@@ -98,6 +98,9 @@ a clean Render build of the **indexer worker**, do ONE of:
 2. Add `cd packages/contracts && corepack yarn install && corepack yarn compile` to the
    Render build command for `arco-giwa-indexer`.
 
+CI (`.github/workflows/ci.yml`, "Compile contract artifacts" step) already implements
+option 2 — reuse that exact step for the Render build.
+
 ## Phase 2 — arco.financial/app cutover notes
 
 Vite `base` is `/` (recorded deviation from the Phase-1 plan draft, which said `/app/`):

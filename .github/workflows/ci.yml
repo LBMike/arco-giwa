@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  green-bar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run prisma:generate # dummy-URL shim — no DB/secrets needed
+
+      - run: npm run typecheck
+
+      - run: npm run build
+
+      # test:frontend pins TMPDIR=/private/tmp (macOS path) — create it on the Linux runner.
+      - run: sudo mkdir -p /private/tmp
+
+      - run: npm run test:frontend
+
+      # test:server (and the registry tooling) read packages/contracts/artifacts/** at runtime
+      # via server/src/evm/abi.ts; artifacts are gitignored, so compile them fresh. This is the
+      # README "Phase 4 requirement" solved for CI — the Render indexer build must reuse this
+      # exact step.
+      - name: Compile contract artifacts
+        working-directory: packages/contracts
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: |
+          corepack yarn install --immutable
+          corepack yarn compile
+
+      - run: npm run test:server
+
+      - run: npm run test:security
+
+      - name: Story structure hook
+        run: node .claude/hooks/check-story-exists.mjs --all
+
+      # Known debt: 7 pre-existing token violations inherited at extraction
+      # (Investor.tsx:111, components.tsx ×6 — see CLAUDE.md). The hook exits 1 on them,
+      # so this step is non-blocking until the dedicated fix task lands; flip it to
+      # blocking (drop continue-on-error) the moment the baseline is clean.
+      - name: Design tokens hook (known-debt baseline, non-blocking)
+        continue-on-error: true
+        run: node .claude/hooks/check-design-tokens.mjs --all
