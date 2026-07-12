@@ -1,0 +1,43 @@
+{
+  "name": "@arco/giwa-contracts",
+  "private": true,
+  "version": "0.0.1",
+  "license": "GPL-3.0-only",
+  "packageManager": "yarn@4.10.3",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "lint:sol": "solhint \"contracts/**/*.sol\"",
+    "format:sol": "prettier \"contracts/**/*.sol\" \"test/**/*.ts\" \"scripts/**/*.ts\" --check",
+    "storage:check": "hardhat test test/storage-layout.test.ts",
+    "keystore:import": "ts-node scripts/import-keystore.ts",
+    "probe:giwa": "ts-node scripts/with-keystore-password.ts hardhat run scripts/probe-giwa.ts --network giwaSepolia",
+    "deploy:giwa:dry-run": "hardhat run scripts/deploy-giwa.ts --network hardhat",
+    "deploy:giwa": "ts-node scripts/with-keystore-password.ts hardhat run scripts/deploy-giwa.ts --network giwaSepolia",
+    "upgrade:faucet:giwa": "ts-node scripts/with-keystore-password.ts hardhat run scripts/upgrade-faucet-giwa.ts --network giwaSepolia",
+    "upgrade:product-tokens:giwa": "ts-node scripts/with-keystore-password.ts hardhat run scripts/upgrade-product-tokens-giwa.ts --network giwaSepolia",
+    "upgrade:deposit-vaults:giwa:dry-run": "hardhat run scripts/upgrade-deposit-vaults-giwa.ts --network giwaSepolia",
+    "upgrade:deposit-vaults:giwa": "ts-node scripts/with-keystore-password.ts hardhat run scripts/upgrade-deposit-vaults-giwa.ts --network giwaSepolia",
+    "verify:registry:giwa": "ts-node scripts/verify-registry.ts",
+    "verify:giwa": "hardhat verify --network giwaSepolia"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-verify": "2.1.3",
+    "@nomiclabs/hardhat-ethers": "2.2.3",
+    "@openzeppelin/contracts": "4.9.6",
+    "@openzeppelin/contracts-upgradeable": "4.9.6",
+    "@openzeppelin/hardhat-upgrades": "1.28.0",
+    "@types/chai": "4.3.16",
+    "@types/mocha": "10.0.6",
+    "@types/node": "20.17.9",
+    "chai": "4.5.0",
+    "dotenv": "16.4.7",
+    "ethers": "5.7.2",
+    "hardhat": "2.26.3",
+    "prettier": "3.4.2",
+    "prettier-plugin-solidity": "1.4.1",
+    "solhint": "5.0.5",
+    "ts-node": "10.9.2",
+    "typescript": "5.6.3"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "products": [
+    {
+      "productId": "beqty",
+      "symbol": "bEQTY",
+      "name": "DigiFT U.S. Equity Income Fund",
+      "paymentAssetSymbol": "tUSDC",
+      "category": "Prime Credit",
+      "description": "Managed by Institutional Leaders Backed by BNY Investments",
+      "init": {
+        "maxSupplyCapShares": "1000000",
+        "vaultMintAllowanceShares": "500000",
+        "maxRedemptionPayment": "1000000",
+        "feedInitialAnswer": "100000000",
+        "feedHealthyDiffSeconds": 259200,
+        "feedMaxAnswer": "100000000000000",
+        "feedMinAnswer": "0"
+      }
+    }
+  ]
+}

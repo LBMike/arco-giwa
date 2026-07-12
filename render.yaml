@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: arco-giwa-api
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run build:server
+    startCommand: node server/dist/index.js
+    envVars:
+      - fromGroup: arco-giwa-server
+  - type: worker
+    name: arco-giwa-indexer
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run build:server
+    startCommand: npm run indexer:giwa
+    envVars:
+      - fromGroup: arco-giwa-server

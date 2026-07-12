@@ -1,0 +1,8 @@
+{
+  "chainId": 1,
+  "network": "ethereum-mainnet",
+  "evmVersion": "prague",
+  "activation": "future-only-after-probe",
+  "safeAddress": "",
+  "timelockAddress": ""
+}

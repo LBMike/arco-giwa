@@ -1,0 +1,30 @@
+node_modules
+dist
+dist-ssr
+.vite
+server/dist
+
+*.local
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vercel
+
+# env — never commit real values; the single committed template is .env.example
+.env*
+!.env.example
+
+# secrets — belt and braces (packages/contracts/.gitignore also ignores .secrets)
+.secrets/
+keystore*
+# …but keystore-NAMED source tooling stays tracked (hardhat.config.ts imports it)
+!packages/contracts/scripts/keystore-constants.ts
+
+# Vite writes these temp files when loading a TS config — not source
+vite.config.ts.timestamp-*.mjs
+
+indexer.log
+# transient render-snapshot harnesses (repo-root, outside tsconfig include; deleted after use)
+*.harness.tsx

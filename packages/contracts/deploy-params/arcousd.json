@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "products": [
+    {
+      "productId": "arcousd",
+      "symbol": "arcoUSD",
+      "name": "Arco USD",
+      "paymentAssetSymbol": "tUSDC",
+      "category": "Arco Saving",
+      "init": {
+        "maxSupplyCapShares": "100000000000000",
+        "vaultMintAllowanceShares": "10000000000000",
+        "maxRedemptionPayment": "100000000000",
+        "feedInitialAnswer": "100000000",
+        "feedHealthyDiffSeconds": 259200,
+        "feedMaxAnswer": "100000000000000",
+        "feedMinAnswer": "0"
+      }
+    }
+  ]
+}

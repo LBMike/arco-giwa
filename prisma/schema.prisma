@@ -1,0 +1,241 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["arco_evm"]
+}
+
+model EvmNetwork {
+  id                String   @id @default(cuid())
+  chainId           Int      @unique
+  name              String
+  network           String
+  publicRpcUrl      String?
+  explorerUrl       String?
+  blockscoutApiUrl  String?
+  nativeCurrency    Json?
+  latestRegistryId  String?
+  registrySyncedAt  DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@schema("arco_evm")
+}
+
+model EvmAssetDeployment {
+  id                String   @id @default(cuid())
+  chainId           Int
+  symbol            String
+  name              String
+  decimals          Int
+  tokenAddress      String
+  faucetAddress     String?
+  deploymentBlock   BigInt?
+  registryReleaseId String?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([chainId, symbol])
+  @@unique([chainId, tokenAddress])
+  @@schema("arco_evm")
+}
+
+model EvmProductDeployment {
+  id                       String   @id @default(cuid())
+  chainId                  Int
+  productId                String
+  symbol                   String
+  name                     String
+  productTokenAddress      String
+  paymentAssetSymbol       String
+  paymentAssetAddress      String
+  depositVaultAddress      String
+  redemptionVaultAddress   String
+  priceFeedAddress         String
+  deploymentBlock          BigInt?
+  registryReleaseId        String?
+  activationFlags          Json?
+  metadata                 Json?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@unique([chainId, productId])
+  @@unique([chainId, productTokenAddress])
+  @@schema("arco_evm")
+}
+
+model EvmIndexedEvent {
+  id              String   @id @default(cuid())
+  chainId         Int
+  contractAddress String
+  blockNumber     BigInt
+  blockHash       String
+  txHash          String
+  logIndex        Int
+  eventName       String
+  args            Json
+  removed         Boolean  @default(false)
+  // Block time of the event (from eth_getBlockByNumber at index time). Nullable: rows
+  // indexed before this column existed backfill via scripts/indexer/backfill-block-timestamps.
+  blockTimestamp  DateTime?
+  indexedAt       DateTime @default(now())
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([chainId, contractAddress, blockNumber])
+  @@index([chainId, eventName, blockNumber])
+  @@schema("arco_evm")
+}
+
+model EvmIndexerCursor {
+  id              String   @id @default(cuid())
+  chainId         Int
+  name            String
+  fromBlock       BigInt
+  lastBlock       BigInt
+  lastBlockHash   String?
+  confirmations   Int
+  lagBlocks       Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  @@unique([chainId, name])
+  @@schema("arco_evm")
+}
+
+model WalletAttestation {
+  id            String   @id @default(cuid())
+  walletAddress String
+  domain        String
+  statement     String?
+  signature     String
+  issuedAt      DateTime
+  expiresAt     DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([walletAddress, domain])
+  @@schema("arco_evm")
+}
+
+model AuthNonce {
+  id            String    @id @default(cuid())
+  walletAddress String
+  domain        String
+  nonce         String    @unique
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([walletAddress, domain, consumedAt, expiresAt])
+  @@schema("arco_evm")
+}
+
+model IndexedRedemptionRequest {
+  id                      String    @id @default(cuid())
+  chainId                 Int
+  requestId               String
+  walletAddress           String
+  productId               String
+  productTokenAddress     String
+  redemptionVaultAddress  String
+  sharesIn                String
+  lockedAssetsOut         String
+  status                  String
+  requestedTxHash         String
+  requestedAtBlock        BigInt
+  fulfilledTxHash         String?
+  claimedTxHash           String?
+  fulfilledAt             DateTime?
+  claimedAt               DateTime?
+  // Direct-transfer payout (admin wallet -> requester): SETTLED is written here, replacing
+  // the legacy fulfill/claim path. settledTxHash is the payout ERC20 transfer tx.
+  settledAt               DateTime?
+  settledTxHash           String?
+  metadata                Json?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  @@unique([chainId, redemptionVaultAddress, requestId])
+  @@index([walletAddress, chainId, status])
+  @@schema("arco_evm")
+}
+
+// Off-chain per-vault display/config (admin-ia-plan §2): the on-chain registry is immutable
+// deploy output, so display metadata, portfolio-card toggles, pin/hide flags and the admin
+// deposit address live here and are merged into the public catalog. No row => defaults
+// (visible, not pinned, all card views on).
+model VaultConfig {
+  id                  String   @id @default(cuid())
+  chainId             Int
+  productId           String
+  displayName         String?
+  category            String?
+  description         String?
+  adminDepositAddress String?
+  cardSnapshot        Boolean  @default(true)
+  cardIndustry        Boolean  @default(true)
+  cardExposure        Boolean  @default(true)
+  pinned              Boolean  @default(false)
+  hidden              Boolean  @default(false)
+  // Vault classification: "product" (default — shown in Products) or "saving" (shown only on the
+  // Savings page, excluded from Products). Non-null default so existing vaults stay in Products.
+  kind                String   @default("product")
+  // Display profile (P1): all nullable — null means "use the legacy fallback content".
+  // Fees are stored as integer basis points (0–10000 = 0–100%, exactly 2 decimals of
+  // percent, no float drift across the JSON boundary). Portfolio JSON columns land in P3.
+  assetManagerName        String?
+  issuerName              String?
+  about                   String?
+  aum                     String?
+  redemptionTimelineDays  Int?
+  feeInstantMintingBps    Int?
+  feeInstantRedemptionBps Int?
+  feeManagementBps        Int?
+  feePerformanceBps       Int?
+  vaultImageUrl           String?
+  assetManagerImageUrl    String?
+  issuerImageUrl          String?
+  // "More info" docs links. Each slot = a URL + a show toggle; the detail renders a link only
+  // when shown AND the URL is set (so shown defaults true but stays invisible until a URL
+  // exists). The Smart Contracts half of "More info" is derived from the registry, never stored.
+  docsUrl                 String?
+  legalUrl                String?
+  risksUrl                String?
+  docsShown               Boolean  @default(true)
+  legalShown              Boolean  @default(true)
+  risksShown              Boolean  @default(true)
+  // Portfolio breakdowns (P3): JSON arrays of { label, percent, valueUsd? }. null => the
+  // detail page falls back (Industry/Exposure → legacy; Snapshot → empty state).
+  portfolioSnapshot       Json?
+  portfolioIndustry       Json?
+  portfolioExposure       Json?
+  // Savings accept-assets (only meaningful for kind="saving"): ordered JSON array of
+  // { symbol, icon, apy, savingVaultId, isDummy }. Drives the Savings-page account selector; the
+  // accept-asset is a UI/config label, not an on-chain token. null => no accept-assets.
+  acceptAssets            Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([chainId, productId])
+  @@schema("arco_evm")
+}
+
+// Products-page hero carousel selection (admin-managed). A small ordered collection (max 3,
+// enforced in the API) of deployed vaults to feature; identity (name + logo) is resolved
+// config-first from VaultConfig at render time, so only the card-scoped intro + show/hide +
+// order live here. `shown=false` on create => a newly added card starts hidden.
+model FeaturedCard {
+  id        String   @id @default(cuid())
+  chainId   Int
+  productId String
+  about     String?
+  shown     Boolean  @default(false)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([chainId, productId])
+  @@index([chainId, position])
+  @@schema("arco_evm")
+}

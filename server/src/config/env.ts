@@ -1,0 +1,97 @@
+const SERVER_ONLY_KEYS = [
+  "DATABASE_URL",
+  "DIRECT_URL",
+  "INDEXER_RPC_URL",
+  "AUTH_JWT_SECRET",
+  "ADMIN_OPERATOR_TOKEN",
+] as const
+
+const FRONTEND_PUBLIC_KEYS = [
+  "VITE_DYNAMIC_ENVIRONMENT_ID",
+  "VITE_PUBLIC_GIWA_RPC",
+  "VITE_GIWA_CHAIN_ID",
+  "VITE_GIWA_EXPLORER",
+  "VITE_ARCO_API_BASE",
+] as const
+
+export type ServerEnv = {
+  readonly port: number
+  readonly corsAllowedOrigins: readonly string[]
+  readonly authNonceTtlSeconds: number
+  readonly databaseUrl: string
+  readonly directUrl: string
+  readonly indexerRpcUrl: string
+  readonly authJwtSecret: string
+  readonly adminOperatorToken: string
+  readonly giwaChainId: number
+  readonly indexerConfirmations: number
+  readonly indexerMaxBlockRange: bigint
+  readonly indexerPollIntervalMs: number
+  readonly registryPath: string
+}
+
+export function parseCorsAllowedOrigins(value: string | undefined): string[] {
+  if (!value) return []
+  return value
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+}
+
+export function assertNoWildcardCors(origins: readonly string[]): void {
+  if (origins.includes("*")) {
+    throw new Error("CORS_ALLOWED_ORIGINS must be explicit; '*' is not allowed")
+  }
+}
+
+export function validateServerEnv(env: NodeJS.ProcessEnv): ServerEnv {
+  for (const key of SERVER_ONLY_KEYS) {
+    if (!env[key]) throw new Error(`${key} is required in server env`)
+  }
+
+  for (const key of FRONTEND_PUBLIC_KEYS) {
+    if (key.includes("SECRET") || key.endsWith("_KEY")) {
+      throw new Error(`${key} looks secret-like and must not be VITE_*`)
+    }
+  }
+
+  const corsAllowedOrigins = parseCorsAllowedOrigins(env.CORS_ALLOWED_ORIGINS)
+  assertNoWildcardCors(corsAllowedOrigins)
+
+  const authNonceTtlSeconds = Number(env.AUTH_NONCE_TTL_SECONDS ?? "300")
+  if (!Number.isInteger(authNonceTtlSeconds) || authNonceTtlSeconds <= 0 || authNonceTtlSeconds > 300) {
+    throw new Error("AUTH_NONCE_TTL_SECONDS must be an integer between 1 and 300")
+  }
+
+  const giwaChainId = Number(env.GIWA_CHAIN_ID ?? "91342")
+  if (giwaChainId !== 91342) throw new Error("GIWA_CHAIN_ID must be 91342")
+
+  const indexerConfirmations = Number(env.INDEXER_CONFIRMATIONS ?? "5")
+  if (!Number.isInteger(indexerConfirmations) || indexerConfirmations < 0) {
+    throw new Error("INDEXER_CONFIRMATIONS must be a non-negative integer")
+  }
+
+  const indexerMaxBlockRange = BigInt(env.INDEXER_MAX_BLOCK_RANGE ?? "500")
+  if (indexerMaxBlockRange <= 0n) throw new Error("INDEXER_MAX_BLOCK_RANGE must be positive")
+
+  const indexerPollIntervalMs = Number(env.INDEXER_POLL_INTERVAL_MS ?? "5000")
+  if (!Number.isInteger(indexerPollIntervalMs) || indexerPollIntervalMs < 1000) {
+    throw new Error("INDEXER_POLL_INTERVAL_MS must be an integer >= 1000")
+  }
+
+  return {
+    port: Number(env.PORT ?? "8080"),
+    corsAllowedOrigins,
+    authNonceTtlSeconds,
+    databaseUrl: env.DATABASE_URL!,
+    directUrl: env.DIRECT_URL!,
+    indexerRpcUrl: env.INDEXER_RPC_URL!,
+    authJwtSecret: env.AUTH_JWT_SECRET!,
+    adminOperatorToken: env.ADMIN_OPERATOR_TOKEN!,
+    giwaChainId,
+    indexerConfirmations,
+    indexerMaxBlockRange,
+    indexerPollIntervalMs,
+    registryPath: env.GIWA_REGISTRY_PATH ?? "deployments/91342/arco-giwa-preprod.json",
+  }
+}

@@ -1,0 +1,160 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Arco demo — light theme tokens, scoped to `.arco-demo` only.
+   The landing stays dark (its tokens live on :root in index.css and are not
+   touched here). Values are HSL channels (shadcn convention) unless noted.
+   ────────────────────────────────────────────────────────────────────────── */
+.arco-demo {
+  /* surfaces */
+  --background: 47 33% 95%; /* #F5F4ED */
+  --foreground: 220 8% 8%; /* #111214 */
+  --card: 0 0% 100%;
+  --card-foreground: 220 8% 8%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 8% 8%;
+
+  /* muted / borders */
+  --muted: 43 38% 96%; /* #FAF8F1 */
+  --muted-foreground: 222 5% 56%;
+  --border: 43 27% 87%; /* #E8E6DC */
+  --input: 43 27% 87%; /* = border */
+  --ring: 220 8% 8%; /* focus ring = foreground */
+
+  /* primary = CTA black (never the cream brand color) */
+  --primary: 220 8% 8%; /* 검정 */
+  --primary-foreground: 0 0% 100%;
+
+  /* secondary / accent — derived from muted to keep the warm light surface */
+  --secondary: 43 38% 96%;
+  --secondary-foreground: 220 8% 8%;
+  --accent: 43 38% 96%;
+  --accent-foreground: 220 8% 8%;
+
+  /* destructive aligns with --danger below */
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+
+  --radius: 0.75rem;
+
+  /* ── custom tokens (intentionally NOT registered as Tailwind colors) ───────
+     Use via arbitrary values, e.g. text-[hsl(var(--success))]. */
+  --brand-cream: #e1e0cc; /* ceremony / logo only */
+  --success: 142 71% 38%; /* gains / confirmed (never primary) */
+  --warning: 38 92% 50%;
+  --danger: 0 72% 51%;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Font: the /app demo (LP-portal surface) is unified on Geist. The global `*`
+   rule in index.css forces Almarai for the landing; this more-specific rule
+   (and the explicit element list) overrides it inside `.arco-demo` only — the
+   landing keeps Almarai + Instrument Serif untouched.
+   Mono values still use the system mono stack via Tailwind's `font-mono`.
+   ────────────────────────────────────────────────────────────────────────── */
+.arco-demo,
+.arco-demo * {
+  font-family: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Roboto', sans-serif;
+}
+.arco-demo .font-mono,
+.arco-demo code,
+.arco-demo kbd,
+.arco-demo samp,
+.arco-demo pre {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Launch App design tokens (harness-governed).
+   These are the ONLY place raw hex is allowed for the Launch App surface — the
+   check-design-tokens hook exempts theme.css. Component code must reference these
+   via `bg-[var(--color-arco-page)]` etc., never raw hex.
+   Values map to DESIGN.md (root) and docs/DESIGN.md (launch-app token reference).
+   Scoped to .arco-demo so the landing is never affected.
+   ────────────────────────────────────────────────────────────────────────── */
+.arco-demo {
+  /* surface / text */
+  --color-arco-page: #f8f8f8;        /* page background */
+  --color-arco-page-80: rgba(248, 248, 248, 0.8); /* SectionNav sticky bg (page @ 80%) */
+  --color-arco-surface: #ffffff;     /* row / filter / card surface */
+  --color-arco-surface-30: rgba(255, 255, 255, 0.3); /* table container (surface @ 30%) */
+  --color-arco-surface-muted: #faf8f1;/* metric card / muted surface */
+  --color-arco-ink: #0f172a;         /* primary text */
+  --color-arco-ink-40: rgba(15, 23, 42, 0.4); /* row focus ring (ink @ 40%) */
+  --color-arco-text: #25272a;        /* nav / header / table-head text */
+  --color-arco-text-soft: #334155;   /* secondary body text, badge text */
+  --color-arco-muted: #7c828b;       /* placeholder / muted label */
+  --color-arco-on-dark: #ffffff;     /* text/icon on black CTA */
+  --color-arco-border: #e1e6f3;      /* subtle border / hairline */
+  --color-arco-cream: #e1e0cc;       /* hero / strategy text (brand-reserved) */
+  --color-arco-cream-70: rgba(225, 224, 204, 0.7); /* strategy active ring (cream @ 70%) */
+
+  /* chips / fills */
+  --color-arco-chip: #eef1f7;        /* category badge / fallback mark bg */
+  --color-arco-chip-ink: #5b6472;    /* fallback mark glyph */
+
+  /* table */
+  --color-row-saving: #e2dccb;       /* Arco Saving pinned row */
+  --color-row-hover: #3a3f4a;        /* hover overlay tint (used at low alpha) */
+  --color-row-hover-weak: rgba(58, 63, 74, 0.06); /* row hover overlay (@ 6%) */
+
+  /* strategy cards */
+  --color-strategy-treasuries: #355a52;
+  --color-strategy-credit: #1c2a49;
+  --color-strategy-saving: #5b3a5d;
+  --color-strategy-equity: #5b2f3a;      /* Equity Exposure strategy card */
+
+  /* savings page */
+  --color-arco-savings-accent: #0bb538;  /* selected accept-asset card border (Figma #0BB538) */
+
+  /* hero / carousel */
+  --color-arco-hero: #000000;
+  --color-arco-hero-deco-1: #2b3a55;
+  --color-arco-hero-deco-2: #14223d;
+  --color-arco-dot-active: #191d1f;
+  --color-arco-dot-inactive: rgba(25, 29, 31, 0.3);
+  --color-arco-overlay: rgba(0, 0, 0, 0.3); /* tag chip on colored card */
+
+  /* networks (brand marks) */
+  --color-network-ethereum: #627eea;
+  --color-network-xrpl: #23292f;
+  --color-network-btc: #f7931a;
+
+  /* product-detail charts (aCAPIX) — donut segment palette read from Figma
+     (node 40:3523, light→dark blue ramp) + performance line + change colors */
+  --color-arco-chart-1: #2a3e6e; /* largest segment / darkest */
+  --color-arco-chart-2: #3a5290;
+  --color-arco-chart-3: #4b649f;
+  --color-arco-chart-4: #5d75b0;
+  --color-arco-chart-5: #748ebe;
+  --color-arco-chart-6: #8ba3cc;
+  --color-arco-chart-7: #a2b8da;
+  --color-arco-chart-8: #bdcfe8;
+  --color-arco-chart-9: #d8ebfb; /* smallest segment / lightest */
+  --color-arco-chart-10: #1c2949; /* exposure bar darkest tier (Figma 7:229) */
+  --color-arco-chart-line: #0f172a;     /* performance line = ink */
+  --color-arco-chart-area: rgba(31, 42, 92, 0.12); /* area gradient top (Figma #1F2A5C) */
+  --color-arco-up: #179386;              /* positive change (Figma) */
+  --color-arco-down: #dc2626;            /* negative change (fallback; Figma shows only positive) */
+  /* Holdings "Price/24hΔ" gain/loss pair. Deliberately NOT --color-arco-up/down: those two also
+     carry success/error meaning across the app (checkmarks, FRESH/STALE, paused, form errors),
+     so recolouring them would leak this change into ~60 unrelated call sites. */
+  --color-arco-delta-up: #3ce3ab;        /* 24h change >= 0, including exactly 0% */
+  --color-arco-delta-down: #f23674;      /* 24h change < 0 */
+
+  /* radius */
+  --radius-control: 5px;   /* filter inputs */
+  --radius-card: 8px;      /* carousel / table container / metric */
+  --radius-row: 10px;      /* table rows */
+  --radius-strategy: 12px; /* strategy cards / detail cards */
+  --radius-pill: 9999px;   /* badges / chips */
+
+  /* shadows */
+  --shadow-control: 0 0 0 0.5px var(--color-arco-border);
+  --shadow-savings-card: 0 1px 2px rgba(16, 16, 20, 0.05); /* accept-asset selector card (Figma) */
+  --shadow-table: 0 3px 4px rgba(0, 0, 0, 0.25);
+
+  /* containers */
+  --container-page: 1200px;
+  --container-header: 1400px;
+}

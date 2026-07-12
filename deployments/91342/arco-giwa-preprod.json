@@ -1,0 +1,2036 @@
+{
+  "schemaVersion": 1,
+  "releaseId": "giwa-preprod-2026-06-27",
+  "gitCommit": "2cfccf2730bc",
+  "chainId": 91342,
+  "network": "giwa-sepolia",
+  "name": "GIWA Sepolia",
+  "nativeCurrency": {
+    "name": "Ether",
+    "symbol": "ETH",
+    "decimals": 18
+  },
+  "publicRpcUrl": "https://sepolia-rpc.giwa.io",
+  "explorerBaseUrl": "https://sepolia-explorer.giwa.io",
+  "blockscoutApiUrl": "https://sepolia-explorer.giwa.io/api",
+  "deploymentBlock": 29212771,
+  "deployer": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+  "evmVersion": "cancun",
+  "proxyAdmin": {
+    "proxy": "0x848aE1a652dB347F5a8a6C74ceF3006D64e7d64e",
+    "implementation": "0x848aE1a652dB347F5a8a6C74ceF3006D64e7d64e",
+    "bytecodeHash": "0x4e8a5693ecb0da4b8382ea10c4a2de307f3aefc5e894324ea538d420ee085cbc",
+    "logicalLabel": "ProxyAdmin",
+    "contractName": "ProxyAdmin"
+  },
+  "roles": {
+    "tier1DefaultAdmin": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+    "tier1ProxyAdminOwner": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+    "tier1Safe": null,
+    "tier1Timelock": null,
+    "tier2Operator": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+    "pauser": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+    "feedAdmin": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+    "faucetAdmin": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29"
+  },
+  "activationFlags": {
+    "deployed": true,
+    "dryRun": false,
+    "frontendEnabled": false,
+    "indexerEnabled": true,
+    "onchainAttestationRequired": false
+  },
+  "assets": [
+    {
+      "symbol": "tUSDC",
+      "name": "Test USDC",
+      "decimals": 6,
+      "contract": {
+        "proxy": "0x869d9c8d9BF0A961FC2FD3bBa300fDBEeE3C2633",
+        "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b",
+        "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+        "logicalLabel": "tUSDC",
+        "contractName": "TestAssetToken",
+        "deployTxHash": "0x5babc3a4ffc760bbd3fddb5de3a9b423d58eb70c73b3fc7f66bbd76ff32c5719",
+        "blockNumber": 29212771
+      },
+      "faucet": "0x785918816f5f5ED6a8C5EDF5E223f14223bF41Bc",
+      "deploymentBlock": 29212771
+    },
+    {
+      "symbol": "tBTC",
+      "name": "Test BTC",
+      "decimals": 8,
+      "contract": {
+        "proxy": "0x2330e111FB116bF8041F694145E961eD9B66243e",
+        "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b",
+        "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+        "logicalLabel": "tBTC",
+        "contractName": "TestAssetToken",
+        "deployTxHash": "0x32cb20d571d2ddce14fa91b14ee126b363d908555c6d8adcfed41b8b8c3d7b00",
+        "blockNumber": 29212779
+      },
+      "faucet": "0x785918816f5f5ED6a8C5EDF5E223f14223bF41Bc",
+      "deploymentBlock": 29212779
+    },
+    {
+      "symbol": "tXRP",
+      "name": "Test XRP",
+      "decimals": 6,
+      "contract": {
+        "proxy": "0x8b93214e63d83d64DE4437c82a8EB6F73481A922",
+        "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b",
+        "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+        "logicalLabel": "tXRP",
+        "contractName": "TestAssetToken",
+        "deployTxHash": "0xee51c34424b52b1e71bdefa6e4465ee2fd11831566a61009b88eddf99af7b722",
+        "blockNumber": 29212791
+      },
+      "faucet": "0x785918816f5f5ED6a8C5EDF5E223f14223bF41Bc",
+      "deploymentBlock": 29212791
+    },
+    {
+      "symbol": "tWETH",
+      "name": "Test WETH",
+      "decimals": 18,
+      "contract": {
+        "proxy": "0xD6499F5D8c162D81A52302b855b7b2961917feAd",
+        "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b",
+        "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+        "logicalLabel": "tWETH",
+        "contractName": "TestAssetToken",
+        "deployTxHash": "0x05d5872bfe345a0827de15390d278ea7f54818b43360911df802e06fc213c3dc",
+        "blockNumber": 29212803
+      },
+      "faucet": "0x785918816f5f5ED6a8C5EDF5E223f14223bF41Bc",
+      "deploymentBlock": 29212803
+    }
+  ],
+  "faucet": {
+    "proxy": "0x785918816f5f5ED6a8C5EDF5E223f14223bF41Bc",
+    "implementation": "0xa2207bc5eb715c9ef115e81b39a6cad707f5f77c",
+    "bytecodeHash": "0xafd3a8034b7bdae700186dd2d8ddd0278cb4c55d1c3ee11264eeabfac3ab3648",
+    "logicalLabel": "test-asset-faucet",
+    "contractName": "TestAssetFaucet",
+    "deployTxHash": "0x9829d216f899bdb7db7acb8c5b9b09e8efa6588dc962de1f423b9bc54e5c8959",
+    "blockNumber": 29212818
+  },
+  "products": [
+    {
+      "productId": "acapix",
+      "symbol": "aCAPIX",
+      "name": "Arco CAPIX",
+      "paymentAssetSymbol": "tUSDC",
+      "productToken": {
+        "proxy": "0xD87AA38101220E3e0CD2e45b7E97D799abeC992f",
+        "implementation": "0xaefc146e2c7ea1fcdd0223762e97256c9c9d9dab",
+        "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+        "logicalLabel": "aCAPIX",
+        "contractName": "ProductToken",
+        "deployTxHash": "0x21c023dd2818f8448357dd21d086826978a39baf89ce349307aeb6cf474d59cb",
+        "blockNumber": 29212846
+      },
+      "depositVault": {
+        "proxy": "0x4ebCE7C472DcB478d30725D0cF3675772dBB34c2",
+        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "logicalLabel": "aCAPIX-deposit-vault",
+        "contractName": "ArcoDepositVault",
+        "deployTxHash": "0x2db4346d90f12d4c6b3902c4166dffd97b20301f89353af5e231458c459ce528",
+        "blockNumber": 29712510
+      },
+      "redemptionVault": {
+        "proxy": "0x43a7Fd58b855f44bADAdc260dedb45F446B4Ecba",
+        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "logicalLabel": "aCAPIX-redemption-vault",
+        "contractName": "ArcoRedemptionVault",
+        "deployTxHash": "0xde8727747e0e0dad4de2158b3c5370da7f0037ed7dbfaf8ab942ce92ed230fe3",
+        "blockNumber": 29213036
+      },
+      "priceFeed": {
+        "proxy": "0x0B01f3E517C1a8749bC3306c22c95C3BA253e4ed",
+        "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+        "logicalLabel": "aCAPIX-price-feed",
+        "contractName": "ProductPriceFeed",
+        "deployTxHash": "0xd5edd15b0ee97d5f5ad8d2bfac47431753df39d2bca3b34ac8ec5fb3695c6580",
+        "blockNumber": 29212895
+      },
+      "deploymentBlock": 29212846,
+      "activationFlags": {
+        "deployed": true,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false,
+        "adminUiEnabled": false
+      }
+    },
+    {
+      "productId": "ibenji",
+      "symbol": "iBENJI",
+      "name": "Arco BENJI",
+      "paymentAssetSymbol": "tUSDC",
+      "productToken": {
+        "proxy": "0xA3a96A910b94FAc01FAf5449c2317A78107ed705",
+        "implementation": "0xaefc146e2c7ea1fcdd0223762e97256c9c9d9dab",
+        "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+        "logicalLabel": "iBENJI",
+        "contractName": "ProductToken",
+        "deployTxHash": "0x005d7f4f7e3e7ebfa1bd4a928750ba83198a6544c0d1b340c1ec44c1049a8001",
+        "blockNumber": 29212854
+      },
+      "depositVault": {
+        "proxy": "0xfa24a31bF1F2B149298969Ced1205FC22670C1b7",
+        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "logicalLabel": "iBENJI-deposit-vault",
+        "contractName": "ArcoDepositVault",
+        "deployTxHash": "0xb889ea0846756b622a766b374865832c9e5ac377cbd38c22a8c0acc0d7cba07c",
+        "blockNumber": 29712517
+      },
+      "redemptionVault": {
+        "proxy": "0x6701eFeC11aF345E38b899cAb2673A5e6C9701f2",
+        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "logicalLabel": "iBENJI-redemption-vault",
+        "contractName": "ArcoRedemptionVault",
+        "deployTxHash": "0x61898c054dc24462b684e2b6628b97658178d5eb54c2f2b88cf1baa8efa15968",
+        "blockNumber": 29213048
+      },
+      "priceFeed": {
+        "proxy": "0x92CfC86aD37ED66734A4AE311A79525ba5990680",
+        "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+        "logicalLabel": "iBENJI-price-feed",
+        "contractName": "ProductPriceFeed",
+        "deployTxHash": "0xae3e0cfca66617ac5d24e8e34e74cb1b432a8d1d8be810ef6face2799094162a",
+        "blockNumber": 29212908
+      },
+      "deploymentBlock": 29212854,
+      "activationFlags": {
+        "deployed": true,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false,
+        "adminUiEnabled": false
+      }
+    },
+    {
+      "productId": "umint",
+      "symbol": "uMINT",
+      "name": "Arco MINT",
+      "paymentAssetSymbol": "tUSDC",
+      "productToken": {
+        "proxy": "0x24c67A5C506FbD9abc2793Bb0967004E88061f8b",
+        "implementation": "0xaefc146e2c7ea1fcdd0223762e97256c9c9d9dab",
+        "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+        "logicalLabel": "uMINT",
+        "contractName": "ProductToken",
+        "deployTxHash": "0x9526b0a491c3ec005b496fd3de14687c8cef210bef090a19db59765f814e77a2",
+        "blockNumber": 29212861
+      },
+      "depositVault": {
+        "proxy": "0xf3c43cD61993f4DCc4203547acB77fDE8F56ba8b",
+        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "logicalLabel": "uMINT-deposit-vault",
+        "contractName": "ArcoDepositVault",
+        "deployTxHash": "0x4be67985678d84e0d46a2f983c277c7f2c4e49f905b93b13be82e30d7b79fd4e",
+        "blockNumber": 29712525
+      },
+      "redemptionVault": {
+        "proxy": "0xc4075029B9E854A7Ef28D53749560564c607Ea67",
+        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "logicalLabel": "uMINT-redemption-vault",
+        "contractName": "ArcoRedemptionVault",
+        "deployTxHash": "0xe70406ec5666d9ee414d1f04b919bbfaf8dbb0a23d226c0582bc4a555568925e",
+        "blockNumber": 29213059
+      },
+      "priceFeed": {
+        "proxy": "0x57a4637a478c88643260E0F33534c75581bEe9DA",
+        "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+        "logicalLabel": "uMINT-price-feed",
+        "contractName": "ProductPriceFeed",
+        "deployTxHash": "0x71c6beb7e934bd0c77968aa6edea6eb66c9786a8e9caa86070ec7243124182d0",
+        "blockNumber": 29212916
+      },
+      "deploymentBlock": 29212861,
+      "activationFlags": {
+        "deployed": true,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false,
+        "adminUiEnabled": false
+      }
+    },
+    {
+      "productId": "abtc",
+      "symbol": "aBTC",
+      "name": "Arco BTC",
+      "paymentAssetSymbol": "tBTC",
+      "productToken": {
+        "proxy": "0x2CF0bbfB47710433fCF4c77FAbb91839bD4723d3",
+        "implementation": "0xaefc146e2c7ea1fcdd0223762e97256c9c9d9dab",
+        "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+        "logicalLabel": "aBTC",
+        "contractName": "ProductToken",
+        "deployTxHash": "0x16f12b2036c9052e687d8d017b50091051b472d4b89f8709ed241defae09f404",
+        "blockNumber": 29212869
+      },
+      "depositVault": {
+        "proxy": "0x63bBF5E165a23ba75aAFA71A34E74a15A422235e",
+        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "logicalLabel": "aBTC-deposit-vault",
+        "contractName": "ArcoDepositVault",
+        "deployTxHash": "0x3b3749b9e6964775eb3378f1d3a78e11ca1f08eb522bf62d106fa98b83e314eb",
+        "blockNumber": 29712533
+      },
+      "redemptionVault": {
+        "proxy": "0xf24362E7704383c368bC91D0F8d9DBCf21F609bB",
+        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "logicalLabel": "aBTC-redemption-vault",
+        "contractName": "ArcoRedemptionVault",
+        "deployTxHash": "0x7ed7b375c39312dcb1965c066ca462242805bcd725db6fd58ec47001d27b5038",
+        "blockNumber": 29213070
+      },
+      "priceFeed": {
+        "proxy": "0x4C3593bC3D4093d3eB11377E64089DEECdF1e140",
+        "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+        "logicalLabel": "aBTC-price-feed",
+        "contractName": "ProductPriceFeed",
+        "deployTxHash": "0xe49ae64421d795d29d1efa1578799c6231a65d4da9d069e133500cac8771ce52",
+        "blockNumber": 29212924
+      },
+      "deploymentBlock": 29212869,
+      "activationFlags": {
+        "deployed": true,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false,
+        "adminUiEnabled": false
+      }
+    },
+    {
+      "productId": "axrp",
+      "symbol": "aXRP",
+      "name": "Arco XRP",
+      "paymentAssetSymbol": "tXRP",
+      "productToken": {
+        "proxy": "0x46462B8527883C726cF4ebB5C19c492293a62Eb0",
+        "implementation": "0xaefc146e2c7ea1fcdd0223762e97256c9c9d9dab",
+        "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+        "logicalLabel": "aXRP",
+        "contractName": "ProductToken",
+        "deployTxHash": "0x4a9eebb3050c0dcc6a8cdc085091d29e3211e81fb5c84e3c5e50b91043629805",
+        "blockNumber": 29212877
+      },
+      "depositVault": {
+        "proxy": "0xB245FBCa1f3De81Fc67622Ae954C1aB9F6cB3BaB",
+        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "logicalLabel": "aXRP-deposit-vault",
+        "contractName": "ArcoDepositVault",
+        "deployTxHash": "0x1f65418326bad7a7bdd22f725cf0d44c4d615e3ed2a6d59945fe2049a792e0c3",
+        "blockNumber": 29712540
+      },
+      "redemptionVault": {
+        "proxy": "0x37Ae685703eD8815fc3ddE53ff4c9Cb12dccB9A7",
+        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "logicalLabel": "aXRP-redemption-vault",
+        "contractName": "ArcoRedemptionVault",
+        "deployTxHash": "0x2de5de9d19163769c7bba8abb92031c6ae109ae0a7be7063fd3370ebe538fc26",
+        "blockNumber": 29213085
+      },
+      "priceFeed": {
+        "proxy": "0xd11D8C5094e67ca55FBfaad6Bf7E459404827f42",
+        "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+        "logicalLabel": "aXRP-price-feed",
+        "contractName": "ProductPriceFeed",
+        "deployTxHash": "0x7050d0727721d24c42bfb8836dda044e26a49368953a3ba3298ae32ed094363b",
+        "blockNumber": 29212937
+      },
+      "deploymentBlock": 29212877,
+      "activationFlags": {
+        "deployed": true,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false,
+        "adminUiEnabled": false
+      }
+    },
+    {
+      "productId": "aeth",
+      "symbol": "aETH",
+      "name": "Arco ETH",
+      "paymentAssetSymbol": "tWETH",
+      "productToken": {
+        "proxy": "0x42FeeDe0F4503d9783404B7301a65A0fF17c36d0",
+        "implementation": "0xaefc146e2c7ea1fcdd0223762e97256c9c9d9dab",
+        "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+        "logicalLabel": "aETH",
+        "contractName": "ProductToken",
+        "deployTxHash": "0xbf1408dfa5720f2cb1112cd987b06df9766f1be9c20bf09118930357f7768b81",
+        "blockNumber": 29212885
+      },
+      "depositVault": {
+        "proxy": "0xB79ac567B5C9200E5E68B3053B913Bcc59f78a7F",
+        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "logicalLabel": "aETH-deposit-vault",
+        "contractName": "ArcoDepositVault",
+        "deployTxHash": "0x3185ff3e05b7a19728c66670239681a3d263f17a847624e9c4c35381afa6b88d",
+        "blockNumber": 29712543
+      },
+      "redemptionVault": {
+        "proxy": "0x0Bcb1702c4dF8d0E5d9476Cbc0d31d0E583B6140",
+        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "logicalLabel": "aETH-redemption-vault",
+        "contractName": "ArcoRedemptionVault",
+        "deployTxHash": "0xe066f09c8ba09dc7f201fb71a5a1112c7c6fd01ae054c8f8a4e4c5d259d6dcac",
+        "blockNumber": 29213096
+      },
+      "priceFeed": {
+        "proxy": "0xaCC6e9adDBc8d43399CFf37c81cCf2c815F03dea",
+        "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+        "logicalLabel": "aETH-price-feed",
+        "contractName": "ProductPriceFeed",
+        "deployTxHash": "0xd971b6570c3d33e091460177bfafe11afd9d30401a6fe90d749e1f70bec66243",
+        "blockNumber": 29212949
+      },
+      "deploymentBlock": 29212885,
+      "activationFlags": {
+        "deployed": true,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false,
+        "adminUiEnabled": false
+      }
+    },
+    {
+      "productId": "beqty",
+      "symbol": "bEQTY",
+      "name": "DigiFT U.S. Equity Income Fund",
+      "paymentAssetSymbol": "tUSDC",
+      "productToken": {
+        "proxy": "0x0089E79DE0aB1Ae2D876f8F2661b3117FA69E6b5",
+        "implementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+        "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+        "logicalLabel": "bEQTY",
+        "contractName": "ProductToken",
+        "deployTxHash": "0x8bfbbf2c6e5a499f7874f3da10e649f5e3a7b18f51c811338027408e6d158044",
+        "blockNumber": 30008251
+      },
+      "depositVault": {
+        "proxy": "0x2703bE9dBDF663c369Db2b87a72B42b97bDdB3eA",
+        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "logicalLabel": "bEQTY-deposit-vault",
+        "contractName": "ArcoDepositVault",
+        "deployTxHash": "0xae1984da6646a9382d13bfa8218b8f9760fcba03c7de444a772247b19f93259b",
+        "blockNumber": 30013138
+      },
+      "redemptionVault": {
+        "proxy": "0x63a1184031C679E1625020d93234D505F0C23Acc",
+        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "logicalLabel": "bEQTY-redemption-vault",
+        "contractName": "ArcoRedemptionVault",
+        "deployTxHash": "0x5dbea40b3bc63d8f7e44adb3825b5255015d6c029824de3d0ea5ebba247c365e",
+        "blockNumber": 30013149
+      },
+      "priceFeed": {
+        "proxy": "0xeC241df6E4E608C4260959Dc07D4f751372AFBa4",
+        "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+        "logicalLabel": "bEQTY-price-feed",
+        "contractName": "ProductPriceFeed",
+        "deployTxHash": "0x5c3c459e5ec0c2a35c05f4d90351baa4302bf6f670a02225ade4c5727d187a58",
+        "blockNumber": 30008259
+      },
+      "deploymentBlock": 30008251,
+      "activationFlags": {
+        "deployed": true,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false,
+        "adminUiEnabled": false
+      }
+    },
+    {
+      "productId": "arcousd",
+      "symbol": "arcoUSD",
+      "name": "Arco USD",
+      "paymentAssetSymbol": "tUSDC",
+      "productToken": {
+        "proxy": "0x28a934C3465331DdEB60908c0C3F3b8dE505Be05",
+        "implementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+        "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+        "logicalLabel": "arcoUSD",
+        "contractName": "ProductToken",
+        "deployTxHash": "0x24a66c02cbe2c3ca7e873eb695da2836568f64448bcbceb505b7f7fecb0df00d",
+        "blockNumber": 30357010
+      },
+      "depositVault": {
+        "proxy": "0x4083d23D792cAefefc97b60677c12243AAC459e5",
+        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "logicalLabel": "arcoUSD-deposit-vault",
+        "contractName": "ArcoDepositVault",
+        "deployTxHash": "0xe9c570e1ad39d49c3c5f0ef8ba74fd86f138d731c1ebd63ac4f7ed35a97859c7",
+        "blockNumber": 30357026
+      },
+      "redemptionVault": {
+        "proxy": "0x5719ED2d50a3fD00852e90aFE7d6Aa4fB696ec36",
+        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "logicalLabel": "arcoUSD-redemption-vault",
+        "contractName": "ArcoRedemptionVault",
+        "deployTxHash": "0x311e1c8b6eaf6a66bc7cecd3497a684484ff41b75a7c6946e6d60eb36fc47d36",
+        "blockNumber": 30357040
+      },
+      "priceFeed": {
+        "proxy": "0x2b1C1Af136f8c9d637a44dc5340748e0389D1Ead",
+        "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+        "logicalLabel": "arcoUSD-price-feed",
+        "contractName": "ProductPriceFeed",
+        "deployTxHash": "0xfd05dbb96682d9654171f0e5b2275b305cad1e5fc65156f090395b5b33f86208",
+        "blockNumber": 30357019
+      },
+      "deploymentBlock": 30357010,
+      "activationFlags": {
+        "deployed": true,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false,
+        "adminUiEnabled": false
+      }
+    }
+  ],
+  "productPaymentMappings": {
+    "aCAPIX": "tUSDC",
+    "iBENJI": "tUSDC",
+    "uMINT": "tUSDC",
+    "aBTC": "tBTC",
+    "aXRP": "tXRP",
+    "aETH": "tWETH",
+    "bEQTY": "tUSDC",
+    "arcoUSD": "tUSDC"
+  },
+  "events": {
+    "targetEvents": [
+      "FaucetDrip",
+      "ProductDeposit",
+      "ProductRedeemInstant",
+      "ProductRedeemRequested",
+      "ProductRedeemFulfilled",
+      "ProductRedeemClaimed",
+      "PriceUpdated",
+      "Paused",
+      "Unpaused"
+    ],
+    "indexedEvents": [
+      {
+        "name": "FaucetDrip",
+        "signature": "FaucetDrip(address,address,uint256)",
+        "sourceContracts": [
+          "TestAssetFaucet"
+        ],
+        "inputs": [
+          {
+            "name": "token",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "wallet",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "indexed": false
+          }
+        ]
+      },
+      {
+        "name": "ProductDeposit",
+        "signature": "ProductDeposit(address,address,uint256,uint256)",
+        "sourceContracts": [
+          "ArcoDepositVault"
+        ],
+        "inputs": [
+          {
+            "name": "sender",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "paymentAssets",
+            "type": "uint256",
+            "indexed": false
+          },
+          {
+            "name": "sharesOut",
+            "type": "uint256",
+            "indexed": false
+          }
+        ]
+      },
+      {
+        "name": "ProductRedeemInstant",
+        "signature": "ProductRedeemInstant(address,address,uint256,uint256)",
+        "sourceContracts": [
+          "ArcoRedemptionVault"
+        ],
+        "inputs": [
+          {
+            "name": "sender",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "sharesIn",
+            "type": "uint256",
+            "indexed": false
+          },
+          {
+            "name": "assetsOut",
+            "type": "uint256",
+            "indexed": false
+          }
+        ]
+      },
+      {
+        "name": "ProductRedeemRequested",
+        "signature": "ProductRedeemRequested(uint256,address,address,uint256,uint256,uint256,uint256)",
+        "sourceContracts": [
+          "ArcoRedemptionVault"
+        ],
+        "inputs": [
+          {
+            "name": "requestId",
+            "type": "uint256",
+            "indexed": true
+          },
+          {
+            "name": "sender",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "sharesIn",
+            "type": "uint256",
+            "indexed": false
+          },
+          {
+            "name": "assetsOut",
+            "type": "uint256",
+            "indexed": false
+          },
+          {
+            "name": "productRate",
+            "type": "uint256",
+            "indexed": false
+          },
+          {
+            "name": "paymentRate",
+            "type": "uint256",
+            "indexed": false
+          }
+        ]
+      },
+      {
+        "name": "ProductRedeemFulfilled",
+        "signature": "ProductRedeemFulfilled(uint256,uint256)",
+        "sourceContracts": [
+          "ArcoRedemptionVault"
+        ],
+        "inputs": [
+          {
+            "name": "requestId",
+            "type": "uint256",
+            "indexed": true
+          },
+          {
+            "name": "assetsOut",
+            "type": "uint256",
+            "indexed": false
+          }
+        ]
+      },
+      {
+        "name": "ProductRedeemClaimed",
+        "signature": "ProductRedeemClaimed(uint256,address,uint256)",
+        "sourceContracts": [
+          "ArcoRedemptionVault"
+        ],
+        "inputs": [
+          {
+            "name": "requestId",
+            "type": "uint256",
+            "indexed": true
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "assetsOut",
+            "type": "uint256",
+            "indexed": false
+          }
+        ]
+      },
+      {
+        "name": "PriceUpdated",
+        "signature": "PriceUpdated(uint80,int256,uint256)",
+        "sourceContracts": [
+          "ProductPriceFeed"
+        ],
+        "inputs": [
+          {
+            "name": "roundId",
+            "type": "uint80",
+            "indexed": true
+          },
+          {
+            "name": "answer",
+            "type": "int256",
+            "indexed": false
+          },
+          {
+            "name": "updatedAt",
+            "type": "uint256",
+            "indexed": false
+          }
+        ]
+      },
+      {
+        "name": "Paused",
+        "signature": "Paused(address)",
+        "sourceContracts": [
+          "ProductToken",
+          "TestAssetFaucet",
+          "ProductPriceFeed",
+          "ArcoDepositVault",
+          "ArcoRedemptionVault"
+        ],
+        "inputs": [
+          {
+            "name": "account",
+            "type": "address",
+            "indexed": false
+          }
+        ]
+      },
+      {
+        "name": "Unpaused",
+        "signature": "Unpaused(address)",
+        "sourceContracts": [
+          "ProductToken",
+          "TestAssetFaucet",
+          "ProductPriceFeed",
+          "ArcoDepositVault",
+          "ArcoRedemptionVault"
+        ],
+        "inputs": [
+          {
+            "name": "account",
+            "type": "address",
+            "indexed": false
+          }
+        ]
+      },
+      {
+        "name": "ProductDepositRequested",
+        "signature": "ProductDepositRequested(uint256,address,address,uint256,uint256,uint256,uint256)",
+        "sourceContracts": [
+          "ArcoDepositVault"
+        ],
+        "inputs": [
+          {
+            "name": "requestId",
+            "type": "uint256",
+            "indexed": true
+          },
+          {
+            "name": "sender",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "paymentAssets",
+            "type": "uint256",
+            "indexed": false
+          },
+          {
+            "name": "sharesOut",
+            "type": "uint256",
+            "indexed": false
+          },
+          {
+            "name": "paymentRate",
+            "type": "uint256",
+            "indexed": false
+          },
+          {
+            "name": "productRate",
+            "type": "uint256",
+            "indexed": false
+          }
+        ]
+      },
+      {
+        "name": "ProductDepositFulfilled",
+        "signature": "ProductDepositFulfilled(uint256,address,uint256)",
+        "sourceContracts": [
+          "ArcoDepositVault"
+        ],
+        "inputs": [
+          {
+            "name": "requestId",
+            "type": "uint256",
+            "indexed": true
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "indexed": true
+          },
+          {
+            "name": "sharesOut",
+            "type": "uint256",
+            "indexed": false
+          }
+        ]
+      }
+    ],
+    "mismatches": [
+      {
+        "eventName": "ProductDepositRequested",
+        "status": "extra-indexed-event",
+        "action": "Included in the registry and indexer because the split deposit vault ABI emits this request-flow event."
+      },
+      {
+        "eventName": "ProductDepositFulfilled",
+        "status": "extra-indexed-event",
+        "action": "Included in the registry and indexer because the split deposit vault ABI emits this request-flow event."
+      }
+    ]
+  },
+  "deploymentRecords": [
+    {
+      "key": "proxy:asset:tUSDC",
+      "logicalLabel": "tUSDC",
+      "contractName": "TestAssetToken",
+      "proxy": "0x869d9c8d9BF0A961FC2FD3bBa300fDBEeE3C2633",
+      "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b",
+      "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+      "deployTxHash": "0x5babc3a4ffc760bbd3fddb5de3a9b423d58eb70c73b3fc7f66bbd76ff32c5719",
+      "blockNumber": 29212771
+    },
+    {
+      "key": "proxy:asset:tBTC",
+      "logicalLabel": "tBTC",
+      "contractName": "TestAssetToken",
+      "proxy": "0x2330e111FB116bF8041F694145E961eD9B66243e",
+      "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b",
+      "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+      "deployTxHash": "0x32cb20d571d2ddce14fa91b14ee126b363d908555c6d8adcfed41b8b8c3d7b00",
+      "blockNumber": 29212779
+    },
+    {
+      "key": "proxy:asset:tXRP",
+      "logicalLabel": "tXRP",
+      "contractName": "TestAssetToken",
+      "proxy": "0x8b93214e63d83d64DE4437c82a8EB6F73481A922",
+      "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b",
+      "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+      "deployTxHash": "0xee51c34424b52b1e71bdefa6e4465ee2fd11831566a61009b88eddf99af7b722",
+      "blockNumber": 29212791
+    },
+    {
+      "key": "proxy:asset:tWETH",
+      "logicalLabel": "tWETH",
+      "contractName": "TestAssetToken",
+      "proxy": "0xD6499F5D8c162D81A52302b855b7b2961917feAd",
+      "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b",
+      "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+      "deployTxHash": "0x05d5872bfe345a0827de15390d278ea7f54818b43360911df802e06fc213c3dc",
+      "blockNumber": 29212803
+    },
+    {
+      "key": "proxy:faucet",
+      "logicalLabel": "test-asset-faucet",
+      "contractName": "TestAssetFaucet",
+      "proxy": "0x785918816f5f5ED6a8C5EDF5E223f14223bF41Bc",
+      "implementation": "0x2c577DB64011b7d751DfFA73170355916EfAee1c",
+      "bytecodeHash": "0xcdbd52292dcd38bd3a078c9fa48168995f6c2d0545bd315060f909459761ae9b",
+      "deployTxHash": "0x9829d216f899bdb7db7acb8c5b9b09e8efa6588dc962de1f423b9bc54e5c8959",
+      "blockNumber": 29212818
+    },
+    {
+      "key": "proxy:product:acapix:productToken",
+      "logicalLabel": "aCAPIX",
+      "contractName": "ProductToken",
+      "proxy": "0xD87AA38101220E3e0CD2e45b7E97D799abeC992f",
+      "implementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+      "bytecodeHash": "0x620d9b11bb84c02fac6115da6deff3bad4cddaf240f906ceebe546a037000f93",
+      "deployTxHash": "0x21c023dd2818f8448357dd21d086826978a39baf89ce349307aeb6cf474d59cb",
+      "blockNumber": 29212846
+    },
+    {
+      "key": "proxy:product:ibenji:productToken",
+      "logicalLabel": "iBENJI",
+      "contractName": "ProductToken",
+      "proxy": "0xA3a96A910b94FAc01FAf5449c2317A78107ed705",
+      "implementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+      "bytecodeHash": "0x620d9b11bb84c02fac6115da6deff3bad4cddaf240f906ceebe546a037000f93",
+      "deployTxHash": "0x005d7f4f7e3e7ebfa1bd4a928750ba83198a6544c0d1b340c1ec44c1049a8001",
+      "blockNumber": 29212854
+    },
+    {
+      "key": "proxy:product:umint:productToken",
+      "logicalLabel": "uMINT",
+      "contractName": "ProductToken",
+      "proxy": "0x24c67A5C506FbD9abc2793Bb0967004E88061f8b",
+      "implementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+      "bytecodeHash": "0x620d9b11bb84c02fac6115da6deff3bad4cddaf240f906ceebe546a037000f93",
+      "deployTxHash": "0x9526b0a491c3ec005b496fd3de14687c8cef210bef090a19db59765f814e77a2",
+      "blockNumber": 29212861
+    },
+    {
+      "key": "proxy:product:abtc:productToken",
+      "logicalLabel": "aBTC",
+      "contractName": "ProductToken",
+      "proxy": "0x2CF0bbfB47710433fCF4c77FAbb91839bD4723d3",
+      "implementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+      "bytecodeHash": "0x620d9b11bb84c02fac6115da6deff3bad4cddaf240f906ceebe546a037000f93",
+      "deployTxHash": "0x16f12b2036c9052e687d8d017b50091051b472d4b89f8709ed241defae09f404",
+      "blockNumber": 29212869
+    },
+    {
+      "key": "proxy:product:axrp:productToken",
+      "logicalLabel": "aXRP",
+      "contractName": "ProductToken",
+      "proxy": "0x46462B8527883C726cF4ebB5C19c492293a62Eb0",
+      "implementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+      "bytecodeHash": "0x620d9b11bb84c02fac6115da6deff3bad4cddaf240f906ceebe546a037000f93",
+      "deployTxHash": "0x4a9eebb3050c0dcc6a8cdc085091d29e3211e81fb5c84e3c5e50b91043629805",
+      "blockNumber": 29212877
+    },
+    {
+      "key": "proxy:product:aeth:productToken",
+      "logicalLabel": "aETH",
+      "contractName": "ProductToken",
+      "proxy": "0x42FeeDe0F4503d9783404B7301a65A0fF17c36d0",
+      "implementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+      "bytecodeHash": "0x620d9b11bb84c02fac6115da6deff3bad4cddaf240f906ceebe546a037000f93",
+      "deployTxHash": "0xbf1408dfa5720f2cb1112cd987b06df9766f1be9c20bf09118930357f7768b81",
+      "blockNumber": 29212885
+    },
+    {
+      "key": "proxy:product:acapix:priceFeed",
+      "logicalLabel": "aCAPIX-price-feed",
+      "contractName": "ProductPriceFeed",
+      "proxy": "0x0B01f3E517C1a8749bC3306c22c95C3BA253e4ed",
+      "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+      "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+      "deployTxHash": "0xd5edd15b0ee97d5f5ad8d2bfac47431753df39d2bca3b34ac8ec5fb3695c6580",
+      "blockNumber": 29212895
+    },
+    {
+      "key": "proxy:product:ibenji:priceFeed",
+      "logicalLabel": "iBENJI-price-feed",
+      "contractName": "ProductPriceFeed",
+      "proxy": "0x92CfC86aD37ED66734A4AE311A79525ba5990680",
+      "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+      "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+      "deployTxHash": "0xae3e0cfca66617ac5d24e8e34e74cb1b432a8d1d8be810ef6face2799094162a",
+      "blockNumber": 29212908
+    },
+    {
+      "key": "proxy:product:umint:priceFeed",
+      "logicalLabel": "uMINT-price-feed",
+      "contractName": "ProductPriceFeed",
+      "proxy": "0x57a4637a478c88643260E0F33534c75581bEe9DA",
+      "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+      "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+      "deployTxHash": "0x71c6beb7e934bd0c77968aa6edea6eb66c9786a8e9caa86070ec7243124182d0",
+      "blockNumber": 29212916
+    },
+    {
+      "key": "proxy:product:abtc:priceFeed",
+      "logicalLabel": "aBTC-price-feed",
+      "contractName": "ProductPriceFeed",
+      "proxy": "0x4C3593bC3D4093d3eB11377E64089DEECdF1e140",
+      "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+      "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+      "deployTxHash": "0xe49ae64421d795d29d1efa1578799c6231a65d4da9d069e133500cac8771ce52",
+      "blockNumber": 29212924
+    },
+    {
+      "key": "proxy:product:axrp:priceFeed",
+      "logicalLabel": "aXRP-price-feed",
+      "contractName": "ProductPriceFeed",
+      "proxy": "0xd11D8C5094e67ca55FBfaad6Bf7E459404827f42",
+      "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+      "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+      "deployTxHash": "0x7050d0727721d24c42bfb8836dda044e26a49368953a3ba3298ae32ed094363b",
+      "blockNumber": 29212937
+    },
+    {
+      "key": "proxy:product:aeth:priceFeed",
+      "logicalLabel": "aETH-price-feed",
+      "contractName": "ProductPriceFeed",
+      "proxy": "0xaCC6e9adDBc8d43399CFf37c81cCf2c815F03dea",
+      "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+      "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+      "deployTxHash": "0xd971b6570c3d33e091460177bfafe11afd9d30401a6fe90d749e1f70bec66243",
+      "blockNumber": 29212949
+    },
+    {
+      "key": "proxy:product:acapix:depositVault",
+      "logicalLabel": "aCAPIX-deposit-vault",
+      "contractName": "ArcoDepositVault",
+      "proxy": "0x4ebCE7C472DcB478d30725D0cF3675772dBB34c2",
+      "implementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+      "bytecodeHash": "0xf54e9c0eb13e06fa1524c9e531d2186132b8cdda8ecc412afb904c55e14a55b3",
+      "deployTxHash": "0x2db4346d90f12d4c6b3902c4166dffd97b20301f89353af5e231458c459ce528",
+      "blockNumber": 29212957
+    },
+    {
+      "key": "proxy:product:ibenji:depositVault",
+      "logicalLabel": "iBENJI-deposit-vault",
+      "contractName": "ArcoDepositVault",
+      "proxy": "0xfa24a31bF1F2B149298969Ced1205FC22670C1b7",
+      "implementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+      "bytecodeHash": "0xf54e9c0eb13e06fa1524c9e531d2186132b8cdda8ecc412afb904c55e14a55b3",
+      "deployTxHash": "0xb889ea0846756b622a766b374865832c9e5ac377cbd38c22a8c0acc0d7cba07c",
+      "blockNumber": 29212974
+    },
+    {
+      "key": "proxy:product:umint:depositVault",
+      "logicalLabel": "uMINT-deposit-vault",
+      "contractName": "ArcoDepositVault",
+      "proxy": "0xf3c43cD61993f4DCc4203547acB77fDE8F56ba8b",
+      "implementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+      "bytecodeHash": "0xf54e9c0eb13e06fa1524c9e531d2186132b8cdda8ecc412afb904c55e14a55b3",
+      "deployTxHash": "0x4be67985678d84e0d46a2f983c277c7f2c4e49f905b93b13be82e30d7b79fd4e",
+      "blockNumber": 29212985
+    },
+    {
+      "key": "proxy:product:abtc:depositVault",
+      "logicalLabel": "aBTC-deposit-vault",
+      "contractName": "ArcoDepositVault",
+      "proxy": "0x63bBF5E165a23ba75aAFA71A34E74a15A422235e",
+      "implementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+      "bytecodeHash": "0xf54e9c0eb13e06fa1524c9e531d2186132b8cdda8ecc412afb904c55e14a55b3",
+      "deployTxHash": "0x3b3749b9e6964775eb3378f1d3a78e11ca1f08eb522bf62d106fa98b83e314eb",
+      "blockNumber": 29212996
+    },
+    {
+      "key": "proxy:product:axrp:depositVault",
+      "logicalLabel": "aXRP-deposit-vault",
+      "contractName": "ArcoDepositVault",
+      "proxy": "0xB245FBCa1f3De81Fc67622Ae954C1aB9F6cB3BaB",
+      "implementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+      "bytecodeHash": "0xf54e9c0eb13e06fa1524c9e531d2186132b8cdda8ecc412afb904c55e14a55b3",
+      "deployTxHash": "0x1f65418326bad7a7bdd22f725cf0d44c4d615e3ed2a6d59945fe2049a792e0c3",
+      "blockNumber": 29213008
+    },
+    {
+      "key": "proxy:product:aeth:depositVault",
+      "logicalLabel": "aETH-deposit-vault",
+      "contractName": "ArcoDepositVault",
+      "proxy": "0xB79ac567B5C9200E5E68B3053B913Bcc59f78a7F",
+      "implementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+      "bytecodeHash": "0xf54e9c0eb13e06fa1524c9e531d2186132b8cdda8ecc412afb904c55e14a55b3",
+      "deployTxHash": "0x3185ff3e05b7a19728c66670239681a3d263f17a847624e9c4c35381afa6b88d",
+      "blockNumber": 29213018
+    },
+    {
+      "key": "proxy:product:acapix:redemptionVault",
+      "logicalLabel": "aCAPIX-redemption-vault",
+      "contractName": "ArcoRedemptionVault",
+      "proxy": "0x43a7Fd58b855f44bADAdc260dedb45F446B4Ecba",
+      "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+      "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+      "deployTxHash": "0xde8727747e0e0dad4de2158b3c5370da7f0037ed7dbfaf8ab942ce92ed230fe3",
+      "blockNumber": 29213036
+    },
+    {
+      "key": "proxy:product:ibenji:redemptionVault",
+      "logicalLabel": "iBENJI-redemption-vault",
+      "contractName": "ArcoRedemptionVault",
+      "proxy": "0x6701eFeC11aF345E38b899cAb2673A5e6C9701f2",
+      "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+      "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+      "deployTxHash": "0x61898c054dc24462b684e2b6628b97658178d5eb54c2f2b88cf1baa8efa15968",
+      "blockNumber": 29213048
+    },
+    {
+      "key": "proxy:product:umint:redemptionVault",
+      "logicalLabel": "uMINT-redemption-vault",
+      "contractName": "ArcoRedemptionVault",
+      "proxy": "0xc4075029B9E854A7Ef28D53749560564c607Ea67",
+      "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+      "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+      "deployTxHash": "0xe70406ec5666d9ee414d1f04b919bbfaf8dbb0a23d226c0582bc4a555568925e",
+      "blockNumber": 29213059
+    },
+    {
+      "key": "proxy:product:abtc:redemptionVault",
+      "logicalLabel": "aBTC-redemption-vault",
+      "contractName": "ArcoRedemptionVault",
+      "proxy": "0xf24362E7704383c368bC91D0F8d9DBCf21F609bB",
+      "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+      "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+      "deployTxHash": "0x7ed7b375c39312dcb1965c066ca462242805bcd725db6fd58ec47001d27b5038",
+      "blockNumber": 29213070
+    },
+    {
+      "key": "proxy:product:axrp:redemptionVault",
+      "logicalLabel": "aXRP-redemption-vault",
+      "contractName": "ArcoRedemptionVault",
+      "proxy": "0x37Ae685703eD8815fc3ddE53ff4c9Cb12dccB9A7",
+      "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+      "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+      "deployTxHash": "0x2de5de9d19163769c7bba8abb92031c6ae109ae0a7be7063fd3370ebe538fc26",
+      "blockNumber": 29213085
+    },
+    {
+      "key": "proxy:product:aeth:redemptionVault",
+      "logicalLabel": "aETH-redemption-vault",
+      "contractName": "ArcoRedemptionVault",
+      "proxy": "0x0Bcb1702c4dF8d0E5d9476Cbc0d31d0E583B6140",
+      "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+      "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+      "deployTxHash": "0xe066f09c8ba09dc7f201fb71a5a1112c7c6fd01ae054c8f8a4e4c5d259d6dcac",
+      "blockNumber": 29213096
+    },
+    {
+      "key": "proxy:product:beqty:productToken",
+      "logicalLabel": "bEQTY",
+      "contractName": "ProductToken",
+      "proxy": "0x0089E79DE0aB1Ae2D876f8F2661b3117FA69E6b5",
+      "implementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+      "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+      "deployTxHash": "0x8bfbbf2c6e5a499f7874f3da10e649f5e3a7b18f51c811338027408e6d158044",
+      "blockNumber": 30008251
+    },
+    {
+      "key": "proxy:product:beqty:priceFeed",
+      "logicalLabel": "bEQTY-price-feed",
+      "contractName": "ProductPriceFeed",
+      "proxy": "0xeC241df6E4E608C4260959Dc07D4f751372AFBa4",
+      "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+      "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+      "deployTxHash": "0x5c3c459e5ec0c2a35c05f4d90351baa4302bf6f670a02225ade4c5727d187a58",
+      "blockNumber": 30008259
+    },
+    {
+      "key": "proxy:product:beqty:depositVault",
+      "logicalLabel": "bEQTY-deposit-vault",
+      "contractName": "ArcoDepositVault",
+      "proxy": "0x2703bE9dBDF663c369Db2b87a72B42b97bDdB3eA",
+      "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+      "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+      "deployTxHash": "0xae1984da6646a9382d13bfa8218b8f9760fcba03c7de444a772247b19f93259b",
+      "blockNumber": 30013138
+    },
+    {
+      "key": "proxy:product:beqty:redemptionVault",
+      "logicalLabel": "bEQTY-redemption-vault",
+      "contractName": "ArcoRedemptionVault",
+      "proxy": "0x63a1184031C679E1625020d93234D505F0C23Acc",
+      "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+      "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+      "deployTxHash": "0x5dbea40b3bc63d8f7e44adb3825b5255015d6c029824de3d0ea5ebba247c365e",
+      "blockNumber": 30013149
+    },
+    {
+      "key": "proxy:product:arcousd:productToken",
+      "logicalLabel": "arcoUSD",
+      "contractName": "ProductToken",
+      "proxy": "0x28a934C3465331DdEB60908c0C3F3b8dE505Be05",
+      "implementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+      "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+      "deployTxHash": "0x24a66c02cbe2c3ca7e873eb695da2836568f64448bcbceb505b7f7fecb0df00d",
+      "blockNumber": 30357010
+    },
+    {
+      "key": "proxy:product:arcousd:priceFeed",
+      "logicalLabel": "arcoUSD-price-feed",
+      "contractName": "ProductPriceFeed",
+      "proxy": "0x2b1C1Af136f8c9d637a44dc5340748e0389D1Ead",
+      "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+      "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+      "deployTxHash": "0xfd05dbb96682d9654171f0e5b2275b305cad1e5fc65156f090395b5b33f86208",
+      "blockNumber": 30357019
+    },
+    {
+      "key": "proxy:product:arcousd:depositVault",
+      "logicalLabel": "arcoUSD-deposit-vault",
+      "contractName": "ArcoDepositVault",
+      "proxy": "0x4083d23D792cAefefc97b60677c12243AAC459e5",
+      "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+      "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+      "deployTxHash": "0xe9c570e1ad39d49c3c5f0ef8ba74fd86f138d731c1ebd63ac4f7ed35a97859c7",
+      "blockNumber": 30357026
+    },
+    {
+      "key": "proxy:product:arcousd:redemptionVault",
+      "logicalLabel": "arcoUSD-redemption-vault",
+      "contractName": "ArcoRedemptionVault",
+      "proxy": "0x5719ED2d50a3fD00852e90aFE7d6Aa4fB696ec36",
+      "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
+      "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+      "deployTxHash": "0x311e1c8b6eaf6a66bc7cecd3497a684484ff41b75a7c6946e6d60eb36fc47d36",
+      "blockNumber": 30357040
+    }
+  ],
+  "roleGrants": [
+    {
+      "key": "grant:proxy:asset:tUSDC:MINTER_ROLE:proxy:faucet",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0x869d9c8d9BF0A961FC2FD3bBa300fDBEeE3C2633",
+      "targetKey": "proxy:asset:tUSDC",
+      "grantee": "0x785918816f5f5ED6a8C5EDF5E223f14223bF41Bc",
+      "granteeKey": "proxy:faucet",
+      "txHash": "0x386231afe528b9b5aad452a3ff871d6bfe5ec1e35ed1835aade1691ecf3b6feb",
+      "blockNumber": 29212827,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:asset:tBTC:MINTER_ROLE:proxy:faucet",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0x2330e111FB116bF8041F694145E961eD9B66243e",
+      "targetKey": "proxy:asset:tBTC",
+      "grantee": "0x785918816f5f5ED6a8C5EDF5E223f14223bF41Bc",
+      "granteeKey": "proxy:faucet",
+      "txHash": "0x1014125c60f0f0f114a15392518465da0d276e6c2788663602ff3cb12d4d9b40",
+      "blockNumber": 29212830,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:asset:tXRP:MINTER_ROLE:proxy:faucet",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0x8b93214e63d83d64DE4437c82a8EB6F73481A922",
+      "targetKey": "proxy:asset:tXRP",
+      "grantee": "0x785918816f5f5ED6a8C5EDF5E223f14223bF41Bc",
+      "granteeKey": "proxy:faucet",
+      "txHash": "0x89357f72c2ab625705b74e22c659723416a3ebf5cc04fd2e0b97329824806200",
+      "blockNumber": 29212832,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:asset:tWETH:MINTER_ROLE:proxy:faucet",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0xD6499F5D8c162D81A52302b855b7b2961917feAd",
+      "targetKey": "proxy:asset:tWETH",
+      "grantee": "0x785918816f5f5ED6a8C5EDF5E223f14223bF41Bc",
+      "granteeKey": "proxy:faucet",
+      "txHash": "0xff742b32212f28808db08fab07e7f9a908d9889d481df238aa06c5393d7d37b2",
+      "blockNumber": 29212834,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:acapix:productToken:GREENLIST_OPERATOR_ROLE:role-address:tier2Operator",
+      "role": "GREENLIST_OPERATOR_ROLE",
+      "roleHash": "0x77c5b782690f31cd39b1abf2448215259a688a75920040c399d96a676bd1999d",
+      "target": "0xD87AA38101220E3e0CD2e45b7E97D799abeC992f",
+      "targetKey": "proxy:product:acapix:productToken",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212848,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:ibenji:productToken:GREENLIST_OPERATOR_ROLE:role-address:tier2Operator",
+      "role": "GREENLIST_OPERATOR_ROLE",
+      "roleHash": "0x77c5b782690f31cd39b1abf2448215259a688a75920040c399d96a676bd1999d",
+      "target": "0xA3a96A910b94FAc01FAf5449c2317A78107ed705",
+      "targetKey": "proxy:product:ibenji:productToken",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212855,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:umint:productToken:GREENLIST_OPERATOR_ROLE:role-address:tier2Operator",
+      "role": "GREENLIST_OPERATOR_ROLE",
+      "roleHash": "0x77c5b782690f31cd39b1abf2448215259a688a75920040c399d96a676bd1999d",
+      "target": "0x24c67A5C506FbD9abc2793Bb0967004E88061f8b",
+      "targetKey": "proxy:product:umint:productToken",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212862,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:abtc:productToken:GREENLIST_OPERATOR_ROLE:role-address:tier2Operator",
+      "role": "GREENLIST_OPERATOR_ROLE",
+      "roleHash": "0x77c5b782690f31cd39b1abf2448215259a688a75920040c399d96a676bd1999d",
+      "target": "0x2CF0bbfB47710433fCF4c77FAbb91839bD4723d3",
+      "targetKey": "proxy:product:abtc:productToken",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212871,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:axrp:productToken:GREENLIST_OPERATOR_ROLE:role-address:tier2Operator",
+      "role": "GREENLIST_OPERATOR_ROLE",
+      "roleHash": "0x77c5b782690f31cd39b1abf2448215259a688a75920040c399d96a676bd1999d",
+      "target": "0x46462B8527883C726cF4ebB5C19c492293a62Eb0",
+      "targetKey": "proxy:product:axrp:productToken",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212879,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:aeth:productToken:GREENLIST_OPERATOR_ROLE:role-address:tier2Operator",
+      "role": "GREENLIST_OPERATOR_ROLE",
+      "roleHash": "0x77c5b782690f31cd39b1abf2448215259a688a75920040c399d96a676bd1999d",
+      "target": "0x42FeeDe0F4503d9783404B7301a65A0fF17c36d0",
+      "targetKey": "proxy:product:aeth:productToken",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212887,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:acapix:priceFeed:FEED_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "FEED_ADMIN_ROLE",
+      "roleHash": "0xca653680535807dc09f7a0756c414d6cb833893dcb2ecc17895855899b8e7c15",
+      "target": "0x0B01f3E517C1a8749bC3306c22c95C3BA253e4ed",
+      "targetKey": "proxy:product:acapix:priceFeed",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212901,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:ibenji:priceFeed:FEED_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "FEED_ADMIN_ROLE",
+      "roleHash": "0xca653680535807dc09f7a0756c414d6cb833893dcb2ecc17895855899b8e7c15",
+      "target": "0x92CfC86aD37ED66734A4AE311A79525ba5990680",
+      "targetKey": "proxy:product:ibenji:priceFeed",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212910,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:umint:priceFeed:FEED_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "FEED_ADMIN_ROLE",
+      "roleHash": "0xca653680535807dc09f7a0756c414d6cb833893dcb2ecc17895855899b8e7c15",
+      "target": "0x57a4637a478c88643260E0F33534c75581bEe9DA",
+      "targetKey": "proxy:product:umint:priceFeed",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212918,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:abtc:priceFeed:FEED_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "FEED_ADMIN_ROLE",
+      "roleHash": "0xca653680535807dc09f7a0756c414d6cb833893dcb2ecc17895855899b8e7c15",
+      "target": "0x4C3593bC3D4093d3eB11377E64089DEECdF1e140",
+      "targetKey": "proxy:product:abtc:priceFeed",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212930,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:axrp:priceFeed:FEED_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "FEED_ADMIN_ROLE",
+      "roleHash": "0xca653680535807dc09f7a0756c414d6cb833893dcb2ecc17895855899b8e7c15",
+      "target": "0xd11D8C5094e67ca55FBfaad6Bf7E459404827f42",
+      "targetKey": "proxy:product:axrp:priceFeed",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212943,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:aeth:priceFeed:FEED_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "FEED_ADMIN_ROLE",
+      "roleHash": "0xca653680535807dc09f7a0756c414d6cb833893dcb2ecc17895855899b8e7c15",
+      "target": "0xaCC6e9adDBc8d43399CFf37c81cCf2c815F03dea",
+      "targetKey": "proxy:product:aeth:priceFeed",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212950,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:acapix:productToken:MINTER_ROLE:proxy:product:acapix:depositVault",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0xD87AA38101220E3e0CD2e45b7E97D799abeC992f",
+      "targetKey": "proxy:product:acapix:productToken",
+      "grantee": "0x4ebCE7C472DcB478d30725D0cF3675772dBB34c2",
+      "granteeKey": "proxy:product:acapix:depositVault",
+      "txHash": "0x338cfb452f47f7c97dd36a75b33028a56fa20dd6d181ffdf7f4113602880c6b3",
+      "blockNumber": 29212962,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:acapix:depositVault:DEPOSIT_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "DEPOSIT_VAULT_ADMIN_ROLE",
+      "roleHash": "0x2728bd32a7e1e24afac41a073e9c92dbb65527c9ec3baa2a8d5ee1d06c0fa779",
+      "target": "0x4ebCE7C472DcB478d30725D0cF3675772dBB34c2",
+      "targetKey": "proxy:product:acapix:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212967,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:acapix:depositVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x4ebCE7C472DcB478d30725D0cF3675772dBB34c2",
+      "targetKey": "proxy:product:acapix:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212967,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:ibenji:productToken:MINTER_ROLE:proxy:product:ibenji:depositVault",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0xA3a96A910b94FAc01FAf5449c2317A78107ed705",
+      "targetKey": "proxy:product:ibenji:productToken",
+      "grantee": "0xfa24a31bF1F2B149298969Ced1205FC22670C1b7",
+      "granteeKey": "proxy:product:ibenji:depositVault",
+      "txHash": "0x1f1abc1c603fd846df0a853d279d7dc401873bbeb1d93380ec79da74e898795d",
+      "blockNumber": 29212978,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:ibenji:depositVault:DEPOSIT_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "DEPOSIT_VAULT_ADMIN_ROLE",
+      "roleHash": "0x2728bd32a7e1e24afac41a073e9c92dbb65527c9ec3baa2a8d5ee1d06c0fa779",
+      "target": "0xfa24a31bF1F2B149298969Ced1205FC22670C1b7",
+      "targetKey": "proxy:product:ibenji:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212979,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:ibenji:depositVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0xfa24a31bF1F2B149298969Ced1205FC22670C1b7",
+      "targetKey": "proxy:product:ibenji:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212979,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:umint:productToken:MINTER_ROLE:proxy:product:umint:depositVault",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0x24c67A5C506FbD9abc2793Bb0967004E88061f8b",
+      "targetKey": "proxy:product:umint:productToken",
+      "grantee": "0xf3c43cD61993f4DCc4203547acB77fDE8F56ba8b",
+      "granteeKey": "proxy:product:umint:depositVault",
+      "txHash": "0xf78d37a4f70b16e190f303937bb732ed2e148d6768183fcf44306181ebf2801c",
+      "blockNumber": 29212990,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:umint:depositVault:DEPOSIT_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "DEPOSIT_VAULT_ADMIN_ROLE",
+      "roleHash": "0x2728bd32a7e1e24afac41a073e9c92dbb65527c9ec3baa2a8d5ee1d06c0fa779",
+      "target": "0xf3c43cD61993f4DCc4203547acB77fDE8F56ba8b",
+      "targetKey": "proxy:product:umint:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212990,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:umint:depositVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0xf3c43cD61993f4DCc4203547acB77fDE8F56ba8b",
+      "targetKey": "proxy:product:umint:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29212991,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:abtc:productToken:MINTER_ROLE:proxy:product:abtc:depositVault",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0x2CF0bbfB47710433fCF4c77FAbb91839bD4723d3",
+      "targetKey": "proxy:product:abtc:productToken",
+      "grantee": "0x63bBF5E165a23ba75aAFA71A34E74a15A422235e",
+      "granteeKey": "proxy:product:abtc:depositVault",
+      "txHash": "0xd76998d1cfdae237af7955d2afc251a1f2b02955011e0e14f87844917045a385",
+      "blockNumber": 29213001,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:abtc:depositVault:DEPOSIT_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "DEPOSIT_VAULT_ADMIN_ROLE",
+      "roleHash": "0x2728bd32a7e1e24afac41a073e9c92dbb65527c9ec3baa2a8d5ee1d06c0fa779",
+      "target": "0x63bBF5E165a23ba75aAFA71A34E74a15A422235e",
+      "targetKey": "proxy:product:abtc:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213001,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:abtc:depositVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x63bBF5E165a23ba75aAFA71A34E74a15A422235e",
+      "targetKey": "proxy:product:abtc:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213001,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:axrp:productToken:MINTER_ROLE:proxy:product:axrp:depositVault",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0x46462B8527883C726cF4ebB5C19c492293a62Eb0",
+      "targetKey": "proxy:product:axrp:productToken",
+      "grantee": "0xB245FBCa1f3De81Fc67622Ae954C1aB9F6cB3BaB",
+      "granteeKey": "proxy:product:axrp:depositVault",
+      "txHash": "0x36d511a918e5819d963790ec2e83eec62a3d0e7c46a1a4e53113f883a54d4ccf",
+      "blockNumber": 29213012,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:axrp:depositVault:DEPOSIT_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "DEPOSIT_VAULT_ADMIN_ROLE",
+      "roleHash": "0x2728bd32a7e1e24afac41a073e9c92dbb65527c9ec3baa2a8d5ee1d06c0fa779",
+      "target": "0xB245FBCa1f3De81Fc67622Ae954C1aB9F6cB3BaB",
+      "targetKey": "proxy:product:axrp:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213012,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:axrp:depositVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0xB245FBCa1f3De81Fc67622Ae954C1aB9F6cB3BaB",
+      "targetKey": "proxy:product:axrp:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213013,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:aeth:productToken:MINTER_ROLE:proxy:product:aeth:depositVault",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0x42FeeDe0F4503d9783404B7301a65A0fF17c36d0",
+      "targetKey": "proxy:product:aeth:productToken",
+      "grantee": "0xB79ac567B5C9200E5E68B3053B913Bcc59f78a7F",
+      "granteeKey": "proxy:product:aeth:depositVault",
+      "txHash": "0xd60d7bb232b323f363882c2e51311ad77a5f7a5dd2a302a17a353927e609c495",
+      "blockNumber": 29213022,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:aeth:depositVault:DEPOSIT_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "DEPOSIT_VAULT_ADMIN_ROLE",
+      "roleHash": "0x2728bd32a7e1e24afac41a073e9c92dbb65527c9ec3baa2a8d5ee1d06c0fa779",
+      "target": "0xB79ac567B5C9200E5E68B3053B913Bcc59f78a7F",
+      "targetKey": "proxy:product:aeth:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213022,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:aeth:depositVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0xB79ac567B5C9200E5E68B3053B913Bcc59f78a7F",
+      "targetKey": "proxy:product:aeth:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213023,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:acapix:productToken:BURNER_ROLE:proxy:product:acapix:redemptionVault",
+      "role": "BURNER_ROLE",
+      "roleHash": "0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848",
+      "target": "0xD87AA38101220E3e0CD2e45b7E97D799abeC992f",
+      "targetKey": "proxy:product:acapix:productToken",
+      "grantee": "0x43a7Fd58b855f44bADAdc260dedb45F446B4Ecba",
+      "granteeKey": "proxy:product:acapix:redemptionVault",
+      "txHash": "0x7f71ed7969897a69c1b40e46d4fb03b53c1064d016c54f8269c599c367decb39",
+      "blockNumber": 29213041,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:acapix:redemptionVault:REDEMPTION_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "REDEMPTION_VAULT_ADMIN_ROLE",
+      "roleHash": "0x57df534b215589c7ade8c8abe0978debf2ea95cf1d442550f94eec78a69d238e",
+      "target": "0x43a7Fd58b855f44bADAdc260dedb45F446B4Ecba",
+      "targetKey": "proxy:product:acapix:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213041,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:acapix:redemptionVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x43a7Fd58b855f44bADAdc260dedb45F446B4Ecba",
+      "targetKey": "proxy:product:acapix:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213041,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:ibenji:productToken:BURNER_ROLE:proxy:product:ibenji:redemptionVault",
+      "role": "BURNER_ROLE",
+      "roleHash": "0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848",
+      "target": "0xA3a96A910b94FAc01FAf5449c2317A78107ed705",
+      "targetKey": "proxy:product:ibenji:productToken",
+      "grantee": "0x6701eFeC11aF345E38b899cAb2673A5e6C9701f2",
+      "granteeKey": "proxy:product:ibenji:redemptionVault",
+      "txHash": "0xacb3329fbd85e7baf132a8a43043a52a04f594c4ed96e0efcbdf824004c2a7a7",
+      "blockNumber": 29213052,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:ibenji:redemptionVault:REDEMPTION_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "REDEMPTION_VAULT_ADMIN_ROLE",
+      "roleHash": "0x57df534b215589c7ade8c8abe0978debf2ea95cf1d442550f94eec78a69d238e",
+      "target": "0x6701eFeC11aF345E38b899cAb2673A5e6C9701f2",
+      "targetKey": "proxy:product:ibenji:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213052,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:ibenji:redemptionVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x6701eFeC11aF345E38b899cAb2673A5e6C9701f2",
+      "targetKey": "proxy:product:ibenji:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213053,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:umint:productToken:BURNER_ROLE:proxy:product:umint:redemptionVault",
+      "role": "BURNER_ROLE",
+      "roleHash": "0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848",
+      "target": "0x24c67A5C506FbD9abc2793Bb0967004E88061f8b",
+      "targetKey": "proxy:product:umint:productToken",
+      "grantee": "0xc4075029B9E854A7Ef28D53749560564c607Ea67",
+      "granteeKey": "proxy:product:umint:redemptionVault",
+      "txHash": "0x7a07ed14d5ad6f71bb4a4f63bec31f9977e80a583c9ecbcc49ef306f811d71ac",
+      "blockNumber": 29213063,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:umint:redemptionVault:REDEMPTION_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "REDEMPTION_VAULT_ADMIN_ROLE",
+      "roleHash": "0x57df534b215589c7ade8c8abe0978debf2ea95cf1d442550f94eec78a69d238e",
+      "target": "0xc4075029B9E854A7Ef28D53749560564c607Ea67",
+      "targetKey": "proxy:product:umint:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213063,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:umint:redemptionVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0xc4075029B9E854A7Ef28D53749560564c607Ea67",
+      "targetKey": "proxy:product:umint:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213064,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:abtc:productToken:BURNER_ROLE:proxy:product:abtc:redemptionVault",
+      "role": "BURNER_ROLE",
+      "roleHash": "0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848",
+      "target": "0x2CF0bbfB47710433fCF4c77FAbb91839bD4723d3",
+      "targetKey": "proxy:product:abtc:productToken",
+      "grantee": "0xf24362E7704383c368bC91D0F8d9DBCf21F609bB",
+      "granteeKey": "proxy:product:abtc:redemptionVault",
+      "txHash": "0x0cf5eb2e30fa7d47bbfaf9fb2c3ad2a5eeb01eb1a75e89039f9ecc2cb5ed2789",
+      "blockNumber": 29213079,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:abtc:redemptionVault:REDEMPTION_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "REDEMPTION_VAULT_ADMIN_ROLE",
+      "roleHash": "0x57df534b215589c7ade8c8abe0978debf2ea95cf1d442550f94eec78a69d238e",
+      "target": "0xf24362E7704383c368bC91D0F8d9DBCf21F609bB",
+      "targetKey": "proxy:product:abtc:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213079,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:abtc:redemptionVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0xf24362E7704383c368bC91D0F8d9DBCf21F609bB",
+      "targetKey": "proxy:product:abtc:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213080,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:axrp:productToken:BURNER_ROLE:proxy:product:axrp:redemptionVault",
+      "role": "BURNER_ROLE",
+      "roleHash": "0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848",
+      "target": "0x46462B8527883C726cF4ebB5C19c492293a62Eb0",
+      "targetKey": "proxy:product:axrp:productToken",
+      "grantee": "0x37Ae685703eD8815fc3ddE53ff4c9Cb12dccB9A7",
+      "granteeKey": "proxy:product:axrp:redemptionVault",
+      "txHash": "0xd341354678e59e6fd0f515b039194b8167e6f83e0c33831fe1108575d9caadc2",
+      "blockNumber": 29213089,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:axrp:redemptionVault:REDEMPTION_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "REDEMPTION_VAULT_ADMIN_ROLE",
+      "roleHash": "0x57df534b215589c7ade8c8abe0978debf2ea95cf1d442550f94eec78a69d238e",
+      "target": "0x37Ae685703eD8815fc3ddE53ff4c9Cb12dccB9A7",
+      "targetKey": "proxy:product:axrp:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213089,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:axrp:redemptionVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x37Ae685703eD8815fc3ddE53ff4c9Cb12dccB9A7",
+      "targetKey": "proxy:product:axrp:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213090,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:aeth:productToken:BURNER_ROLE:proxy:product:aeth:redemptionVault",
+      "role": "BURNER_ROLE",
+      "roleHash": "0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848",
+      "target": "0x42FeeDe0F4503d9783404B7301a65A0fF17c36d0",
+      "targetKey": "proxy:product:aeth:productToken",
+      "grantee": "0x0Bcb1702c4dF8d0E5d9476Cbc0d31d0E583B6140",
+      "granteeKey": "proxy:product:aeth:redemptionVault",
+      "txHash": "0x2e10b479593436ae7b7c422dbc36cee18b3498ad3a512f23316d5d5f58cce3de",
+      "blockNumber": 29213104,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:aeth:redemptionVault:REDEMPTION_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "REDEMPTION_VAULT_ADMIN_ROLE",
+      "roleHash": "0x57df534b215589c7ade8c8abe0978debf2ea95cf1d442550f94eec78a69d238e",
+      "target": "0x0Bcb1702c4dF8d0E5d9476Cbc0d31d0E583B6140",
+      "targetKey": "proxy:product:aeth:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213104,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:aeth:redemptionVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x0Bcb1702c4dF8d0E5d9476Cbc0d31d0E583B6140",
+      "targetKey": "proxy:product:aeth:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 29213105,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:beqty:productToken:GREENLIST_OPERATOR_ROLE:role-address:tier2Operator",
+      "role": "GREENLIST_OPERATOR_ROLE",
+      "roleHash": "0x77c5b782690f31cd39b1abf2448215259a688a75920040c399d96a676bd1999d",
+      "target": "0x0089E79DE0aB1Ae2D876f8F2661b3117FA69E6b5",
+      "targetKey": "proxy:product:beqty:productToken",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30008254,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:beqty:priceFeed:FEED_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "FEED_ADMIN_ROLE",
+      "roleHash": "0xca653680535807dc09f7a0756c414d6cb833893dcb2ecc17895855899b8e7c15",
+      "target": "0xeC241df6E4E608C4260959Dc07D4f751372AFBa4",
+      "targetKey": "proxy:product:beqty:priceFeed",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30013133,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:beqty:productToken:MINTER_ROLE:proxy:product:beqty:depositVault",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0x0089E79DE0aB1Ae2D876f8F2661b3117FA69E6b5",
+      "targetKey": "proxy:product:beqty:productToken",
+      "grantee": "0x2703bE9dBDF663c369Db2b87a72B42b97bDdB3eA",
+      "granteeKey": "proxy:product:beqty:depositVault",
+      "txHash": "0x6abe2272316956c1d201382eb299149b2a5330d989a76f6d1e4d90d7fad61600",
+      "blockNumber": 30013142,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:beqty:depositVault:DEPOSIT_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "DEPOSIT_VAULT_ADMIN_ROLE",
+      "roleHash": "0x2728bd32a7e1e24afac41a073e9c92dbb65527c9ec3baa2a8d5ee1d06c0fa779",
+      "target": "0x2703bE9dBDF663c369Db2b87a72B42b97bDdB3eA",
+      "targetKey": "proxy:product:beqty:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30013144,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:beqty:depositVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x2703bE9dBDF663c369Db2b87a72B42b97bDdB3eA",
+      "targetKey": "proxy:product:beqty:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30013144,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:beqty:productToken:BURNER_ROLE:proxy:product:beqty:redemptionVault",
+      "role": "BURNER_ROLE",
+      "roleHash": "0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848",
+      "target": "0x0089E79DE0aB1Ae2D876f8F2661b3117FA69E6b5",
+      "targetKey": "proxy:product:beqty:productToken",
+      "grantee": "0x63a1184031C679E1625020d93234D505F0C23Acc",
+      "granteeKey": "proxy:product:beqty:redemptionVault",
+      "txHash": "0x712b7960d4ef8330238b272b2c2e9ce23b0e4ab5295cdb4bf06df1120e878237",
+      "blockNumber": 30013153,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:beqty:redemptionVault:REDEMPTION_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "REDEMPTION_VAULT_ADMIN_ROLE",
+      "roleHash": "0x57df534b215589c7ade8c8abe0978debf2ea95cf1d442550f94eec78a69d238e",
+      "target": "0x63a1184031C679E1625020d93234D505F0C23Acc",
+      "targetKey": "proxy:product:beqty:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30013155,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:beqty:redemptionVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x63a1184031C679E1625020d93234D505F0C23Acc",
+      "targetKey": "proxy:product:beqty:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30013156,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:arcousd:productToken:GREENLIST_OPERATOR_ROLE:role-address:tier2Operator",
+      "role": "GREENLIST_OPERATOR_ROLE",
+      "roleHash": "0x77c5b782690f31cd39b1abf2448215259a688a75920040c399d96a676bd1999d",
+      "target": "0x28a934C3465331DdEB60908c0C3F3b8dE505Be05",
+      "targetKey": "proxy:product:arcousd:productToken",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30357013,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:arcousd:priceFeed:FEED_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "FEED_ADMIN_ROLE",
+      "roleHash": "0xca653680535807dc09f7a0756c414d6cb833893dcb2ecc17895855899b8e7c15",
+      "target": "0x2b1C1Af136f8c9d637a44dc5340748e0389D1Ead",
+      "targetKey": "proxy:product:arcousd:priceFeed",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30357020,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:arcousd:productToken:MINTER_ROLE:proxy:product:arcousd:depositVault",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0x28a934C3465331DdEB60908c0C3F3b8dE505Be05",
+      "targetKey": "proxy:product:arcousd:productToken",
+      "grantee": "0x4083d23D792cAefefc97b60677c12243AAC459e5",
+      "granteeKey": "proxy:product:arcousd:depositVault",
+      "txHash": "0x8b4540d6843702a89f51c697aca1e44ed3af3ebe4a4c3fb1ac311ef94f693790",
+      "blockNumber": 30357032,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:arcousd:depositVault:DEPOSIT_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "DEPOSIT_VAULT_ADMIN_ROLE",
+      "roleHash": "0x2728bd32a7e1e24afac41a073e9c92dbb65527c9ec3baa2a8d5ee1d06c0fa779",
+      "target": "0x4083d23D792cAefefc97b60677c12243AAC459e5",
+      "targetKey": "proxy:product:arcousd:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30357034,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:arcousd:depositVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x4083d23D792cAefefc97b60677c12243AAC459e5",
+      "targetKey": "proxy:product:arcousd:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30357034,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:arcousd:productToken:BURNER_ROLE:proxy:product:arcousd:redemptionVault",
+      "role": "BURNER_ROLE",
+      "roleHash": "0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848",
+      "target": "0x28a934C3465331DdEB60908c0C3F3b8dE505Be05",
+      "targetKey": "proxy:product:arcousd:productToken",
+      "grantee": "0x5719ED2d50a3fD00852e90aFE7d6Aa4fB696ec36",
+      "granteeKey": "proxy:product:arcousd:redemptionVault",
+      "txHash": "0x837b7574c69d2ba43ecebea8e77e5b0df22000c6d0e836c85d3c08bc44b70977",
+      "blockNumber": 30357047,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:arcousd:redemptionVault:REDEMPTION_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "REDEMPTION_VAULT_ADMIN_ROLE",
+      "roleHash": "0x57df534b215589c7ade8c8abe0978debf2ea95cf1d442550f94eec78a69d238e",
+      "target": "0x5719ED2d50a3fD00852e90aFE7d6Aa4fB696ec36",
+      "targetKey": "proxy:product:arcousd:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30357045,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:arcousd:redemptionVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x5719ED2d50a3fD00852e90aFE7d6Aa4fB696ec36",
+      "targetKey": "proxy:product:arcousd:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 30357046,
+      "status": "already-present"
+    }
+  ]
+}

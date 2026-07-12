@@ -1,0 +1,16 @@
+{
+  "chainId": 91342,
+  "network": "giwa-sepolia",
+  "evmVersion": "cancun",
+  "nativeCurrency": {
+    "name": "Ether",
+    "symbol": "ETH",
+    "decimals": 18
+  },
+  "publicRpcUrl": "https://sepolia-rpc.giwa.io",
+  "explorerUrl": "https://sepolia-explorer.giwa.io",
+  "tier1AdminAddress": "",
+  "tier2OperatorAddress": "",
+  "mainnetSafeAddress": "",
+  "mainnetTimelockAddress": ""
+}
