@@ -1,9 +1,18 @@
+# Render Blueprint — GIWA API (web) + indexer (worker).
+# Node version resolves from package.json engines (>=22).
+# Do NOT set NODE_ENV=production in the env group: builds need devDeps (typescript);
+# `--include=dev` guards against that regardless.
 services:
   - type: web
     name: arco-giwa-api
     runtime: node
     plan: starter
-    buildCommand: npm install && npm run build:server
+    # prisma:generate is explicit (the @prisma/client postinstall usually covers it,
+    # but never rely on that). dist is built HERE once — startCommand stays a pure
+    # `node` boot so restarts never depend on devDeps or recompile.
+    # The API does NOT need contract artifacts: server/src/evm/abi.ts is only imported
+    # by the indexer's event-decoder and the ops-script-only registry/generate.
+    buildCommand: npm install --include=dev && npm run prisma:generate && npm run build:server
     startCommand: node server/dist/index.js
     envVars:
       - fromGroup: arco-giwa-server
@@ -11,7 +20,11 @@ services:
     name: arco-giwa-indexer
     runtime: node
     plan: starter
-    buildCommand: npm install && npm run build:server
-    startCommand: npm run indexer:giwa
+    # The indexer decodes events via server/src/evm/abi.ts, which reads
+    # packages/contracts/artifacts/** (gitignored) at runtime — compile them at build.
+    # This is the CI-validated step from .github/workflows/ci.yml "Compile contract
+    # artifacts" (README "Phase 4 requirement", option 2) — keep the two in sync.
+    buildCommand: npm install --include=dev && npm run prisma:generate && npm run build:server && cd packages/contracts && export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 && corepack yarn install --immutable && corepack yarn compile
+    startCommand: node scripts/indexer/run-giwa.mjs
     envVars:
       - fromGroup: arco-giwa-server

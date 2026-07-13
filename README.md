@@ -82,8 +82,12 @@ npm run evm:verify:giwa -- <address> [constructor args]              # Blockscou
 
 ## Deploy (Render)
 
-`render.yaml` defines `arco-giwa-api` (web) and `arco-giwa-indexer` (worker), both built
-with `npm install && npm run build:server`; env comes from the `arco-giwa-server` group.
+`render.yaml` defines `arco-giwa-api` (web: install → prisma:generate → build:server,
+boots `node server/dist/index.js`) and `arco-giwa-indexer` (worker: same plus the
+contracts-artifacts compile, boots `node scripts/indexer/run-giwa.mjs`); env comes from
+the shared `arco-giwa-server` group — note the WORKER validates the same server env as
+the API (`validateServerEnv`), so it needs all five required secrets too. The server
+never reads `VITE_*` values at runtime; those are Vercel build-time only.
 
 ### ⚠ Phase 4 requirement — contracts-artifacts gap
 
@@ -98,8 +102,9 @@ a clean Render build of the **indexer worker**, do ONE of:
 2. Add `cd packages/contracts && corepack yarn install && corepack yarn compile` to the
    Render build command for `arco-giwa-indexer`.
 
-CI (`.github/workflows/ci.yml`, "Compile contract artifacts" step) already implements
-option 2 — reuse that exact step for the Render build.
+Option 2 is implemented in BOTH `.github/workflows/ci.yml` ("Compile contract artifacts")
+and `render.yaml` (the `arco-giwa-indexer` buildCommand) — keep the two in sync. The API
+service deliberately skips it (no runtime artifact readers).
 
 ## Phase 2 — arco.financial/app cutover notes
 
