@@ -51,9 +51,9 @@ inherited at extraction — fix only as a dedicated approved task; never grow th
 
 ## Routes
 
-`/app` (investor) · `/app/savings` · `/app/portfolio` · `/app/product/:id` ·
-`/app/admin/{operations,prices,config,featured,monitoring}` — constants in
-`src/demo/giwa/routes.ts`; legacy `/app/giwa-preprod/*` redirects live in `src/main.tsx`.
+Root-based (served at app.arco.financial): `/` (investor) · `/savings` · `/portfolio` ·
+`/product/:id` · `/admin/{operations,prices,config,featured,monitoring}` — constants in
+`src/demo/giwa/routes.ts`; legacy `/app/*` + `/app/giwa-preprod/*` redirects live in `src/main.tsx`.
 
 ## Agent delegation
 

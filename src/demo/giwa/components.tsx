@@ -570,7 +570,7 @@ export function GiwaHeader({ admin = false }: { admin?: boolean }) {
     <header className="sticky top-0 z-40 border-b border-[var(--color-arco-border)] bg-[var(--color-arco-page-80)] backdrop-blur">
       <div className="mx-auto flex min-h-[76px] max-w-[var(--container-page)] items-center justify-between gap-4 px-8 pb-[6px] pt-[22px]">
         <div className="flex items-center gap-6">
-          <Link to="/app" aria-label="Arco legacy app" className="flex items-center">
+          <Link to={GIWA_PREPROD_ROUTE} aria-label="Arco home" className="flex items-center">
             <img src="/arco-icon.svg" alt="Arco" className="h-[33px] w-[35px] shrink-0" />
           </Link>
           {/* Desktop nav — hidden below lg (mobile uses the hamburger sheet). */}
@@ -939,7 +939,7 @@ function GiwaProductRow({
 }
 
 // ── Investor catalog table (legacy-style columns) ──────────────────────────────
-// Public products list on /app. Mirrors the legacy ProductsTable column
+// Public products list at the root route. Mirrors the legacy ProductsTable column
 // set (Product | Base Asset | Asset Manager | Issuer | AUM | APY | Network) over REAL
 // GIWA registry rows. Kept SEPARATE from GiwaProductsTable so Admin's ProductCatalogList
 // (operational columns: decimals / registry load-state / vault route) stays unchanged.

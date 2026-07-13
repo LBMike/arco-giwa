@@ -58,10 +58,11 @@ npm run start:server   # API on :8080
 npm run indexer:giwa   # indexer worker (needs INDEXER_RPC_URL + DATABASE_URL + artifacts)
 ```
 
-Routes: `/app` (investor) · `/app/savings` · `/app/portfolio` · `/app/product/:id` ·
-`/app/admin/{operations,prices,config,featured,monitoring}`. Legacy
-`/app/giwa-preprod/*` deep links redirect. Note: the indexer loads the registry at
-**startup only** — after registering a vault, backfill from its deploy block and restart.
+Routes (root-based, served at **app.arco.financial**): `/` (investor) · `/savings` ·
+`/portfolio` · `/product/:id` · `/admin/{operations,prices,config,featured,monitoring}`.
+Legacy `/app/*` and `/app/giwa-preprod/*` deep links redirect to the root paths. Note:
+the indexer loads the registry at **startup only** — after registering a vault, backfill
+from its deploy block and restart.
 
 ## Verify
 
@@ -106,15 +107,16 @@ Option 2 is implemented in BOTH `.github/workflows/ci.yml` ("Compile contract ar
 and `render.yaml` (the `arco-giwa-indexer` buildCommand) — keep the two in sync. The API
 service deliberately skips it (no runtime artifact readers).
 
-## Phase 2 — arco.financial/app cutover notes
+## Cutover (decided): app.arco.financial subdomain, root-based
 
-Vite `base` is `/` (recorded deviation from the Phase-1 plan draft, which said `/app/`):
-the app references `public/` assets by root-absolute strings (`/logos/…`), which a bare
-`base: '/app/'` build breaks — Vite serves bundled assets under the base but does not
-rewrite runtime strings, and `public/` files land in the dist **root**. The `/app` URL
-structure comes from the **routes**, not the base. For the cutover, either serve this app
-on its own (sub)domain and proxy the whole path space, or do the base migration properly:
-`base: '/app/'` + a `BASE_URL`-aware public-asset helper + host rewrites. Decide in Phase 2.
+The GIWA app serves at **app.arco.financial** with root-based routes; the marketing
+landing stays untouched on arco.financial and simply links across. Vite `base` stays
+`'/'` — correct for a subdomain root, and it keeps the app's root-absolute `public/`
+asset strings (`/logos/…`) working everywhere (a path-proxy under `arco.financial/app`
+would have required a `base`/asset-helper migration; the subdomain avoids all of it).
+Remaining cutover steps are infra only: DNS CNAME for `app` → Vercel, add the domain to
+the Vercel project, set `CORS_ALLOWED_ORIGINS=https://app.arco.financial` on Render, and
+set `VITE_ARCO_API_BASE` to the Render API URL on Vercel.
 
 ## Follow-ups (inherited from the source repo)
 

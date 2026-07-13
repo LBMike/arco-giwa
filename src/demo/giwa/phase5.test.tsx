@@ -45,13 +45,13 @@ const product: GiwaCatalogItem = {
   priceFeedAddress: "0x00000000000000000000000000000000000000e1",
 }
 
-test("GIWA route constants own /app (promoted at extraction; legacy giwa-preprod paths redirect)", () => {
-  assert.equal(GIWA_PREPROD_ROUTE, "/app")
-  assert.equal(GIWA_ADMIN_ROUTE, "/app/admin")
-  assert.equal(GIWA_ADMIN_PRICES_ROUTE, "/app/admin/prices")
-  assert.equal(GIWA_ADMIN_CONFIG_ROUTE, "/app/admin/config")
-  assert.equal(GIWA_ADMIN_OPERATIONS_ROUTE, "/app/admin/operations")
-  assert.equal(GIWA_ADMIN_MONITORING_ROUTE, "/app/admin/monitoring")
+test("GIWA route constants are root-based (app.arco.financial; legacy /app paths redirect)", () => {
+  assert.equal(GIWA_PREPROD_ROUTE, "/")
+  assert.equal(GIWA_ADMIN_ROUTE, "/admin")
+  assert.equal(GIWA_ADMIN_PRICES_ROUTE, "/admin/prices")
+  assert.equal(GIWA_ADMIN_CONFIG_ROUTE, "/admin/config")
+  assert.equal(GIWA_ADMIN_OPERATIONS_ROUTE, "/admin/operations")
+  assert.equal(GIWA_ADMIN_MONITORING_ROUTE, "/admin/monitoring")
 })
 
 test("GIWA live-read queries poll 20s + focus refetch, never in the background", () => {

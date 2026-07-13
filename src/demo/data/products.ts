@@ -22,7 +22,7 @@ export type Network = 'Ethereum' | 'XRPL'
 export type Denomination = 'USD' | 'BTC' | 'ETH'
 
 export interface Product {
-  /** Routing key, e.g. 'acapix' → /app/product/acapix */
+  /** Routing key, e.g. 'acapix' → /product/acapix */
   id: string
   /** Display ticker, e.g. 'aCAPIX' */
   token: string

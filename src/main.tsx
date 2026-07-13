@@ -22,17 +22,19 @@ function giwaRoute(element: React.ReactNode) {
   return <Suspense fallback={null}>{element}</Suspense>
 }
 
-// Pre-extraction the app lived at /app/giwa-preprod/*; keep those deep links working.
-function LegacyPreprodRedirect() {
+// Earlier lives of this app served /app/* (and, pre-extraction, /app/giwa-preprod/*).
+// On the app.arco.financial subdomain routes are root-based — redirect legacy deep links.
+function LegacyAppRedirect() {
   const params = useParams()
   const location = useLocation()
-  const rest = params['*'] ?? ''
-  return <Navigate to={`${GIWA_PREPROD_ROUTE}${rest ? `/${rest}` : ''}${location.search}`} replace />
+  let rest = params['*'] ?? ''
+  if (rest === 'giwa-preprod') rest = ''
+  else if (rest.startsWith('giwa-preprod/')) rest = rest.slice('giwa-preprod/'.length)
+  return <Navigate to={`/${rest}${location.search}`} replace />
 }
 
 const router = createBrowserRouter([
-  { path: '/', element: <Navigate to={GIWA_PREPROD_ROUTE} replace /> },
-  { path: '/app/giwa-preprod/*', element: <LegacyPreprodRedirect /> },
+  { path: '/app/*', element: <LegacyAppRedirect /> },
   {
     path: GIWA_PREPROD_ROUTE,
     element: giwaRoute(<GiwaPreprodApp />),
