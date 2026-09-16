@@ -16,6 +16,7 @@ import { reconcileStocks } from '../../server/dist/stocks/reconciliation.js';
 import { httpStocksRpc, externalStocksSigner } from '../../server/dist/stocks-runtime/transport.js';
 import { stocksSessionResolvers } from '../../server/dist/stocks-runtime/session.js';
 import { StocksFinalizedObserver } from '../../server/dist/stocks-runtime/observer.js';
+import { verifyStocksDeployment } from '../../server/dist/stocks-runtime/runtime.js';
 import { localSigner } from './local-signer.mjs';
 
 const require = createRequire(import.meta.url);
@@ -48,6 +49,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
   assert.ok(metadata.instanceId && !metadata.forkedNetwork);
   const transport = httpStocksRpc(rpcUrl, true);
   const chain = createStocksRpcPort(transport, manifest);
+  await verifyStocksDeployment(manifest, chain, transport);
   const verifier = new ReceiptVerifier(manifest, chain);
   const repo = new StocksRepository(pool, digest);
   const service = new StocksService(repo, manifest, verifier, { manifestDigest: digest, contractPolicyVerified: true },
@@ -198,6 +200,18 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     assert.equal(await buyState(lost.id), 'MINT_UNKNOWN');
     const prepared = (await pool.query('SELECT * FROM stocks_local_harness.signer_operations WHERE id=$1', [`mint:${lost.id}`])).rows[0];
     assert.equal(prepared.state, 'PREPARED'); assert.equal(prepared.tx_hash, null);
+    const alternateManifest = freezeManifest({ ...manifest, deploymentId: `${manifest.deploymentId}-nonce-probe` });
+    const alternateDigest = manifestDigest(alternateManifest);
+    const alternateServer = await localSigner({ pool, rpc, manifest: alternateManifest, deploymentDigest: alternateDigest, token: signerToken });
+    const alternateSigner = externalStocksSigner({ url: alternateServer.url, authorization: signerToken,
+      deploymentDigest: alternateDigest, manifest: alternateManifest, localHarness: true });
+    try {
+      await alternateSigner.probe();
+      await assert.rejects(() => alternateSigner.submit({ ...prepared.payload, operationId: 'nonce-probe:blocked',
+        deploymentId: alternateManifest.deploymentId }));
+      assert.equal(alternateServer.controls.submissions, 0);
+      assert.equal((await pool.query('SELECT COUNT(*)::text AS n FROM stocks_local_harness.signer_operations WHERE id=$1', ['nonce-probe:blocked'])).rows[0].n, '0');
+    } finally { await alternateServer.close(); }
     await resetSigner();
     await drain(async () => await buyState(lost.id) === 'COMPLETED', 'recovering original mint after signer restart');
     assert.equal(signerServer.controls.submissions, 0);
@@ -222,6 +236,25 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     await assert.rejects(() => signer.submit({ ...records[0].payload, data: records[1].payload.data }));
     assert.equal(await currentBalance(manifest.stockToken, accounts.holder), '3000000000');
     passed('Concurrent operation nonce serialization, exact replay, and altered-payload rejection');
+
+    // Both calls deliberately replay an already-completed on-chain operation,
+    // so these signer-boundary probes consume nonces without moving more value.
+    // Distinct deployment digests still share one physical node/account sequence.
+    const crossServer = await localSigner({ pool, rpc, manifest: alternateManifest, deploymentDigest: alternateDigest, token: signerToken });
+    try {
+      const crossSigner = externalStocksSigner({ url: crossServer.url, authorization: signerToken,
+        deploymentDigest: alternateDigest, manifest: alternateManifest, localHarness: true });
+      const calls = [
+        { ...records[0].payload, operationId: 'nonce-probe:original-deployment' },
+        { ...records[0].payload, operationId: 'nonce-probe:alternate-deployment', deploymentId: alternateManifest.deploymentId },
+      ];
+      const results = await Promise.all([signer.submit(calls[0]), crossSigner.submit(calls[1])]);
+      for (const result of results) assert.equal((await waitReceipt(result.txHash)).logs.length, 0);
+      const physical = (await pool.query('SELECT nonce FROM stocks_local_harness.signer_operations WHERE id=ANY($1::text[]) ORDER BY nonce', [calls.map(call => call.operationId)])).rows;
+      assert.equal(physical.length, 2); assert.equal(BigInt(physical[1].nonce), BigInt(physical[0].nonce) + 1n);
+      assert.equal(await currentBalance(manifest.stockToken, accounts.holder), '3000000000');
+    } finally { await crossServer.close(); }
+    passed('Different deployment digests share physical-account nonce lock and unresolved-operation blocking');
 
     const abnormal = await buy('1', 'abnormal');
     const abnormalHash = await deposit(abnormal, '119000000');

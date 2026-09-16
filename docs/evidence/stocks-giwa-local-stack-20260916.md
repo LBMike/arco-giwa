@@ -9,7 +9,7 @@ The committed harness imports `server/dist/stocks/**` and `server/dist/stocks-ru
 
 Explicit `STOCKS_LOCAL_STACK_ONLY=1` is required. The runner creates a loopback-only banner-safe Hardhat node, deploys the five new bytecode contracts through the approved local deployment helper, supplies the actual backend ABI digest, and initializes its own temporary PostgreSQL cluster with all repository migrations. It verifies Hardhat node identity and chain 91342. The HTTP backend and signing service bind random loopback ports.
 
-The local signer uses unlocked test RPC accounts through `eth_sendTransaction`; no key is loaded, returned, persisted or logged by these scripts. It serializes the execution account across all operation kinds using a PostgreSQL session advisory lock. The immutable operation payload/digest and original nonce are committed before broadcast. RPC occurs outside DB transactions. Existing operations may only resolve their original submission; unresolved original nonces block later broadcasts. Lost acknowledgement is recovered by scanning the original sender + nonce and exact transaction payload, never by resubmitting. This adapter is test harness code, not an approved public-network signer.
+The local signer uses unlocked test RPC accounts through `eth_sendTransaction`; no key is loaded, returned, persisted or logged by these scripts. It serializes the execution account across all operation kinds and deployment digests using a PostgreSQL session advisory lock scoped to the physical Hardhat node instance plus account. The disposable database pins one canonical physical node, and nonce uniqueness/history uses node + account independently of a deployment manifest. The immutable operation payload/digest and original nonce are committed before broadcast. RPC occurs outside DB transactions. Existing operations may only resolve their original submission; unresolved original nonces from any deployment block later broadcasts. Lost acknowledgement is recovered by scanning the original sender + nonce and exact transaction payload, never by resubmitting. This adapter is test harness code, not an approved public-network signer.
 
 ## Scenarios implemented
 
@@ -23,6 +23,9 @@ The local signer uses unlocked test RPC accounts through `eth_sendTransaction`; 
 8. Underpayment becomes suspense and returns only through an authorized exact finalized refund.
 9. Create fresh buy/sell orders, then advance only local EVM inclusion time past quote expiry. Record late funding and custody, refund cash and return stock to the original payer. No immutable database quote is edited to fabricate expiry.
 10. Final common-cutoff reconciliation compares independently read cash, stock supply and wallet/escrow balances against the database. Expected final stock wallet/supply is `3000000000` raw units (3 test NVDA), custody zero and vault cash `360000000` raw units (360 test USDC).
+11. Two deployment digests sharing one physical node/account cannot bypass the unresolved nonce guard and receive distinct consecutive nonces under concurrent submission. Successful probes replay an already-completed on-chain operation, consuming nonces with zero value movement.
+
+The actual commander's `verifyStocksDeployment` runtime preflight also executes against these deployed contracts, covering checkpoint/finality, pinned runtime code, all constructor getters and token decimals.
 
 ## Running in the assembled candidate
 
@@ -34,13 +37,17 @@ STOCKS_LOCAL_STACK_ONLY=1 STOCKS_PG_BIN=/opt/homebrew/Cellar/postgresql@18/18.6/
 
 `STOCKS_PG_BIN` may point to another installed PostgreSQL **server** binary directory; the plain libpq client installation is insufficient. The harness uses a private Unix socket and a unique temporary directory. Coordinate one PostgreSQL cluster at a time on this host because available shared-memory slots are limited. Loopback node/server sockets may require the host's approved local-test sandbox escalation.
 
-On normal completion or caught failure, the runner stops only its own local-node process group and its own PostgreSQL cluster. Successful temporary resources are removed. Failure diagnostics are retained with their absolute path and no claim of success; failure to confirm PostgreSQL shutdown retains the directory for explicit owned-resource recovery.
+On normal completion, caught failure, SIGINT or SIGTERM, one shared single-flight cleanup stops only the runner's local-node process group and PostgreSQL cluster. Signal exit occurs only after cleanup, with conventional exit code 130 or 143. Cleanup verifies the process group is gone and the PostgreSQL PID file is removed. Successful temporary resources are removed. Failure diagnostics are retained with their absolute path and no claim of success; failure to confirm shutdown retains the directory for explicit owned-resource recovery.
+
+Run `STOCKS_LOCAL_STACK_ONLY=1 STOCKS_PG_BIN=/opt/homebrew/Cellar/postgresql@18/18.6/bin node scripts/stocks-local/signal-check.mjs` to exercise both SIGTERM and SIGINT after the child's real EVM and PostgreSQL services are ready. The probe verifies owned process group, PostgreSQL PID and Unix socket are gone before child exit. It runs the two disposable clusters sequentially.
 
 ## Verification status at handoff
 
-- `node --check` passed for all three new JavaScript modules.
+- `node --check` passed for all four JavaScript modules, including the signal cleanup probe.
 - `git diff --check` passed.
 - No full-stack execution is claimed in this prototype commit: the separate SELL backend and runtime branches must first be assembled by the commander. The commander/independent verifier will run the actual stack, and any resulting failures must be fixed and retested before this harness is considered passed.
 - The already-delivered contract EVM tests remain separately documented; their success does not substitute for this full-stack result.
+
+Independent review requested fixes to signal cleanup and deployment-independent nonce scope. Both are implemented in the follow-up commit, with corresponding real-stack scenarios/probe prepared. Their execution is still pending assembled runtime availability; syntax checks do not substitute for those runs.
 
 No public GIWA or Mainnet deployment, application activation, UI implementation, package update or registry change is included.
