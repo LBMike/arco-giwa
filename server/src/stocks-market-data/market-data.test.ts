@@ -135,6 +135,10 @@ test('impossible OHLC, out-of-order/duplicate/future/out-of-window bars fail clo
   for (const bars of [bar(TIME - 1000, '102'), `${bar(TIME - 1000)},${bar(TIME - 2000)}`, `${bar(TIME - 1000)},${bar(TIME - 1000)}`, bar(TIME + 1000), bar(TIME - 2 * 86400000)]) assert.throws(() => chart(parseExactJson(`{"status":"OK","ticker":"NVDA","adjusted":true,"results":[${bars}]}`), 'NVDA', '1D', TIME), /INVALID_RESPONSE/);
   assert.throws(() => chart(parseExactJson('{"status":"OK","ticker":"NVDA","adjusted":false}'), 'NVDA', '1D', TIME), /INVALID_RESPONSE/);
 });
+test('fixed ranges reject impossible aggregate density before retaining chart data', () => {
+  const bar = (t: number) => `{"t":${t},"o":100,"h":101,"l":99,"c":100,"v":2}`;
+  for (const bars of [`${bar(TIME - 2000)},${bar(TIME - 1000)}`, Array.from({ length: 291 }, (_, i) => bar(TIME - 291000 + i * 1000)).join(',')]) assert.throws(() => chart(parseExactJson(`{"status":"OK","ticker":"NVDA","adjusted":true,"results":[${bars}]}`), 'NVDA', '1D', TIME), /INVALID_RESPONSE/);
+});
 test('ignored abort and stalled body both obey the total deadline', async () => {
   for (const fetcher of [async () => { await new Promise(r => setTimeout(r, 80)); return json(snapshot()); }, async () => new Response(new ReadableStream({ start() {} }), { headers: { 'Content-Type': 'application/json' } })]) {
     const transport = new MassiveTransport({ apiKey: 'x', timeoutMs: 15, fetch: fetcher }); const start = performance.now();

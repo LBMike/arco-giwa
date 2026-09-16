@@ -66,14 +66,17 @@ export function chart(input: unknown, symbol: string, range: ChartRange, now: nu
   const row = providerObject(input); const window = chartWindow(range, now); const rule = RANGE_RULES[range];
   if (row.ticker !== symbol || row.adjusted !== true || (row.results != null && !Array.isArray(row.results))) return invalid();
   const entries = (row.results ?? []) as unknown[];
-  if (entries.length > 50000) return invalid();
+  // Bound retained chart memory by the selected interval, not just provider bytes.
+  const maxBars = Math.ceil(rule.days * 86400000 / rule.width) + 2;
+  if (entries.length > maxBars) return invalid();
   if (row.resultsCount != null && integer(row.resultsCount) !== BigInt(entries.length)) return invalid();
   if (row.queryCount != null && integer(row.queryCount) > 50000n) return invalid();
   const bars: Bar[] = []; let previous = 0;
   for (const entry of entries) {
     const bar = object(entry); const time = timestamp(bar.t, now);
     // The provider expands the start to its aggregate boundary (including ET days).
-    if (time <= previous || time < window.from - rule.width || time > window.to) return invalid(); previous = time;
+    const minSpacing = rule.timespan === 'day' ? 23 * 3600000 : rule.width;
+    if (time <= previous || (previous && time - previous < minSpacing) || time < window.from - rule.width || time > window.to) return invalid(); previous = time;
     const open = positive(bar.o); const high = positive(bar.h); const low = positive(bar.l); const close = positive(bar.c); const volume = decimal(bar.v);
     if (scaled(low) > scaled(high) || scaled(open) < scaled(low) || scaled(open) > scaled(high) || scaled(close) < scaled(low) || scaled(close) > scaled(high)) return invalid();
     bars.push({ timestamp: new Date(time).toISOString(), open, high, low, close, volume });
