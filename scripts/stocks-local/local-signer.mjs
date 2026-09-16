@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
-import { callDigest, canonicalJson } from '../../server/dist/stocks/contracts.js';
+import { address, callDigest, canonicalJson } from '../../server/dist/stocks/contracts.js';
 
 // This module is a disposable local test harness, never a production signer.
 // Its only signing mechanism is eth_sendTransaction on an unforked loopback node.
@@ -11,6 +11,10 @@ export async function localSigner({ pool, rpc, manifest, deploymentDigest, token
   const metadata = await rpc('hardhat_metadata', []);
   assert.ok(metadata.instanceId && !metadata.forkedNetwork);
   const nodeInstance = metadata.instanceId;
+  // Physical identity is independent of manifest/request address spelling. Keep
+  // original payload/digest unchanged; only account indexing and RPC addressing
+  // use this canonical value.
+  const account = address(manifest.signerAddress);
   await pool.query(`CREATE SCHEMA IF NOT EXISTS stocks_local_harness;
     CREATE TABLE IF NOT EXISTS stocks_local_harness.canonical_node (
       singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton), node_instance text NOT NULL
@@ -24,13 +28,20 @@ export async function localSigner({ pool, rpc, manifest, deploymentDigest, token
       CHECK ((state='PREPARED' AND tx_hash IS NULL) OR (state='BROADCASTED' AND tx_hash IS NOT NULL)),
       UNIQUE(node_instance,account,nonce)
     )`);
+  const conflicts = await pool.query(`SELECT 1 FROM stocks_local_harness.signer_operations
+    GROUP BY node_instance,lower(account),nonce HAVING COUNT(*)>1 LIMIT 1`);
+  assert.equal(conflicts.rows.length, 0, 'Existing physical-account nonce records conflict; signer startup blocked');
+  // Old rows may legitimately retain checksum spelling. Include them in the
+  // physical uniqueness constraint rather than rewriting or clearing evidence.
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS signer_operations_physical_nonce
+    ON stocks_local_harness.signer_operations (node_instance,lower(account),nonce)`);
   await pool.query('INSERT INTO stocks_local_harness.canonical_node(node_instance) VALUES($1) ON CONFLICT(singleton) DO NOTHING', [nodeInstance]);
   assert.equal((await pool.query('SELECT node_instance FROM stocks_local_harness.canonical_node WHERE singleton')).rows[0].node_instance, nodeInstance,
     'Disposable signer database belongs to another physical local node');
-  const scope = `stocks-local-signer:${nodeInstance}:${manifest.signerAddress}`;
+  const scope = `stocks-local-signer:${nodeInstance}:${account}`;
   const controls = { loseNextBroadcastAcknowledgement: false, submissionRequests: 0,
     submissions: 0, recoveries: 0, unresolvedBlocks: 0 };
-  const targets = new Set([manifest.mintController, manifest.fundingVault, manifest.redemptionEscrow]);
+  const targets = new Set([manifest.mintController, manifest.fundingVault, manifest.redemptionEscrow].map(address));
   function response(row) {
     return row?.tx_hash ? { operationId: row.id, callDigest: row.call_digest, txHash: row.tx_hash } : null;
   }
@@ -46,12 +57,12 @@ export async function localSigner({ pool, rpc, manifest, deploymentDigest, token
     }
   }
   function matchTransaction(tx, row) {
-    return tx && tx.from?.toLowerCase() === row.account && BigInt(tx.nonce) === BigInt(row.nonce)
-      && tx.to?.toLowerCase() === row.payload.to && tx.input === row.payload.data
+    return tx && tx.from?.toLowerCase() === account && address(row.account) === account && BigInt(tx.nonce) === BigInt(row.nonce)
+      && tx.to?.toLowerCase() === address(row.payload.to) && tx.input === row.payload.data
       && BigInt(tx.value) === 0n;
   }
   async function recover(db, row) {
-    if (!row || row.deployment_digest !== deploymentDigest || row.node_instance !== nodeInstance) return null;
+    if (!row || row.deployment_digest !== deploymentDigest || row.node_instance !== nodeInstance || address(row.account) !== account) return null;
     if (row.tx_hash) return response(row);
     const last = BigInt((await rpc('eth_getBlockByNumber', ['latest', false])).number);
     const first = BigInt(row.prepared_block);
@@ -59,7 +70,7 @@ export async function localSigner({ pool, rpc, manifest, deploymentDigest, token
     for (let n = first; n <= last; n++) {
       const block = await rpc('eth_getBlockByNumber', [`0x${n.toString(16)}`, true]);
       for (const tx of block.transactions) {
-        if (tx.from?.toLowerCase() !== row.account || BigInt(tx.nonce) !== BigInt(row.nonce)) continue;
+        if (tx.from?.toLowerCase() !== account || BigInt(tx.nonce) !== BigInt(row.nonce)) continue;
         assert.ok(matchTransaction(tx, row), 'Original nonce was used for another payload');
         const saved = (await db.query(`UPDATE stocks_local_harness.signer_operations
           SET tx_hash=$2,state='BROADCASTED' WHERE id=$1 AND tx_hash IS NULL RETURNING *`, [row.id, tx.hash])).rows[0];
@@ -84,7 +95,7 @@ export async function localSigner({ pool, rpc, manifest, deploymentDigest, token
     assert.equal(call.deploymentId, manifest.deploymentId);
     assert.equal(call.from, manifest.signerAddress);
     assert.equal(call.value, '0');
-    assert.ok(targets.has(call.to));
+    assert.ok(targets.has(address(call.to)));
     assert.match(call.data, /^0x[0-9a-f]+$/);
     assert.equal(request.callDigest, callDigest(call));
     return exclusive(async db => {
@@ -96,7 +107,7 @@ export async function localSigner({ pool, rpc, manifest, deploymentDigest, token
         return recover(db, existing);
       }
       for (const row of (await db.query(`SELECT * FROM stocks_local_harness.signer_operations
-        WHERE node_instance=$1 AND account=$2 AND state='PREPARED' ORDER BY nonce`, [nodeInstance, call.from])).rows) {
+        WHERE node_instance=$1 AND lower(account)=$2 AND state='PREPARED' ORDER BY nonce`, [nodeInstance, account])).rows) {
         // A changed manifest cannot erase another deployment's unresolved nonce.
         // Only its original deployment client may recover that operation.
         if (!await recover(db, row)) {
@@ -104,18 +115,18 @@ export async function localSigner({ pool, rpc, manifest, deploymentDigest, token
           throw new Error('Unresolved original submission blocks later nonces');
         }
       }
-      const pending = BigInt(await rpc('eth_getTransactionCount', [call.from, 'pending']));
+      const pending = BigInt(await rpc('eth_getTransactionCount', [account, 'pending']));
       const stored = BigInt((await db.query(`SELECT COALESCE(MAX(nonce)+1,0)::text AS next
-        FROM stocks_local_harness.signer_operations WHERE node_instance=$1 AND account=$2`, [nodeInstance, call.from])).rows[0].next);
+        FROM stocks_local_harness.signer_operations WHERE node_instance=$1 AND lower(account)=$2`, [nodeInstance, account])).rows[0].next);
       const nonce = pending > stored ? pending : stored;
       const block = BigInt((await rpc('eth_getBlockByNumber', ['latest', false])).number);
       // Durable original nonce and payload exist before the first broadcast.
       await db.query(`INSERT INTO stocks_local_harness.signer_operations
         (id,deployment_digest,call_digest,payload,node_instance,account,nonce,prepared_block,state)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'PREPARED')`,
-      [id, deploymentDigest, request.callDigest, JSON.stringify(call), nodeInstance, call.from, nonce.toString(), block.toString()]);
+      [id, deploymentDigest, request.callDigest, JSON.stringify(call), nodeInstance, account, nonce.toString(), block.toString()]);
       controls.submissions++;
-      const txHash = await rpc('eth_sendTransaction', [{ from: call.from, to: call.to, data: call.data,
+      const txHash = await rpc('eth_sendTransaction', [{ from: account, to: address(call.to), data: call.data,
         value: '0x0', nonce: `0x${nonce.toString(16)}`, gas: '0x1e8480' }]);
       if (controls.loseNextBroadcastAcknowledgement) {
         controls.loseNextBroadcastAcknowledgement = false;

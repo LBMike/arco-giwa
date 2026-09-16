@@ -110,7 +110,8 @@ try {
       postgresData: data, socket, temp }));
     await new Promise(() => {}); // Signal-check child deliberately awaits its owned cleanup.
   }
-  const { runStack } = await import('./stack.mjs');
+  // Fixed local regression selection only; never accept an arbitrary module path.
+  const { runStack } = await import(process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1' ? './address-case.mjs' : './stack.mjs');
   checkRunning();
   const report = await runStack({ rpcUrl, bundle: JSON.parse(readFileSync(bundlePath, 'utf8')),
     databaseUrl: `postgresql://stocks_local@localhost/stocks_local_test?host=${encodeURIComponent(socket)}` });
