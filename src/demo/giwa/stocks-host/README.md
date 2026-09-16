@@ -1,6 +1,10 @@
 # Stocks host session integration
 
-This module is ready for composition; it is not mounted in existing routes. It imports no investor/admin builder files and issues no requests at import or construction. The only existing source change is optional message/read methods on the existing active wallet client type.
+The session host is mounted once inside both GIWA wallet-provider branches, above the application router. Investor/admin navigation preserves the in-memory login; a full refresh or owner unmount discards it. Connecting a wallet does not sign in. No investor/admin feature module, Stocks route or menu item is connected yet.
+
+`GiwaStocksHost` maps the active wallet's address, chain, signing readiness and connection epoch, plus `window.location.origin` and configured API base, into `StocksHostProvider`. `useGiwaStocksHost()` exposes the current snapshot, structural investor/admin session props, explicit signIn/logout actions and request-ID-scoped invalidation. `StocksSignIn` is an exported accessible control for the future Stocks surfaces; it is deliberately not placed on unrelated Savings/Funds pages.
+
+The provider guards the scope during render, before layout-effect cleanup. An old scope's controller is never supplied to a new scope. Every layout-effect setup creates a new controller and cleanup disposes it, including React StrictMode replay. A wallet/source replacement also increments its connection epoch, preventing A→B→A from reviving a prior login. No unfinished feature files are imported and no request is issued on mount.
 
 ## Host lifecycle
 
@@ -13,7 +17,7 @@ This module is ready for composition; it is not mounted in existing routes. It i
 7. Call `refresh()` when a hidden page becomes visible so wall-clock expiration is promptly reflected. Reads also fail closed after expiry or clock reversal. Session transitions found during a snapshot read notify asynchronously to avoid React-render reentrancy. Expiry never requests another signature.
 8. At final owner unmount call `dispose()`. Aborting the host attempt cannot dismiss an already-open external wallet prompt; its eventual result is discarded. Nonce expiry bounds how long this module waits for that prompt.
 
-Investor and admin branches currently mount separate existing app providers. The future route integrator must define a common lifetime or explicitly accept a new login on remount. `/admin/stocks` must not inherit the legacy `RequireGiwaAdmin` / operator-token layout. These route/provider decisions are deliberately not applied while the two feature builders are working.
+The existing application providers now live above `RouterProvider`, so existing investor/admin branches share one lifetime. `/admin/stocks` must still be added outside the legacy `RequireGiwaAdmin` / operator-token layout by the future feature integrator. Existing legacy administrator guards remain unchanged.
 
 ## Data and failures
 
@@ -27,4 +31,12 @@ Investor and admin branches currently mount separate existing app providers. The
 
 Tests use fake HTTP/clock/timers and an ephemeral generated test account to validate SIWE compatibility with the existing `SiweMessage` parser/verifier. Wallet tests exercise both the actual active Dynamic-client selection and the injected viem client with a stub EIP-1193 provider, allowing only `eth_accounts`, `eth_chainId`, `personal_sign`. They do not exercise an installed wallet extension, live Dynamic service, actual HTTP application/nonce database, public RPC, UI routes or public execution.
 
-No dependency/lockfile, server/auth endpoint, funds contract, deployment, database, common theme or existing route is modified. The existing transaction APIs retain their runtime implementation.
+No dependency/lockfile, server/auth endpoint, funds contract, deployment, database, common theme or route definition is modified. The existing transaction APIs retain their runtime implementation. Shared provider ownership moves from `GiwaPreprodApp` to `main.tsx`; the wallet context now includes signing readiness and connection epochs.
+
+The DOM lifecycle gate uses an existing external jsdom installation without adding a dependency:
+
+```sh
+GIWA_HOST_DOM_RUNTIME=/path/to/existing/node_modules/jsdom/package.json npm run test:frontend
+```
+
+Without that explicit runtime the normal suite reports the DOM gate as skipped. It must be enabled for mounting changes. Tests run real React DOM and actual wallet-provider source with fake vendor-hook inputs and contract balance transport. They cover StrictMode, scope changes before effects, batched injected A→B→A, Dynamic/Wagmi mismatch, signer replacement, route navigation, refresh, expiry/401, late HTTP completions, pending logout and cleanup. This does not claim installed-wallet or live Dynamic SDK testing.
