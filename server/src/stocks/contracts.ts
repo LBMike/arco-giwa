@@ -67,7 +67,15 @@ export function freezeManifest(input: Manifest): Manifest {
     Object.freeze(copy.codeHashes);
     return Object.freeze(copy);
 }
-export function manifestDigest(manifest: Manifest): string { return createHash('sha256').update(JSON.stringify(manifest)).digest('hex'); }
+export function canonicalJson(value: unknown): string {
+    const ordered = (input: unknown): unknown => {
+        if (Array.isArray(input)) return input.map(ordered);
+        if (input !== null && typeof input === 'object') return Object.fromEntries(Object.entries(input).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, ordered(child)]));
+        return input;
+    };
+    return JSON.stringify(ordered(value));
+}
+export function manifestDigest(manifest: Manifest): string { return createHash('sha256').update(canonicalJson(manifest)).digest('hex'); }
 export function validateManifest(m: Manifest): void {
     ensure(m?.profile === 'DEMO_TESTNET' && m.chainId === 91342 && m.cashScale === 6 && m.quantityScale === 9, 'INVALID_PROFILE');
     ensure(m.abiDigest === ABI_DIGEST && m.finalityPolicy === 'FINALIZED' && m.restrictedTransfers === true && m.nonUpgradeable === true, 'UNSUPPORTED_DEPLOYMENT');
@@ -148,4 +156,4 @@ export type SignerPort = {
     submit(call: AuthorizedCall): Promise<Submission>;
     lookup(operationId: string): Promise<Submission | null>;
 };
-export function callDigest(call: AuthorizedCall): string { return createHash('sha256').update(JSON.stringify(call)).digest('hex'); }
+export function callDigest(call: AuthorizedCall): string { return createHash('sha256').update(canonicalJson(call)).digest('hex'); }

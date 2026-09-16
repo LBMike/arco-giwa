@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { amount, ensure, type BrokerPort, type BrokerRequest, type BrokerResult } from './contracts.js';
+import { amount, ensure, canonicalJson, type BrokerPort, type BrokerRequest, type BrokerResult } from './contracts.js';
 import { StocksRepository } from './repository.js';
 // Explicit demo-only adapter. Its durable provider receipt is committed in its OWN transaction,
 // outside the order worker transaction, so lookup resolves a crash after provider acceptance.
@@ -9,7 +9,7 @@ export function createDurableMockBroker(repo: StocksRepository): BrokerPort {
             ensure(request.symbol === 'NVDA' && request.operationId === `broker:${request.orderId}`, 'INVALID_MOCK_ORDER');
             amount(request.quantity);
             amount(request.cashAmount);
-            const digest = createHash('sha256').update(JSON.stringify(request)).digest('hex');
+            const digest = createHash('sha256').update(canonicalJson(request)).digest('hex');
             return repo.tx(async (db) => {
                 await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`mock-provider:${request.operationId}`]);
                 const existing = (await db.query('SELECT * FROM arco_evm."StocksProviderReceipt" WHERE id=$1', [request.operationId])).rows[0];

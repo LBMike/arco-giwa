@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { zeroAddress } from 'viem';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import Fastify from 'fastify';
@@ -282,4 +285,73 @@ test('PG adversarial broker/signer mutations cannot change durable authorized qu
     assert.equal(mutations, 1);
     assert.equal(await f.state(other.id), 'MINT_UNKNOWN');
     assert.equal((await f.repo.portfolio(f.actor.actorId)).holdings.length, 0);
+}));
+
+test('PG actual child SIGKILL after durable broker acceptance recovers original operation without resubmission', options, async () => scenario(async f => {
+    const o = await f.order(); await f.funding(o);
+    const child = spawnSync(process.execPath, [fileURLToPath(new URL('./crash-broker-fixture.js', import.meta.url))], { env: { ...process.env, STOCKS_CRASH_MANIFEST: JSON.stringify(f.m) }, encoding: 'utf8', timeout: 10000 });
+    assert.equal(child.signal, 'SIGKILL', child.stderr);
+    assert.equal(await f.state(o.id), 'BROKER_PENDING');
+    const before = (await f.pool.query('SELECT status FROM arco_evm."StocksOutbox" WHERE id=$1', [`broker:${o.id}`])).rows[0]; assert.equal(before.status, 'STARTED');
+    await f.eligible(); await new StocksWorker(f.service, createDurableMockBroker(new StocksRepository(f.pool, f.repo.deploymentDigest)), f.signer).runOne();
+    assert.equal(await f.state(o.id), 'MINT_QUEUED');
+    assert.equal((await f.pool.query('SELECT COUNT(*)::text AS n FROM arco_evm."StocksProviderReceipt" WHERE id=$1', [`broker:${o.id}`])).rows[0].n, '1');
+    assert.equal((await f.pool.query('SELECT COUNT(*)::text AS n FROM arco_evm."StocksOutbox" WHERE id=$1', [`mint:${o.id}`])).rows[0].n, '1');
+}));
+
+test('PG same cash movement cannot credit twice after attribution conflict; zero transfers ignored and direct cash mint held', options, async () => scenario(async f => {
+    const o = await f.order(); await f.funding(o);
+    f.rpc.receipts.get(h(200))!.logs.shift();
+    const conflict = await f.service.observeFunding(h(200)) as Record<string, any>[];
+    assert.equal(conflict[0].conflict, 'REVIEW_REQUIRED'); assert.equal(await f.state(o.id), 'REVIEW_REQUIRED'); assert.equal(await f.worker.runOne(), false);
+    assert.equal((await f.pool.query('SELECT COUNT(*)::text AS n FROM arco_evm."StocksFunding" WHERE "deploymentDigest"=$1', [f.repo.deploymentDigest])).rows[0].n, '1');
+    assert.equal((await f.pool.query('SELECT COUNT(*)::text AS n FROM arco_evm."StocksJournal" WHERE "deploymentDigest"=$1', [f.repo.deploymentDigest])).rows[0].n, '1');
+    f.rpc.add({ hash: h(299), from: f.actor.wallet, to: f.m.cashToken, input: '0x', value: '0' }, [eventLog(f.m.cashToken, 'Transfer', { from: f.actor.wallet, to: f.m.fundingVault, value: 0n }, 0), eventLog(f.m.cashToken, 'Transfer', { from: zeroAddress, to: f.m.fundingVault, value: 12n }, 1)]);
+    const unallocated = await f.service.observeFunding(h(299)) as Record<string, any>[]; assert.equal(unallocated.length, 1); assert.equal(unallocated[0].amount, '12'); assert.equal(unallocated[0].payer, zeroAddress);
+    await assert.rejects(() => f.service.requestRefund(unallocated[0].id), /REFUND_INELIGIBLE/);
+}));
+
+test('PG deterministic varied-order conservation property across permutation, replay and refunds', options, async () => scenario(async f => {
+    // Independent business oracle, including prices/units written explicitly rather than calling amount helpers.
+    const cases = [
+        { quantity: '1', required: '120000000', paid: '120000000', units: '1000000000', bought: true },
+        { quantity: '0.125', required: '15000000', paid: '15000000', units: '125000000', bought: true },
+        { quantity: '2', required: '240000000', paid: '10000000', units: '2000000000', bought: false },
+        { quantity: '3', required: '360000000', paid: '400000000', units: '3000000000', bought: false },
+        { quantity: '0.5', required: '60000000', paid: '60000000', units: '500000000', bought: false },
+    ];
+    const orders = [];
+    for (const entry of cases) { const order = await f.order(entry.quantity); assert.equal(order.cashAmount, entry.required); orders.push(order); }
+    const operationExpectations = new Map<string, { kind: 'MINT' | 'REFUND'; quantity: string }>();
+    for (const index of [3, 1, 4, 0, 2]) {
+        const entry = cases[index]; const order = orders[index];
+        const timestamp = index === 4 ? (BigInt(Math.floor(new Date(order.quoteExpiresAt).getTime() / 1000)) + 10n).toString() : undefined;
+        const funding = await f.funding(order, entry.paid, f.actor.wallet, h(400 + index), timestamp) as Record<string, any>;
+        await f.service.observeFunding(h(400 + index));
+        if (entry.bought) operationExpectations.set(`mint:${order.id}`, { kind: 'MINT', quantity: entry.units });
+        else { const intent = await f.service.requestRefund(funding.id); operationExpectations.set(intent.operationId, { kind: 'REFUND', quantity: entry.paid }); }
+    }
+    const confirmed = new Set<string>();
+    for (let step = 0; step < 30; step++) {
+        await f.eligible();
+        if (!(await f.worker.runOne())) break;
+        for (const call of f.signer.calls) {
+            if (confirmed.has(call.operationId)) continue;
+            const expected = operationExpectations.get(call.operationId)!; assert.ok(expected);
+            f.rpc.confirmation(call, expected.quantity, f.actor.wallet, expected.kind, f.signer.receipts.get(call.operationId)!.txHash); confirmed.add(call.operationId);
+        }
+    }
+    assert.equal(confirmed.size, 5);
+    const cash = (await f.pool.query(`SELECT SUM(CASE WHEN debit='CASH_VAULT' THEN amount WHEN credit='CASH_VAULT' THEN -amount ELSE 0 END)::text AS cash FROM arco_evm."StocksJournal" WHERE "deploymentDigest"=$1 AND asset=$2`, [f.repo.deploymentDigest, f.m.cashToken])).rows[0].cash;
+    assert.equal(cash, '135000000');
+    assert.equal((await f.repo.portfolio(f.actor.actorId)).holdings[0].quantity, '1125000000');
+    assert.equal((await f.repo.portfolio(f.actor.actorId)).pending.length, 0);
+    for (let index = 0; index < cases.length; index++) assert.equal(await f.state(orders[index].id), cases[index].bought ? 'COMPLETED' : 'REFUNDED');
+}));
+
+test('PG already-expired immutable quote cannot create an order', options, async () => scenario(async f => {
+    const id = randomUUID();
+    await f.pool.query(`INSERT INTO arco_evm."StocksQuote" (id,"actorId",wallet,symbol,quantity,"cashAmount","deploymentDigest","expiresAt") VALUES ($1,$2,$3,'NVDA',1000000000,120000000,$4,clock_timestamp()-interval '1 second')`, [id, f.actor.actorId, f.actor.wallet, f.service.digest]);
+    await assert.rejects(() => f.service.createOrder(f.actor, id, 'expired-quote-key'), /QUOTE_EXPIRED_OR_DEPLOYMENT_CHANGED/);
+    assert.equal((await f.repo.scopedOrders(f.actor.actorId)).length, 0);
 }));

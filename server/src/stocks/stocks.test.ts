@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import Fastify from 'fastify';
 import { zeroAddress } from 'viem';
-import { units, validateManifest, manifestDigest, StocksError, type SqlPool } from './contracts.js';
+import { units, validateManifest, manifestDigest, callDigest, StocksError, type SqlPool } from './contracts.js';
 import { authorizedCall, ReceiptVerifier } from './chain.js';
 import { stocksPlugin } from './plugin.js';
 import { StocksRepository } from './repository.js';
@@ -156,4 +156,13 @@ test('RPC adapter to verifier accepts real ERC20 mint zero-from topic and verifi
     const proof = await verifier.fetch(h(777));
     assert.ok(proof);
     verifier.confirmation(proof, call, 'MINT', '1000000000', ACTOR.wallet);
+});
+
+test('canonical call digest survives JSONB key reordering and binds every call identity field', () => {
+    const m = testManifest(); const call = authorizedCall(m, 'mint:digest', 'MINT', ACTOR.wallet, '1000000000');
+    const reordered = Object.fromEntries(Object.entries(call).reverse()) as typeof call;
+    assert.equal(callDigest(call), callDigest(reordered));
+    for (const patch of [{ operationId: 'mint:other' }, { networkInstance: 'other' }, { deploymentId: 'other' }, { from: a(99) }, { to: a(99) }, { data: '0x00' }, { value: '1' }, { chainId: 1 }]) assert.notEqual(callDigest(call), callDigest({ ...call, ...patch } as typeof call));
+    const reorderedManifest = Object.fromEntries(Object.entries(m).reverse()) as typeof m;
+    assert.equal(manifestDigest(m), manifestDigest(reorderedManifest));
 });

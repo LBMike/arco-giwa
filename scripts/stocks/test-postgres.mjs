@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -22,6 +22,11 @@ try {
   const connection = `postgresql://stocks_harness@localhost/stocks_test?host=${encodeURIComponent(socket)}`
   run(process.execPath, ['--test', '--test-concurrency=1', 'server/dist/stocks/stocks.postgres.test.js'], { env: { ...process.env, STOCKS_TEST_DATABASE_URL: connection, STOCKS_TEST_HARNESS_ONLY: '1' } })
 } finally {
-  if (started) spawnSync(pgCommand('pg_ctl'), ['-D', data, '-m', 'immediate', '-w', 'stop'], { stdio: 'inherit' })
+  if (started || existsSync(join(data, 'postmaster.pid'))) {
+    const stopped = spawnSync(pgCommand('pg_ctl'), ['-D', data, '-m', 'immediate', '-w', 'stop'], { stdio: 'inherit' })
+    if (stopped.error || stopped.status !== 0 || existsSync(join(data, 'postmaster.pid'))) {
+      throw new Error(`Owned PostgreSQL cleanup could not confirm shutdown; retained ${temp} for explicit recovery`)
+    }
+  }
   rmSync(temp, { recursive: true, force: true })
 }
