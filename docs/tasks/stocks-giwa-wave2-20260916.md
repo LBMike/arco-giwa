@@ -7,9 +7,11 @@ The user now appoints a separate development-verification agent and requests con
 
 ## Roles and file ownership
 
-- Commander/integrator /root: this document, final evidence, composition task and shared `server/src/app.ts` / `server/src/index.ts` wiring. No changes to existing money behavior.
+- Commander/integrator /root: this document, final evidence, first-slice review-status correction, `docs/proposals/stocks-activation*` review-only artifacts, disconnected `server/src/stocks-runtime/**` composition/observer/transport/session modules and their tests, and `scripts/stocks-local/**` local EVM+Postgres harness. Shared `server/src/app.ts` / `server/src/index.ts` wiring is a separate proposed change, currently not applied (see activation gate below). No changes to existing money behavior.
 - Contracts builder /root/giwa_stocks_contracts: new worktree `codex/stocks-giwa-contracts-20260916` at the base. Owns only NEW `packages/contracts/contracts/stocks/**`, `packages/contracts/test/stocks/**`, `packages/contracts/scripts/stocks/**`, `packages/contracts/hardhat.stocks.config.ts`, `docs/contracts/stocks-giwa-contracts-v2.md`, `docs/evidence/stocks-giwa-contracts-20260916.md`. Existing Solidity, configs, package manifests, locks and deployment registry are immutable.
 - Backend builder /root/giwa_stocks_builder: new worktree `codex/stocks-giwa-sell-20260916` at the base. Owns `server/src/stocks/**`, `scripts/stocks/**`, additive Stocks-only Prisma changes and NEW `prisma/migrations/20260917000000_stocks_redemption/**`, `docs/contracts/stocks-giwa-v1.md`, `docs/evidence/stocks-giwa-sell-20260916.md`. No existing migration changes, app/index, dependencies, UI, secrets or other worktrees.
+
+Narrow approved scope addition: the backend builder may repair `scripts/prisma/inspect-migrations.mjs` and `scripts/prisma/inspect-migrations.test.mjs` for the demonstrated false positive on a DROP CONSTRAINT clause inside a qualified ALTER TABLE. This is a separate atomic prerequisite commit with failing-first regressions; standalone DROP, unsafe targets and other statement/routine boundaries remain checked. Independent review is required.
 - Independent verifier /root/rwa_reviewer: read-only own worktree, exact-commit review and independent tests, no self-approval by either builder. Confirmed P0/P1 findings block local integration.
 
 ## Contracts task STOCKS-GIWA-002
@@ -72,3 +74,7 @@ Commander will connect the reviewed plugin to existing verified SIWE sessions th
 The signer boundary must serialize nonces across BUY, SELL and refunds for the same account and durably bind original operation+payload+nonce before broadcast. Backend retries only look up the original operation; a missing lookup is not authorization for another submit. First version does not implement transaction replacement. A later fee-replacement capability requires a separate attempt history and review, not mutation of the original hash.
 
 Every builder returns an exact atomic commit and evidence. Run relevant unit/contracts tests, real PG tests, typecheck/build/server/security/migration inspection. Independent verifier reviews and reproduces before integration. No main merge, push, existing contract redeploy or Mainnet activity. Do not claim public GIWA execution from a local EVM harness. If real signing remains unavailable, complete all executable local development and provide a concrete deployable package while keeping that external step explicit.
+
+## Activation approval gate
+
+Automatic approval review rejected the proposed app/index change because it would connect an external signer and automatically dispatch actual testnet transactions when configured, without explicit approval for that concrete behavior. The rejected patch was not applied and must not be reintroduced indirectly. Existing app/index stay unchanged. Disconnected composition has no automatic timer or implicit scheduler. Develop and independently verify the local contracts/backend/harness, then present the exact optional runtime-wiring proposal for user approval as the final step. Public-testnet deployment and signing setup remain explicit; no secrets should be sent in chat.

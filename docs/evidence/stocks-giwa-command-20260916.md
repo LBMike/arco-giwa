@@ -73,7 +73,7 @@ Initial sandbox PostgreSQL bootstrap failed and left a 56-byte shared-memory slo
 
 An actual read-only Claude Code attempt used its own clean detached worktree /private/tmp/arco-giwa-stocks-claude-review-20260916 at a4422f66d137c650b2895eebde621f69c01beb8e, reviewer session f31e1a5b-02c6-4cf2-b178-7eed71ce8160. Tools were limited to Read/Glob/Grep; no shell, edit, MCP or deployment tools were enabled. The CLI returned `Not logged in · Please run /login` before any API call, and `claude auth status` independently reported loggedIn=false. No Claude review was performed and no approval is inferred. No credentials were inspected, changed or requested.
 
-The exact reusable prompt is `docs/tasks/stocks-giwa-claude-review-20260916.md`. The repository's cross-tool review gate remains PENDING_AUTH. The combined source is preserved on codex/stocks-giwa-command-20260916 for review and has not been integrated to main.
+The exact reusable prompt is `docs/tasks/stocks-giwa-claude-review-20260916.md`. At the first-slice handoff the cross-tool review was PENDING_AUTH. The user subsequently appointed a separate verification agent and requested continued development; Wave 2 records independent `/root/rwa_reviewer` as the mandatory gate. No Claude review is retrospectively claimed. The combined source remains on codex/stocks-giwa-command-20260916 and has not been integrated to main.
 
 ## Remaining activation work
 

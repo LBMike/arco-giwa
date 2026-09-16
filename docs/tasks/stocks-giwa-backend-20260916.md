@@ -1,12 +1,12 @@
 # STOCKS-GIWA-001 — Testnet buy-to-mint backend
 
-Status: IMPLEMENTED_AND_CODEX_VERIFIED; Claude counter-review is PENDING_AUTH. Approved for bounded implementation by Commander /root under the user's explicit GIWA-first backend instruction (2026-09-16). The source remains an unactivated local candidate, not integrated to main or deployed. XRPL development is deferred until GIWA is complete.
+Status: IMPLEMENTED_AND_INDEPENDENTLY_VERIFIED for the first BUY slice. The user's later instruction appoints a dedicated verification agent; see `stocks-giwa-wave2-20260916.md` for the continuing implementation and current gate. Approved for bounded implementation by Commander /root under the user's explicit GIWA-first backend instruction (2026-09-16). The source remains an unactivated local candidate, not integrated to main or deployed. XRPL development is deferred until GIWA is complete.
 
 Base SHA: 8160f354b55dfe9a525565e30ddc007f51448f3d.
 Commander: /root, codex/stocks-giwa-command-20260916.
 Builder: /root/giwa_stocks_builder, codex/stocks-giwa-backend-20260916.
 Reviewer: /root/rwa_reviewer, a separate clean review worktree after handoff.
-Counter-review: Claude Code required before integration/release of new money paths.
+Counter-review: independent `/root/rwa_reviewer` is required before candidate integration of new money paths, as appointed by the user's later instruction. The earlier Claude authentication failure is historical evidence, not the current blocker.
 
 ## Scope and authority
 
