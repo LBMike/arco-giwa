@@ -94,6 +94,24 @@ test('out-of-order snapshot refresh is rejected and preserves prior observation'
   let now = TIME; let calls = 0; const s = createStocksMarketDataService({ apiKey: 'x', now: () => now, fetch: async () => json(snapshot('123', calls++ ? TIME - 10000 : TIME - 1000)) });
   await s.quotes(); now += 16000; const result = await s.quotes(); assert.equal(result.status, 'STALE'); assert.equal(result.reason, 'INVALID_RESPONSE'); assert.equal(result.data![0].sourceTimestamp, new Date(TIME - 1000).toISOString());
 });
+test('missing/reset snapshot does not erase the last accepted source high-water', async () => {
+  let now = TIME; let calls = 0;
+  const responses = [snapshot('123', TIME - 1000), '{"status":"OK","tickers":[]}', snapshot('122', TIME - 2000)];
+  const s = createStocksMarketDataService({ apiKey: 'x', now: () => now, fetch: async () => json(responses[calls++]) });
+  assert.equal((await s.quotes()).status, 'AVAILABLE'); now += 16000;
+  assert.equal((await s.quotes()).data![0].price, null); now += 16000;
+  const result = await s.quotes(); assert.equal(result.reason, 'INVALID_RESPONSE'); assert.equal(result.data![0].price, null); assert.notEqual(result.data![0].status, 'AVAILABLE');
+});
+test('per-symbol high-water survives partial omissions and failed batches advance no symbol', async () => {
+  let now = TIME; let calls = 0;
+  const row = (symbol: string, time: number) => `{"ticker":"${symbol}","lastTrade":{"p":123,"t":${BigInt(time) * 1000000n}}}`;
+  const batch = (...rows: string[]) => `{"status":"OK","tickers":[${rows.join(',')}]}`;
+  const responses = [batch(row('NVDA', TIME - 1000), row('AAPL', TIME - 1000)), batch(row('NVDA', TIME + 1000)), batch(row('NVDA', TIME + 2000), row('AAPL', TIME - 2000)), batch(row('NVDA', TIME + 1500), row('AAPL', TIME - 500))];
+  const s = createStocksMarketDataService({ apiKey: 'x', catalog: catalog(), now: () => now, fetch: async () => json(responses[calls++]) });
+  await s.quotes(); now += 16000; const partial = await s.quotes(); assert.equal(partial.data![1].price, null);
+  now += 16000; const rejected = await s.quotes(); assert.equal(rejected.reason, 'INVALID_RESPONSE'); assert.equal(rejected.data![0].sourceTimestamp, new Date(TIME + 1000).toISOString());
+  now += 31000; const accepted = await s.quotes(); assert.equal(accepted.status, 'AVAILABLE'); assert.equal(accepted.data![0].sourceTimestamp, new Date(TIME + 1500).toISOString()); assert.equal(accepted.data![1].sourceTimestamp, new Date(TIME - 500).toISOString());
+});
 test('429 cools down every provider key including profiles and charts', async () => {
   let calls = 0; let now = TIME; const s = createStocksMarketDataService({ apiKey: 'x', now: () => now, fetch: async () => { calls++; return new Response('', { status: 429, headers: { 'retry-after': '60' } }); } });
   assert.equal((await s.quotes()).reason, 'PROVIDER_RATE_LIMITED'); assert.equal((await s.profile('NVDA')).reason, 'PROVIDER_RATE_LIMITED'); assert.equal((await s.chart('NVDA', '1D')).reason, 'PROVIDER_RATE_LIMITED'); assert.equal(calls, 1);

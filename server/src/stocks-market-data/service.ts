@@ -48,6 +48,9 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
   const observationLimit = { UNKNOWN: 20 * 60000, DELAYED_15_MIN: 20 * 60000, END_OF_DAY: 36 * 3600000, REALTIME: 2 * 60000 }[delay];
   const transport = options.apiKey ? new MassiveTransport({ apiKey: options.apiKey, fetch: options.fetch, now, timeoutMs: options.timeoutMs, requestsPerMinute: options.requestsPerMinute }) : null;
   const cache = new Map<string, Entry>(); const flights = new Map<string, Promise<void>>();
+  // Retain the accepted source high-water independently of reset/missing snapshots.
+  // Only validated catalog symbols can enter this map, so it holds at most 40 keys.
+  const latestAcceptedTimestamp = new Map<string, string>();
   const envelope = <T>(status: DataStatus, reason: DataReason, data: T | null, fetched?: number): MarketResponse<T> => ({ ...MARKET_CONTEXT, status, reason, data: data === null ? null : structuredClone(data), fetchedAt: fetched === undefined ? null : new Date(fetched).toISOString(), cacheAgeMs: fetched === undefined ? null : Math.max(0, now() - fetched), feedDelay: delay });
   const checkSymbol = (symbol: string) => { if (!symbols.includes(symbol)) throw new MarketDataError('NOT_FOUND'); };
   async function get<T>(key: string, policy: { ttl: number; maxAge: number }, load: () => Promise<T>): Promise<MarketResponse<T>> {
@@ -61,10 +64,11 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
         flight = (async () => {
           try {
             const data = await load();
-            const prior = cache.get(key);
-            if (key === 'quotes' && prior?.data) {
-              const old = new Map((prior.data as Quote[]).map(q => [q.symbol, q.sourceTimestamp]));
-              for (const q of data as Quote[]) if (q.sourceTimestamp && old.get(q.symbol) && q.sourceTimestamp < old.get(q.symbol)!) throw new MarketDataError('INVALID_RESPONSE');
+            if (key === 'quotes') {
+              const batch = data as Quote[];
+              for (const q of batch) if (q.sourceTimestamp && latestAcceptedTimestamp.get(q.symbol) && q.sourceTimestamp < latestAcceptedTimestamp.get(q.symbol)!) throw new MarketDataError('INVALID_RESPONSE');
+              // Publish high-water updates only after the entire batch validates.
+              for (const q of batch) if (q.sourceTimestamp) latestAcceptedTimestamp.set(q.symbol, q.sourceTimestamp);
             }
             cache.set(key, { data, fetched: now(), retryAt: 0, reason: null });
           } catch (error) {
