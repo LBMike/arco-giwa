@@ -121,6 +121,26 @@ test("routine bodies are scanned and trigger row fields are not schemas", () => 
   assert.match(inspect("CREATE FUNCTION arco_evm.bad() RETURNS void LANGUAGE sql AS 'DELETE FROM public.waitlist';").join("\n"), /single-quoted executable/)
 })
 
+for (const [name, sql] of [
+  ["DO LANGUAGE before a string body", "DO LANGUAGE plpgsql 'BEGIN DELETE FROM public.waitlist; END';"],
+  ["DO with an E-string body", "DO E'BEGIN DELETE FROM public.waitlist; END';"],
+  ["FUNCTION with an E-string body", "CREATE FUNCTION arco_evm.bad() RETURNS void LANGUAGE sql AS E'DELETE FROM public.waitlist';"],
+  ["PROCEDURE with LANGUAGE after an E-string body", "CREATE PROCEDURE arco_evm.bad() AS E'DELETE FROM public.waitlist' LANGUAGE sql;"],
+  ["DO LANGUAGE before an E-string body", "DO LANGUAGE plpgsql E'BEGIN DELETE FROM public.waitlist; END';"],
+]) {
+  test(`rejects single-quoted executable bodies: ${name}`, () => {
+    assert.match(inspect(sql).join("\n"), /single-quoted executable/)
+  })
+}
+
+test("benign E-string defaults remain permitted outside executable body syntax", () => {
+  assert.deepEqual(inspect("CREATE TABLE arco_evm.note (note TEXT DEFAULT E'public.waitlist');"), [])
+  assert.deepEqual(inspect(`
+    DO LANGUAGE plpgsql $$ BEGIN RAISE NOTICE 'ordinary message'; END $$;
+    CREATE TABLE arco_evm.note (note TEXT DEFAULT E'public.waitlist');
+  `), [])
+})
+
 test("search-path and unsupported object changes fail closed", () => {
   for (const sql of ["SET search_path = arco_evm;", "SELECT set_config('search_path', 'public', false);", "CREATE EXTENSION whatever;", "DROP SCHEMA arco_evm;", "ALTER TABLE arco_evm.thing SET SCHEMA other;"]) {
     assert.match(inspect(sql).join("\n"), /unsupported/)

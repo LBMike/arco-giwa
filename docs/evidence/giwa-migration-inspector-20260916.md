@@ -33,7 +33,7 @@ The inspector remains read-only and has no database or environment dependency. I
 
 Node version: `v24.14.0`.
 
-1. `node --test scripts/prisma/inspect-migrations.test.mjs` — PASS: 15 tests, 0 failures, 0 skips.
+1. `node --test scripts/prisma/inspect-migrations.test.mjs` — PASS: 21 tests, 0 failures, 0 skips.
 2. `npm run prisma:migration:inspect` — PASS: `Prisma migration SQL inspection passed` against the complete existing migration history.
 3. `git diff --check` — PASS.
 4. `git diff --name-only 8160f354b55dfe9a525565e30ddc007f51448f3d -- prisma` — empty: no schema/history changes.
@@ -51,3 +51,11 @@ Qualified aliases other than routine NEW/OLD can be conservatively rejected as f
 New money-path migrations still require human review and disposable real-Postgres application/invariant tests. Passing this guard alone is not migration execution approval.
 
 Mainnet/network/signing/deployment/database actions performed: none.
+
+## Independent-review P1 remediation
+
+Reviewer `/root/rwa_reviewer` found that the single-quoted executable-body guard missed `DO LANGUAGE ... 'body'`, `DO E'body'`, and `CREATE FUNCTION ... AS E'body'`. The ignored literal could therefore hide public/waitlist statements that the old raw inspection rejected. Commander reassigned this P1 fix to the same builder and file scope; schema release remains subject to independent re-review.
+
+Five negative cases were added before changing the guard (the three reported forms plus PROCEDURE with LANGUAGE after its E-string and DO LANGUAGE with an E-string). Initial regression run: 21 tests, 16 pass, 5 fail. The bounded fix tracks pending DO bodies by dollar-quote nesting depth and recognizes an E-prefix before FUNCTION/PROCEDURE AS bodies. It rejects these executable strings while permitting ordinary E-string defaults and scanned dollar-quoted DO bodies.
+
+Post-fix: 21/21 tests pass; actual history inspection and `git diff --check` pass. No SQL history, database calls or additional file scope were introduced. Parser limitations above still apply.

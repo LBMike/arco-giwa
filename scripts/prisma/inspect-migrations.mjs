@@ -7,8 +7,9 @@ const OBJECT_KINDS = new Set(["TABLE", "INDEX", "VIEW", "SEQUENCE", "FUNCTION", 
 
 // A small static guard, not a PostgreSQL parser. Preserve identifiers, ignore
 // comments/literals, and also scan dollar-quoted routine bodies.
-function tokenize(sql, findings, file, routineBody = false) {
+function tokenize(sql, findings, file, routineDepth = 0) {
   const tokens = []
+  const routineBody = routineDepth > 0
   let i = 0
   while (i < sql.length) {
     if (/\s/.test(sql[i])) { i++; continue }
@@ -46,24 +47,24 @@ function tokenize(sql, findings, file, routineBody = false) {
         } else value += sql[i++]
       }
       if (!closed) findings.push(`${file}: unterminated ${quote === '"' ? "identifier" : "string"}`)
-      tokens.push({ kind: quote === '"' ? "identifier" : "literal", value, routineBody, quoted: quote === '"' })
+      tokens.push({ kind: quote === '"' ? "identifier" : "literal", value, routineBody, routineDepth, quoted: quote === '"' })
       continue
     }
     const dollar = sql.slice(i).match(/^\$(?:[a-zA-Z_][a-zA-Z0-9_]*)?\$/)?.[0]
     if (dollar) {
       const end = sql.indexOf(dollar, i + dollar.length)
       if (end === -1) { findings.push(`${file}: unterminated dollar-quoted body`); break }
-      tokens.push(...tokenize(sql.slice(i + dollar.length, end), findings, file, true))
+      tokens.push(...tokenize(sql.slice(i + dollar.length, end), findings, file, routineDepth + 1))
       i = end + dollar.length
       continue
     }
     const identifier = sql.slice(i).match(/^[a-zA-Z_][a-zA-Z0-9_$]*/)?.[0]
     if (identifier) {
-      tokens.push({ kind: "identifier", value: identifier.toLowerCase(), routineBody })
+      tokens.push({ kind: "identifier", value: identifier.toLowerCase(), routineBody, routineDepth })
       i += identifier.length
       continue
     }
-    tokens.push({ kind: "punctuation", value: sql[i++], routineBody })
+    tokens.push({ kind: "punctuation", value: sql[i++], routineBody, routineDepth })
   }
   return tokens
 }
@@ -102,10 +103,20 @@ export function inspectMigrationHistory(migrations) {
       if (!schemaCreated) add(`${context} appears before the idempotent ${ALLOWED_SCHEMA} schema bootstrap`)
       return start + 3
     }
+    const pendingDoBodies = new Set()
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i]
       const current = word(tokens, i)
-      if (token.kind === "literal" && ["AS", "DO"].includes(word(tokens, i - 1))) add("single-quoted executable bodies are unsupported; use an inspected dollar-quoted body")
+      // Entering a dollar body fulfills any enclosing DO body. At its own
+      // depth, DO may place LANGUAGE before or after its quoted body. A prefix
+      // E belongs to the following string and must not hide FUNCTION/PROCEDURE AS.
+      for (const depth of pendingDoBodies) if (depth < token.routineDepth) pendingDoBodies.delete(depth)
+      if (token.kind === "punctuation" && token.value === ";") pendingDoBodies.delete(token.routineDepth)
+      if (current === "DO" && !["UPDATE", "NOTHING"].includes(word(tokens, i + 1))) pendingDoBodies.add(token.routineDepth)
+      const beforeLiteral = word(tokens, i - 1) === "E" ? i - 2 : i - 1
+      if (token.kind === "literal" && (word(tokens, beforeLiteral) === "AS" || pendingDoBodies.has(token.routineDepth))) {
+        add("single-quoted executable bodies are unsupported; use an inspected dollar-quoted body")
+      }
       if (token.kind !== "identifier") continue
       if (token.value.toLowerCase() === "public") add("references public schema or identifier")
       if (token.value.toLowerCase().includes("waitlist")) add("references waitlist identifier")
