@@ -1,6 +1,6 @@
 # STOCKS-GIWA-001 — Testnet buy-to-mint backend
 
-Status: CONTRACT_READY, approved for bounded implementation by Commander /root under the user's explicit GIWA-first backend instruction (2026-09-16). XRPL development is deferred until GIWA is complete.
+Status: IMPLEMENTED_AND_CODEX_VERIFIED; Claude counter-review is PENDING_AUTH. Approved for bounded implementation by Commander /root under the user's explicit GIWA-first backend instruction (2026-09-16). The source remains an unactivated local candidate, not integrated to main or deployed. XRPL development is deferred until GIWA is complete.
 
 Base SHA: 8160f354b55dfe9a525565e30ddc007f51448f3d.
 Commander: /root, codex/stocks-giwa-command-20260916.
