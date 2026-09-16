@@ -1,6 +1,8 @@
 # Claude Code 전달용 — GIWA Stocks UI
 
-GIWA 제품의 UI를 구현한다. 사용자가 정한 우선순위는 GIWA 완성 후 XRPL이다. 현재 검증된 Stocks 백엔드 기준은 `d5dfd6d7716e2476a3a59f9283f3deffe3d6962d`이고, API 설명은 `docs/contracts/stocks-giwa-v1.md`, 어드민 기획은 `docs/specs/giwa-stocks-admin-v1.md`다. 먼저 저장소 지침과 이 문서를 읽고, 별도 작업 브랜치·작업 디렉터리에서 진행한다.
+GIWA 제품의 UI를 구현한다. 사용자가 정한 우선순위는 GIWA 완성 후 XRPL이다. 검증된 Stocks 통합 후보는 `e157de40c4813f3c37aeb1ccf8cff0a3ec548c71`이며, 구현 기준은 `fb036bb61a092a82c1ae48ab580bf7155f572c43`다. 기존에 안내한 `d5dfd6d7716e2476a3a59f9283f3deffe3d6962d`는 서버 연결 전의 과거 기준이다. 최신 후보에는 승인된 선택적 서버 연결·자동 처리와 독립 검증된 S1 서명기 수정이 포함된다. API 설명은 `docs/contracts/stocks-giwa-v1.md`, 어드민 기획은 `docs/specs/giwa-stocks-admin-v1.md`, 검증 기록은 `docs/evidence/stocks-giwa-activation-20260917.md`다. 먼저 저장소 지침과 이 문서를 읽고, 별도 작업 브랜치·작업 디렉터리에서 진행한다.
+
+이미 `427f83278dd752a69b3b89011b0ff18f5f46f6dc`를 기준으로 시작한 UI 작업은 계속 진행할 수 있다. 해당 기준과 위 통합 후보 사이에 `src` 및 `server/src` 변경은 없으며 API 계약도 동일하다. 검증된 S1 수정은 로컬 테스트 서명기 범위이므로 UI 작업에 별도 S1 수정 후보를 중복 반영하지 않는다.
 
 ## 화면 방향
 
