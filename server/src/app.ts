@@ -1,6 +1,7 @@
 import { createRequire } from "node:module"
 import cors from "@fastify/cors"
 import { stocksPlugin, type StocksPluginOptions } from "./stocks/plugin.js"
+import { stocksMarketDataPlugin, type StocksMarketDataService } from "./stocks-market-data/index.js"
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify"
 import { generateNonce, SiweMessage } from "siwe"
 import { formatUnits, getAddress, isAddress, type Address } from "viem"
@@ -71,6 +72,7 @@ export type VaultLimitsRaw = {
 }
 
 export type ArcoAppServices = {
+  readonly stocksMarketData?: StocksMarketDataService
   readonly stocks?: StocksPluginOptions
   readonly arco: PrismaArcoService
   readonly registry: EvmRegistryService
@@ -1257,6 +1259,7 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
   })
 
   if (services.stocks) app.register(stocksPlugin, services.stocks)
+  if (services.stocksMarketData) app.register(stocksMarketDataPlugin, { service: services.stocksMarketData })
   return app
 }
 

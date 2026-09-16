@@ -2,6 +2,8 @@ import { pathToFileURL } from "node:url"
 import { configuredStocksRuntime, stocksAutodispatch } from "./stocks-runtime/runtime.js"
 import { closeOnce, installServerShutdown, startManagedStocksServer } from "./stocks-runtime/lifecycle.js"
 import { stocksSessionResolvers } from "./stocks-runtime/session.js"
+import { configuredStocksMarketData } from "./stocks-market-runtime/config.js"
+import type { StocksMarketDataService } from "./stocks-market-data/index.js"
 import { createPublicClient, http, keccak256, parseAbi, toBytes, type Hex } from "viem"
 import { buildApp, type PauseStateVaultRef, type VaultPauseState } from "./app.js"
 import { FUNCTION_PAUSE_SELECTORS } from "./evm/admin-transactions.js"
@@ -21,10 +23,11 @@ import { readRegistryFile } from "./registry/io.js"
 export async function startServer(envSource: NodeJS.ProcessEnv = process.env, cliOwnsSignals = false) {
   const env = validateServerEnv(envSource)
   const autodispatch = stocksAutodispatch(envSource)
+  const stocksMarketData = configuredStocksMarketData(envSource)
   const prisma = createPrismaClient()
   const closeDatabase = closeOnce(() => prisma.$disconnect())
   try {
-    return await composeServer(envSource, env, prisma, closeDatabase, autodispatch, cliOwnsSignals)
+    return await composeServer(envSource, env, prisma, closeDatabase, autodispatch, cliOwnsSignals, stocksMarketData)
   } catch (error) {
     await closeDatabase()
     throw error
@@ -38,6 +41,7 @@ async function composeServer(
   closeDatabase: () => Promise<void>,
   autodispatch: boolean,
   cliOwnsSignals: boolean,
+  stocksMarketData: StocksMarketDataService,
 ) {
   const arco = new PrismaArcoService(prisma)
   const registry = new EvmRegistryService(arco)
@@ -298,7 +302,7 @@ async function composeServer(
         registryPath: env.registryPath,
       },
       {
-        arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits,
+        arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits, stocksMarketData,
         stocks: stocks ? {
           service: stocks.service,
           reconciliationCoverage: stocks.reconciliationCoverage,
