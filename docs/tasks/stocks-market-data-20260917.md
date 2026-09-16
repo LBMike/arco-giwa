@@ -1,6 +1,6 @@
 # Stocks market display data — 2026-09-17
 
-Status: ASSIGNED. The user authorized Ondo-level data with approximate testnet swaps and chose Massive preparation without an existing API account. The coordinating task `01a0aae1-20be-7a42-9672-dbcd305033dd` confirmed exclusive ownership of this module and reserves shared app/index/UI integration.
+Status: COMMANDER_VERIFIED — independent exact-source review passed at `6008f10429b5fd6d5805ac329b4a1e536c3bc8e9`; app/UI integration and live-key activation remain separate. The user authorized Ondo-level data with approximate testnet swaps and chose Massive preparation without an existing API account. The coordinating task `01a0aae1-20be-7a42-9672-dbcd305033dd` confirmed exclusive ownership of this module and reserves shared app/index/UI integration. See `docs/evidence/stocks-market-data-20260917.md` for checks and the resolved P2.
 
 Scope correction: the user clarified SEIBro is only a stock-selection reference and explicitly prohibited further access. The catalog research task was interrupted immediately. No SEIBro scraping, synchronization, runtime integration, or collected ranking snapshot is included in this task. Initial selection is a separate curated input; market data comes from Massive only.
 
