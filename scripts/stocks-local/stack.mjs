@@ -4,8 +4,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createRequire } from 'node:module';
 import Fastify from 'fastify';
 import { encodeFunctionData, parseAbi } from 'viem';
-import { ABI, manifestDigest, freezeManifest } from '../../server/dist/stocks/contracts.js';
-import { ReceiptVerifier } from '../../server/dist/stocks/chain.js';
+import { ABI, manifestDigest, callDigest, freezeManifest } from '../../server/dist/stocks/contracts.js';
+import { ReceiptVerifier, authorizedCall } from '../../server/dist/stocks/chain.js';
 import { StocksRepository } from '../../server/dist/stocks/repository.js';
 import { StocksService } from '../../server/dist/stocks/service.js';
 import { StocksWorker } from '../../server/dist/stocks/worker.js';
@@ -207,9 +207,13 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
       deploymentDigest: alternateDigest, manifest: alternateManifest, localHarness: true });
     try {
       await alternateSigner.probe();
-      await assert.rejects(() => alternateSigner.submit({ ...prepared.payload, operationId: 'nonce-probe:blocked',
-        deploymentId: alternateManifest.deploymentId }));
+      const beforeBlockedNonce = await rpc('eth_getTransactionCount', [manifest.signerAddress, 'pending']);
+      const blockedCall = authorizedCall(alternateManifest, 'nonce-probe:blocked', 'MINT', accounts.holder, '1');
+      await assert.rejects(() => alternateSigner.submit(blockedCall));
+      assert.equal(alternateServer.controls.submissionRequests, 1, 'Canonical call must reach the signer over HTTP');
+      assert.equal(alternateServer.controls.unresolvedBlocks, 1, 'Physical-account unresolved guard must reject the call');
       assert.equal(alternateServer.controls.submissions, 0);
+      assert.equal(await rpc('eth_getTransactionCount', [manifest.signerAddress, 'pending']), beforeBlockedNonce);
       assert.equal((await pool.query('SELECT COUNT(*)::text AS n FROM stocks_local_harness.signer_operations WHERE id=$1', ['nonce-probe:blocked'])).rows[0].n, '0');
     } finally { await alternateServer.close(); }
     await resetSigner();
@@ -237,18 +241,32 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     assert.equal(await currentBalance(manifest.stockToken, accounts.holder), '3000000000');
     passed('Concurrent operation nonce serialization, exact replay, and altered-payload rejection');
 
-    // Both calls deliberately replay an already-completed on-chain operation,
-    // so these signer-boundary probes consume nonces without moving more value.
-    // Distinct deployment digests still share one physical node/account sequence.
+    // This explicit LOCAL signer-protocol client tests nonce storage only. It
+    // deliberately bypasses the product adapter's operationId/calldata policy:
+    // both calls replay an already-completed on-chain operation, consuming two
+    // nonces with zero value movement. Do not use this client for product flows.
     const crossServer = await localSigner({ pool, rpc, manifest: alternateManifest, deploymentDigest: alternateDigest, token: signerToken });
     try {
-      const crossSigner = externalStocksSigner({ url: crossServer.url, authorization: signerToken,
-        deploymentDigest: alternateDigest, manifest: alternateManifest, localHarness: true });
+      const nonceProtocolProbe = async (server, deploymentDigest, call) => {
+        assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1');
+        assert.equal(new URL(server.url).hostname, '127.0.0.1');
+        const response = await fetch(`${server.url}/v1/operations/${encodeURIComponent(call.operationId)}`, {
+          method: 'PUT', redirect: 'error', headers: { authorization: `Bearer ${signerToken}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ protocol: 'ARCO_STOCKS_SIGNER_V1', deploymentDigest, call, callDigest: callDigest(call) }),
+        });
+        assert.equal(response.status, 200, 'Local nonce-store probe must reach and succeed at HTTP signer');
+        const result = await response.json();
+        assert.equal(result.operationId, call.operationId); assert.equal(result.callDigest, callDigest(call));
+        return result;
+      };
       const calls = [
         { ...records[0].payload, operationId: 'nonce-probe:original-deployment' },
         { ...records[0].payload, operationId: 'nonce-probe:alternate-deployment', deploymentId: alternateManifest.deploymentId },
       ];
-      const results = await Promise.all([signer.submit(calls[0]), crossSigner.submit(calls[1])]);
+      const requestsBefore = signerServer.controls.submissionRequests;
+      const results = await Promise.all([nonceProtocolProbe(signerServer, digest, calls[0]), nonceProtocolProbe(crossServer, alternateDigest, calls[1])]);
+      assert.equal(signerServer.controls.submissionRequests, requestsBefore + 1);
+      assert.equal(crossServer.controls.submissionRequests, 1);
       for (const result of results) assert.equal((await waitReceipt(result.txHash)).logs.length, 0);
       const physical = (await pool.query('SELECT nonce FROM stocks_local_harness.signer_operations WHERE id=ANY($1::text[]) ORDER BY nonce', [calls.map(call => call.operationId)])).rows;
       assert.equal(physical.length, 2); assert.equal(BigInt(physical[1].nonce), BigInt(physical[0].nonce) + 1n);

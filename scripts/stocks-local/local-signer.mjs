@@ -28,7 +28,8 @@ export async function localSigner({ pool, rpc, manifest, deploymentDigest, token
   assert.equal((await pool.query('SELECT node_instance FROM stocks_local_harness.canonical_node WHERE singleton')).rows[0].node_instance, nodeInstance,
     'Disposable signer database belongs to another physical local node');
   const scope = `stocks-local-signer:${nodeInstance}:${manifest.signerAddress}`;
-  const controls = { loseNextBroadcastAcknowledgement: false, submissions: 0, recoveries: 0 };
+  const controls = { loseNextBroadcastAcknowledgement: false, submissionRequests: 0,
+    submissions: 0, recoveries: 0, unresolvedBlocks: 0 };
   const targets = new Set([manifest.mintController, manifest.fundingVault, manifest.redemptionEscrow]);
   function response(row) {
     return row?.tx_hash ? { operationId: row.id, callDigest: row.call_digest, txHash: row.tx_hash } : null;
@@ -98,7 +99,10 @@ export async function localSigner({ pool, rpc, manifest, deploymentDigest, token
         WHERE node_instance=$1 AND account=$2 AND state='PREPARED' ORDER BY nonce`, [nodeInstance, call.from])).rows) {
         // A changed manifest cannot erase another deployment's unresolved nonce.
         // Only its original deployment client may recover that operation.
-        if (!await recover(db, row)) throw new Error('Unresolved original submission blocks later nonces');
+        if (!await recover(db, row)) {
+          controls.unresolvedBlocks++;
+          throw new Error('Unresolved original submission blocks later nonces');
+        }
       }
       const pending = BigInt(await rpc('eth_getTransactionCount', [call.from, 'pending']));
       const stored = BigInt((await db.query(`SELECT COALESCE(MAX(nonce)+1,0)::text AS next
@@ -138,6 +142,7 @@ export async function localSigner({ pool, rpc, manifest, deploymentDigest, token
       if (req.method === 'GET') { const value = await lookup(id); return send(value ? 200 : 404, value ?? { error: 'UNKNOWN' }); }
       if (req.method !== 'PUT') return send(405, { error: 'METHOD_NOT_ALLOWED' });
       let input = ''; for await (const chunk of req) { input += chunk; if (input.length > 16384) throw new Error('BODY_LIMIT'); }
+      controls.submissionRequests++;
       const result = await submit(id, JSON.parse(input));
       return send(result ? 200 : 503, result ?? { error: 'UNKNOWN' });
     } catch {
