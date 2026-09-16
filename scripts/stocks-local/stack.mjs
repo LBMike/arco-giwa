@@ -16,7 +16,8 @@ import { reconcileStocks } from '../../server/dist/stocks/reconciliation.js';
 import { httpStocksRpc, externalStocksSigner } from '../../server/dist/stocks-runtime/transport.js';
 import { stocksSessionResolvers } from '../../server/dist/stocks-runtime/session.js';
 import { StocksFinalizedObserver } from '../../server/dist/stocks-runtime/observer.js';
-import { verifyStocksDeployment } from '../../server/dist/stocks-runtime/runtime.js';
+import { createStocksRuntime, verifyStocksDeployment } from '../../server/dist/stocks-runtime/runtime.js';
+import { startManagedStocksServer } from '../../server/dist/stocks-runtime/lifecycle.js';
 import { localSigner } from './local-signer.mjs';
 
 const require = createRequire(import.meta.url);
@@ -65,7 +66,8 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
   const signerToken = `TEST_HARNESS_ONLY_${randomUUID()}`;
   const authSecret = `TEST_HARNESS_ONLY_SESSION_${randomUUID()}`;
   const domain = 'stocks-local.test';
-  const resolvers = stocksSessionResolvers(authSecret, [domain], [{ wallet: accounts.operator, operatorId: 'local-operator', permissions: ['stocks:read'] }]);
+  const operators = [{ wallet: accounts.operator, operatorId: 'local-operator', permissions: ['stocks:read'] }];
+  const resolvers = stocksSessionResolvers(authSecret, [domain], operators);
   const nonceStore = new Map();
   // Minimal legacy service fixture; actual Stocks services above use PostgreSQL
   // and the local EVM. Never load an existing product registry or external DB.
@@ -88,9 +90,10 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     readiness: { check: async () => ({ ok: true, checks: { localTestFixture: { ok: true } } }) },
     loadRegistry: () => { throw new Error('LOCAL_STACK_MUST_NOT_READ_DEPLOYED_REGISTRY'); },
   };
-  const app = buildApp({ corsAllowedOrigins: [`https://${domain}`], authNonceTtlSeconds: 60,
+  const appEnv = { corsAllowedOrigins: [`https://${domain}`], authNonceTtlSeconds: 60,
     authJwtSecret: authSecret, adminOperatorToken: 'TEST_HARNESS_ONLY_LEGACY_OPERATOR',
-    registryPath: '/TEST_HARNESS_ONLY_NO_REGISTRY_FILE' }, {
+    registryPath: '/TEST_HARNESS_ONLY_NO_REGISTRY_FILE' };
+  const app = buildApp(appEnv, {
     ...legacy,
     stocks: { service, ...resolvers, reconciliationCoverage: () => observer.coverage() },
   });
@@ -338,6 +341,103 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     assert.equal(await currentBalance(manifest.stockToken, accounts.holder), '3000000000');
     passed('Abnormal actual funding remains suspense until authorized exact refund is finalized');
 
+    // The actual runtime factory verifies the deployment, signer and DB binding.
+    // Each managed app owns a fresh real pool; the original pool remains open for
+    // independent assertions and the remaining abnormal-inclusion scenarios.
+    const signerCount = async () => (await pool.query('SELECT COUNT(*)::text AS n FROM stocks_local_harness.signer_operations')).rows[0].n;
+    const cursorVersion = async () => (await pool.query('SELECT version FROM arco_evm."StocksObserverCursor" WHERE "deploymentDigest"=$1', [digest])).rows[0]?.version;
+    async function managedApp(autodispatch) {
+      const runtimePool = new Pool({ connectionString: databaseUrl, max: 8 });
+      let runtime;
+      let managedUrl;
+      const managed = await startManagedStocksServer({
+        createRuntime: async () => {
+          try {
+            runtime = await createStocksRuntime({ manifest, pool: runtimePool, transport, signer, autodispatch, paused: false, operators });
+            return runtime;
+          } catch (error) {
+            await runtimePool.end(); // Factory transfers ownership only after successful return.
+            throw error;
+          }
+        },
+        buildApp: configured => buildApp(appEnv, { ...legacy, stocks: {
+          service: configured.service, ...resolvers, reconciliationCoverage: configured.reconciliationCoverage,
+        } }),
+        listen: async instance => { managedUrl = await instance.listen({ host: '127.0.0.1', port: 0 }); },
+        closeDatabase: async () => {}, // The fixture's separate original pool is not owned by this app.
+        autodispatch,
+        // No scheduler override: use the production lifecycle's native 2s timer.
+      });
+      const request = async (path, body, status = 200, actor = 'holder') => {
+        const response = await fetch(`${managedUrl}/api/v1/${path}`, {
+          method: body === undefined ? 'GET' : 'POST', redirect: 'error',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${tokens[actor]}` },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+        const row = await response.json();
+        assert.equal(response.status, status, JSON.stringify({ path, row }));
+        return row.data ?? row;
+      };
+      return { app: managed, pool: runtimePool, runtime, request };
+    }
+
+    const noDispatchBefore = { signerCount: await signerCount(), cursorVersion: await cursorVersion() };
+    const idle = await managedApp(false);
+    try {
+      assert.equal(idle.runtime.status().newOrdersPaused, true);
+      await idle.request('stocks/quotes', { symbol: 'NVDA', quantity: '0.125' }, 503);
+      await idle.request('stocks/sell-quotes', { symbol: 'NVDA', quantity: '0.125' }, 503);
+      await Promise.all([idle.runtime.tick(), idle.runtime.tick()]);
+      assert.equal(idle.runtime.status().newOrdersPaused, true);
+      assert.equal(await signerCount(), noDispatchBefore.signerCount);
+      assert.equal(await cursorVersion(), noDispatchBefore.cursorVersion);
+    } finally { await idle.app.close(); }
+    await assert.rejects(() => idle.pool.query('SELECT 1'), /Cannot use a pool after calling end/);
+    passed('Actual runtime autodispatch disabled keeps quotes paused and tick inert, then closes its owned pool');
+
+    const automaticBefore = await signerCount();
+    const automatic = await managedApp(true);
+    try {
+      assert.equal(automatic.runtime.status().newOrdersPaused, false);
+      const waitForOrder = async (path, label) => {
+        const deadline = Date.now() + 60000;
+        let state;
+        while (Date.now() < deadline) {
+          state = (await automatic.request(path)).state;
+          // Projection may finish just before the same tick refreshes observer
+          // health; wait for admission readiness before submitting the next quote.
+          if (state === 'COMPLETED' && !automatic.runtime.status().newOrdersPaused) return;
+          assert.ok(!state.includes('REVIEW'), `${label}: ${state}`);
+          await delay(200);
+        }
+        throw new Error(`Native runtime timer did not complete ${label}: ${state}`);
+      };
+      const buyQuote = await automatic.request('stocks/quotes', { symbol: 'NVDA', quantity: '0.125' });
+      const automaticBuy = await automatic.request('stocks/orders', { quoteId: buyQuote.id, idempotencyKey: 'local-native-timer-buy' });
+      await deposit(automaticBuy);
+      // Only HTTP polling follows wallet submissions. No manual worker, observer
+      // or tick calls are allowed anywhere in this automatic trading phase.
+      await waitForOrder(`stocks/orders/${automaticBuy.id}`, 'BUY 0.125');
+      assert.equal(await currentBalance(manifest.stockToken, accounts.holder), '3125000000');
+      assert.equal(await currentBalance(manifest.cashToken, manifest.fundingVault), '375000000');
+      const sellQuote = await automatic.request('stocks/sell-quotes', { symbol: 'NVDA', quantity: '0.125' });
+      const automaticSell = await automatic.request('stocks/sell-orders', { quoteId: sellQuote.id, idempotencyKey: 'local-native-timer-sell' });
+      await escrow(automaticSell);
+      await waitForOrder(`stocks/sell-orders/${automaticSell.id}`, 'SELL 0.125');
+      assert.equal(await currentBalance(manifest.stockToken, accounts.holder), '3000000000');
+      assert.equal(await currentBalance(manifest.stockToken, manifest.redemptionEscrow), '0');
+      assert.equal(await currentBalance(manifest.cashToken, manifest.fundingVault), '360000000');
+      const position = (await automatic.request('stocks/portfolio')).holdings[0];
+      assert.equal(position.walletQuantity, '3000000000');
+      assert.equal(position.escrowedQuantity, '0');
+      assert.equal(position.reservedQuantity, '0');
+      assert.equal(BigInt(await signerCount()) - BigInt(automaticBefore), 2n);
+      await automatic.request('admin/stocks/overview', undefined, 200, 'operator');
+    } finally { await automatic.app.close(); }
+    await assert.rejects(() => automatic.pool.query('SELECT 1'), /Cannot use a pool after calling end/);
+    assert.equal((await api('stocks/portfolio')).holdings[0].walletQuantity, '3000000000');
+    passed('Actual runtime factory and native managed-server timer complete HTTP BUY/SELL 0.125 without manual dispatch');
+
     // Both orders are created while quotes are fresh. Only inclusion time is then
     // advanced; database quote snapshots are never edited to fabricate expiry.
     const lateBuy = await buy('1', 'late');
@@ -368,6 +468,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     assert.equal(reconciliation.status, 'MATCHED_AT_CUTOFF', JSON.stringify(reconciliation));
     assert.equal((await pool.query(`SELECT COUNT(*)::text AS n FROM arco_evm."StocksOutbox" WHERE status <> 'DONE'`)).rows[0].n, '0');
     const allSignerRows = (await pool.query('SELECT id,nonce,tx_hash FROM stocks_local_harness.signer_operations ORDER BY nonce')).rows;
+    assert.equal(allSignerRows.length, 12, 'Original scenarios plus the native timer roundtrip produce twelve durable signer operations');
     assert.equal(new Set(allSignerRows.map(r => r.nonce)).size, allSignerRows.length);
     assert.ok(allSignerRows.every(r => r.tx_hash));
     passed('Common-cutoff reconciliation agrees with independent cash, stock supply and wallet/escrow reads');
