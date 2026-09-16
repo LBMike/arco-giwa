@@ -105,6 +105,7 @@ export function inspectMigrationHistory(migrations) {
     }
     const pendingDoBodies = new Set()
     const truncateTriggerEvents = new Set()
+    const alterDropConstraintClauses = new Set()
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i]
       const current = word(tokens, i)
@@ -164,13 +165,28 @@ export function inspectMigrationHistory(migrations) {
         } else if (OBJECT_KINDS.has(kind)) requireQualified(at, `CREATE ${kind}`)
         else add(`unsupported CREATE object kind ${kind || "(missing)"}`)
       }
-      if (current === "ALTER" || current === "DROP") {
+      if (current === "ALTER" || (current === "DROP" && !alterDropConstraintClauses.has(i))) {
         let at = i + 1
         if (word(tokens, at) === "MATERIALIZED") at++
         const kind = word(tokens, at++)
         if (OBJECT_KINDS.has(kind)) {
           let next = requireQualified(at, `${current} ${kind}`)
           if (current === "DROP") while (tokens[next]?.value === ",") next = requireQualified(next + 1, `${current} ${kind}`)
+          if (current === "ALTER" && kind === "TABLE") {
+            // A DROP CONSTRAINT action inherits its already-checked ALTER TABLE
+            // target. Exempt only top-level action starts in this one statement,
+            // never nested expressions, routine bodies or later statements.
+            let nesting = 0
+            let actionStart = true
+            for (let clause = next; clause < tokens.length && tokens[clause].value !== ";"; clause++) {
+              if (tokens[clause].routineDepth !== token.routineDepth) continue
+              const value = tokens[clause].value
+              if (actionStart && nesting === 0 && word(tokens, clause) === "DROP" && word(tokens, clause + 1) === "CONSTRAINT") alterDropConstraintClauses.add(clause)
+              if (value === "(") nesting++
+              if (value === ")") nesting--
+              actionStart = value === "," && nesting === 0
+            }
+          }
         } else add(`unsupported ${current} object kind ${kind || "(missing)"}`)
       }
       if (current === "TRUNCATE" && !truncateTriggerEvents.has(i)) {

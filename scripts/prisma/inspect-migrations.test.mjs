@@ -186,3 +186,20 @@ test("missing, empty, or incomplete migration directories fail closed", () => {
     assert.match(inspectMigrationsDirectory(directory).join("\n"), /Missing migration.sql/)
   } finally { fs.rmSync(directory, { recursive: true, force: true }) }
 })
+
+test("qualified ALTER TABLE DROP CONSTRAINT is a clause, not a standalone DROP target", () => {
+  assert.deepEqual(inspect('ALTER TABLE arco_evm.thing DROP CONSTRAINT thing_check;'), [])
+  assert.deepEqual(inspect('ALTER TABLE ONLY arco_evm.thing ADD COLUMN note TEXT, DROP CONSTRAINT IF EXISTS thing_check;'), [])
+  assert.deepEqual(inspect('DO $$ BEGIN ALTER TABLE arco_evm.thing DROP CONSTRAINT thing_check; END; $$;'), [])
+})
+
+test("DROP CONSTRAINT exemption cannot hide other targets or escape ALTER statement context", () => {
+  for (const sql of [
+    'DROP CONSTRAINT thing_check;',
+    'ALTER TABLE thing DROP CONSTRAINT thing_check;',
+    'ALTER TABLE other.thing DROP CONSTRAINT thing_check;',
+    'ALTER TABLE arco_evm.thing DROP CONSTRAINT thing_check; DROP TABLE thing;',
+    'ALTER TABLE arco_evm.thing DROP CONSTRAINT thing_check; DO $$ BEGIN DROP TABLE other.thing; END; $$;',
+    'DO $$ BEGIN ALTER TABLE arco_evm.thing DROP CONSTRAINT thing_check; DROP TABLE other.thing; END; $$;',
+  ]) assert.ok(inspect(sql).length > 0, sql)
+})
