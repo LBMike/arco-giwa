@@ -100,13 +100,14 @@
    - 같은 시도는 하나만 in-flight이며, 동기 guard로 중복 클릭을 무시한다.
    - 응답 유실, 5xx, 오류 본문 없는 응답, DTO 불일치는 `UNCONFIRMED`로 두고 같은 본문과 같은 `idempotencyKey`를 유지한다.
    - 재시도는 동일 본문으로만 한다. 목록 확인에서 찾지 못한 것은 미제출 증거가 아니다.
-   - 확정 오류(검증된 StocksError 4xx/503, 401)는 서버가 처리하지 않았다는 뜻으로만 다룬다.
+   - 확정 오류(검증된 StocksError 4xx/503, 401)는 **그 요청 자체**를 서버가 처리하지 않았다는 뜻으로만 다룬다.
+   - *리뷰 반영 정정(wf_0d913593-363 F1):* 결과가 불명인 이전 전송이 있으면 재시도의 거부는 이전 전송에 대해 아무것도 증명하지 않는다. 서버는 401, `plugin.ts` body 검사(`INVALID_BODY`·`UNEXPECTED_FIELDS`), `ready()`의 503(`STOCKS_PAUSED`·`STOCKS_NOT_ACTIVATED`·`VAULT_ALREADY_BOUND_TO_OTHER_DEPLOYMENT`), `INVALID_ORDER_REQUEST`를 idempotency 조회 **전에** 검사하고, 미등록 경로는 Fastify 404다. 그래서 이 경우 시도를 해결로 보는 코드는 조회 뒤에 검사되는 `QUOTE_NOT_FOUND`·`QUOTE_EXPIRED_OR_DEPLOYMENT_CHANGED`·`QUOTE_ALREADY_USED`·`INSUFFICIENT_AVAILABLE_STOCK`뿐이다. `IDEMPOTENCY_CONFLICT`는 같은 key의 행이 있다는 뜻이므로 `UNCONFIRMED`로 둔다.
    - 미확정 시도가 있는 동안 같은 계정은 새 견적·주문을 만들 수 없다.
 4. **세션 격리**
    - identity 요소: client, 세션 상태, 지갑, chainId, token, host 지갑 일치, catalog deploymentId.
    - identity가 바뀌면 generation을 올리고, 이전 AbortController를 abort하고, 화면 데이터(견적·주문·보유·오류·401)를 비운다.
    - 모든 비동기 결과는 요청 당시 generation과 일치할 때만 반영한다.
-   - 미확정 주문 시도는 owner key(client+지갑+체인+deployment)별로 메모리에만 보존한다. A→B→A에서 A로 돌아오면 A의 시도만 다시 보이며, 다른 계정으로 옮기거나 새 키로 재제출하지 않는다.
+   - 미확정 주문 시도는 owner key(정규화한 API baseUrl+deployment+지갑+체인)별로 페이지 메모리 registry에만 보존한다(리뷰 반영 정정 F2: 컴포넌트 재마운트·client 재생성에도 유지, 주문 POST는 언마운트로 취소하지 않음). A→B→A에서 A로 돌아오면 A의 시도만 다시 보이며, 다른 계정으로 옮기거나 새 키로 재제출하지 않는다.
    - generation 전환으로 결과를 볼 수 없게 된 in-flight 시도는 `UNCONFIRMED`로 바뀐다.
 5. **인증**
    - 인증 없는 상태에서는 공개 catalog만 요청한다.

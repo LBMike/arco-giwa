@@ -114,7 +114,7 @@ export function attemptErrorMessage(error: FeatureError, outcomeUnknown: boolean
     case "NOT_REGISTERED":
       return "The Stocks API is not available right now, so this retry was not processed. The earlier request may still have created the order."
     case "UNAUTHORIZED":
-      return "The sign-in session was not accepted, so this retry was not processed. The earlier request may still have created the order."
+      return "The sign-in session was not accepted, so this retry was not processed. The earlier request may still have created the order. After signing in again, retry it unchanged or check your orders."
     case "MISMATCH":
       return "The server's answer did not match this request, so it was not used. The request may still have created the order."
     default:

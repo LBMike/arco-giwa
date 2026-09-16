@@ -1,6 +1,6 @@
 # GIWA-STOCKS-INVESTOR-20260917 — Builder evidence
 
-상태: **기능 모듈 완료(로컬 검증)**. 실제 지갑 거래 완주는 아니다. 독립 검증 전이며 통합·배포는 없다. Builder 측 리뷰 지적 18건(중복 제외 15건)은 수정 후 재검증했다(8절).
+상태: **기능 모듈 완료(로컬 검증)**. 실제 지갑 거래 완주는 아니다. 독립 검증 전이며 통합·배포는 없다. Builder 측 리뷰(`wf_0d913593-363`) 지적 18건(중복 제외 15건)은 수정 후 재검증했다(8절). 리뷰 원문을 다시 대조해 1차 수정 커밋 `1866ea2`에 남은 F1 잔여 결함 1건을 추가로 고쳤다(8.1절).
 
 ## 1. 기준
 
@@ -9,7 +9,8 @@
 | 기준 커밋 | `427f83278dd752a69b3b89011b0ff18f5f46f6dc` |
 | 작업 디렉터리 / 브랜치 | `/private/tmp/arco-giwa-stocks-investor-20260917` / `codex/giwa-stocks-investor-20260917` |
 | Builder | Claude Code conversation `f2b93f80-1d28-4387-be4f-c72bb75ff4f4`, model `claude-opus-5` |
-| 계획 | `docs/tasks/giwa-stocks-investor-20260917.md` (코드 작성 전에 기록) |
+| 계획 | `docs/tasks/giwa-stocks-investor-20260917.md` (코드 작성 전에 기록, 리뷰로 틀린 규칙 2곳을 정정 표시) |
+| 이전 로컬 커밋 | `1866ea21fabbb0dab1405470aa444df9a4747877` (1차 리뷰 수정 포함) |
 | 네트워크 | 테스트·검증 화면 모두 in-memory fixture만 사용. 실제 Stocks 서버·RPC·지갑·서명·외부 요청 없음. push·merge·배포 없음 |
 
 ## 2. 변경 파일
@@ -143,7 +144,7 @@ function StocksPage() {
 | storage·Number 금지, fixture fallback 금지 | `static-guards.test` |
 | 인증 없는 공개 catalog만 | `controller.test` 첫 테스트: 요청은 인증 헤더 없는 catalog 1건 |
 | 지갑 연결만으로 인증 불가 | `session.ts` host wallet 불일치·JWT payload 불일치 거부, `views.test` 안내 문구 |
-| 결과 불명 뒤 재시도 거부(503·404·409) | `controller.test` "after an unknown outcome, a retry refused before the idempotency lookup stays unresolved": 세 경우 모두 `UNCONFIRMED`, 새 주문 불가, 재개 후 같은 body로 `ACCEPTED`, 서버 주문 1건 |
+| 결과 불명 뒤 재시도 거부(503·404·409·400 형식 오류) | `controller.test` "after an unknown outcome, a retry refused before the idempotency lookup stays unresolved": `STOCKS_PAUSED`, 미등록 404, `IDEMPOTENCY_CONFLICT`, `INVALID_BODY`, `UNEXPECTED_FIELDS`, `INVALID_ORDER_REQUEST` 여섯 경우 모두 `UNCONFIRMED`, 새 주문 불가, 재개 후 같은 body로 `ACCEPTED`, 서버 주문 1건 |
 | 재마운트·client 재생성 | `controller.test` "a remount or a re-created client…": 진행 중 POST 미취소, 시도 복원, 새 주문 POST 0회, 이전 컨트롤러의 늦은 응답 미적용 |
 | 조회 중 재시도 | `controller.test` "retry is not possible while an order lookup is running…" |
 | catalog 전 인증 조회 | `controller.test` "authenticated reads wait for the catalog's deployment…", `views.test` "before the catalog names the deployment…" |
@@ -178,33 +179,33 @@ function StocksPage() {
 
 | 파일 | SHA-256 |
 |---|---|
-| `stocks-evidence/375-01-list-signed-out.png` | `55c4abe737cf1f7ed7fdc01201d8cc62561ff8bc5c1c8fcb82fa3dd7b043b078` |
-| `stocks-evidence/375-02-detail-quote.png` | `e0ae5d68ccb7dde4d5a9ae974024d9635a1de80f1604d4d0322041180c2951f1` |
-| `stocks-evidence/375-03-order-awaiting-funding.png` | `7635d6e0a44fe3a5118bbb9b49b1468feef13f304e8a7396ce5079d398135f28` |
-| `stocks-evidence/375-04-portfolio.png` | `7a6d593077ab4f5628574aa9ff3320d925d0e0af6d56e78d8187f362e6a1a0f9` |
-| `stocks-evidence/375-05-orders.png` | `4ea2c0b0f8cba7a7026ca779f0aafbbf4856d8ce8d09ac890678f8dd757ed99d` |
-| `stocks-evidence/768-01-list-signed-out.png` | `fb11b9680a49ed16fedb08fa56064e4b11e9d8a8a45de0c64a079524533d9229` |
-| `stocks-evidence/768-02-detail-quote.png` | `e463a519cb49d82e1432e60966d54c9f697bcb086b7ea1bb61d8651dc48aec86` |
-| `stocks-evidence/768-03-order-awaiting-funding.png` | `fd85c67885f99d158d1c11c19016a5f30faaa2f16749a8849e8f68e71a680587` |
-| `stocks-evidence/768-04-portfolio.png` | `c852168a4caa75621922c35561ffe3cc8f5f0b0a1575c2b6df373a0668f10db0` |
-| `stocks-evidence/768-05-orders.png` | `14ce3e6dde51ea96fb7241376c7cdeb8eacdeaa4d24cf63c4ffc0070c738af2a` |
-| `stocks-evidence/1440-01-list-signed-out.png` | `abc49bf3050233bf08fde291b77ecb5944ced5bb17c708f5a7202c9f388a4520` |
-| `stocks-evidence/1440-02-detail-quote.png` | `bc6c295dc744032c7ba25477ee743e5a9628e1a0f3d106b2a259c850ea580ffc` |
-| `stocks-evidence/1440-03-order-awaiting-funding.png` | `106543bf981feea9ccff34b46f720c4c4cab932925f699409a0091e5ba0a537d` |
-| `stocks-evidence/1440-04-portfolio.png` | `c50d5e0d14f52e6224863d1a1ab86513e996c19aeebdbaf5a32b34a2597a1873` |
-| `stocks-evidence/1440-05-orders.png` | `97f473fe6ed99dc9089fa5fa1f033c2f3f22a4a269caefd5a89c11efc29b2e23` |
-| `stocks-evidence/1440-06-keyboard-sell-awaiting-escrow.png` | `4655051f30a52c6611fa7c6c7593b6f99a69985e5c8a1238661c93c80120f9e0` |
-| `stocks-evidence/1440-07-switched-to-B-while-A-order-held.png` | `8236c0e9e08038c0c6e6ab7e00e2d0a0c1425b49ce08695c0be1bbace48f96a2` |
-| `stocks-evidence/1440-08-back-to-A-unconfirmed-after-late-answer.png` | `759ed5475897bb7ecfdd63ec348e903ebf5fc1685e372cd201eae6d105b4f6d2` |
-| `stocks-evidence/1440-09-B-portfolio-after-late-A-answer.png` | `90fe17fbde13ace6dde42bcacc434b37964484376c2ffd373c5460579ad10fd4` |
-| `stocks-evidence/768-10-lost-answer-unconfirmed.png` | `8a000a1935b439157035717fdf7670a1c5d573844fb979feaebdadcde02430a1` |
-| `stocks-evidence/768-11-unknown-is-checking.png` | `4de344bd4263d11200c489164586402bb68156a44dfa869bc9eac07c0cf23c11` |
-| `stocks-evidence/768-12-server-quote-expired-refused.png` | `3aba377268ad3327925eace51cf5a6729e70c53409eb2a90e67bb9a53a547e94` |
+| `stocks-evidence/375-01-list-signed-out.png` | `bf4973170176fd0dc329a792feec7cb419e5c738e4f24d4f70a11e47286d78ab` |
+| `stocks-evidence/375-02-detail-quote.png` | `93fe4d2c28552f38862b77f121e6d54b794b7dd5868df3de94a43fc602455008` |
+| `stocks-evidence/375-03-order-awaiting-funding.png` | `cf4be2da7194ac0172e3ce95757ee21a54b755034dad557fd07089041b28e7ae` |
+| `stocks-evidence/375-04-portfolio.png` | `9395d29a3e9266bbf4fbf538cb8e6c942047c7a9570f8b22b66d107e37f27b9a` |
+| `stocks-evidence/375-05-orders.png` | `6d5693201d62b3f112c2c78f39b1d4ed76e991816547e831f4c9e6fc6cba4e95` |
+| `stocks-evidence/768-01-list-signed-out.png` | `b0711c879285e258d7070cd78c75bbfab4218d3df15822e1651539ba4ed7f4f1` |
+| `stocks-evidence/768-02-detail-quote.png` | `aa23ffcc13c9787a77f3241395e72c31138c2a970f5539285a8a21835c1afb0d` |
+| `stocks-evidence/768-03-order-awaiting-funding.png` | `8511830259c2cabde308859b2602a1c5d4caafcd2ed5d17d2095ba0a77eef1e4` |
+| `stocks-evidence/768-04-portfolio.png` | `09f1f5d9dc3f915d315d778b7065832365ede4e97ff76dc0bddd071d2d1151c8` |
+| `stocks-evidence/768-05-orders.png` | `fd5e1366af891e90dd3f82e765080a45495dee6babff0037da9bdfb6bbe27ff3` |
+| `stocks-evidence/1440-01-list-signed-out.png` | `b58a3e635554a314947b027a0f6a3f448f4492c6956d18bbeb32ab49292eea25` |
+| `stocks-evidence/1440-02-detail-quote.png` | `d579f803dce5b97cb40106749fac5625ed5e6790aa9c68fd8c2d4b7be233a5ce` |
+| `stocks-evidence/1440-03-order-awaiting-funding.png` | `80092fafda2f79436eab7ea8ee9dc47ff2a386337b2ee28247c4e2db2f07fd7b` |
+| `stocks-evidence/1440-04-portfolio.png` | `ecdd60cdcf95abed996b78a25360acac73c60236789ffafb64593101c011b103` |
+| `stocks-evidence/1440-05-orders.png` | `fcf9b1eb49721e69a17685eaa73e545ea770c2052340591d8e6830b04f4790c1` |
+| `stocks-evidence/1440-06-keyboard-sell-awaiting-escrow.png` | `80ea10e31e9159e0f8dd24cda5c1a89d1c6cfc630b54477a177b32936927c194` |
+| `stocks-evidence/1440-07-switched-to-B-while-A-order-held.png` | `d97278e169b87a09fb07109a225c096926447ee55ded66e6e6c023ffde399ff5` |
+| `stocks-evidence/1440-08-back-to-A-unconfirmed-after-late-answer.png` | `26640fbda787be22c103a0a1e92f5bcafb98ea5842d9250008fbba03161412ac` |
+| `stocks-evidence/1440-09-B-portfolio-after-late-A-answer.png` | `754e74679308611cda14e41f105e1f556c57ee9804dd99d3b5a4b2c1a207c9a7` |
+| `stocks-evidence/768-10-lost-answer-unconfirmed.png` | `25d95d9c6a367e33468061a148d21c0122d7d5985718fdba15256ce8fa8b6176` |
+| `stocks-evidence/768-11-unknown-is-checking.png` | `b182a6b9a957648c48d32e53d5745d1fbeaebaf0aa5915707ffa1e136119fd57` |
+| `stocks-evidence/768-12-server-quote-expired-refused.png` | `4156b052be55c0e22d01987191cd3688e2c05a08cbd2bfc85ed6269d08e1111a` |
 | `stocks-evidence/768-13-session-rejected-401.png` | `9ef5efe7600ec266ce79e871ee08a6d2ee3ae5e95ebfc35a891f618ead0d29e7` |
-| `stocks-evidence/375-15-retry-refused-while-paused-stays-unconfirmed.png` | `d49dbd22ea2e5c7561b9a558aa9ca0c79597eefec6d53a62ba2986d956a38a32` |
-| `stocks-evidence/375-16-deadline-passed-do-not-fund.png` | `7101fb1252f82ec1d85f6baebb4e0d52f1d3ce6fd4c9a85f39dcd8c6f5d853ed` |
+| `stocks-evidence/375-15-retry-refused-while-paused-stays-unconfirmed.png` | `1ba74dfeef97e2dc29e6a3e2e199ecd6eb690fccdc9070ba3ca677644316cef3` |
+| `stocks-evidence/375-16-deadline-passed-do-not-fund.png` | `cef5ed68271c2da37129571e026bfe08e56a1cd494173530a2b4915d64771d7a` |
 | `stocks-evidence/375-14-not-registered.png` | `7689ba77434e23033c4930216c6cab2b3f7166541a2a2980abcc9f669c1f22af` |
-| `stocks-evidence/375-14-not-activated.png` | `e0381a2e16219bd6f8e1dcc978011a04622291ab0c6f76db892fc5c6c0b253ea` |
+| `stocks-evidence/375-14-not-activated.png` | `29414a0c731958d711d5720e7d49cadfb67563abed4ca81da3cbe4d5ae7deec0` |
 | `stocks-evidence/375-14-invalid.png` | `6eea24f7dbc644589c1b64c380657028662c3c34426cc4e9ab861c4039472978` |
 
 ## 8. Builder 측 리뷰와 수정
@@ -213,7 +214,7 @@ function StocksPage() {
 
 | ID | 심각도 | 문제 | 수정 | 회귀 증거 |
 |---|---|---|---|---|
-| 상태 F1 = 계약 F1 | P1 | 결과 불명 뒤 재시도가 503·404를 받으면 "Order not placed"로 표시되어, 새 주문을 만들 수 있었다(중복 주문) | 시도에 `outcomeUnknown`을 기록한다. 이후 거부는 서버가 idempotency 조회 **뒤**에 검사하는 코드(QUOTE_NOT_FOUND, QUOTE_EXPIRED_OR_DEPLOYMENT_CHANGED, QUOTE_ALREADY_USED, INSUFFICIENT_AVAILABLE_STOCK, 요청 형식 오류)일 때만 해결로 본다. 503·404·409·500은 `UNCONFIRMED` 유지, 같은 body·key | 뮤테이션 시 2개 실패 |
+| 상태 F1 = 계약 F1 | P1 | 결과 불명 뒤 재시도가 503·404를 받으면 "Order not placed"로 표시되어, 새 주문을 만들 수 있었다(중복 주문) | 시도에 `outcomeUnknown`을 기록한다. 이후 거부는 서버가 idempotency 조회 **뒤**에 검사하는 코드(QUOTE_NOT_FOUND, QUOTE_EXPIRED_OR_DEPLOYMENT_CHANGED, QUOTE_ALREADY_USED, INSUFFICIENT_AVAILABLE_STOCK)일 때만 해결로 본다. 401·400 형식 오류·503·404·409·500은 `UNCONFIRMED`(401은 `AUTH_REQUIRED`) 유지, 같은 body·key | 뮤테이션 시 2개 실패, 형식 오류 코드 재추가 시 1개 실패(8.1) |
 | 상태 F2 | P2 | 언마운트가 진행 중 주문을 취소하고 시도를 잊어, 재마운트 후 두 번째 주문이 가능했다 | 주문 POST 전용 AbortController(취소하지 않음), 페이지 메모리 registry(`apiBaseUrl`·`deploymentId`·`wallet`·`chainId` 키) | 뮤테이션 시 1개 실패 |
 | 상태 F3 | P3 | 조회 중 재시도하면 "Checking…"에 멈췄다 | 조회 중 재시도 차단, 세대 교체 시 조회 상태 초기화 | 뮤테이션 시 1개 실패 |
 | 상태 F4 = UX-3 | P3/P2 | catalog 전 주문 조회가 거짓 "deployment changed"와 catalog 재시작을 일으켰다 | deploymentId가 없으면 인증 조회를 보내지 않고 "Waiting for the Stocks catalog" 표시 | 뮤테이션 시 2개 실패 |
@@ -221,13 +222,49 @@ function StocksPage() {
 | 계약 F3 | P3 | 서버가 허용하는 음수 wallet·available portfolio를 INVALID_RESPONSE로 거부했다 | 부호 있는 정수 허용 + BigInt 식 검사, "Holding under review" 표시 | `client.test`, `views.test` |
 | 계약 F4 | P3 | pending 1000건 초과를 거부했다(서버에는 상한 없음) | 상한 제거 | `client.test` 1500건 |
 | UX-2 | P2 | 존재하지 않는 앱 내 입금·에스크로 단계를 안내했다 | "not available in this app yet", 필요한 호출(`depositForOrder`/`escrowForOrder`)과 대상 명시, 단순 전송 불일치 안내 | `views.test` |
-| UX-4 | P2 | 결과 불명 뒤 401을 "was not processed"로만 안내했다 | "이전 요청이 이미 주문을 만들었을 수 있음" 안내 | `views.test` |
+| UX-4 | P2 | 결과 불명 뒤 401을 "was not processed"로만 안내했다 | "이전 요청이 이미 주문을 만들었을 수 있음"과 "재로그인 후 같은 요청 재시도 또는 주문 확인" 안내 | `views.test`, 문구 제거 뮤테이션 시 1개 실패 |
 | UX-5 | P2 | 수량 오류·test-value 안내가 muted 토큰(3.87:1)이었다 | text-soft/ink로 변경, muted는 placeholder 전용 | `views.test` |
 | UX-6 | P3 | 검토 필요 상태가 실패(down) 색이었다 | attention 톤(ink-40 테두리) | `views.test` |
 | UX-7 | P3 | "may have reached the server" 직후 "could not be reached" | "No answer was received from the Stocks API" | `views.test` |
 | UX-8 | P3 | client null + 인증 세션에서 "Loading…"이 끝나지 않았다 | "not configured" 게이트 | `views.test` |
 | UX-9 | P3 | 화면 전환 시 포커스 유실, 결과 미안내 | 사용자 조작 후에만 새 제목으로 포커스 이동, sr-only polite 상태 문장 | 브라우저 `focusAfterRetry` = H3 "Order accepted" |
 | UX-10 | P3 | 주문 행 aria-label이 보이는 비용·날짜를 가렸다 | aria-label 제거(보이는 텍스트가 이름) | `views.test`, 브라우저 행 이름 매칭 |
+
+### 8.1 리뷰 원문 재대조 (2차)
+
+`wf_0d913593-363`의 18개 지적 전문(detail·failureScenario·suggestedFix·verifier evidence)을 1차 수정 커밋 `1866ea2`의 코드와 다시 대조했다.
+
+**남아 있던 결함 (F1, P1 범위):**
+- **1차 수정의 오류:** `RESOLVES_AFTER_UNKNOWN`에 `INVALID_BODY`, `UNEXPECTED_FIELDS`, `INVALID_ORDER_REQUEST`가 들어 있었고, 코드 주석은 "같은 body는 매번 같게 거부된다"는 가정에 기대고 있었다.
+- **서버의 실제 순서:** 기준 서버에서 앞의 두 코드는 `plugin.ts` `body()`가, `INVALID_ORDER_REQUEST`는 `plugin.ts:30,32`와 `service.ts:54`·`sell-service.ts:42`가 만든다. 모두 idempotency 조회(`service.ts:58`, `sell-service.ts:46`) **전**이다.
+- **결과:** 응답을 잃은 뒤의 재시도가 이 코드로 거부되면, 이전 전송이 주문을 만들었을 수 있는데도 `REJECTED`("Order not placed")가 되어 새 주문을 열 수 있었다. contract 리뷰어가 제안한 "body-shape codes UNCONFIRMED"를 1차 수정에서 빠뜨린 것이다.
+- **재현:** 테스트를 먼저 확장했고, 수정 전 코드에서 실패했다(`actual: 'REJECTED', expected: 'UNCONFIRMED'`).
+- **수정:** 세 코드를 집합에서 제거하고 주석을 서버 순서에 맞게 고쳤다. 해결로 보는 코드는 조회 뒤에 검사되는 4개뿐이다. `IDEMPOTENCY_CONFLICT`는 같은 key의 행이 있다는 뜻이므로 계속 `UNCONFIRMED`다.
+
+**함께 반영:**
+- **UX-4 suggestedFix:** 재시도 401 문구에 "After signing in again, retry it unchanged or check your orders."를 추가했다.
+- **계획 문서 정정:** F1 verifier가 지적한 `docs/tasks` 3절의 "확정 오류는 서버 미처리" 규칙과, 4절의 옛 owner key(client 객체 기준)를 정정 표시했다.
+
+**나머지 17건 재확인 결과:** 추가 결함 없음.
+- **F2:** 언마운트 중 진행 중인 POST, 응답 유실 후 재마운트, 같은 baseUrl의 client 재생성 모두 registry로 유지된다.
+- **F3:** 조회 중 재시도 버튼은 비활성이고 컨트롤러도 차단한다.
+- **F4/UX-3:** deploymentId가 없으면 요청하지 않는다.
+- **UX-5:** 모듈 안의 muted 토큰은 placeholder 1곳뿐이다.
+- **UX-6:** 목록·카드·pending이 같은 tone map을 쓴다.
+- **UX-9:** 포커스 대상이 모두 있다. View와 All stocks는 상세·목록 제목, 주문 행은 카드 제목, All orders는 목록 제목, 주문·재시도는 시도 제목, Start a new order와 Discard quote는 수량 입력으로 간다. 정적 Notice는 live region이 아니다.
+
+**현재 코드 기준 뮤테이션 재확인 (각 변경 후 모듈 테스트, 원복 확인):**
+
+| 되돌린 수정 | 실패한 테스트 수 |
+|---|---|
+| F1: 결과 불명 뒤 모든 거부를 해결로 봄 | 2 |
+| F1 잔여: `INVALID_BODY`를 해결 코드에 재추가 | 1 |
+| F1 잔여: `INVALID_ORDER_REQUEST`를 해결 코드에 재추가 | 1 |
+| F3: 조회 중 재시도 허용 | 1 |
+| F4: deploymentId 없이 인증 조회 | 2 |
+| F2: 인스턴스별 registry | 1 |
+| 계약 F2: 기한 경과 판단 제거 | 1 |
+| UX-4: 주문 확인 안내 제거 | 1 |
 
 ## 9. 제한과 미구현
 
@@ -236,3 +273,5 @@ function StocksPage() {
 - **실제 지갑 거래 완주는 수행하지 않았다.**
 - **메모리 한정.** 미확정 주문 시도는 탭 메모리에만 있어 새로고침하면 사라진다. 이후에는 Orders 탭에서 서버 목록으로 확인해야 한다. 저장소 금지 규칙에 따른 의도된 제한이다.
 - **목록 범위.** 목록은 서버가 제공하는 BUY/SELL 각 최신 100건이며, 조회 실패는 미제출 증거가 아니다.
+- **풀리지 않는 미확정 시도.** 결과 불명 뒤 재시도가 계속 조회 전 단계에서 거부되면(예: 장기 일시 중지, 다른 deployment 행과의 `IDEMPOTENCY_CONFLICT`) 시도는 `UNCONFIRMED`로 남고, 그 페이지에서 같은 지갑의 새 주문은 막힌다. 해제는 새로고침뿐이며, 이후 Orders 탭에서 서버 목록으로 확인해야 한다. 중복 주문 방지를 우선한 의도된 동작이다.
+- **응답 크기 상한.** 클라이언트는 응답 본문을 1MB로 제한한다. pending 개수 검사는 없앴지만, 한 지갑의 미종결 주문이 대략 7,000건을 넘어 portfolio 본문이 1MB를 초과하면 portfolio 전체가 오류로 표시된다(잘못된 수치 대신 오류, fail closed). 계약 F4 verifier가 지적한 잔여 한계이며 이번 범위에서는 문서화만 했다.

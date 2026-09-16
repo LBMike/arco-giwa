@@ -266,6 +266,7 @@ test("an unknown outcome is never described as 'not reached' or 'not processed' 
   await h.controller.retryOrder()
   const unauthorized = text(render(h.controller, "stocks", true))
   assert.match(unauthorized, /may already have created the order/)
+  assert.match(unauthorized, /After signing in again, retry it unchanged or check your orders/)
   assert.doesNotMatch(unauthorized, /this request was not processed\. After signing in again/)
 })
 

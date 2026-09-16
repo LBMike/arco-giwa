@@ -381,6 +381,10 @@ test("after an unknown outcome, a retry refused before the idempotency lookup st
     [() => h.controls.setPaused(true), "STOCKS_PAUSED"],
     [() => { h.controls.setPaused(false); h.controls.failNext("order", 404, { message: "Route POST:/api/v1/stocks/orders not found", error: "Not Found", statusCode: 404 }) }, null],
     [() => h.controls.failNext("order", 409, { error: "IDEMPOTENCY_CONFLICT", ...PROFILE }), "IDEMPOTENCY_CONFLICT"],
+    // plugin.ts body() and createOrder's key check run before the idempotency lookup as well.
+    [() => h.controls.failNext("order", 400, { error: "INVALID_BODY", ...PROFILE }), "INVALID_BODY"],
+    [() => h.controls.failNext("order", 400, { error: "UNEXPECTED_FIELDS", ...PROFILE }), "UNEXPECTED_FIELDS"],
+    [() => h.controls.failNext("order", 400, { error: "INVALID_ORDER_REQUEST", ...PROFILE }), "INVALID_ORDER_REQUEST"],
   ] as const) {
     setup()
     await h.controller.retryOrder()

@@ -136,16 +136,15 @@ const sharedAttemptRegistry = new Map<string, OrderAttempt>()
  * Refusals the server raises only after its idempotency lookup (server/src/stocks/service.ts and
  * sell-service.ts createOrder). If an earlier send with this key had created an order, the lookup
  * would have returned that order instead, so these codes prove no order exists under the key.
- * Body-shape refusals are included because the identical body was refused identically every time.
+ * Everything checked before the lookup (401, body shape in plugin.ts, INVALID_ORDER_REQUEST, the
+ * 503s from ready(), an unregistered route) says nothing about an earlier send. IDEMPOTENCY_CONFLICT
+ * means a row with this key already exists, so it never resolves the attempt either.
  */
 const RESOLVES_AFTER_UNKNOWN = new Set([
   "QUOTE_NOT_FOUND",
   "QUOTE_EXPIRED_OR_DEPLOYMENT_CHANGED",
   "QUOTE_ALREADY_USED",
   "INSUFFICIENT_AVAILABLE_STOCK",
-  "INVALID_ORDER_REQUEST",
-  "UNEXPECTED_FIELDS",
-  "INVALID_BODY",
 ])
 
 const clientIds = new WeakMap<object, number>()
