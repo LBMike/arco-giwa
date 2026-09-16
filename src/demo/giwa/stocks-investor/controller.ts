@@ -11,10 +11,9 @@
 //     the same wallet, remounting, or re-creating the client shows the same unresolved attempt with
 //     the same body and idempotency key; another wallet never sees it. An attempt whose answer can
 //     no longer be observed becomes UNCONFIRMED — never failed, never resubmitted.
-//   • Once any send of an attempt had an unknown outcome, a later refusal only resolves it when the
-//     server checks that code AFTER its idempotency lookup (quote/stock checks). Refusals that come
-//     before the lookup (pause, activation, unregistered route, 401) say nothing about the earlier
-//     send and keep the attempt unresolved.
+//   • Once any send has an unknown outcome, a later refusal cannot close it: the API
+//     does not persist an authoritative rejected idempotency outcome. Preserve the exact
+//     key/body until a successful same-key retry or positive order lookup resolves it.
 // Order rules
 //   • One submission at a time (synchronous guard). No answer, a 500, an unrecognised body or a
 //     mismatched order keeps the attempt UNCONFIRMED with its exact body. A retry resends that body.
@@ -131,21 +130,6 @@ export type StocksInvestorControllerOptions = {
 
 /** Page-lifetime, memory-only registry of order attempts, shared by every mounted feature. */
 const sharedAttemptRegistry = new Map<string, OrderAttempt>()
-
-/**
- * Refusals the server raises only after its idempotency lookup (server/src/stocks/service.ts and
- * sell-service.ts createOrder). If an earlier send with this key had created an order, the lookup
- * would have returned that order instead, so these codes prove no order exists under the key.
- * Everything checked before the lookup (401, body shape in plugin.ts, INVALID_ORDER_REQUEST, the
- * 503s from ready(), an unregistered route) says nothing about an earlier send. IDEMPOTENCY_CONFLICT
- * means a row with this key already exists, so it never resolves the attempt either.
- */
-const RESOLVES_AFTER_UNKNOWN = new Set([
-  "QUOTE_NOT_FOUND",
-  "QUOTE_EXPIRED_OR_DEPLOYMENT_CHANGED",
-  "QUOTE_ALREADY_USED",
-  "INSUFFICIENT_AVAILABLE_STOCK",
-])
 
 const clientIds = new WeakMap<object, number>()
 let nextClientId = 1
@@ -285,6 +269,14 @@ export class StocksInvestorController {
     return attemptOwnerKey(this.client?.baseUrl ?? null, this.state.session, this.deploymentId)
   }
 
+  private isCurrent(generation: number): boolean {
+    return !this.suspended && generation === this.state.generation
+  }
+
+  private ownsAttempt(generation: number, owner: string, attempt: OrderAttempt): boolean {
+    return this.isCurrent(generation) && this.ownerKey() === owner && this.state.attempt === attempt && this.attempts.get(owner) === attempt
+  }
+
   // ── context and generations ─────────────────────────────────────────────
 
   setContext(context: StocksInvestorContext): void {
@@ -381,10 +373,12 @@ export class StocksInvestorController {
     const current = this.state.catalog
     const previous = current.status === "ready" ? current.catalog : current.status === "idle" ? null : current.previous
     this.set({ catalog: { status: "loading", previous } })
+    if (seq !== this.catalogSeq || client !== this.client || this.suspended) return
     try {
       const catalog = await client.getCatalog(signal)
       if (seq !== this.catalogSeq || client !== this.client) return
       this.set({ catalog: { status: "ready", catalog } })
+      if (seq !== this.catalogSeq || client !== this.client || this.suspended) return
       if (catalog.deploymentId !== this.deploymentId) {
         // A different deployment is a different ledger: nothing from the previous one stays on screen.
         this.deploymentId = catalog.deploymentId
@@ -411,28 +405,32 @@ export class StocksInvestorController {
     const signal = options.submission ? this.orderAbort.signal : this.abort.signal
     try {
       const value = await work(client, session.token, signal)
-      if (generation !== this.state.generation) return null
+      if (!this.isCurrent(generation)) return null
       return { ok: true, value }
     } catch (error) {
-      if (generation !== this.state.generation) return null
+      if (!this.isCurrent(generation)) return null
       const failure = toFeatureError(error)
       if (failure === null) return null
       if (failure.kind === "UNAUTHORIZED") this.rejectSession()
+      if (!this.isCurrent(generation)) return null
       return { ok: false, error: failure }
     }
   }
 
   private rejectSession(): void {
     if (this.state.authRejected) return
+    const generation = this.state.generation
+    const session = this.state.session
+    const onRejected = this.onSessionRejected
     this.quoteSeq += 1
     this.ordersSeq += 1
     this.portfolioSeq += 1
     this.selectedSeq += 1
     this.set({ authRejected: true, quote: { status: "idle" }, orders: { status: "idle" }, portfolio: { status: "idle" }, selectedOrder: null })
-    const session = this.state.session
+    if (!this.isCurrent(generation)) return
     if (!this.rejectionReported && session.status === "verified") {
       this.rejectionReported = true
-      this.onSessionRejected?.({ walletAddress: session.wallet })
+      onRejected?.({ walletAddress: session.wallet })
     }
   }
 
@@ -462,17 +460,20 @@ export class StocksInvestorController {
     const state = this.state
     // A REJECTED attempt does not block (it is cleared below); unresolved or open attempts do.
     if (tradeBlock(state) !== null || !state.quantityCheck.ok || state.quote.status === "loading" || state.session.status !== "verified") return
+    const generation = state.generation
+    const startedAt = this.now()
     const side = state.side
     const quantity = state.quantityCheck.input
     const baseUnits = state.quantityCheck.baseUnits
     const wallet = state.session.wallet
     const seq = ++this.quoteSeq
     this.set({ quote: { status: "loading", side, quantity }, attempt: this.clearRejected() })
+    if (!this.isCurrent(generation) || seq !== this.quoteSeq) return
     const result = await this.authed((client, token, signal) => client.createQuote(side, { symbol: "NVDA", quantity }, token, signal))
-    if (result === null || seq !== this.quoteSeq) return
+    if (result === null || !this.isCurrent(generation) || seq !== this.quoteSeq) return
     if (!result.ok) {
       this.set({ quote: { status: "error", side, error: result.error } })
-      if (result.error.kind === "REFUSED" && result.error.status === 503) void this.loadCatalog()
+      if (this.isCurrent(generation) && result.error.kind === "REFUSED" && result.error.status === 503) void this.loadCatalog()
       return
     }
     const quote = result.value.data
@@ -482,13 +483,16 @@ export class StocksInvestorController {
       return
     }
     const ttl = Date.parse(quote.expiresAt) - Date.parse(quote.createdAt)
-    if (!(Number.isFinite(ttl) && ttl > 0)) {
+    const observedRemaining = Date.parse(quote.expiresAt) - Date.parse(result.value.observedAt)
+    if (!(Number.isFinite(ttl) && ttl > 0 && Number.isFinite(observedRemaining))) {
       this.set({ quote: { status: "error", side, error: { kind: "INVALID_RESPONSE", status: null, code: "QUOTE_VALIDITY" } } })
       return
     }
     const receivedAt = this.now()
-    // Measured on this device from receipt, never against the device's wall clock.
-    this.set({ quote: { status: "ready", quote, deadlineMs: receivedAt + Math.min(ttl, QUOTE_MAX_TTL_MS), observedAt: result.value.observedAt }, nowMs: receivedAt })
+    // Start at request dispatch, not receipt: conservatively charge all transit time.
+    // Server observation bounds old/cached responses without trusting the device wall clock.
+    const deadlineMs = startedAt + Math.max(0, Math.min(ttl, observedRemaining, QUOTE_MAX_TTL_MS))
+    this.set({ quote: { status: receivedAt >= deadlineMs ? "expired" : "ready", quote, deadlineMs, observedAt: result.value.observedAt }, nowMs: receivedAt })
   }
 
   /** Clock tick from the view: moves a ready quote to expired. Never requests a replacement. */
@@ -520,7 +524,9 @@ export class StocksInvestorController {
     }
     const owner = this.ownerKey()
     if (owner === null) return
+    const generation = state.generation
     const key = this.newKey()
+    if (!this.isCurrent(generation) || this.ownerKey() !== owner || this.state.quote !== quote) return
     if (typeof key !== "string" || !IDEMPOTENCY_KEY.test(key)) {
       this.set({ attempt: { side: quote.quote.side, quote: quote.quote, body: { quoteId: quote.quote.id, idempotencyKey: "" }, status: "REJECTED", order: null, orderObservedAt: null, error: { kind: "LOCAL", status: null, code: "UNSAFE_IDEMPOTENCY_KEY" }, outcomeUnknown: false, lookup: "NOT_CHECKED", refresh: "IDLE" } })
       return
@@ -543,9 +549,10 @@ export class StocksInvestorController {
       return
     }
     this.submitting = true
+    this.touchedOwners.add(owner)
     this.attempts.set(owner, attempt)
     this.set({ attempt })
-    await this.send(owner, attempt)
+    await this.send(owner, attempt, generation)
   }
 
   /** Resend the unresolved attempt with exactly the same body and idempotency key. */
@@ -556,11 +563,13 @@ export class StocksInvestorController {
     if (attempt === null || owner === null || (attempt.status !== "UNCONFIRMED" && attempt.status !== "AUTH_REQUIRED") || attempt.lookup === "CHECKING") return
     if (this.syncFromRegistry(owner, attempt)) return
     if (this.state.session.status !== "verified" || this.state.authRejected) return
+    const generation = this.state.generation
     const next: OrderAttempt = Object.freeze({ ...attempt, status: "SUBMITTING", error: null, lookup: "NOT_CHECKED" })
     this.submitting = true
+    this.touchedOwners.add(owner)
     this.attempts.set(owner, next)
     this.set({ attempt: next })
-    await this.send(owner, next)
+    await this.send(owner, next, generation)
   }
 
   /** Another mounted feature may have moved this owner's attempt on; show that instead of acting on a stale copy. */
@@ -586,11 +595,12 @@ export class StocksInvestorController {
     )
   }
 
-  private async send(owner: string, attempt: OrderAttempt): Promise<void> {
-    const generation = this.state.generation
+  private async send(owner: string, attempt: OrderAttempt, generation: number): Promise<void> {
+    if (!this.ownsAttempt(generation, owner, attempt)) return
     this.touchedOwners.add(owner)
     const result = await this.authed((client, token, signal) => client.createOrder(attempt.side, attempt.body, token, signal), { submission: true })
-    if (generation === this.state.generation) this.submitting = false
+    if (!this.ownsAttempt(generation, owner, attempt)) return
+    this.submitting = false
     if (result === null) return
     let next: OrderAttempt
     if (result.ok) {
@@ -602,12 +612,8 @@ export class StocksInvestorController {
       const error = result.error
       // 401 is decided before the service runs: this send was not processed. An earlier unknown send stays unknown.
       if (error.kind === "UNAUTHORIZED") next = { ...attempt, status: "AUTH_REQUIRED", error }
-      else if (attempt.outcomeUnknown) {
-        next =
-          error.kind === "REFUSED" && error.status !== 500 && error.code !== null && RESOLVES_AFTER_UNKNOWN.has(error.code)
-            ? { ...attempt, status: "REJECTED", error }
-            : { ...attempt, status: "UNCONFIRMED", error }
-      } else if (error.kind === "NOT_REGISTERED" || (error.kind === "REFUSED" && error.status !== 500)) next = { ...attempt, status: "REJECTED", error }
+      else if (attempt.outcomeUnknown) next = { ...attempt, status: "UNCONFIRMED", error }
+      else if (error.kind === "NOT_REGISTERED" || (error.kind === "REFUSED" && error.status !== 500)) next = { ...attempt, status: "REJECTED", error }
       else next = { ...attempt, status: "UNCONFIRMED", outcomeUnknown: true, error }
     }
     next = Object.freeze(next)
@@ -628,7 +634,7 @@ export class StocksInvestorController {
       }
     }
     this.set(patch)
-    if (next.status === "REJECTED" && (next.error?.code === "QUOTE_EXPIRED_OR_DEPLOYMENT_CHANGED" || next.error?.status === 503)) void this.loadCatalog()
+    if (this.ownsAttempt(generation, owner, next) && next.status === "REJECTED" && (next.error?.code === "QUOTE_EXPIRED_OR_DEPLOYMENT_CHANGED" || next.error?.status === 503)) void this.loadCatalog()
   }
 
   /** Look for the unresolved attempt in the server's latest orders by its idempotency key. Absence proves nothing. */
@@ -638,12 +644,14 @@ export class StocksInvestorController {
     if (this.submitting || attempt === null || owner === null || (attempt.status !== "UNCONFIRMED" && attempt.status !== "AUTH_REQUIRED") || attempt.lookup === "CHECKING") return
     if (this.syncFromRegistry(owner, attempt)) return
     if (this.state.session.status !== "verified" || this.state.authRejected) return
+    const generation = this.state.generation
     const checking: OrderAttempt = Object.freeze({ ...attempt, lookup: "CHECKING" })
     this.touchedOwners.add(owner)
     this.attempts.set(owner, checking)
     this.set({ attempt: checking })
+    if (!this.ownsAttempt(generation, owner, checking)) return
     const result = await this.authed((client, token, signal) => client.listOrders(attempt.side, token, signal))
-    if (result === null) return
+    if (result === null || !this.ownsAttempt(generation, owner, checking)) return
     const current = this.attempts.get(owner)
     if (current !== checking) return
     let next: OrderAttempt
@@ -674,13 +682,16 @@ export class StocksInvestorController {
     const attempt = this.state.attempt
     const owner = this.ownerKey()
     if (attempt === null || owner === null || attempt.status !== "ACCEPTED" || attempt.order === null || attempt.refresh === "LOADING") return
+    if (this.syncFromRegistry(owner, attempt)) return
+    const generation = this.state.generation
     const loading: OrderAttempt = Object.freeze({ ...attempt, refresh: "LOADING" })
     this.touchedOwners.add(owner)
     this.attempts.set(owner, loading)
     this.set({ attempt: loading })
+    if (!this.ownsAttempt(generation, owner, loading)) return
     const order = attempt.order
     const result = await this.authed((client, token, signal) => client.getOrder(order.side, order.id, token, signal))
-    if (result === null) return
+    if (result === null || !this.ownsAttempt(generation, owner, loading)) return
     const current = this.attempts.get(owner)
     if (current === undefined || current.order?.id !== order.id) return
     let next: OrderAttempt
@@ -705,14 +716,16 @@ export class StocksInvestorController {
   async loadOrders(): Promise<void> {
     // Orders are only read once the catalog has named the deployment they must belong to.
     if (this.state.session.status !== "verified" || this.state.authRejected || this.client === null || this.deploymentId === null) return
+    const generation = this.state.generation
     const seq = ++this.ordersSeq
     const wallet = this.state.session.wallet
     this.set({ orders: { status: "loading" } })
+    if (!this.isCurrent(generation) || seq !== this.ordersSeq) return
     const [buy, sell] = await Promise.all([
       this.authed((client, token, signal) => client.listOrders("BUY", token, signal)),
       this.authed((client, token, signal) => client.listOrders("SELL", token, signal)),
     ])
-    if (buy === null || sell === null || seq !== this.ordersSeq) return
+    if (buy === null || sell === null || !this.isCurrent(generation) || seq !== this.ordersSeq) return
     let deploymentChanged = false
     const sideOrders = (result: NonNullable<typeof buy>): SideOrders => {
       if (!result.ok) return { status: "error", error: result.error }
@@ -725,7 +738,7 @@ export class StocksInvestorController {
       return { status: "ready", orders, observedAt: result.value.observedAt }
     }
     this.set({ orders: { status: "ready", buy: sideOrders(buy), sell: sideOrders(sell) } })
-    if (deploymentChanged) void this.loadCatalog()
+    if (this.isCurrent(generation) && deploymentChanged) void this.loadCatalog()
   }
 
   selectOrder(order: StocksOrder | null): void {
@@ -743,11 +756,13 @@ export class StocksInvestorController {
   async refreshSelectedOrder(): Promise<void> {
     const selected = this.state.selectedOrder
     if (selected === null || selected.refresh === "LOADING") return
+    const generation = this.state.generation
     const seq = ++this.selectedSeq
     this.set({ selectedOrder: { ...selected, refresh: "LOADING" } })
+    if (!this.isCurrent(generation) || seq !== this.selectedSeq) return
     const known = selected.order
     const result = await this.authed((client, token, signal) => client.getOrder(known.side, known.id, token, signal))
-    if (result === null || seq !== this.selectedSeq) return
+    if (result === null || !this.isCurrent(generation) || seq !== this.selectedSeq) return
     const current = this.state.selectedOrder
     if (current === null || current.order.id !== known.id) return
     if (result.ok && this.sameOrder(result.value.data, known)) {
@@ -760,11 +775,13 @@ export class StocksInvestorController {
 
   async loadPortfolio(): Promise<void> {
     if (this.state.session.status !== "verified" || this.state.authRejected || this.client === null || this.deploymentId === null) return
+    const generation = this.state.generation
     const seq = ++this.portfolioSeq
     const wallet = this.state.session.wallet
     this.set({ portfolio: { status: "loading" } })
+    if (!this.isCurrent(generation) || seq !== this.portfolioSeq) return
     const result = await this.authed((client, token, signal) => client.getPortfolio(token, signal))
-    if (result === null || seq !== this.portfolioSeq) return
+    if (result === null || !this.isCurrent(generation) || seq !== this.portfolioSeq) return
     if (!result.ok) {
       this.set({ portfolio: { status: "error", error: result.error } })
       return

@@ -402,7 +402,7 @@ test("after an unknown outcome, a retry refused before the idempotency lookup st
   assert.equal(new Set(h.requests("POST", "/api/v1/stocks/orders").map((request) => JSON.stringify(request.body))).size, 1)
 })
 
-test("after an unknown outcome, only refusals checked after the idempotency lookup resolve the attempt", async () => {
+test("after an unknown outcome, expiry refusal stays unresolved and only a positive same-key answer resolves it", async () => {
   // First send never reached the service (gateway error before handling): no order exists.
   const none = createHarness()
   await none.enter(WALLET_A)
@@ -412,9 +412,11 @@ test("after an unknown outcome, only refusals checked after the idempotency look
   none.controls.advanceTime(61_000)
   await none.controller.retryOrder()
   const refused = none.controller.getState().attempt
-  assert.equal(refused?.status, "REJECTED")
+  assert.equal(refused?.status, "UNCONFIRMED")
   assert.equal(refused?.error?.code, "QUOTE_EXPIRED_OR_DEPLOYMENT_CHANGED")
   assert.equal(none.controls.orders().length, 0)
+  none.controller.startNewOrder()
+  assert.equal(none.controller.getState().attempt?.body, refused?.body, "a refusal does not prove durable key closure")
 
   // First send created the order: after expiry the same key still returns that order, not a refusal.
   const created = createHarness()
