@@ -75,6 +75,42 @@ An actual read-only Claude Code attempt used its own clean detached worktree /pr
 
 The exact reusable prompt is `docs/tasks/stocks-giwa-claude-review-20260916.md`. At the first-slice handoff the cross-tool review was PENDING_AUTH. The user subsequently appointed a separate verification agent and requested continued development; Wave 2 records independent `/root/rwa_reviewer` as the mandatory gate. No Claude review is retrospectively claimed. The combined source remains on codex/stocks-giwa-command-20260916 and has not been integrated to main.
 
-## Remaining activation work
+## First-slice remaining work (historical)
 
 No process activation, real RPC/signing activation, Stocks contract deployment, token issuance, UI changes, push or release occurred. Existing Saving/Funds source and deployment registry remain unchanged. Next GIWA work is new Stocks contracts and restricted-transfer/operation-dedup proofs, signer/session/observer composition and actual testnet buy verification, then sell/escrow/burn/payout, admin controls/UI and multi-instrument expansion. XRPL starts only after GIWA completion. Real Alpaca settlement, live prices, social-wallet creation and 40 tradeable instruments are not implemented by this first slice.
+
+## Wave 2 combined local result — 2026-09-17
+
+Exact combined runtime source: `d5dfd6d7716e2476a3a59f9283f3deffe3d6962d`. Further final evidence changes are documentation only. Original base, existing app/index, Saving/Funds Solidity/deployments, packages and lockfiles remain unchanged outside the previously recorded bounded prerequisite scopes.
+
+Independent gates:
+
+- Contracts builder `/root/giwa_stocks_contracts`, exact `12f8e2d6d9af4e7515b56d335f98c32c498daf4e`: reviewer independently reproduced 29 actual EVM tests and 5 wrong-chain rejections; no confirmed P0/P1.
+- SELL builder `/root/giwa_stocks_builder`, exact `e6ed7a80b59ccbaa1d18a067712d75d4345c14fa`, including `fcbd568` and parser prerequisite `6b8874e`: reviewer independently reproduced 32/32 fresh real-PostgreSQL scenarios and 14/14 unit tests, server build and migration inspection. Reviewer found a P1 where an arbitrary network alias split one physical vault's liability scope; failing-first regression then normalized chain/vault/cash binding resolved it. Both binding and reservation use the same physical scope. Historical aliases fail closed.
+- Runtime integrator `/root`, exact `907e311c8219acde4fcdb80bbfaad35e50375e92`. Reviewer independently built and ran 8/8 runtime tests plus security/migration checks. No confirmed P0/P1. Session scope, 4 canonical signer capabilities, UNKNOWN semantics, checkpoint-inclusive/version-zero cursor, reorg checks and 60-second readiness expiry are covered.
+- Local harness, exact `b7514e40f777bb5218fec82b1f2a622d4b3e0927`: reviewer approved bounded local assembly after nonce scope, signal cleanup and false-positive test corrections. Product signer capability validation was not weakened to accommodate the tests.
+
+Commander results on the assembled source:
+
+| Verification | Result |
+| --- | --- |
+| Actual local EVM + fresh PostgreSQL + real HTTP stack | PASS 11/11 scenarios |
+| Actual SIGTERM and SIGINT to harness with EVM and PG running | PASS 2/2; owned process groups, DB and socket stopped before runner exit |
+| Server tests | PASS 84; 32 DB cases intentionally skip without DB in this generic command and independently pass in the fresh PG harness |
+| Runtime unit tests | PASS 8/8, included in server count |
+| Existing frontend tests | PASS 175/175, existing SSR warnings |
+| Typecheck, server build, web build, security | PASS; existing third-party/chunk warnings |
+| Prisma generation, complete migration inspection | PASS; no existing DB connected or migrated |
+| Migration-parser regressions | PASS 26/26 |
+| Source diff whitespace excluding review `.patch` artifact | PASS; the patch's blank context lines contain literal format-required spaces |
+| Review proposal `git apply --check` | PASS; patch was not applied |
+
+The full stack deploys actual new bytecode to an unforked loopback EVM chain 91342, reads raw RPC logs, uses a real temporary PostgreSQL database, and serves real HTTP requests with signed sessions. Scenarios cover actor/admin scope, constructor/code preflight, concurrent observer lock, crash after durable funding before cursor commit and replay, BUY/mint, partial-position SELL with atomic burn/payout, lost broadcast acknowledgement and signer restart, concurrent/duplicate/cross-deployment nonce behavior, abnormal funding refund, late funding/custody return, and final independent reconciliation. The fixed NVDA test price is 120.000000 and the test asset is ARCO_TEST_USDC, not actual USDC/RLUSD.
+
+Final balances: wallet `3000000000` stock raw units, escrow `0`, supply `3000000000`, vault `360000000` test-cash raw units. This is 3 test NVDA and 360 test cash, with `MATCHED_AT_CUTOFF` and 10 durable signer-operation records. Each run uses a new random deployment identity. Successful temporary resources were removed; no public endpoint or existing runtime was used.
+
+The local signer is explicitly a test harness using unlocked loopback RPC accounts. It is not an approved public-network key service. It uses physical node identity plus signer account for nonce uniqueness and locking, records payload/nonce before broadcast, and blocks a later deployment while an original operation remains unresolved. Two deliberately separate storage-boundary probes replay existing on-chain operations without value movement; their receipts must contain zero logs and stock supply must remain unchanged. Actual financial flows always use the canonical product adapter.
+
+Current external boundary: automatic approval review rejected shared app/index activation because connecting the external signer and automatically dispatching testnet transactions was not explicitly approved. The rejected patch was not applied. A concrete optional proposal exists at `docs/proposals/stocks-activation.md` and `.patch`; there is no timer or indirect activation in current app entrypoints. Public GIWA deployment, external signing setup, app activation, admin change commands/UI, 40-instrument trading, real RLUSD/USDC and Alpaca integration remain subsequent work. XRPL remains deferred.
+
+Final independent combined gate: `/root/rwa_reviewer` checked out exact `d5dfd6d7716e2476a3a59f9283f3deffe3d6962d` in its own detached worktree, independently rebuilt and repeated all 11 actual EVM/PG/HTTP scenarios with the same expected balance totals and `MATCHED_AT_CUTOFF`. Result PASS, no confirmed remaining P0/P1. Its owned EVM group and PostgreSQL shutdown were confirmed, temporary resources removed and checkout clean. Its source-only whitespace check and unapplied proposal applicability check also passed. This approves the unactivated local candidate; it is not public-network execution approval.

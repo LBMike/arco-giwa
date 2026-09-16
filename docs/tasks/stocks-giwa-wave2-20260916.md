@@ -1,7 +1,7 @@
 # GIWA Stocks Wave 2 — contracts, sell and runtime
 
 Base SHA: 3cd4f7bb789944e30998b208d456a6e04e6f2295.
-Status: CONTRACT_READY, approved by Commander /root under the user's instruction to keep developing with a separate verification agent.
+Status: IMPLEMENTED_AND_INDEPENDENT_LOCAL_FULL_STACK_PASS. Approved by Commander /root under the user's instruction to keep developing with a separate verification agent. Public-network activation remains gated below.
 
 The user now appoints a separate development-verification agent and requests continued GIWA development. Independent reviewer /root/rwa_reviewer is the mandatory review gate for this wave and the existing candidate. Claude authentication no longer blocks development or local candidate integration. This does not waive review, authorize Mainnet, or permit changes to existing live Saving/Funds deployments. GIWA is completed first; XRPL remains deferred. White-theme investor/admin UI remains a separate Claude handoff.
 
@@ -78,3 +78,9 @@ Every builder returns an exact atomic commit and evidence. Run relevant unit/con
 ## Activation approval gate
 
 Automatic approval review rejected the proposed app/index change because it would connect an external signer and automatically dispatch actual testnet transactions when configured, without explicit approval for that concrete behavior. The rejected patch was not applied and must not be reintroduced indirectly. Existing app/index stay unchanged. Disconnected composition has no automatic timer or implicit scheduler. Develop and independently verify the local contracts/backend/harness, then present the exact optional runtime-wiring proposal for user approval as the final step. Public-testnet deployment and signing setup remain explicit; no secrets should be sent in chat.
+
+## Completed candidate, 2026-09-17
+
+Combined source: `d5dfd6d7716e2476a3a59f9283f3deffe3d6962d`. Commander and the independent reviewer separately ran the genuine local EVM + PostgreSQL + HTTP harness: all 11 scenarios passed in each run, with final independent chain/DB reconciliation matched at its finalized cutoff. Separate commander SIGINT/SIGTERM cleanup probes both passed. Backend, contracts, signer/session/observer runtime and test harness have independent source review, with no confirmed remaining P0/P1. This is not public GIWA evidence.
+
+The root may also write `docs/tasks/stocks-giwa-ui-handoff-20260917.md` as a copyable Claude UI handoff referencing the actual API. It must distinguish implemented NVDA/test-cash capability from the later 40-instrument, RLUSD/USDC, social-wallet and admin-control scope, and cannot authorize runtime activation through UI work.

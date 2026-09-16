@@ -51,3 +51,9 @@ Run `STOCKS_LOCAL_STACK_ONLY=1 STOCKS_PG_BIN=/opt/homebrew/Cellar/postgresql@18/
 Independent review requested fixes to signal cleanup and deployment-independent nonce scope. Both are implemented in the follow-up commit, with corresponding real-stack scenarios/probe prepared. Their execution is still pending assembled runtime availability; syntax checks do not substitute for those runs.
 
 No public GIWA or Mainnet deployment, application activation, UI implementation, package update or registry change is included.
+
+## Assembled execution result — 2026-09-17
+
+Prototype-pending status above is historical. At combined source `d5dfd6d7716e2476a3a59f9283f3deffe3d6962d`, both commander `/root` and independent verifier `/root/rwa_reviewer` separately executed the complete actual EVM + fresh PostgreSQL + HTTP stack: **11/11 PASS** in each run. Runtime deployment getter/code checks were exercised on the five real local contracts. Final wallet/supply was `3000000000`, escrow `0`, vault cash `360000000`, 10 durable signer operations and `MATCHED_AT_CUTOFF`.
+
+Commander also executed `signal-check.mjs`: actual SIGTERM and SIGINT both passed, proving the owned EVM group, PostgreSQL process and socket stopped before exit. All successful temporary resources were removed. The independent stack run likewise confirmed cleanup. Source syntax and bounded diff checks passed; literal blank context spaces in the unapplied review `.patch` artifact are excluded from the repository whitespace check. No confirmed P0/P1 remains in this local candidate. Public activation is still a separate approval step.
