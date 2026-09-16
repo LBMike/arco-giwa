@@ -22,12 +22,20 @@ const pg = require('pg') as {
         end(): Promise<void>;
     };
 };
+let nextPhysicalAddress = 10000;
 async function fixture() {
     assert.equal(enabled, true);
     const pool = new pg.Pool({ connectionString: process.env.STOCKS_TEST_DATABASE_URL, max: 8 });
     const m = testManifest();
     m.deploymentId = `TEST_HARNESS_ONLY_${randomUUID()}`;
     m.networkInstance = `TEST_NETWORK_${randomUUID()}`;
+    // Scenarios represent separate physical cash pools, not renamed aliases of one pool.
+    for (const field of ['cashToken', 'fundingVault'] as const) {
+        const previous = m[field];
+        m[field] = a(nextPhysicalAddress++);
+        m.codeHashes[m[field]] = m.codeHashes[previous];
+        delete m.codeHashes[previous];
+    }
     const repo = new StocksRepository(pool, manifestDigest(m));
     const rpc = new TestChain(m);
     const signer = new TestSigner();
@@ -404,6 +412,10 @@ test('SELL PG exact buy/escrow/redeem conserves wallet, escrow, supply and cash;
     await f.complete(await f.order('2'));
     const order = await sell(f);
     const fact = await escrow(f, order);
+    const reservationScope = (await f.pool.query('SELECT "scopeKey" FROM arco_evm."StocksCashReservation" WHERE "orderId"=$1', [order.id])).rows[0].scopeKey;
+    const bindingScope = (await f.pool.query('SELECT "scopeKey" FROM arco_evm."StocksLiquidityBinding" WHERE "deploymentDigest"=$1', [f.service.digest])).rows[0].scopeKey;
+    assert.equal(reservationScope, `cash:91342:${f.m.fundingVault}:${f.m.cashToken}`);
+    assert.equal(reservationScope, bindingScope);
     const held = (await f.repo.portfolio(f.actor.actorId)).holdings[0];
     assert.equal(held.walletQuantity, '1000000000');
     assert.equal(held.escrowedQuantity, '1000000000');
@@ -559,12 +571,24 @@ test('SELL PG stale high chain snapshot cannot reuse cash consumed after snapsho
     assert.equal((await f.repo.liquidity(f.pool, f.m.cashToken)).sellReserved, '120000000');
     assert.equal((await f.repo.sellOrders(f.actor.actorId, first.id))[0].state, 'COMPLETED');
 }));
-test('SELL PG same vault cannot activate two deployment digests and cross-mix liabilities', options, async () => scenario(async (f) => {
+test('SELL PG same physical vault rejects deployment, network alias and checkpoint ledger splits', options, async () => scenario(async (f) => {
     await f.complete(await f.order());
-    const changed = { ...f.m, deploymentId: 'DIFFERENT_MANIFEST_SAME_VAULT' };
-    const repo = new StocksRepository(f.pool, manifestDigest(changed));
-    const service = new StocksService(repo, changed, new ReceiptVerifier(changed, new TestChain(changed)), { manifestDigest: manifestDigest(changed), contractPolicyVerified: true }, async () => false);
-    await assert.rejects(() => service.quote(f.actor, 'NVDA', '1'), /VAULT_ALREADY_BOUND_TO_OTHER_DEPLOYMENT/);
+    for (const overrides of [
+        { deploymentId: 'DIFFERENT_MANIFEST_SAME_VAULT' },
+        { deploymentId: 'RENAMED_MANIFEST_SAME_VAULT', networkInstance: 'RENAMED_NETWORK_SAME_PHYSICAL_CHAIN' },
+        { deploymentId: 'REANCHORED_MANIFEST_SAME_VAULT', networkInstance: 'SECOND_ALIAS_SAME_PHYSICAL_CHAIN', checkpointNumber: '2', checkpointHash: h(2) },
+    ]) {
+        const changed = { ...f.m, ...overrides };
+        const repo = new StocksRepository(f.pool, manifestDigest(changed));
+        const service = new StocksService(repo, changed, new ReceiptVerifier(changed, new TestChain(changed)), { manifestDigest: manifestDigest(changed), contractPolicyVerified: true }, async () => false);
+        for (const command of [
+            () => service.quote(f.actor, 'NVDA', '1'),
+            () => service.sell.quote(f.actor, 'NVDA', '1'),
+            () => service.sell.reserveLiquidity('unreachable-order'),
+        ])
+            await assert.rejects(command, /VAULT_ALREADY_BOUND_TO_OTHER_DEPLOYMENT/);
+        assert.equal((await f.pool.query('SELECT * FROM arco_evm."StocksLiquidityBinding" WHERE "deploymentDigest"=$1', [service.digest])).rows.length, 0);
+    }
 }));
 test('SELL PG escrow/supply/cash reconcile at one cutoff after finalized atomic redemption', options, async () => scenario(async (f) => {
     await f.complete(await f.order('2'));

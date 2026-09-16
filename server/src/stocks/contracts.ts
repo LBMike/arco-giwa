@@ -59,6 +59,11 @@ export type Manifest = {
     restrictedTransfers: true;
     nonUpgradeable: true;
 };
+// An alias/checkpoint rollover must never split one physical cash pool into new ledgers.
+// Reusing addresses after a chain reset also fails closed until a reviewed migration.
+export function liquidityScope(manifest: Manifest): string {
+    return `cash:${manifest.chainId}:${address(manifest.fundingVault)}:${address(manifest.cashToken)}`;
+}
 export function immutable<T>(input: T): T {
     const value = structuredClone(input);
     const freeze = (node: unknown): void => {

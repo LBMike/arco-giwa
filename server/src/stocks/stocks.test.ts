@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import Fastify from 'fastify';
 import { zeroAddress } from 'viem';
-import { units, validateManifest, manifestDigest, callDigest, StocksError, type SqlPool } from './contracts.js';
+import { units, validateManifest, manifestDigest, callDigest, liquidityScope, StocksError, type SqlPool } from './contracts.js';
 import { authorizedCall, ReceiptVerifier, redemptionCall } from './chain.js';
 import { stocksPlugin } from './plugin.js';
 import { StocksRepository } from './repository.js';
@@ -19,6 +19,14 @@ test('manifest requires GIWA demo, exact ABI, finality, restricted nonupgradeabl
     validateManifest(m);
     for (const patch of [{ chainId: 1 }, { abiDigest: 'arbitrary' }, { finalityPolicy: 'SAFE' }, { restrictedTransfers: false }, { cashSymbol: 'USDC' }, { stockToken: zeroAddress }, { nonUpgradeable: false }])
         assert.throws(() => validateManifest({ ...m, ...patch } as never));
+});
+test('physical liquidity scope ignores aliases and checkpoints but distinguishes cash pools', () => {
+    const m = testManifest();
+    const renamed = { ...m, deploymentId: 'ANOTHER_DEPLOYMENT', networkInstance: 'ANOTHER_NETWORK_ALIAS', checkpointNumber: '2', checkpointHash: h(2) };
+    assert.equal(liquidityScope(renamed), liquidityScope(m));
+    assert.equal(liquidityScope(m), `cash:91342:${m.fundingVault.toLowerCase()}:${m.cashToken.toLowerCase()}`);
+    assert.notEqual(liquidityScope({ ...m, fundingVault: a(900) }), liquidityScope(m));
+    assert.notEqual(liquidityScope({ ...m, cashToken: a(901) }), liquidityScope(m));
 });
 test('verifier deep freezes manifest and confirms canonical finalized attributed deposit', async () => {
     const m = testManifest();

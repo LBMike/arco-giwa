@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Hex } from 'viem';
-import { address, callDigest, ensure, hash, immutable, operationKey, units, validateActor, type Actor, type BrokerPort, type SqlClient, type SignerPort } from './contracts.js';
+import { address, callDigest, ensure, hash, immutable, liquidityScope, operationKey, units, validateActor, type Actor, type BrokerPort, type SqlClient, type SignerPort } from './contracts.js';
 import { redemptionCall } from './chain.js';
 import type { StocksService } from './service.js';
 import type { Row } from './repository.js';
@@ -132,7 +132,7 @@ export class StocksSellService {
         const s = this.parent;
         await s.ready();
         const snapshot = await s.verifier.latestSnapshot();
-        const scope = `cash:${s.manifest.networkInstance}:${address(s.manifest.fundingVault)}:${address(s.manifest.cashToken)}`;
+        const scope = liquidityScope(s.manifest);
         return s.repo.tx(async (db) => {
             await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [scope]);
             const order = await this.order(db, orderId);

@@ -1,6 +1,6 @@
 import { StocksSellService, type EscrowReturnPolicy } from './sell-service.js';
 import { randomUUID } from 'node:crypto';
-import { address, ensure, immutable, manifestDigest, operationKey, PROFILE, units, validateActor, freezeManifest, type Activation, type Actor, type Manifest, type PausePolicy, type SqlClient } from './contracts.js';
+import { address, ensure, immutable, liquidityScope, manifestDigest, operationKey, PROFILE, units, validateActor, freezeManifest, type Activation, type Actor, type Manifest, type PausePolicy, type SqlClient } from './contracts.js';
 import { authorizedCall, ReceiptVerifier } from './chain.js';
 import { StocksRepository } from './repository.js';
 import type { Hex } from 'viem';
@@ -26,7 +26,7 @@ export class StocksService {
     requireActivation(): void { ensure(this.activation?.manifestDigest === this.digest && this.activation.contractPolicyVerified === true, 'STOCKS_NOT_ACTIVATED', 503); }
     async bindDeployment(): Promise<void> {
         this.requireActivation();
-        const scope = `cash:${this.manifest.networkInstance}:${address(this.manifest.fundingVault)}:${address(this.manifest.cashToken)}`;
+        const scope = liquidityScope(this.manifest);
         await this.repo.pool.query('INSERT INTO arco_evm."StocksLiquidityBinding" ("scopeKey","deploymentDigest") VALUES($1,$2) ON CONFLICT DO NOTHING', [scope, this.digest]);
         const binding = (await this.repo.pool.query('SELECT "deploymentDigest" FROM arco_evm."StocksLiquidityBinding" WHERE "scopeKey"=$1', [scope])).rows[0];
         ensure(binding?.deploymentDigest === this.digest, 'VAULT_ALREADY_BOUND_TO_OTHER_DEPLOYMENT', 503);
