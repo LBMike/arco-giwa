@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { Area, AreaChart, CartesianGrid, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import type { Chart, Envelope, Quote } from "./contracts"
 import { chartPoints, dollars, priceLabel, FEED_LABELS, time, windowChange } from "./display"
@@ -7,6 +7,16 @@ export function MarketChart({ response, quote }: { response: Envelope<Chart>; qu
   // The containing detail is keyed by API/symbol/range, so selection never crosses scopes.
   const [selected, setSelected] = useState<number | null>(null)
   const sliderId = useId()
+  const selectionScope = useRef<HTMLElement>(null)
+  // Touch range controls need not take focus, so blur alone cannot end selection.
+  useEffect(() => {
+    if (selected === null) return
+    const scope = selectionScope.current
+    const endOutside = (event: Event) => { if (event.target instanceof Node && !scope?.contains(event.target)) setSelected(null) }
+    document.addEventListener("pointerdown", endOutside, true)
+    document.addEventListener("focusin", endOutside, true)
+    return () => { document.removeEventListener("pointerdown", endOutside, true); document.removeEventListener("focusin", endOutside, true) }
+  }, [selected])
   const points = useMemo(() => chart ? chartPoints(chart) : [], [chart])
   const segments = [...new Set(points.map(point => point.segment))]
   const drawing = points.map(point => ({ ...point, [`segment${point.segment}`]: point.coordinate }))
@@ -14,7 +24,7 @@ export function MarketChart({ response, quote }: { response: Envelope<Chart>; qu
   const change = chart ? windowChange(chart) : "—"
   const message = response.status === "UNCONFIGURED" ? "시세 연결 준비 중" : response.status === "UNAVAILABLE" ? "시세를 불러올 수 없습니다" : response.status === "STALE" ? "마지막 확인 시세 · 오래된 데이터" : null
   const onMove = (event: { activeTooltipIndex?: string | number | null }) => { const index = Number(event.activeTooltipIndex); if (event.activeTooltipIndex !== null && event.activeTooltipIndex !== undefined && Number.isInteger(index) && points[index]) setSelected(index) }
-  return <section aria-label="Underlying security chart" className="w-full min-w-0 space-y-4">
+  return <section ref={selectionScope} aria-label="Underlying security chart" className="w-full min-w-0 space-y-4">
     <div aria-live="polite" aria-atomic="true">
       <p className="text-xs text-[var(--color-arco-text-soft)]">{bar ? `${chart?.interval} 구간 종가 · 시각은 봉 시작` : "기초 주식 시세 · USD"}</p>
       <p title={dollars(bar?.close ?? quote?.price ?? null)} className="mt-1 break-all text-3xl font-medium tracking-tight text-[var(--color-arco-ink)]">{bar ? dollars(bar.close) : priceLabel(quote?.price ?? null)}</p>
@@ -32,7 +42,7 @@ export function MarketChart({ response, quote }: { response: Envelope<Chart>; qu
             <XAxis dataKey="timestamp" type="number" domain={["dataMin", "dataMax"]} tickFormatter={value => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" }).format(new Date(value))} minTickGap={48} tick={{ fill: "var(--color-arco-text-soft)", fontSize: 10 }} axisLine={false} tickLine={false} />
             <YAxis hide domain={["dataMin", "dataMax"]} />
             <Tooltip content={() => null} cursor={false} />
-            {segments.map(segment => <Area key={segment} type="linear" dataKey={`segment${segment}`} connectNulls={false} stroke="var(--color-arco-chart-line)" fill="var(--color-arco-chart-area)" fillOpacity={0.16} strokeWidth={1.5} isAnimationActive={false} dot={points.length === 1 ? { r: 3 } : false} activeDot={false} />)}
+            {segments.map(segment => <Area key={segment} type="linear" dataKey={`segment${segment}`} connectNulls={false} stroke="var(--color-arco-chart-line)" fill="var(--color-arco-chart-area)" fillOpacity={0.16} strokeWidth={1.5} isAnimationActive={false} dot={points.filter(point => point.segment === segment).length === 1 ? { r: 3 } : false} activeDot={false} />)}
             {bar && <ReferenceDot x={Date.parse(bar.timestamp)} y={Number(bar.close)} r={4} fill="var(--color-arco-chart-line)" stroke="var(--color-arco-surface)" />}
             {bar && <ReferenceLine x={Date.parse(bar.timestamp)} stroke="var(--color-arco-text-soft)" strokeDasharray="3 3" />}
           </AreaChart>
