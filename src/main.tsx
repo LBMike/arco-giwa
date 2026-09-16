@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
 import { createBrowserRouter, Navigate, RouterProvider, useLocation, useParams } from 'react-router-dom'
 import { GIWA_ADMIN_OPERATIONS_ROUTE, GIWA_ADMIN_ROUTE, GIWA_PREPROD_ROUTE } from './demo/giwa/routes'
+import { stocksRoutes } from './demo/giwa/stocks-market/routes'
 import './index.css'
 import './demo/theme.css'
 
@@ -36,6 +37,7 @@ function LegacyAppRedirect() {
 
 const router = createBrowserRouter([
   { path: '/app/*', element: <LegacyAppRedirect /> },
+  ...stocksRoutes(giwaRoute(<GiwaPreprodApp />)),
   {
     path: GIWA_PREPROD_ROUTE,
     element: giwaRoute(<GiwaPreprodApp />),

@@ -42,7 +42,7 @@ import { compareNullLast } from "./sort"
 import { buildActivityFeed, type ActivityRow } from "./activity-feed"
 import { isVaultCategory, type VaultCategory } from "../../../shared/vault-taxonomy"
 import { isAdminAddress, parseAdminAddresses } from "./admin-access"
-import { GIWA_ADMIN_ROUTE, GIWA_PORTFOLIO_ROUTE, GIWA_PREPROD_ROUTE, GIWA_SAVINGS_ROUTE, giwaProductPath } from "./routes"
+import { GIWA_STOCKS_ROUTE, GIWA_ADMIN_ROUTE, GIWA_PORTFOLIO_ROUTE, GIWA_PREPROD_ROUTE, GIWA_SAVINGS_ROUTE, giwaProductPath } from "./routes"
 import { GiwaHeaderMenu } from "./GiwaHeaderMenu"
 import { BrandMark } from "../components/BrandMark"
 import { ASSET_MANAGERS, ISSUERS, ISSUER_OPTIONS, aumLabel, apyLabel, productById } from "../data/products"
@@ -580,6 +580,9 @@ export function GiwaHeader({ admin = false }: { admin?: boolean }) {
             </HeaderNavLink>
             <HeaderNavLink to={GIWA_PREPROD_ROUTE} active={pathname === GIWA_PREPROD_ROUTE}>
               Products
+            </HeaderNavLink>
+            <HeaderNavLink to={GIWA_STOCKS_ROUTE} active={pathname === GIWA_STOCKS_ROUTE || pathname === "/admin/stocks"}>
+              Stocks
             </HeaderNavLink>
             <HeaderNavLink to={GIWA_PORTFOLIO_ROUTE} active={pathname.startsWith(GIWA_PORTFOLIO_ROUTE)}>
               Portfolio

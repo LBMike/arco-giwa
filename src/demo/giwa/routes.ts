@@ -12,3 +12,6 @@ export const GIWA_PRODUCT_ROUTE = "/product/:id"
 export function giwaProductPath(productId: string) {
   return `/product/${productId}`
 }
+
+export const GIWA_STOCKS_ROUTE = "/stocks"
+export const GIWA_ADMIN_STOCKS_ROUTE = "/admin/stocks"

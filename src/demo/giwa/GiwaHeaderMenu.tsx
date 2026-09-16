@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Menu, X } from "lucide-react"
-import { GIWA_ADMIN_ROUTE, GIWA_PORTFOLIO_ROUTE, GIWA_PREPROD_ROUTE, GIWA_SAVINGS_ROUTE } from "./routes"
+import { GIWA_STOCKS_ROUTE, GIWA_ADMIN_ROUTE, GIWA_PORTFOLIO_ROUTE, GIWA_PREPROD_ROUTE, GIWA_SAVINGS_ROUTE } from "./routes"
 import { GIWA_FOOTER_LINKS } from "./footer-links"
 
 // Mobile-only (lg:hidden) header menu: a hamburger that opens a slide-up bottom sheet with the
@@ -66,6 +66,7 @@ export function GiwaHeaderMenu({ isAdmin, testFunds }: { isAdmin: boolean; testF
   const navItems = [
     { label: "Savings", to: GIWA_SAVINGS_ROUTE, active: pathname.startsWith(GIWA_SAVINGS_ROUTE) },
     { label: "Products", to: GIWA_PREPROD_ROUTE, active: pathname === GIWA_PREPROD_ROUTE },
+    { label: "Stocks", to: GIWA_STOCKS_ROUTE, active: pathname === GIWA_STOCKS_ROUTE || pathname === "/admin/stocks" },
     { label: "Portfolio", to: GIWA_PORTFOLIO_ROUTE, active: pathname.startsWith(GIWA_PORTFOLIO_ROUTE) },
     ...(isAdmin ? [{ label: "Admin", to: GIWA_ADMIN_ROUTE, active: pathname.startsWith(GIWA_ADMIN_ROUTE) }] : []),
   ]
