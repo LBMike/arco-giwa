@@ -331,3 +331,35 @@ test("a consumed confirmed approval is recovery-only, not another approval promp
   await f.controller.approve(); assert.equal(f.walletCalls.length, 1)
   f.controller.dispose()
 })
+
+for (const windowMs of [1, 15000]) for (const action of ["approve", "submit"] as const) {
+  test(`${action} rechecks ${windowMs}ms policy expiry after synchronous signing subscribers`, async () => {
+    const f = fixture()
+    if (action === "submit") f.setAllowance("999999999999")
+    const readPolicy = f.ports.readExecutionPolicy
+    f.ports.readExecutionPolicy = async request => ({ ...await readPolicy(request), validUntil: START + windowMs })
+    const plan = planOrder(f.selected, f.context(), START)
+    const stage = action === "approve" ? "APPROVAL" : "TRANSFER"
+    let unsubscribe = () => {}
+    try {
+      await f.controller.prepare()
+      unsubscribe = f.controller.subscribe(() => {
+        if (f.controller.getSnapshot().status === "SIGNING") f.setTime(START + windowMs)
+      })
+      await f.controller[action]()
+      assert.equal(f.walletCalls.length, 0)
+      assert.equal(f.controller.getSnapshot().status, "UNKNOWN")
+      const claim = f.shared.data.get(`${plan.intentKey}:${stage}`)
+      assert.equal(claim?.status, "UNKNOWN")
+      assert.equal(claim?.txHash, undefined)
+      assert.equal(f.shared.data.size, 1)
+      unsubscribe()
+      // Even a fresh policy cannot silently release the durable claim or reopen the wallet.
+      f.ports.readExecutionPolicy = readPolicy
+      await f.controller[action](); f.controller.cancel(); await f.controller.prepare(); await f.controller[action]()
+      assert.equal(f.walletCalls.length, 0)
+      assert.equal(f.shared.data.get(`${plan.intentKey}:${stage}`)?.claimId, claim?.claimId)
+      assert.equal(f.controller.getSnapshot().status, "UNKNOWN")
+    } finally { unsubscribe(); f.controller.dispose() }
+  })
+}

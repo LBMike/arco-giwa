@@ -152,7 +152,8 @@ export function createStocksWalletController(ports: WalletPorts) {
     guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED")
     state(a, "SIGNING", { stage })
     let result: unknown
-    try { guard(a); result = await ports.requestTransaction(tx) }
+    // SIGNING subscribers run synchronously and may consume the policy's remaining lifetime.
+    try { guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED"); result = await ports.requestTransaction(tx) }
     catch {
       const unknown = { ...claim, status: "UNKNOWN" as const }
       try { await persist(unknown) } catch { /* The pre-request claim still blocks re-signing. */ }
