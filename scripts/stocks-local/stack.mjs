@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createRequire } from 'node:module';
-import Fastify from 'fastify';
-import { encodeFunctionData, parseAbi } from 'viem';
+import { SiweMessage } from 'siwe';
+import { encodeFunctionData, getAddress, parseAbi, stringToHex } from 'viem';
+import { buildApp } from '../../server/dist/app.js';
 import { ABI, manifestDigest, callDigest, freezeManifest } from '../../server/dist/stocks/contracts.js';
 import { ReceiptVerifier, authorizedCall } from '../../server/dist/stocks/chain.js';
 import { StocksRepository } from '../../server/dist/stocks/repository.js';
@@ -11,7 +12,6 @@ import { StocksService } from '../../server/dist/stocks/service.js';
 import { StocksWorker } from '../../server/dist/stocks/worker.js';
 import { createDurableMockBroker } from '../../server/dist/stocks/mock-broker.js';
 import { createStocksRpcPort } from '../../server/dist/stocks/rpc.js';
-import { stocksPlugin } from '../../server/dist/stocks/plugin.js';
 import { reconcileStocks } from '../../server/dist/stocks/reconciliation.js';
 import { httpStocksRpc, externalStocksSigner } from '../../server/dist/stocks-runtime/transport.js';
 import { stocksSessionResolvers } from '../../server/dist/stocks-runtime/session.js';
@@ -63,7 +63,37 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
   let signerServer;
   let signer;
   const signerToken = `TEST_HARNESS_ONLY_${randomUUID()}`;
-  const app = Fastify({ logger: false });
+  const authSecret = `TEST_HARNESS_ONLY_SESSION_${randomUUID()}`;
+  const domain = 'stocks-local.test';
+  const resolvers = stocksSessionResolvers(authSecret, [domain], [{ wallet: accounts.operator, operatorId: 'local-operator', permissions: ['stocks:read'] }]);
+  const nonceStore = new Map();
+  // Minimal legacy service fixture; actual Stocks services above use PostgreSQL
+  // and the local EVM. Never load an existing product registry or external DB.
+  const legacy = {
+    arco: {
+      issueAuthNonce: async row => nonceStore.set(row.nonce, { ...row, expiresAt: row.now.getTime() + row.ttlSeconds * 1000 }),
+      consumeAuthNonce: async request => {
+        const row = nonceStore.get(request.nonce);
+        if (!row || row.expiresAt <= Date.now() || row.walletAddress !== request.walletAddress.toLowerCase() || row.domain !== request.domain) return false;
+        nonceStore.delete(request.nonce);
+        return true;
+      },
+      vaultConfigs: async () => [],
+    },
+    registry: {
+      listNetworks: async () => [{ chainId: 91342, fixture: 'LOCAL_STACK_LEGACY' }],
+      getRegistry: async () => ({ network: { chainId: 91342 }, assets: [], products: [] }),
+    },
+    portfolio: { portfolio: async wallet => ({ walletAddress: wallet, products: [] }) },
+    readiness: { check: async () => ({ ok: true, checks: { localTestFixture: { ok: true } } }) },
+    loadRegistry: () => { throw new Error('LOCAL_STACK_MUST_NOT_READ_DEPLOYED_REGISTRY'); },
+  };
+  const app = buildApp({ corsAllowedOrigins: [`https://${domain}`], authNonceTtlSeconds: 60,
+    authJwtSecret: authSecret, adminOperatorToken: 'TEST_HARNESS_ONLY_LEGACY_OPERATOR',
+    registryPath: '/TEST_HARNESS_ONLY_NO_REGISTRY_FILE' }, {
+    ...legacy,
+    stocks: { service, ...resolvers, reconciliationCoverage: () => observer.coverage() },
+  });
   try {
     const resetSigner = async () => {
       if (signerServer) await signerServer.close();
@@ -73,13 +103,8 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     };
     await resetSigner();
     const worker = () => new StocksWorker(service, broker, signer);
-    const authSecret = `TEST_HARNESS_ONLY_SESSION_${randomUUID()}`;
-    const domain = 'stocks-local.test';
-    const resolvers = stocksSessionResolvers(authSecret, [domain], [{ wallet: accounts.operator, operatorId: 'local-operator', permissions: ['stocks:read'] }]);
-    await app.register(stocksPlugin, { service, ...resolvers, reconciliationCoverage: () => observer.coverage() });
     const url = await app.listen({ host: '127.0.0.1', port: 0 });
-    const tokens = Object.fromEntries(['holder', 'otherHolder', 'operator'].map(name => [name,
-      sign({ sub: accounts[name], chainId: 91342, domain }, authSecret, { algorithm: 'HS256', expiresIn: '15m' })]));
+    const tokens = {};
     async function api(path, body, actor = 'holder', status = 200) {
       const response = await fetch(`${url}/api/v1/${path}`, { method: body === undefined ? 'GET' : 'POST', redirect: 'error',
         headers: { 'content-type': 'application/json', ...(actor ? { authorization: `Bearer ${tokens[actor]}` } : {}) },
@@ -88,6 +113,27 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
       assert.equal(response.status, status, JSON.stringify({ path, row }));
       return row.data ?? row;
     }
+    // Existing nonce/SIWE endpoints issue every ordinary session. The ephemeral
+    // local node signs for its unlocked test accounts; no key material is read.
+    for (const name of ['holder', 'otherHolder', 'operator']) {
+      const nonce = await api('auth/nonce', { walletAddress: accounts[name], domain }, null);
+      const message = new SiweMessage({ domain, address: getAddress(accounts[name]), uri: `https://${domain}`,
+        version: '1', chainId: 91342, nonce: nonce.nonce, issuedAt: new Date().toISOString() }).prepareMessage();
+      const signature = await rpc('personal_sign', [stringToHex(message), accounts[name]]);
+      const verified = await api('auth/verify', { message, signature }, null);
+      assert.equal(verified.walletAddress, accounts[name].toLowerCase());
+      assert.equal(verified.chainId, 91342);
+      tokens[name] = verified.token;
+      await api('auth/verify', { message, signature }, null, 401);
+    }
+    // Explicit adversarial session fixtures verify chain/domain binding at the
+    // real app's Stocks boundary; they never substitute for ordinary SIWE login.
+    tokens.wrongChain = sign({ sub: accounts.holder, chainId: 1, domain }, authSecret, { algorithm: 'HS256', expiresIn: '15m' });
+    tokens.wrongDomain = sign({ sub: accounts.holder, chainId: 91342, domain: 'foreign.test' }, authSecret, { algorithm: 'HS256', expiresIn: '15m' });
+    assert.deepEqual(await (await fetch(`${url}/health`)).json(), { ok: true, service: 'arco-giwa-api' });
+    assert.equal((await fetch(`${url}/ready`)).status, 200);
+    assert.deepEqual(await api('evm/catalog/91342', undefined, null), []);
+    assert.equal((await api('evm/networks', undefined, null))[0].chainId, 91342);
     async function waitReceipt(txHash) {
       for (let n = 0; n < 30; n++) {
         const receipt = await rpc('eth_getTransactionReceipt', [txHash]);
@@ -133,10 +179,18 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
 
     // HTTP actor identities are signed sessions, not caller-provided wallet fields.
     await api('stocks/quotes', { symbol: 'NVDA', quantity: '1' }, null, 401);
+    await api('stocks/quotes', { symbol: 'NVDA', quantity: '1' }, 'wrongChain', 401);
+    await api('stocks/sell-quotes', { symbol: 'NVDA', quantity: '1' }, 'wrongDomain', 401);
     await api('admin/stocks/overview', undefined, 'holder', 403);
     await api('stocks/quotes', { symbol: 'NVDA', quantity: '1', wallet: accounts.otherHolder }, 'holder', 400);
     await api('admin/stocks/overview', undefined, 'operator');
-    passed('HTTP signed actor scope and named read-only administrator authorization');
+    const forgedAdmin = await fetch(`${url}/api/v1/admin/stocks/overview`, { headers: {
+      'x-operator-token': 'TEST_HARNESS_ONLY_LEGACY_OPERATOR', 'x-role': 'admin', 'x-wallet': accounts.operator,
+    } });
+    assert.equal(forgedAdmin.status, 403);
+    for (const route of ['stocks/mint', 'stocks/confirm', 'stocks/refund', 'stocks/redeem', 'admin/stocks/retry'])
+      await api(route, { amount: '999999' }, 'operator', 404);
+    passed('Actual buildApp legacy health/catalog/SIWE, signed actor scope, and named read-only administrator authorization');
     assert.equal((await chain.network()).checkpointHash, manifest.checkpointHash);
     for (const target of [manifest.cashToken, manifest.stockToken, manifest.fundingVault, manifest.mintController, manifest.redemptionEscrow]) {
       assert.equal(await chain.codeHash(target, manifest.checkpointNumber), manifest.codeHashes[target]);
