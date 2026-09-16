@@ -54,21 +54,16 @@ type GiwaStocksAdminFeatureProps = {
 - 같은 `session.id`에서 `accessToken`만 바뀌면(갱신) 데이터를 유지하고, 다음 요청부터 새 토큰을 쓴다(요청 시점에 읽음).
 - 루트는 `w-full`이다. 폭은 host 페이지 wrapper가 정한다.
 
-### 3.3 기존 관리자 메뉴 연결 위치 (이번 작업에서는 수정하지 않음 — 통합 담당)
+### 3.3 관리자 통합 조건 (2026-09-17 검토 후 정정; 통합 담당)
 
-| 파일 | 추가할 내용 |
-|---|---|
-| `src/demo/giwa/routes.ts` | `export const GIWA_ADMIN_STOCKS_ROUTE = "/admin/stocks"` |
-| `src/main.tsx` | `/admin` children에 `{ path: 'stocks', element: giwaRoute(<GiwaAdminStocksPage />) }` 추가. lazy import `./demo/giwa/stocks-admin`의 `GiwaStocksAdminFeature`를 페이지 wrapper로 감싼다 |
-| `src/demo/giwa/GiwaAdminLayout.tsx` | `ADMIN_TABS`에 `{ label: "Stocks", to: GIWA_ADMIN_STOCKS_ROUTE }` 추가 |
+원래 이 절의 `/admin` children 및 `GiwaAdminLayout.ADMIN_TABS` 제안은 철회한다. 해당 route 계층은 legacy `RequireGiwaAdmin` / operator-token shell을 상속하므로 SIWE Stocks의 진입점으로 사용하지 않는다.
 
-선행 조건:
+1. Stocks 관리자 페이지는 legacy gate/shell 바깥의 sibling route로 연결한다. 최종 URL과 탐색 메뉴는 통합 담당이 정하고, 공통 SIWE host 세션을 `session`으로 주입한다.
+2. 원래 base `427f832`에는 frontend SIWE host가 없었다. 이후 별도 host 후보 `bac9020a`가 존재하며, 이 관리자 후보에는 아직 통합되지 않았다. 당시의 "host 없음"을 현재 전체 개발 상태로 확대하지 않는다.
+3. `GiwaAdminLayout`의 `x-operator-token`과 `RequireGiwaAdmin` 주소 allowlist는 Stocks 권한이 아니다. 이 모듈에 전달하지 말고 서버의 명명된 `stocks:read` 판정만 따른다.
+4. 서버 진입점은 Stocks runtime이 구성된 경우에만 plugin을 등록한다. 미구성 서버에서는 "API 비활성"을 표시한다.
 
-1. 현재 프런트엔드에는 SIWE Bearer 세션을 만드는 코드가 없다(`src`에 `authorization`/`Bearer` 사용처 없음). 서버에는
-   `POST /api/v1/auth/nonce`, `POST /api/v1/auth/verify`가 있다. 통합 작업이 세션을 만들어 `session`으로 넘겨야 한다.
-2. `GiwaAdminLayout`의 operator token 입력값(`x-operator-token`)과 `RequireGiwaAdmin` 주소 allowlist는 Stocks 권한이 아니다.
-   이 모듈에 전달하지 말고, Stocks 권한은 서버의 명명된 `stocks:read` 판정만 따른다.
-3. 서버 진입점은 Stocks runtime이 구성된 경우에만 plugin을 등록한다. 미구성 서버에서는 이 화면이 "API 비활성"을 표시한다.
+이 정정은 통합 안내에만 적용된다. 과거 구현·검사·스크린샷 기록은 당시 결과를 그대로 보존한다.
 
 ## 4. 실제 연결한 API와 구현하지 않은 기능
 

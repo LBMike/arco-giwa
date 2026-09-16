@@ -108,12 +108,12 @@ type GiwaStocksAdminFeatureProps = {
 11. `UNKNOWN`은 실패로 단정하지 않고 "결과 미확정 — 원래 의도 유지, 재전송 없음"으로 표시.
 12. 흰색 테마, `var(--color-arco-*)` 토큰만(원시 색·기본 Tailwind 색 금지), 루트 `w-full`, 375px 가로 스크롤 없음, 키보드 탭 이동·화살표 탭 전환·포커스 표시.
 
-### 4.4 기존 관리자 메뉴 연결 위치 (이번 작업에서 수정하지 않음)
+### 4.4 관리자 통합 조건 (2026-09-17 검토 후 정정; 이번 작업에서 route 수정 없음)
 
-- `src/demo/giwa/routes.ts`: `GIWA_ADMIN_STOCKS_ROUTE = "/admin/stocks"` 추가
-- `src/main.tsx`: `/admin` children에 `{ path: 'stocks', element: giwaRoute(<GiwaAdminStocksPage />) }` (lazy import `./demo/giwa/stocks-admin`)
-- `src/demo/giwa/GiwaAdminLayout.tsx`: `ADMIN_TABS`에 `{ label: "Stocks", to: GIWA_ADMIN_STOCKS_ROUTE }`
-- 선행 조건: 프런트엔드에 SIWE Bearer 세션 제공자가 아직 없음(`/api/v1/auth/nonce`·`verify`는 서버에 존재). host 통합 작업이 세션을 만들어 `session`으로 주입해야 하며, 기존 operator token 입력란은 Stocks에 전달하지 않는다.
+- Stocks 관리자 route는 기존 `/admin` 자식으로 넣지 않는다. 해당 계층은 `RequireGiwaAdmin`과 `GiwaAdminLayout`의 legacy operator-token shell을 상속한다.
+- 새 Stocks 페이지는 그 gate/shell 바깥의 sibling route로 통합하고, 공통 SIWE host의 세션을 `session` props로 전달한다. 최종 URL·공통 탐색 메뉴는 통합 담당이 정한다.
+- 기존 operator token 입력값과 브라우저 주소 allowlist는 Stocks 권한을 부여하지 않는다. 서버의 `stocks:read` 판정을 따른다.
+- 이 문서의 원래 base `427f832`에는 frontend SIWE host가 없었다. 이후 별도 후보 `bac9020a`에 host가 구현되었지만 이 관리자 후보에는 아직 합쳐지지 않았다. 이 역사적 base 제약을 최신 전체 개발 상태로 해석하지 않는다.
 
 ## 5. 실패 기준
 

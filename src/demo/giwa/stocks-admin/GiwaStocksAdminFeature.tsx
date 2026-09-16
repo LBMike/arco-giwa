@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react"
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react"
 import { KeyRound, ShieldOff, PlugZap } from "lucide-react"
 import { AuditPanel } from "./AuditPanel"
 import { formatUtc } from "./format"
 import { OrdersPanel } from "./OrdersPanel"
 import { OverviewPanel } from "./OverviewPanel"
 import { ReconciliationPanel } from "./ReconciliationPanel"
-import { StocksAdminStore } from "./store"
+import { scopeKeyOf, StocksAdminStore } from "./store"
 import type {
   AccessState,
   GiwaStocksAdminFeatureProps,
@@ -57,18 +57,28 @@ export function latestMeta(snapshot: StocksAdminSnapshot): StocksEnvelopeMeta | 
   return best?.meta ?? null
 }
 
+// The owner key belongs inside the feature: hosts may persist this component across
+// logout, account and environment changes without supplying a React key themselves.
 export function GiwaStocksAdminFeature(props: GiwaStocksAdminFeatureProps) {
+  return <StocksAdminScopeOwner key={scopeKeyOf(props)} {...props} />
+}
+
+// No effect runs during SSR. In the browser retire the old owner and apply token-only
+// changes during commit, before a containing layout effect can invoke its callbacks.
+const useCommitEffect = typeof window === "undefined" ? useEffect : useLayoutEffect
+
+function StocksAdminScopeOwner(props: GiwaStocksAdminFeatureProps) {
   const now = props.now ?? Date.now
   const [store] = useState(() => new StocksAdminStore({ ...props, now }))
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   const [section, setSection] = useState<StocksAdminSection>(props.initialSection ?? "overview")
   const clock = useTicker(now, 15_000)
 
-  useEffect(() => {
+  useCommitEffect(() => {
     store.configure({ apiBase: props.apiBase, session: props.session, deploymentKey: props.deploymentKey, fetch: props.fetch, now })
   }, [store, props.apiBase, props.session, props.deploymentKey, props.fetch, now])
 
-  useEffect(() => {
+  useCommitEffect(() => {
     store.activate()
     return () => store.deactivate()
   }, [store])
