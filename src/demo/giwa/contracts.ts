@@ -55,7 +55,8 @@ export function fromBaseUnits(value: bigint, decimals: number) {
   return formatUnits(value, decimals)
 }
 
-type ActiveWalletClient = Pick<WalletClient, "sendTransaction" | "writeContract">
+type ActiveWalletClient = Pick<WalletClient, "sendTransaction" | "writeContract"> &
+  Partial<Pick<WalletClient, "getAddresses" | "getChainId" | "signMessage">>
 type SimulateContractClient = {
   simulateContract(args: Record<string, unknown>): Promise<{ request: unknown }>
 }
