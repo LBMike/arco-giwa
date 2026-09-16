@@ -58,3 +58,9 @@ Required baseline: typecheck, build, test:frontend, test:server, test:security, 
 ## DB-001 prerequisite
 
 Separate assigned builder /root/giwa_backend_inventory, branch codex/giwa-migration-inspector-20260916, same exact base. Allowed only scripts/prisma/inspect-migrations.mjs, new scripts/prisma/inspect-migrations.test.mjs and docs/evidence/giwa-migration-inspector-20260916.md. Fix the false requirement that every incremental migration repeat CREATE SCHEMA. Retain forbidden-schema/waitlist checks and validate supported qualified DDL in ordered history. Add regressions for valid history and unsafe schema references, without weakening checks or modifying historical SQL. Document parser limits. Node test and actual migration inspection must pass before releasing Stocks schema work. No DB connection or migration application in this prerequisite.
+
+### Gate update and clarifications
+
+DB-001 final source SHA d16fbe8dad0dde5a9c15e0ebf8c26602e2474c23 (including 7fe76fe) passed independent reviewer /root/rwa_reviewer after fixing the reported executable-string bypass; 21 tests and actual migration history pass. Commander released the assigned additive schema work. This does not approve the new migration itself or activate a runtime.
+
+Additional required edge behavior: wrong-wallet dust is recorded in suspense without changing a legitimate awaiting order; a verified refund closes an order that never bought, but refunding a second separate payment cannot undo a completed purchase. Scope all reads/claims/projections to the deployment digest. Include actual direct ERC20 transfers to the vault in unallocated observation; they do not fund an order. A reconciliation needs an independent fixed-finalized-block snapshot and adequate coverage; otherwise explicitly unavailable/incomplete.

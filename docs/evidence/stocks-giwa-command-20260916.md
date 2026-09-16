@@ -36,4 +36,6 @@ Unchanged baseline results:
 
 ## Current handoff state
 
+DB-001 source commits 7fe76fe44812af6d3d9d8fb62514a3a28fbc3a6a and d16fbe8dad0dde5a9c15e0ebf8c26602e2474c23 were independently reviewed and assembled into this local commander verification branch as b7cc167 and 44759a8. The reviewer found an executable-string inspection bypass; five failing reproductions were added before the fix, then 21/21 tests and actual history passed. The reviewed prerequisite releases only the planned additive schema implementation, not deployment or main integration.
+
 Implementation and independent verification are in progress. No integration to main, process activation, RPC/signing activation, testnet deployment, token issuance, UI changes, push or release has occurred. A local test result is not live-chain evidence. Final code SHA/results and remaining activation requirements will be recorded after independent review. Claude counter-review remains required before integration of Codex money-path changes.
