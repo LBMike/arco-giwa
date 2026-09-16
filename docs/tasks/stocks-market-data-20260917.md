@@ -2,11 +2,13 @@
 
 Status: ASSIGNED. The user authorized Ondo-level data with approximate testnet swaps and chose Massive preparation without an existing API account. The coordinating task `01a0aae1-20be-7a42-9672-dbcd305033dd` confirmed exclusive ownership of this module and reserves shared app/index/UI integration.
 
+Scope correction: the user clarified SEIBro is only a stock-selection reference and explicitly prohibited further access. The catalog research task was interrupted immediately. No SEIBro scraping, synchronization, runtime integration, or collected ranking snapshot is included in this task. Initial selection is a separate curated input; market data comes from Massive only.
+
 Base SHA: `bc67cf2a8ae98d3e5f820627afe8f25046a0891a`.
 Branch: `codex/giwa-stocks-market-data-20260917`.
 Checkout: `/private/tmp/arco-giwa-stocks-market-data-20260917` (independent same-product clone).
 
-Roles: commander `/root`; builder `/root/stocks_market_data_builder`; reviewer `/root/stocks_market_data_reviewer`; catalog researcher `/root/seibro_catalog_research`.
+Roles: commander `/root`; builder `/root/stocks_market_data_builder`; reviewer `/root/giwa_stocks_builder` (a separate identity from this task's builder, read-only review); catalog researcher `/root/seibro_catalog_research` (interrupted; no further access).
 
 Allowed files: `server/src/stocks-market-data/**`, this document, `docs/contracts/stocks-market-data-v1.md`, `docs/evidence/stocks-market-data-20260917.md`. Commander owns documents; builder owns module source/tests. Review is read-only in a separate checkout after a candidate commit.
 
