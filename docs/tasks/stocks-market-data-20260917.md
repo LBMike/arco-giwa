@@ -4,6 +4,8 @@ Status: COMMANDER_VERIFIED — independent exact-source review passed at `6008f1
 
 Scope correction: the user clarified SEIBro is only a stock-selection reference and explicitly prohibited further access. The catalog research task was interrupted immediately. No SEIBro scraping, synchronization, runtime integration, or collected ranking snapshot is included in this task. Initial selection is a separate curated input; market data comes from Massive only.
 
+Chart direction follow-up: the user requested that ARCO own the chart UI. At documentation base `ac91155e0f5a5d6c9c9e9ccf8b3fc4c8e7f76ea8`, commander updated only this task document and `docs/contracts/stocks-market-data-v1.md` with the native chart implementation brief. Existing Recharts is the drawing library; Massive is the data source. A separate read-only review supplied data-semantics/race/precision acceptance criteria. No backend API/source or existing UI changed in this follow-up; frontend implementation remains with the assigned frontend/integration owner.
+
 Base SHA: `bc67cf2a8ae98d3e5f820627afe8f25046a0891a`.
 Branch: `codex/giwa-stocks-market-data-20260917`.
 Checkout: `/private/tmp/arco-giwa-stocks-market-data-20260917` (independent same-product clone).

@@ -54,6 +54,30 @@ Keep the existing white theme. This module supplies data, not a new visual desig
 
 Deferred fields: dividends, dividend yield, exchange-session calendar, total-return-adjusted token chart, token supply/NAV/price ratio. They require a separately defined source/meaning and must not be filled with plausible-looking fixture values in normal runtime.
 
+## ARCO-owned chart UI — user direction, 2026-09-17
+
+The user selected an ARCO-owned chart experience inspired by Ondo. Massive remains the data supplier; ARCO renders and controls the chart, period controls, styling, interactions and state messages. This does not assert which chart engine Ondo uses internally. Build the component inside the existing Stocks frontend owner's module and integrate through the single assigned integrator. Existing backend source/API at `6008f104` is sufficient for this task and remains unchanged.
+
+Use the already installed Recharts package as a drawing library; own the React component and data adapter. Do not embed a third-party chart widget, iframe or vendor script, and do not build an unrelated charting engine. No package or lockfile change is needed. Inspect the existing GIWA chart for visual tokens and responsive conventions, but retain its current Saving/Funds behavior; a separate Stocks component should handle the market-data DTO and states.
+
+Visual/interaction brief for the frontend implementer:
+
+- Keep the white theme and fluid width within the page's existing layout. The chart header prioritizes the underlying USD price, selected-window price change, and the source timestamp/delay status. Keep testnet mock execution price in the order panel.
+- Start with a clear line/very light area chart of bar closes, without smoothing that implies extra observations. Use existing `--color-arco-chart-line`, `--color-arco-chart-area`, border and surface tokens. Signed change text uses `--color-arco-up` / `--color-arco-down` plus an explicit sign; color is not the only indicator. Keep grid lines and axis labels restrained.
+- Period controls are exactly 1D / 1W / 1M / 3M / 1Y, with an obvious selected state and keyboard focus. Do not add unsupported ALL/YTD/5Y controls. 1D means the rolling last 24 hours, not today's trading session.
+- Hover/focus/touch selects an actual observation and shows a crosshair/dot, exact close and its bar time. Label it as the interval's close; the timestamp is the bar start. A separate interval label prevents implying a tick trade at that instant. Use one explicit timezone across ticks/tooltips/source labels, preferably New York time via `America/New_York` with DST-aware formatting. Restore the current underlying snapshot display when selection ends; never place another symbol's observation beneath the current title.
+- Provide a keyboard-accessible latest-value summary and period controls; the chart's essential value/time information must not require a mouse. Mobile touch interaction must preserve vertical page scrolling. Zero/one-observation states must remain legible without manufacturing a trend.
+
+Data and verification acceptance:
+
+1. Compute selected-window change from the first and last **returned** close using exact decimal/bigint arithmetic; report the actual observation bounds. Do not substitute the snapshot's daily `changePercent`, and do not mix a current unadjusted snapshot with a split-adjusted historical close. Fewer than two observations gives `—`. Partial history is labeled as the returned interval, not a complete period return.
+2. Keep provider decimal strings as the source for labels, tooltips and percentage calculations. Recharts receives finite numeric coordinates only at the final drawing boundary; those coordinates must never become monetary values or input to orders. Round only for display.
+3. Draw only returned observations. Do not fill market closures or missing data with zero prices, synthetic candles or interpolated tooltip values. If a time gap exceeds the documented interval, segment the line or explicitly represent the gap; do not assert an exchange session calendar that the backend does not provide. `EMPTY`, `TRUNCATED`, `UNCONFIGURED`, `UNAVAILABLE` and `STALE` have distinct visible states; no fabricated preview chart in normal runtime.
+4. Key data by exact symbol and range. On rapid symbol/range changes, cancel when possible and also guard response publication by the current selection/request generation. Clear previous selection-specific price/change/tooltip data immediately. A late response for a previous selection must not overwrite the active one. Test both symbol switches and range switches.
+5. Fetch a detail chart on demand through the ARCO API. Keep drawing separate from fetching. Do not start 40 independent chart polling loops in the listing; miniature charts can reuse deliberately loaded/cached series when supported by the configured request budget. API keys never enter browser code.
+
+Required frontend checks: selected-window change differs correctly from the snapshot daily change; exact tooltip formatting; out-of-order symbol/range responses; empty/one-point/partial/stale/unconfigured states; chart data cannot alter the server-issued order quote; keyboard/touch interaction and narrow/large viewport layout. Use clearly labeled synthetic fixtures in tests only. Confirm the final rendered appearance visually before reporting UI completion.
+
 ## Server integration (assigned integrator only)
 
 Exports live in `server/src/stocks-market-data/index.ts`. This task supplies the module; it does not edit shared `app.ts` / `index.ts` or mount frontend routes. Register once per server instance, not once per request, so cache, request budget and cooldown are shared within that process:
