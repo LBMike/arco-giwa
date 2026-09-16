@@ -104,6 +104,7 @@ export function inspectMigrationHistory(migrations) {
       return start + 3
     }
     const pendingDoBodies = new Set()
+    const truncateTriggerEvents = new Set()
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i]
       const current = word(tokens, i)
@@ -144,9 +145,22 @@ export function inspectMigrationHistory(migrations) {
           else if (idempotent && !token.routineBody) schemaCreated = true
         } else if (kind === "INDEX" || kind === "TRIGGER") {
           // PostgreSQL index/trigger names are unqualified; the table sets schema.
+          const declarationStart = at
           while (at < tokens.length && tokens[at].value !== ";" && word(tokens, at) !== "ON") at++
           if (word(tokens, at) !== "ON") add(`CREATE ${kind} is missing its ON target`)
-          else requireQualified(at + 1, `CREATE ${kind} ON`)
+          else {
+            requireQualified(at + 1, `CREATE ${kind} ON`)
+            if (kind === "TRIGGER") {
+              // Exempt only event tokens within this CREATE TRIGGER header,
+              // before its ON relation. Later statements/routine bodies retain
+              // the normal TRUNCATE target check.
+              for (let event = declarationStart; event < at; event++) {
+                if (word(tokens, event) === "TRUNCATE" && tokens[event].routineDepth === token.routineDepth &&
+                  ["BEFORE", "AFTER", "OR"].includes(word(tokens, event - 1)) &&
+                  ["OR", "ON"].includes(word(tokens, event + 1))) truncateTriggerEvents.add(event)
+              }
+            }
+          }
         } else if (OBJECT_KINDS.has(kind)) requireQualified(at, `CREATE ${kind}`)
         else add(`unsupported CREATE object kind ${kind || "(missing)"}`)
       }
@@ -159,7 +173,7 @@ export function inspectMigrationHistory(migrations) {
           if (current === "DROP") while (tokens[next]?.value === ",") next = requireQualified(next + 1, `${current} ${kind}`)
         } else add(`unsupported ${current} object kind ${kind || "(missing)"}`)
       }
-      if (current === "TRUNCATE") {
+      if (current === "TRUNCATE" && !truncateTriggerEvents.has(i)) {
         let at = i + 1
         if (word(tokens, at) === "TABLE") at++
         let next = requireQualified(at, "TRUNCATE")

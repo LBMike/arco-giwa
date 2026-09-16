@@ -107,6 +107,30 @@ test("qualified writes and non-target UPDATE keywords remain valid", () => {
   `), [])
 })
 
+test("CREATE TRIGGER permits BEFORE TRUNCATE as an event", () => {
+  assert.deepEqual(inspect('CREATE TRIGGER "immutable" BEFORE TRUNCATE ON arco_evm."Journal" FOR EACH STATEMENT EXECUTE FUNCTION arco_evm.reject_mutation();'), [])
+})
+
+test("CREATE TRIGGER permits TRUNCATE in a combined event list", () => {
+  assert.deepEqual(inspect('CREATE TRIGGER "immutable" BEFORE UPDATE OR DELETE OR TRUNCATE ON arco_evm."Journal" FOR EACH STATEMENT EXECUTE FUNCTION arco_evm.reject_mutation();'), [])
+})
+
+test("TRUNCATE statements still require safe qualified targets outside trigger events", () => {
+  const trigger = 'CREATE TRIGGER "immutable" BEFORE TRUNCATE ON arco_evm."Journal" FOR EACH STATEMENT EXECUTE FUNCTION arco_evm.reject_mutation();'
+  for (const target of ["thing", "other.thing", '"public"."thing"']) {
+    for (const prefix of ["TRUNCATE", "TRUNCATE TABLE"]) {
+      const statement = `${prefix} ${target};`
+      for (const sql of [
+        statement,
+        `${trigger} ${statement}`,
+        `DO $$ BEGIN ${statement} END; $$;`,
+        `CREATE FUNCTION arco_evm.bad() RETURNS void LANGUAGE plpgsql AS $$ BEGIN ${statement} END; $$;`,
+      ]) assert.match(inspect(sql).join("\n"), /qualified object|non-arco_evm|public/, sql)
+    }
+  }
+  assert.match(inspect('CREATE TRIGGER immutable BEFORE TRUNCATE ON thing FOR EACH STATEMENT EXECUTE FUNCTION arco_evm.reject_mutation();').join("\n"), /CREATE TRIGGER ON requires/)
+})
+
 test("routine bodies are scanned and trigger row fields are not schemas", () => {
   assert.deepEqual(inspect(`
     CREATE FUNCTION arco_evm.reject_update() RETURNS trigger LANGUAGE plpgsql AS $body$

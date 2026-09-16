@@ -33,7 +33,7 @@ The inspector remains read-only and has no database or environment dependency. I
 
 Node version: `v24.14.0`.
 
-1. `node --test scripts/prisma/inspect-migrations.test.mjs` — PASS: 21 tests, 0 failures, 0 skips.
+1. `node --test scripts/prisma/inspect-migrations.test.mjs` — PASS: 24 tests, 0 failures, 0 skips.
 2. `npm run prisma:migration:inspect` — PASS: `Prisma migration SQL inspection passed` against the complete existing migration history.
 3. `git diff --check` — PASS.
 4. `git diff --name-only 8160f354b55dfe9a525565e30ddc007f51448f3d -- prisma` — empty: no schema/history changes.
@@ -59,3 +59,11 @@ Reviewer `/root/rwa_reviewer` found that the single-quoted executable-body guard
 Five negative cases were added before changing the guard (the three reported forms plus PROCEDURE with LANGUAGE after its E-string and DO LANGUAGE with an E-string). Initial regression run: 21 tests, 16 pass, 5 fail. The bounded fix tracks pending DO bodies by dollar-quote nesting depth and recognizes an E-prefix before FUNCTION/PROCEDURE AS bodies. It rejects these executable strings while permitting ordinary E-string defaults and scanned dollar-quoted DO bodies.
 
 Post-fix: 21/21 tests pass; actual history inspection and `git diff --check` pass. No SQL history, database calls or additional file scope were introduced. Parser limitations above still apply.
+
+## Trigger TRUNCATE event follow-up
+
+Commander assigned a narrow follow-up because the Stocks migration's immutable-table guards use `CREATE TRIGGER ... BEFORE TRUNCATE ON arco_evm...`. The inspector incorrectly treated that trigger event as an executable TRUNCATE statement with an unqualified target.
+
+Two positive fixtures (`BEFORE TRUNCATE` and `BEFORE UPDATE OR DELETE OR TRUNCATE`) failed before the fix. The parser now records only TRUNCATE event-token positions inside a CREATE TRIGGER header before its ON relation. It still validates that ON target. Normal TRUNCATE statements, later statements after trigger declarations, and statements inside executable DO/function bodies retain the qualified-target check.
+
+Post-fix: 24/24 tests pass; actual committed history inspection and `git diff --check` pass. An additional read-only call to `inspectMigrationsDirectory('/private/tmp/arco-giwa-stocks-backend-20260916/prisma/migrations')` returned no findings, including the builder's new Stocks migration. No file in that builder workspace was modified. No Postgres/server operation was performed. The previous executable-body regression cases still pass.
