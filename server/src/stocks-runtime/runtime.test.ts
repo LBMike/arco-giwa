@@ -7,7 +7,7 @@ import { authorizedCall, redemptionCall } from '../stocks/chain.js';
 import { a, h, testManifest, TestChain } from '../stocks/test-fixtures.js';
 import { stocksSessionResolvers } from './session.js';
 import { endpoint, externalStocksSigner, httpStocksRpc, type HttpFetch } from './transport.js';
-import { parseStocksRuntimeConfig, configuredStocksRuntime } from './runtime.js';
+import { parseStocksRuntimeConfig, configuredStocksRuntime, stocksAutodispatch } from './runtime.js';
 import { StocksFinalizedObserver } from './observer.js';
 import { StocksObservationHealth } from './health.js';
 import { toEventSelector } from 'viem';
@@ -74,8 +74,15 @@ test('Signer rejects mutated target or operation before HTTP and snapshots confi
 test('Stocks runtime is absent by default and rejects incomplete or old activation configs', async () => {
   assert.equal(await configuredStocksRuntime({}, 'unused'), null);
   assert.equal(await configuredStocksRuntime({ STOCKS_MODE: 'DISABLED' }, 'unused'), null);
-  await assert.rejects(() => configuredStocksRuntime({ STOCKS_MODE: 'MAINNET' }, 'unused'), /STOCKS_CONFIGURATION_REQUIRED/);
+  await assert.rejects(() => configuredStocksRuntime({ STOCKS_MODE: 'MAINNET' }, 'unused'), /INVALID_STOCKS_MODE/);
   assert.throws(() => parseStocksRuntimeConfig({ profile: 'DEMO_TESTNET', manifest: { schemaVersion: 1 } }), /INVALID_STOCKS_ACTIVATION/);
+});
+
+test('Stocks dispatch flags fail closed before file, RPC, signer or database access', async () => {
+  for (const mode of [undefined, 'DISABLED', 'DEMO_TESTNET']) for (const flag of [undefined, '0']) assert.equal(stocksAutodispatch({ STOCKS_MODE: mode, STOCKS_AUTODISPATCH: flag }), false);
+  assert.equal(stocksAutodispatch({ STOCKS_MODE: 'DEMO_TESTNET', STOCKS_AUTODISPATCH: '1' }), true);
+  for (const env of [{ STOCKS_AUTODISPATCH: '1' }, { STOCKS_MODE: 'DISABLED', STOCKS_AUTODISPATCH: '1' }, { STOCKS_MODE: 'DEMO_TESTNET', STOCKS_AUTODISPATCH: 'true' }, { STOCKS_MODE: 'MAINNET' }]) await assert.rejects(() => configuredStocksRuntime(env, 'never-connect'), /STOCKS/);
+  assert.equal(await configuredStocksRuntime({ STOCKS_MODE: 'DISABLED', STOCKS_CONFIG_PATH: '/does-not-exist', STOCKS_AUTODISPATCH: '0' }, 'never-connect'), null);
 });
 
 test('Observation readiness expires without another tick and immediately closes after failure or clock reversal', () => {
