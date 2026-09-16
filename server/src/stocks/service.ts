@@ -1,3 +1,4 @@
+import { StocksSellService, type EscrowReturnPolicy } from './sell-service.js';
 import { randomUUID } from 'node:crypto';
 import { address, ensure, immutable, manifestDigest, operationKey, PROFILE, units, validateActor, freezeManifest, type Activation, type Actor, type Manifest, type PausePolicy, type SqlClient } from './contracts.js';
 import { authorizedCall, ReceiptVerifier } from './chain.js';
@@ -12,15 +13,25 @@ export type RefundPolicy = (input: {
 }) => Promise<boolean>;
 export class StocksService {
     readonly digest: string;
-    constructor(readonly repo: StocksRepository, readonly manifest: Manifest, readonly verifier: ReceiptVerifier, private readonly activation?: Activation, readonly paused: PausePolicy = async () => true, private readonly refundPolicy: RefundPolicy = async () => false) {
+    readonly sell: StocksSellService;
+    constructor(readonly repo: StocksRepository, readonly manifest: Manifest, readonly verifier: ReceiptVerifier, private readonly activation?: Activation, readonly paused: PausePolicy = async () => true, private readonly refundPolicy: RefundPolicy = async () => false, returnPolicy?: EscrowReturnPolicy) {
         this.manifest = freezeManifest(manifest);
         this.digest = manifestDigest(this.manifest);
         if (activation)
             this.activation = Object.freeze(structuredClone(activation));
         ensure(repo.deploymentDigest === this.digest, 'REPOSITORY_DEPLOYMENT_MISMATCH');
         ensure(this.digest === manifestDigest(verifier.manifest), 'VERIFIER_DEPLOYMENT_MISMATCH');
+        this.sell = new StocksSellService(this, returnPolicy);
     }
-    async ready(): Promise<void> { ensure(this.activation?.manifestDigest === this.digest && this.activation.contractPolicyVerified === true, 'STOCKS_NOT_ACTIVATED', 503); ensure(!(await this.paused()), 'STOCKS_PAUSED', 503); }
+    requireActivation(): void { ensure(this.activation?.manifestDigest === this.digest && this.activation.contractPolicyVerified === true, 'STOCKS_NOT_ACTIVATED', 503); }
+    async bindDeployment(): Promise<void> {
+        this.requireActivation();
+        const scope = `cash:${this.manifest.networkInstance}:${address(this.manifest.fundingVault)}:${address(this.manifest.cashToken)}`;
+        await this.repo.pool.query('INSERT INTO arco_evm."StocksLiquidityBinding" ("scopeKey","deploymentDigest") VALUES($1,$2) ON CONFLICT DO NOTHING', [scope, this.digest]);
+        const binding = (await this.repo.pool.query('SELECT "deploymentDigest" FROM arco_evm."StocksLiquidityBinding" WHERE "scopeKey"=$1', [scope])).rows[0];
+        ensure(binding?.deploymentDigest === this.digest, 'VAULT_ALREADY_BOUND_TO_OTHER_DEPLOYMENT', 503);
+    }
+    async ready(): Promise<void> { await this.bindDeployment(); ensure(this.activation?.manifestDigest === this.digest && this.activation.contractPolicyVerified === true, 'STOCKS_NOT_ACTIVATED', 503); ensure(!(await this.paused()), 'STOCKS_PAUSED', 503); }
     catalog() { return { ...PROFILE, instruments: [{ symbol: 'NVDA', quantityScale: 9, price: '120.000000', priceSource: 'FIXED_MOCK_PRICE', orderCapability: this.activation?.manifestDigest === this.digest ? 'CHECK_PAUSE_AT_ORDER' : 'NOT_ACTIVATED' }], cashSymbol: this.manifest.cashSymbol, deploymentId: this.manifest.deploymentId, observedAt: new Date().toISOString() }; }
     async quote(actor: Actor, symbol: string, quantity: unknown) {
         actor = immutable(actor);
@@ -62,6 +73,7 @@ export class StocksService {
     }
     // Internal indexer boundary only. A hash causes a fresh trusted RPC read; clients cannot submit proof envelopes.
     async observeFunding(txHash: Hex) {
+        await this.bindDeployment();
         ensure(this.activation?.manifestDigest === this.digest, 'STOCKS_NOT_ACTIVATED', 503);
         const proof = await this.verifier.fetch(txHash);
         if (!proof)

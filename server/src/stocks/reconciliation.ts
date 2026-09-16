@@ -20,7 +20,7 @@ export async function reconcileStocks(service: StocksService, coverage?: Coverag
         return { status: 'INCOMPLETE', reason: 'STALE_OR_INVALID_OBSERVER_COVERAGE', cutoff: cursor, pending };
     if (!/^(0|[1-9]\d*)$/.test(cursor.throughBlock) || !/^0x[0-9a-f]{64}$/.test(cursor.blockHash))
         return { status: 'INCOMPLETE', reason: 'INVALID_CUTOFF', pending };
-    const walletRows = (await service.repo.pool.query('SELECT wallet,SUM(quantity)::text AS quantity FROM arco_evm."StocksHolding" WHERE "deploymentDigest"=$1 AND "blockNumber"<=$2 GROUP BY wallet', [service.digest, cursor.throughBlock])).rows;
+    const walletRows = (await service.repo.pool.query(`SELECT wallet,SUM(quantity)::text AS quantity FROM (SELECT wallet,quantity FROM arco_evm."StocksHolding" WHERE "deploymentDigest"=$1 AND "blockNumber"<=$2 UNION ALL SELECT wallet,"walletDelta" AS quantity FROM arco_evm."StocksQuantityMovement" WHERE "deploymentDigest"=$1 AND "blockNumber"<=$2) movements GROUP BY wallet`, [service.digest, cursor.throughBlock])).rows;
     let snapshot;
     try {
         snapshot = await service.verifier.snapshot(cursor.throughBlock, cursor.blockHash, walletRows.map(row => row.wallet));
@@ -31,8 +31,12 @@ export async function reconcileStocks(service: StocksService, coverage?: Coverag
     if (!snapshot)
         return { status: 'INCOMPLETE', reason: 'CUTOFF_NOT_CANONICAL_FINALIZED', pending };
     const row = (await service.repo.pool.query(`SELECT COALESCE(SUM(CASE WHEN debit='CASH_VAULT' THEN amount WHEN credit='CASH_VAULT' THEN -amount ELSE 0 END),0)::text AS cash FROM arco_evm."StocksJournal" WHERE "deploymentDigest"=$1 AND asset=$2 AND "blockNumber"<=$3`, [service.digest, service.manifest.cashToken, cursor.throughBlock])).rows[0];
-    const expectedSupply = walletRows.reduce((sum, holding) => sum + BigInt(holding.quantity), 0n).toString();
+    const escrow = (await service.repo.pool.query('SELECT COALESCE(SUM("escrowDelta"),0)::text AS quantity FROM arco_evm."StocksQuantityMovement" WHERE "deploymentDigest"=$1 AND "blockNumber"<=$2', [service.digest, cursor.throughBlock])).rows[0].quantity;
+    const liquidity = await service.repo.liquidity(service.repo.pool, service.manifest.cashToken);
+    const expectedSupply = walletRows.reduce((sum, holding) => sum + BigInt(holding.quantity), BigInt(escrow)).toString();
     const differences = [];
+    if (snapshot.escrowBalance !== escrow)
+        differences.push({ asset: 'STOCK_ESCROW', expected: escrow, actual: snapshot.escrowBalance });
     if (snapshot.cashBalance !== row.cash)
         differences.push({ asset: 'TEST_CASH', expected: row.cash, actual: snapshot.cashBalance });
     if (snapshot.stockSupply !== expectedSupply)
@@ -40,5 +44,5 @@ export async function reconcileStocks(service: StocksService, coverage?: Coverag
     for (const holding of walletRows)
         if (snapshot.walletBalances[holding.wallet] !== holding.quantity)
             differences.push({ asset: 'STOCK_WALLET', wallet: holding.wallet, expected: holding.quantity, actual: snapshot.walletBalances[holding.wallet] });
-    return { status: differences.length ? 'MISMATCH' : 'MATCHED_AT_CUTOFF', cutoff: cursor, snapshot, differences, pending };
+    return { status: differences.length ? 'MISMATCH' : 'MATCHED_AT_CUTOFF', cutoff: cursor, snapshot, differences, pending, currentLiabilities: liquidity };
 }

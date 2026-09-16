@@ -1,12 +1,13 @@
 // TEST_HARNESS_ONLY. Explicit imports from tests only; never selected by runtime composition.
 import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256, zeroAddress, type Abi, type Address, type Hex } from 'viem';
 import { ABI, ABI_DIGEST, callDigest, operationKey, type Actor, type AuthorizedCall, type Manifest, type SignerPort, type Submission } from './contracts.js';
+import { escrowIdentity } from './chain.js';
 import type { ChainBlock, ChainPort, ChainReceipt, ChainTransaction, RawLog } from './chain.js';
 export const a = (n: number) => `0x${n.toString(16).padStart(40, '0')}` as Address;
 export const h = (n: number) => `0x${n.toString(16).padStart(64, '0')}` as Hex;
 export const ACTOR: Actor = { actorId: 'test-actor', wallet: a(10), chainId: 91342, scope: 'STOCKS_TESTNET', verified: true };
 export function testManifest(): Manifest {
-    return { deploymentId: 'TEST_HARNESS_ONLY_STOCKS_V1', profile: 'DEMO_TESTNET', chainId: 91342, networkInstance: 'TEST_HARNESS_ONLY_NETWORK_V1', checkpointNumber: '1', checkpointHash: h(1), abiDigest: ABI_DIGEST, finalityPolicy: 'FINALIZED', cashToken: a(100), cashSymbol: 'ARCO_TEST_USDC', cashScale: 6, stockToken: a(101), quantityScale: 9, fundingVault: a(102), mintController: a(103), signerAddress: a(104), codeHashes: Object.fromEntries([100, 101, 102, 103].map(n => [a(n), keccak256('0x6000')])), restrictedTransfers: true, nonUpgradeable: true };
+    return { schemaVersion: 2, redemptionEscrow: a(105), deploymentId: 'TEST_HARNESS_ONLY_STOCKS_V1', profile: 'DEMO_TESTNET', chainId: 91342, networkInstance: 'TEST_HARNESS_ONLY_NETWORK_V1', checkpointNumber: '1', checkpointHash: h(1), abiDigest: ABI_DIGEST, finalityPolicy: 'FINALIZED', cashToken: a(100), cashSymbol: 'ARCO_TEST_USDC', cashScale: 6, stockToken: a(101), quantityScale: 9, fundingVault: a(102), mintController: a(103), signerAddress: a(104), codeHashes: Object.fromEntries([100, 101, 102, 103, 105].map(n => [a(n), keccak256('0x6000')])), restrictedTransfers: true, nonUpgradeable: true };
 }
 export function eventLog(contract: Address, name: string, args: Record<string, unknown>, index: number): RawLog {
     const event = ABI.find(entry => entry.type === 'event' && entry.name === name);
@@ -46,6 +47,16 @@ export class TestChain implements ChainPort {
     }
     funding(orderKey: Hex, cash: string, payer = ACTOR.wallet, txHash = h(200), timestamp?: string) {
         return this.add({ hash: txHash, from: payer, to: this.m.fundingVault, input: encodeFunctionData({ abi: ABI, functionName: 'depositForOrder', args: [orderKey, BigInt(cash)] }), value: '0' }, [eventLog(this.m.fundingVault, 'FundingReceived', { orderKey, payer, token: this.m.cashToken, amount: BigInt(cash) }, 0), eventLog(this.m.cashToken, 'Transfer', { from: payer, to: this.m.fundingVault, value: BigInt(cash) }, 1)], timestamp);
+    }
+    escrow(orderKey: Hex, quantity: string, payer = ACTOR.wallet, txHash = h(300), timestamp?: string) {
+        const escrowId = escrowIdentity(orderKey, payer, this.m.stockToken);
+        const data = encodeFunctionData({ abi: ABI, functionName: 'escrowForOrder', args: [orderKey, this.m.stockToken, BigInt(quantity)] });
+        this.add({ hash: txHash, from: payer, to: this.m.redemptionEscrow, input: data, value: '0' }, [eventLog(this.m.redemptionEscrow, 'StockEscrowed', { escrowId, orderKey, payer, token: this.m.stockToken, quantity: BigInt(quantity) }, 0), eventLog(this.m.stockToken, 'Transfer', { from: payer, to: this.m.redemptionEscrow, value: BigInt(quantity) }, 1)], timestamp, '30');
+        return { txHash, escrowId };
+    }
+    redeem(call: AuthorizedCall, escrowId: Hex, quantity: string, cashAmount: string, wallet: Address, kind: 'REDEEM' | 'RETURN', txHash: Hex) {
+        const logs = kind === 'REDEEM' ? [eventLog(this.m.redemptionEscrow, 'StockRedeemed', { operationId: operationKey(call.operationId), escrowId, recipient: wallet, token: this.m.stockToken, quantity: BigInt(quantity), cashToken: this.m.cashToken, cashAmount: BigInt(cashAmount) }, 0), eventLog(this.m.stockToken, 'Transfer', { from: this.m.redemptionEscrow, to: zeroAddress, value: BigInt(quantity) }, 1), eventLog(this.m.cashToken, 'Transfer', { from: this.m.fundingVault, to: wallet, value: BigInt(cashAmount) }, 2)] : [eventLog(this.m.redemptionEscrow, 'StockReturned', { operationId: operationKey(call.operationId), escrowId, recipient: wallet, token: this.m.stockToken, quantity: BigInt(quantity) }, 0), eventLog(this.m.stockToken, 'Transfer', { from: this.m.redemptionEscrow, to: wallet, value: BigInt(quantity) }, 1)];
+        return this.add({ hash: txHash, from: call.from, to: call.to, input: call.data, value: '0' }, logs, undefined, '40');
     }
     confirmation(call: AuthorizedCall, quantity: string, wallet: Address, kind: 'MINT' | 'REFUND', txHash: Hex) {
         const logs = kind === 'MINT' ? [eventLog(this.m.mintController, 'StockMinted', { operationId: operationKey(call.operationId), token: this.m.stockToken, recipient: wallet, quantity: BigInt(quantity) }, 0), eventLog(this.m.stockToken, 'Transfer', { from: zeroAddress, to: wallet, value: BigInt(quantity) }, 1)] : [eventLog(this.m.fundingVault, 'FundingRefunded', { operationId: operationKey(call.operationId), recipient: wallet, amount: BigInt(quantity) }, 0), eventLog(this.m.cashToken, 'Transfer', { from: this.m.fundingVault, to: wallet, value: BigInt(quantity) }, 1)];

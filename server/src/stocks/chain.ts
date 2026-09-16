@@ -1,4 +1,4 @@
-import { decodeEventLog, encodeFunctionData, toEventSelector, zeroAddress, type Address, type Hex } from 'viem';
+import { decodeEventLog, encodeFunctionData, toEventSelector, encodeAbiParameters, keccak256, zeroAddress, type Address, type Hex } from 'viem';
 import { ABI, amount, address, ensure, hash, operationKey, freezeManifest, StocksError, type AuthorizedCall, type Manifest } from './contracts.js';
 export type RawLog = {
     address: Address;
@@ -70,14 +70,14 @@ export class ReceiptVerifier {
             return null;
         ensure(block.number === receipt.blockNumber && receipt.status === 'success' && tx.value === '0', 'UNSUCCESSFUL_RECEIPT');
         const events: VerifiedEnvelope['events'] = [];
-        for (const contract of [m.cashToken, m.stockToken, m.fundingVault, m.mintController]) {
+        for (const contract of [m.cashToken, m.stockToken, m.fundingVault, m.mintController, m.redemptionEscrow]) {
             ensure(await this.rpc.codeHash(contract, block.number) === m.codeHashes[contract.toLowerCase()], 'CODE_IDENTITY_MISMATCH');
         }
         const indices = new Set<number>();
         for (const log of receipt.logs) {
             ensure(!log.removed && Number.isSafeInteger(log.logIndex) && log.logIndex >= 0 && !indices.has(log.logIndex), 'INVALID_LOG_IDENTITY');
             indices.add(log.logIndex);
-            if (![m.cashToken, m.stockToken, m.fundingVault, m.mintController].some(a => a.toLowerCase() === log.address.toLowerCase()))
+            if (![m.cashToken, m.stockToken, m.fundingVault, m.mintController, m.redemptionEscrow].some(a => a.toLowerCase() === log.address.toLowerCase()))
                 continue;
             if (!ABI.filter(e => e.type === 'event').some(e => toEventSelector(e) === log.topics[0]))
                 continue;
@@ -91,6 +91,13 @@ export class ReceiptVerifier {
         }
         return { receipt, tx, block, events };
     }
+    async latestSnapshot() {
+        const block = await this.rpc.block('finalized');
+        ensure(block, 'FINALIZED_BLOCK_UNAVAILABLE');
+        const snapshot = await this.snapshot(block.number, block.hash, []);
+        ensure(snapshot, 'FINALIZED_SNAPSHOT_UNAVAILABLE');
+        return snapshot;
+    }
     async snapshot(blockNumber: string, blockHash: string, wallets: string[]) {
         const m = this.manifest;
         const network = await this.rpc.network();
@@ -103,9 +110,9 @@ export class ReceiptVerifier {
         const walletBalances: Record<string, string> = {};
         for (const wallet of wallets)
             walletBalances[wallet] = await this.rpc.tokenBalance(m.stockToken, address(wallet), blockNumber);
-        const [cashBalance, stockSupply] = await Promise.all([this.rpc.tokenBalance(m.cashToken, m.fundingVault, blockNumber), this.rpc.tokenSupply(m.stockToken, blockNumber)]);
-        ensure([cashBalance, stockSupply, ...Object.values(walletBalances)].every(v => /^(0|[1-9]\d*)$/.test(v)), 'INVALID_CHAIN_BALANCE');
-        return { blockNumber, blockHash, cashBalance, stockSupply, walletBalances };
+        const [cashBalance, stockSupply, escrowBalance] = await Promise.all([this.rpc.tokenBalance(m.cashToken, m.fundingVault, blockNumber), this.rpc.tokenSupply(m.stockToken, blockNumber), this.rpc.tokenBalance(m.stockToken, m.redemptionEscrow, blockNumber)]);
+        ensure([cashBalance, stockSupply, escrowBalance, ...Object.values(walletBalances)].every(v => /^(0|[1-9]\d*)$/.test(v)), 'INVALID_CHAIN_BALANCE');
+        return { blockNumber, blockHash, blockTimestamp: block.timestamp, cashBalance, stockSupply, escrowBalance, walletBalances };
     }
     unallocated(proof: VerifiedEnvelope): {
         eventId: string;
@@ -156,6 +163,35 @@ export class ReceiptVerifier {
             this.transfer(proof, m.cashToken, m.fundingVault, wallet, amount(quantity));
         }
     }
+    escrow(proof: VerifiedEnvelope) {
+        const m = this.manifest;
+        ensure(address(proof.tx.to) === address(m.redemptionEscrow), 'WRONG_ESCROW_TARGET');
+        const events = proof.events.filter(e => e.name === 'StockEscrowed' && e.address === address(m.redemptionEscrow));
+        ensure(events.length === 1, 'ESCROW_EVENT_COUNT');
+        const a = events[0].args;
+        ensure(typeof a.payer === 'string' && typeof a.token === 'string' && typeof a.orderKey === 'string' && typeof a.quantity === 'bigint', 'INVALID_ESCROW_EVENT');
+        ensure(address(a.payer) === address(proof.tx.from) && address(a.token) === address(m.stockToken), 'ESCROW_IDENTITY_MISMATCH');
+        const quantity = amount(a.quantity.toString());
+        ensure(a.escrowId === escrowIdentity(a.orderKey as Hex, a.payer, a.token), 'ESCROW_COMPOSITE_ID_MISMATCH');
+        ensure(proof.tx.input === encodeFunctionData({ abi: ABI, functionName: 'escrowForOrder', args: [a.orderKey as Hex, m.stockToken, quantity] }), 'ESCROW_CALLDATA_MISMATCH');
+        const movement = this.transfer(proof, m.stockToken, a.payer, m.redemptionEscrow, quantity);
+        return { escrowId: a.escrowId as string, orderKey: a.orderKey, payer: address(a.payer), quantity: quantity.toString(), eventId: `${m.networkInstance}:${proof.receipt.transactionHash}:${movement.logIndex}`, blockTimestamp: proof.block.timestamp };
+    }
+    redemption(proof: VerifiedEnvelope, call: AuthorizedCall, kind: 'REDEEM' | 'RETURN', escrowId: Hex, wallet: string, quantity: string, cashAmount: string) {
+        const m = this.manifest;
+        ensure(address(proof.tx.from) === address(call.from) && address(proof.tx.to) === address(m.redemptionEscrow) && proof.tx.input === call.data, 'REDEMPTION_CALL_MISMATCH');
+        const events = proof.events.filter(e => e.name === (kind === 'REDEEM' ? 'StockRedeemed' : 'StockReturned') && e.address === address(m.redemptionEscrow));
+        ensure(events.length === 1, 'REDEMPTION_EVENT_COUNT');
+        const a = events[0].args;
+        ensure(a.operationId === operationKey(call.operationId) && a.escrowId === escrowId && typeof a.recipient === 'string' && address(a.recipient) === address(wallet) && typeof a.token === 'string' && address(a.token) === address(m.stockToken) && a.quantity === amount(quantity), 'REDEMPTION_IDENTITY_MISMATCH');
+        if (kind === 'REDEEM') {
+            ensure(typeof a.cashToken === 'string' && address(a.cashToken) === address(m.cashToken) && a.cashAmount === amount(cashAmount), 'REDEMPTION_CASH_MISMATCH');
+            this.transfer(proof, m.stockToken, m.redemptionEscrow, zeroAddress, amount(quantity));
+            this.transfer(proof, m.cashToken, m.fundingVault, wallet, amount(cashAmount));
+        }
+        else
+            this.transfer(proof, m.stockToken, m.redemptionEscrow, wallet, amount(quantity));
+    }
     private transfer(proof: VerifiedEnvelope, token: string, from: string, to: string, quantity: bigint): VerifiedEnvelope['events'][number] {
         const transfers = proof.events.filter(e => e.name === 'Transfer' && e.address === address(token));
         ensure(transfers.length === 1 && String(transfers[0].args.from).toLowerCase() === from.toLowerCase() && String(transfers[0].args.to).toLowerCase() === to.toLowerCase() && transfers[0].args.value === quantity, 'ERC20_MOVEMENT_MISMATCH');
@@ -165,4 +201,11 @@ export class ReceiptVerifier {
 export function authorizedCall(m: Manifest, operationId: string, kind: 'MINT' | 'REFUND', wallet: string, quantity: string): AuthorizedCall {
     const data = kind === 'MINT' ? encodeFunctionData({ abi: ABI, functionName: 'mintForOperation', args: [operationKey(operationId), m.stockToken, address(wallet), amount(quantity)] }) : encodeFunctionData({ abi: ABI, functionName: 'refundForOperation', args: [operationKey(operationId), address(wallet), amount(quantity)] });
     return { operationId, chainId: m.chainId, networkInstance: m.networkInstance, deploymentId: m.deploymentId, from: m.signerAddress, to: kind === 'MINT' ? m.mintController : m.fundingVault, data, value: '0' };
+}
+export function escrowIdentity(orderKey: Hex, payer: string, token: string): Hex {
+    return keccak256(encodeAbiParameters([{ type: 'bytes32' }, { type: 'address' }, { type: 'address' }], [orderKey, address(payer), address(token)]));
+}
+export function redemptionCall(m: Manifest, operationId: string, kind: 'REDEEM' | 'RETURN', escrowId: Hex, cashAmount: string): AuthorizedCall {
+    const data = kind === 'REDEEM' ? encodeFunctionData({ abi: ABI, functionName: 'settleRedemption', args: [operationKey(operationId), escrowId, amount(cashAmount)] }) : encodeFunctionData({ abi: ABI, functionName: 'returnEscrowForOperation', args: [operationKey(operationId), escrowId] });
+    return { operationId, chainId: m.chainId, networkInstance: m.networkInstance, deploymentId: m.deploymentId, from: m.signerAddress, to: m.redemptionEscrow, data, value: '0' };
 }

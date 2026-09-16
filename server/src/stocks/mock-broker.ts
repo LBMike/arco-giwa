@@ -6,7 +6,7 @@ import { StocksRepository } from './repository.js';
 export function createDurableMockBroker(repo: StocksRepository): BrokerPort {
     return {
         async submit(request: BrokerRequest): Promise<BrokerResult> {
-            ensure(request.symbol === 'NVDA' && request.operationId === `broker:${request.orderId}`, 'INVALID_MOCK_ORDER');
+            ensure(request.symbol === 'NVDA' && request.operationId === `${request.side === 'SELL' ? 'sell-broker' : 'broker'}:${request.orderId}`, 'INVALID_MOCK_ORDER');
             amount(request.quantity);
             amount(request.cashAmount);
             const digest = createHash('sha256').update(canonicalJson(request)).digest('hex');

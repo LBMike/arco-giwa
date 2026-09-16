@@ -14,13 +14,22 @@ export class StocksWorker {
             if (!(e instanceof StocksError) || e.code !== 'STOCKS_PAUSED')
                 return false;
         }
+        await s.sell.expireReservations();
+        if (!(await s.paused()))
+            await s.sell.advanceLiquidity();
         const job = await s.repo.claim(await s.paused());
         if (!job)
             return false;
         try {
             if (job.originalStatus === 'PENDING' && await s.paused()) {
-                await s.repo.tx(async (db) => { if (await s.repo.leased(db, job))
-                    await s.repo.finish(db, job, 'PENDING'); });
+                await s.repo.tx(async (db) => {
+                    if (await s.repo.leased(db, job))
+                        await s.repo.finish(db, job, 'PENDING');
+                });
+                return true;
+            }
+            if (['SELL_BROKER', 'REDEEM', 'RETURN'].includes(job.kind)) {
+                await s.sell.runJob(job, this.broker, this.signer);
                 return true;
             }
             if (job.kind !== 'REFUND') {
@@ -46,7 +55,12 @@ export class StocksWorker {
                     const order = await s.repo.order(db, job.orderId);
                     await s.repo.state(db, order, review ? 'REVIEW_REQUIRED' : job.kind === 'BROKER' ? 'BROKER_UNKNOWN' : 'MINT_UNKNOWN');
                 }
-                await s.repo.audit(db, job.orderId ?? job.id, review ? 'PROVIDER_EVIDENCE_REJECTED' : 'PROVIDER_OUTCOME_UNKNOWN', { operationId: job.id, code: review ? error.code : 'TRANSPORT_OR_DECODING_FAILURE' });
+                if (job.sellOrderId) {
+                    const order = await s.sell.order(db, job.sellOrderId);
+                    if (!['COMPLETED', 'RETURNED'].includes(order.state))
+                        await s.sell.state(db, order, review ? 'REVIEW_REQUIRED' : job.kind === 'SELL_BROKER' ? 'SELL_BROKER_UNKNOWN' : 'SETTLEMENT_UNKNOWN');
+                }
+                await s.repo.audit(db, job.orderId ?? job.sellOrderId ?? job.id, review ? 'PROVIDER_EVIDENCE_REJECTED' : 'PROVIDER_OUTCOME_UNKNOWN', { operationId: job.id, code: review ? error.code : 'TRANSPORT_OR_DECODING_FAILURE' });
             });
         }
         return true;

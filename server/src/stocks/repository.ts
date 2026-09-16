@@ -60,17 +60,45 @@ export class StocksRepository {
     async scopedOrders(actorId: string, id?: string): Promise<Row[]> {
         return (await this.pool.query('SELECT * FROM arco_evm."StocksOrder" WHERE "actorId"=$1 AND "deploymentDigest"=$3 AND ($2::text IS NULL OR id=$2) ORDER BY "createdAt" DESC LIMIT 100', [actorId, id ?? null, this.deploymentDigest])).rows;
     }
+    async isTransactionProjected(txHash: string): Promise<boolean> {
+        const row = (await this.pool.query(`SELECT o.id FROM arco_evm."StocksOutbox" o WHERE o."deploymentDigest"=$1 AND o."txHash"=$2 AND o.status='DONE' AND o.kind IN('MINT','REFUND','REDEEM','RETURN') AND EXISTS(SELECT 1 FROM arco_evm."StocksAudit" a WHERE a."deploymentDigest"=$1 AND a.action=o.kind||'_FINALIZED' AND a.detail->>'txHash'=$2) LIMIT 1`, [this.deploymentDigest, txHash])).rows[0];
+        return !!row;
+    }
+    async walletPosition(db: Pick<SqlClient, 'query'>, wallet: string) {
+        const row = (await db.query(`SELECT
+          (SELECT COALESCE(SUM(quantity),0) FROM arco_evm."StocksHolding" WHERE "deploymentDigest"=$1 AND wallet=$2)+
+          (SELECT COALESCE(SUM("walletDelta"),0) FROM arco_evm."StocksQuantityMovement" WHERE "deploymentDigest"=$1 AND wallet=$2) AS wallet,
+          (SELECT COALESCE(SUM("escrowDelta"),0) FROM arco_evm."StocksQuantityMovement" WHERE "deploymentDigest"=$1 AND wallet=$2) AS escrow,
+          (SELECT COALESCE(SUM(quantity),0) FROM arco_evm."StocksQuantityReservation" WHERE "deploymentDigest"=$1 AND wallet=$2 AND status='ACTIVE') AS reserved`, [this.deploymentDigest, wallet])).rows[0];
+        return { walletQuantity: String(row.wallet), escrowedQuantity: String(row.escrow), reservedQuantity: String(row.reserved), availableQuantity: (BigInt(row.wallet) - BigInt(row.reserved)).toString(), quantity: (BigInt(row.wallet) + BigInt(row.escrow)).toString() };
+    }
+    async liquidity(db: Pick<SqlClient, 'query'>, cashToken: string) {
+        const row = (await db.query(`SELECT
+         (SELECT COALESCE(SUM(CASE WHEN debit='CASH_VAULT' THEN amount WHEN credit='CASH_VAULT' THEN -amount ELSE 0 END),0) FROM arco_evm."StocksJournal" WHERE "deploymentDigest"=$1 AND asset=$2) AS "cashBalance",
+         (SELECT COALESCE(SUM(f.amount),0) FROM arco_evm."StocksFunding" f LEFT JOIN arco_evm."StocksOrder" o ON o.id=f."orderId" WHERE f."deploymentDigest"=$1 AND (f.status IN('SUSPENSE','REFUND_PENDING') OR (f.status='ACCEPTED' AND o.state<>'COMPLETED'))) AS liabilities,
+         (SELECT COALESCE(SUM(amount),0) FROM arco_evm."StocksCashReservation" WHERE "deploymentDigest"=$1 AND status='RESERVED') AS "sellReserved"`, [this.deploymentDigest, cashToken])).rows[0];
+        return { cashBalance: String(row.cashBalance), liabilities: String(row.liabilities), sellReserved: String(row.sellReserved) };
+    }
+    async sellOrders(actorId: string, id?: string) { return (await this.pool.query(`SELECT *,'SELL' AS side FROM arco_evm."StocksSellOrder" WHERE "actorId"=$1 AND "deploymentDigest"=$2 AND ($3::text IS NULL OR id=$3) ORDER BY "createdAt" DESC LIMIT 100`, [actorId, this.deploymentDigest, id ?? null])).rows; }
     async portfolio(actorId: string): Promise<Row> {
-        const [holdings, pending] = await Promise.all([
-            this.pool.query('SELECT "deploymentId",wallet,symbol,SUM(quantity)::text AS quantity FROM arco_evm."StocksHolding" WHERE "actorId"=$1 AND "deploymentDigest"=$2 GROUP BY "deploymentId",wallet,symbol', [actorId, this.deploymentDigest]),
-            this.pool.query(`SELECT id,state,quantity::text,"cashAmount"::text FROM arco_evm."StocksOrder" WHERE "actorId"=$1 AND "deploymentDigest"=$2 AND state NOT IN ('COMPLETED','REFUNDED') ORDER BY "createdAt"`, [actorId, this.deploymentDigest]),
-        ]);
-        return { holdings: holdings.rows, pending: pending.rows, projectionPolicy: 'FINALIZED_RESTRICTED_TRANSFER_ISSUANCE_ONLY' };
+        const wallets = (await this.pool.query(`SELECT wallet FROM arco_evm."StocksHolding" WHERE "actorId"=$1 AND "deploymentDigest"=$2 UNION SELECT wallet FROM arco_evm."StocksSellOrder" WHERE "actorId"=$1 AND "deploymentDigest"=$2`, [actorId, this.deploymentDigest])).rows;
+        const holdings = [];
+        for (const row of wallets)
+            holdings.push({ wallet: row.wallet, symbol: 'NVDA', ...await this.walletPosition(this.pool, row.wallet) });
+        const pending = (await this.pool.query(`SELECT id,state,quantity::text,"cashAmount"::text,'BUY' AS side FROM arco_evm."StocksOrder" WHERE "actorId"=$1 AND "deploymentDigest"=$2 AND state NOT IN('COMPLETED','REFUNDED') UNION ALL SELECT id,state,quantity::text,"cashAmount"::text,'SELL' AS side FROM arco_evm."StocksSellOrder" WHERE "actorId"=$1 AND "deploymentDigest"=$2 AND state NOT IN('COMPLETED','RETURNED','EXPIRED')`, [actorId, this.deploymentDigest])).rows;
+        return { holdings, pending, projectionPolicy: 'FINALIZED_RESTRICTED_TRANSFER_MOVEMENTS' };
     }
     async adminOrder(id: string): Promise<Row | null> {
         const order = (await this.admin('orders', id))[0];
         if (!order)
             return null;
+        if (order.side === 'SELL') {
+            const custody = (await this.pool.query('SELECT * FROM arco_evm."StocksCustody" WHERE "orderId"=$1 AND "deploymentDigest"=$2', [id, this.deploymentDigest])).rows;
+            const operations = (await this.pool.query('SELECT id,kind,status,"txHash","createdAt" FROM arco_evm."StocksOutbox" WHERE "sellOrderId"=$1 AND "deploymentDigest"=$2', [id, this.deploymentDigest])).rows;
+            const audit = (await this.pool.query('SELECT * FROM arco_evm."StocksAudit" WHERE subject=$1 AND "deploymentDigest"=$2 ORDER BY "createdAt",id', [id, this.deploymentDigest])).rows;
+            const reservations = (await this.pool.query('SELECT * FROM arco_evm."StocksCashReservation" WHERE "orderId"=$1 AND "deploymentDigest"=$2', [id, this.deploymentDigest])).rows;
+            return { order, custody, operations, audit, reservations };
+        }
         const [funding, operations, audit, holdings] = await Promise.all([
             this.pool.query('SELECT * FROM arco_evm."StocksFunding" WHERE "orderId"=$1 AND "deploymentDigest"=$2 ORDER BY "createdAt",id', [id, this.deploymentDigest]),
             this.pool.query('SELECT id,kind,status,"txHash","createdAt","leaseUntil" FROM arco_evm."StocksOutbox" WHERE "orderId"=$1 AND "deploymentDigest"=$2 ORDER BY "createdAt",id', [id, this.deploymentDigest]),
@@ -81,11 +109,11 @@ export class StocksRepository {
     }
     async admin(kind: 'overview' | 'orders' | 'reconciliations' | 'audit', id?: string): Promise<Row[]> {
         if (kind === 'orders')
-            return (await this.pool.query('SELECT * FROM arco_evm."StocksOrder" WHERE "deploymentDigest"=$2 AND ($1::text IS NULL OR id=$1) ORDER BY "createdAt" DESC LIMIT 200', [id ?? null, this.deploymentDigest])).rows;
+            return (await this.pool.query(`SELECT *,'BUY' AS side FROM arco_evm."StocksOrder" WHERE "deploymentDigest"=$2 AND ($1::text IS NULL OR id=$1) UNION ALL SELECT *,'SELL' AS side FROM arco_evm."StocksSellOrder" WHERE "deploymentDigest"=$2 AND ($1::text IS NULL OR id=$1) ORDER BY "createdAt" DESC LIMIT 200`, [id ?? null, this.deploymentDigest])).rows;
         if (kind === 'overview')
-            return (await this.pool.query('SELECT state,COUNT(*)::text AS count,SUM("cashAmount")::text AS "cashAmount" FROM arco_evm."StocksOrder" WHERE "deploymentDigest"=$1 GROUP BY state', [this.deploymentDigest])).rows;
+            return (await this.pool.query(`SELECT state,COUNT(*)::text AS count,SUM("cashAmount")::text AS "cashAmount",'BUY' AS side FROM arco_evm."StocksOrder" WHERE "deploymentDigest"=$1 GROUP BY state UNION ALL SELECT state,COUNT(*)::text AS count,SUM("cashAmount")::text AS "cashAmount",'SELL' AS side FROM arco_evm."StocksSellOrder" WHERE "deploymentDigest"=$1 GROUP BY state`, [this.deploymentDigest])).rows;
         if (kind === 'audit')
             return (await this.pool.query('SELECT * FROM arco_evm."StocksAudit" WHERE "deploymentDigest"=$1 ORDER BY "createdAt" DESC,id LIMIT 200', [this.deploymentDigest])).rows;
-        return (await this.pool.query(`SELECT 'ORDER' AS kind,id,state AS status FROM arco_evm."StocksOrder" WHERE "deploymentDigest"=$1 AND state NOT IN ('COMPLETED','REFUNDED') UNION ALL SELECT 'FUNDING',id,status FROM arco_evm."StocksFunding" WHERE "deploymentDigest"=$1 AND status IN ('SUSPENSE','REFUND_PENDING') UNION ALL SELECT 'OUTBOX',id,status FROM arco_evm."StocksOutbox" WHERE "deploymentDigest"=$1 AND status <> 'DONE' ORDER BY kind,id`, [this.deploymentDigest])).rows;
+        return (await this.pool.query(`SELECT 'ORDER' AS kind,id,state AS status FROM arco_evm."StocksOrder" WHERE "deploymentDigest"=$1 AND state NOT IN ('COMPLETED','REFUNDED') UNION ALL SELECT 'FUNDING',id,status FROM arco_evm."StocksFunding" WHERE "deploymentDigest"=$1 AND status IN ('SUSPENSE','REFUND_PENDING') UNION ALL SELECT 'OUTBOX',id,status FROM arco_evm."StocksOutbox" WHERE "deploymentDigest"=$1 AND status <> 'DONE' UNION ALL SELECT 'SELL',id,state FROM arco_evm."StocksSellOrder" WHERE "deploymentDigest"=$1 AND state NOT IN('COMPLETED','RETURNED','EXPIRED') UNION ALL SELECT 'CUSTODY',id,status FROM arco_evm."StocksCustody" WHERE "deploymentDigest"=$1 AND status NOT IN('REDEEMED','RETURNED') ORDER BY kind,id`, [this.deploymentDigest])).rows;
     }
 }

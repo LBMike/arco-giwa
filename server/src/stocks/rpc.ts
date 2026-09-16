@@ -5,8 +5,12 @@ export type JsonRpcTransport = (method: string, params: unknown[]) => Promise<un
 function object(value: unknown): Record<string, any> { ensure(value !== null && typeof value === 'object' && !Array.isArray(value), 'MALFORMED_RPC_RESPONSE'); return value as Record<string, any>; }
 function integer(value: unknown): string { ensure(typeof value === 'string' && /^0x(0|[1-9a-f][0-9a-f]*)$/.test(value), 'MALFORMED_RPC_QUANTITY'); return BigInt(value).toString(); }
 function hexData(value: unknown): Hex { ensure(typeof value === 'string' && /^0x([0-9a-f]{2})*$/.test(value), 'MALFORMED_RPC_DATA'); return value as Hex; }
-function rpcBlock(value: unknown): ChainBlock | null { if (value === null)
-    return null; const row = object(value); return { number: integer(row.number), hash: hash(row.hash), timestamp: integer(row.timestamp) }; }
+function rpcBlock(value: unknown): ChainBlock | null {
+    if (value === null)
+        return null;
+    const row = object(value);
+    return { number: integer(row.number), hash: hash(row.hash), timestamp: integer(row.timestamp) };
+}
 export function createStocksRpcPort(transport: JsonRpcTransport, manifest: Manifest): ChainPort {
     manifest = freezeManifest(manifest);
     const block = async (number: string | 'finalized') => rpcBlock(await transport('eth_getBlockByNumber', [number === 'finalized' ? number : `0x${BigInt(number).toString(16)}`, false]));

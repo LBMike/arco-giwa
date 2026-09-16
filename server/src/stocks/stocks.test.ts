@@ -3,7 +3,7 @@ import test from 'node:test';
 import Fastify from 'fastify';
 import { zeroAddress } from 'viem';
 import { units, validateManifest, manifestDigest, callDigest, StocksError, type SqlPool } from './contracts.js';
-import { authorizedCall, ReceiptVerifier } from './chain.js';
+import { authorizedCall, ReceiptVerifier, redemptionCall } from './chain.js';
 import { stocksPlugin } from './plugin.js';
 import { StocksRepository } from './repository.js';
 import { StocksService } from './service.js';
@@ -91,11 +91,18 @@ test('mint confirmation binds operation/call/recipient/quantity and ERC20 zero-a
 test('read-only RPC adapter requests finalized tag and rejects malformed quantities and log identity', async () => {
     const m = testManifest();
     const seen: string[] = [];
-    const port = createStocksRpcPort(async (method, params) => { seen.push(`${method}:${params[0]}`); if (method === 'eth_chainId')
-        return '0x164ce'; if (method === 'eth_getBlockByNumber')
-        return { number: '0x1', hash: h(1), timestamp: '0x2' }; if (method === 'eth_getCode')
-        return '0x6000'; if (method === 'eth_call')
-        return `0x${'1'.padStart(64, '0')}`; return null; }, m);
+    const port = createStocksRpcPort(async (method, params) => {
+        seen.push(`${method}:${params[0]}`);
+        if (method === 'eth_chainId')
+            return '0x164ce';
+        if (method === 'eth_getBlockByNumber')
+            return { number: '0x1', hash: h(1), timestamp: '0x2' };
+        if (method === 'eth_getCode')
+            return '0x6000';
+        if (method === 'eth_call')
+            return `0x${'1'.padStart(64, '0')}`;
+        return null;
+    }, m);
     assert.equal((await port.block('finalized'))!.number, '1');
     assert.ok(seen.includes('eth_getBlockByNumber:finalized'));
     assert.equal(await port.tokenBalance(m.cashToken, m.fundingVault, '1'), '1');
@@ -157,12 +164,35 @@ test('RPC adapter to verifier accepts real ERC20 mint zero-from topic and verifi
     assert.ok(proof);
     verifier.confirmation(proof, call, 'MINT', '1000000000', ACTOR.wallet);
 });
-
 test('canonical call digest survives JSONB key reordering and binds every call identity field', () => {
-    const m = testManifest(); const call = authorizedCall(m, 'mint:digest', 'MINT', ACTOR.wallet, '1000000000');
+    const m = testManifest();
+    const call = authorizedCall(m, 'mint:digest', 'MINT', ACTOR.wallet, '1000000000');
     const reordered = Object.fromEntries(Object.entries(call).reverse()) as typeof call;
     assert.equal(callDigest(call), callDigest(reordered));
-    for (const patch of [{ operationId: 'mint:other' }, { networkInstance: 'other' }, { deploymentId: 'other' }, { from: a(99) }, { to: a(99) }, { data: '0x00' }, { value: '1' }, { chainId: 1 }]) assert.notEqual(callDigest(call), callDigest({ ...call, ...patch } as typeof call));
+    for (const patch of [{ operationId: 'mint:other' }, { networkInstance: 'other' }, { deploymentId: 'other' }, { from: a(99) }, { to: a(99) }, { data: '0x00' }, { value: '1' }, { chainId: 1 }])
+        assert.notEqual(callDigest(call), callDigest({ ...call, ...patch } as typeof call));
     const reorderedManifest = Object.fromEntries(Object.entries(m).reverse()) as typeof m;
     assert.equal(manifestDigest(m), manifestDigest(reorderedManifest));
+});
+test('manifest v2 rejects old generation, missing escrow and duplicate constructor targets', () => {
+    const m = testManifest();
+    assert.throws(() => validateManifest({ ...m, schemaVersion: undefined } as never));
+    assert.throws(() => validateManifest({ ...m, redemptionEscrow: undefined } as never));
+    assert.throws(() => validateManifest({ ...m, redemptionEscrow: m.fundingVault }));
+});
+test('escrow verifier binds composite identity, owner, quantity and atomic burn/payout pair', async () => {
+    const m = testManifest();
+    const chain = new TestChain(m);
+    const verifier = new ReceiptVerifier(m, chain);
+    const raw = chain.escrow(h(900), '1000000000');
+    const fact = verifier.escrow((await verifier.fetch(raw.txHash))!);
+    assert.equal(fact.quantity, '1000000000');
+    const call = redemptionCall(m, 'redeem:test', 'REDEEM', raw.escrowId, '120000000');
+    chain.redeem(call, raw.escrowId, '1000000000', '120000000', ACTOR.wallet, 'REDEEM', h(901));
+    const proof = (await verifier.fetch(h(901)))!;
+    verifier.redemption(proof, call, 'REDEEM', raw.escrowId, ACTOR.wallet, '1000000000', '120000000');
+    assert.throws(() => verifier.redemption(proof, call, 'REDEEM', raw.escrowId, a(88), '1000000000', '120000000'));
+    chain.receipts.get(h(901))!.logs.pop();
+    const noPayout = (await verifier.fetch(h(901)))!;
+    assert.throws(() => verifier.redemption(noPayout, call, 'REDEEM', raw.escrowId, ACTOR.wallet, '1000000000', '120000000'), /ERC20_MOVEMENT_MISMATCH/);
 });
