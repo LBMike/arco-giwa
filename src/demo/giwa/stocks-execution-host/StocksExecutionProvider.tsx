@@ -100,19 +100,20 @@ export function useStocksOrderExecutionSlot(): OrderExecutionSlot | null {
  * Shown while signed out with the same wallet after a session ended with an open, answered or uncertain wallet
  * request. It names no order, amount or hash.
  *
- * A check never records a late answer: an expired session's gate refuses it before any request, and the browser
- * does not carry that hash into the next session. The check only reads the server's record, so the copy promises
- * no recovery and sends an unknown result to operations instead.
+ * The request itself is always on the server by then (its claim is reserved before the wallet opens); what may be
+ * missing is the wallet's answer. A check never records that answer: an expired session's gate refuses it before any
+ * request, and the browser does not carry the hash into the next session. The check only reads the server's record,
+ * so the copy promises no recovery, never allows a repeat, and sends an unknown or uncheckable result to operations.
  */
 export function StocksExecutionSessionNotice() {
   const host = useContext(ExecutionHostContext)
   const ended = host?.endedWithAttempt ?? null
   if (!host || !ended || host.signedIn || ended.wallet === null || host.wallet === null || ended.wallet.toLowerCase() !== host.wallet.toLowerCase()) return null
   return (
-    <Notice tone="warning" title="A wallet request from your last Stocks session may still be open or unrecorded">
-      <p>If your wallet answered after that session ended, the server may not have recorded the request, even if the transaction was sent.</p>
-      <p className="mt-2">Sign in to Stocks again with the same wallet, open the order and check it. The check only shows what the server has already recorded. It cannot add a request the server never received.</p>
-      <p className="mt-2">If the check shows the result as unknown, do not send the approval, deposit or escrow again from this or any other app or wallet. Contact operations to confirm what happened.</p>
+    <Notice tone="warning" title="A wallet request from your last Stocks session may still be open or its answer unrecorded">
+      <p>If your wallet answered after that session ended, the server may not have recorded that answer, even if the transaction was sent.</p>
+      <p className="mt-2">Sign in to Stocks again with the same wallet, open the order and check it. The check only shows what the server has already recorded. It cannot add a wallet answer the server never received.</p>
+      <p className="mt-2">Do not send the approval, deposit or escrow again from this or any other app or wallet. If the check shows the result as unknown, or the order can no longer be checked, contact operations to confirm what happened.</p>
     </Notice>
   )
 }

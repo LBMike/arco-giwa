@@ -29,7 +29,14 @@ const READ_METHODS = new Set(["eth_chainId", "eth_accounts", "eth_getBlockByNumb
 const READY_COPY = "입금·매도 예치는 수락된 주문 카드에서 진행합니다"
 const SESSION_COPY = "입금·매도 예치는 주문한 지갑으로 Stocks에 로그인한 뒤 진행할 수 있습니다."
 const UNSUPPORTED_COPY = "현재 연결된 지갑 방식은 거래 요청을 한 번만 보내도록 보장할 수 없어"
-const SESSION_NOTICE = "A wallet request from your last Stocks session may still be open or unrecorded"
+const SESSION_NOTICE = "A wallet request from your last Stocks session may still be open or its answer unrecorded"
+/** The whole notice as rendered (title and paragraphs concatenated by textContent). Any added promise changes it. */
+const SESSION_NOTICE_TEXT = [
+  SESSION_NOTICE,
+  "If your wallet answered after that session ended, the server may not have recorded that answer, even if the transaction was sent.",
+  "Sign in to Stocks again with the same wallet, open the order and check it. The check only shows what the server has already recorded. It cannot add a wallet answer the server never received.",
+  "Do not send the approval, deposit or escrow again from this or any other app or wallet. If the check shows the result as unknown, or the order can no longer be checked, contact operations to confirm what happened.",
+].join("")
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
@@ -673,19 +680,22 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       const text = notice.textContent ?? ""
       // No promise that checking or signing in records, attaches or restores the late answer.
       assert.doesNotMatch(text, /until (?:that|the|this|you) check/i, text)
-      assert.doesNotMatch(text, /\bcheck(?:ing)?\s+(?:will\s+|can\s+|may\s+|does\s+)?(?:record|attach|restore|recover|add|save)/i, text)
+      assert.doesNotMatch(text, /\bcheck(?:ing)?\s+(?:will\s+|can\s+|may\s+|does\s+)?(?:record|attach|restore|recover|add|save|match)/i, text)
       assert.doesNotMatch(text, /sign(?:ing)? in again\s+(?:will\s+|to\s+)?(?:record|attach|restore|recover)/i, text)
-      assert.doesNotMatch(text, /will be recorded|is recorded (?:when|after|once)|gets recorded/i, text)
-      // What it must say instead.
-      assert.match(text, /server may not have recorded the request, even if the transaction was sent/i, text)
+      assert.doesNotMatch(text, /will be recorded|is recorded (?:when|after|once)|gets recorded|\b(?:attach|restor|recover|retriev|resend|retry|re-?submit)/i, text)
+      // What it must say instead: the request is on the server, its late answer may not be; checking cannot add the answer;
+      // never repeat (unconditionally); operations for an unknown or no longer checkable result.
+      assert.match(text, /server may not have recorded that answer, even if the transaction was sent/i, text)
       assert.match(text, /check only shows what the server has already recorded/i, text)
-      assert.match(text, /cannot add a request the server never received/i, text)
-      assert.match(text, /do not send the approval, deposit or escrow again from this or any other app or wallet/i, text)
-      assert.match(text, /contact operations/i, text)
+      assert.match(text, /cannot add a wallet answer the server never received/i, text)
+      assert.match(text, /(?:^|\.)\s*Do not send the approval, deposit or escrow again from this or any other app or wallet\./, text)
+      assert.match(text, /if the check shows the result as unknown, or the order can no longer be checked, contact operations/i, text)
       // Nothing to click and nothing about the order: no link, button, number, amount, order or hash.
       assert.equal(notice.querySelectorAll("a, button").length, 0, "no link or button in the notice")
       assert.doesNotMatch(text, /\d/, text)
       for (const secret of secrets) assert.ok(!text.includes(secret), `notice leaks ${secret}`)
+      // And exactly this copy: a reworded promise the patterns above miss still fails here.
+      assert.equal(text, SESSION_NOTICE_TEXT)
     }
 
     const expiredSessionLateHash = (side: "BUY" | "SELL") => async () => {
@@ -726,7 +736,7 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       offset += 31_000
       await page.rerender({})
       await page.waitFor(() => page.text().includes("Your Stocks session expired. Sign in again."), "expired session")
-      const notice = await page.waitFor(() => noticeElement(page), "session notice")
+      await page.waitFor(() => noticeElement(page), "session notice")
       assert.equal(page.panel(), null)
       assert.equal(page.element.querySelector('[data-testid="stocks-order-card"]'), null)
 
@@ -740,6 +750,9 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       assert.equal(bodies(harness, /wallet-submissions\/outcomes$/).length, 0, "the expired session's gate refuses the late hash before any request")
       assert.deepEqual(approvals(), [["REQUEST_MAY_START", null]], "the server journal has no hash")
       assert.ok(!page.text().includes(hash), "the late hash is not painted")
+      // Re-query after the refused answer: the notice is still mounted, not a detached node from before.
+      const notice = noticeElement(page)
+      assert.ok(notice && page.element.contains(notice), "the notice is still shown after the late answer was refused")
       assertSessionNoticeMeaning(notice, [order.id, order.orderKey, hash])
 
       // A new session: sign in again and check. The check reads what the server recorded; it cannot attach the lost hash.

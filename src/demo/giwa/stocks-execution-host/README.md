@@ -62,13 +62,13 @@ When the capability is not READY, the investor order card keeps its "not availab
 
 When a signed-in identity ends with an open, answered or uncertain wallet request (logout or session expiry while the page stays mounted), the registry is disposed. `StocksExecutionSessionNotice` then shows, while signed out with the same wallet, a notice. It names no order, amount or hash, and has no link or button. It says:
 
-- a wallet answer that arrived after the session ended may not have been recorded by the server, even if the transaction was sent;
-- sign in again with the same wallet and check the order. The check only shows what the server has already recorded, and cannot add a request the server never received;
-- if the result is unknown, do not send the approval, deposit or escrow again from any app or wallet, and contact operations.
+- the request itself is on the server (its claim was reserved before the wallet opened), but a wallet answer that arrived after the session ended may not have been recorded, even if the transaction was sent;
+- sign in again with the same wallet and check the order. The check only shows what the server has already recorded, and cannot add a wallet answer the server never received;
+- never send the approval, deposit or escrow again from any app or wallet. If the check shows the result as unknown, or the order can no longer be checked (for example after the quote deadline), contact operations.
 
 A later session for the same wallet that ends without such a request clears it.
 
-The notice lives in page state: after a reload or remount it is gone. The next check then shows the reserved claim as recovery-only (UNKNOWN, do not repeat) or the recorded hash.
+The notice lives in page state: after a reload or remount it is gone. While the order can still be checked, the next check shows the reserved claim as recovery-only (UNKNOWN, do not repeat) or the recorded hash. After the quote deadline the panel offers no check.
 
 Known limit (browser): once the session has expired by time, the original gate refuses a late hash before any request.
 - The server journal keeps only the reserved claim (`REQUEST_MAY_START`, no hash).

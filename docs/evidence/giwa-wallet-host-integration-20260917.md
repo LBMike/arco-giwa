@@ -101,9 +101,9 @@ No app entry references `testing/` or `verification/`, and no product module imp
    - **Check:** one explicit evidence read, then the read-only controller check.
    - **Approve** and **Deposit/Escrow:** separate clicks, armed after 800 ms, each opening at most one `eth_sendTransaction`.
 7. **Session end.** Logout or expiry disposes the registry. A late wallet answer goes only to the original gate, which refuses it once the session has expired by time. While signed out with the same wallet, a generic notice appears. It names no order, amount or hash, and has no link or button. It says:
-   - a late answer may not have been recorded by the server, even if the transaction was sent;
-   - sign in again and check the order. The check only shows what the server has already recorded, and cannot add a request the server never received;
-   - if the result is unknown, send nothing again from any app or wallet, and contact operations.
+   - the request is on the server, but a late wallet answer may not have been recorded, even if the transaction was sent;
+   - sign in again and check the order. The check only shows what the server has already recorded, and cannot add a wallet answer the server never received;
+   - never send the approval, deposit or escrow again from any app or wallet. If the check shows the result as unknown, or the order can no longer be checked, contact operations.
 
    No previous account's attempt is shown to a new account. *(Notice copy corrected in 003B-1. The 003B copy said a late answer "may not be recorded until that check", which implied that a check records it.)*
 
@@ -169,13 +169,13 @@ Also: existing Savings/Funds and host wallet regressions 82/82 (`wallet-source/r
 | 4 s policy + 6 s check inside the final wallet read + 15 s evidence | **0** | claim REQUEST_MAY_START | UNKNOWN `EXECUTION_POLICY_EXPIRED`; negative control (a port that awaits its own check) → **1** send |
 | evidence and policy expiry while the approval prompt is open | 1 | outcome SUBMITTED, reconcile 0 | APPROVAL_SUBMITTED + hash + `EXECUTION_AUTHORITY_CHANGED`; explicit check later → READY_TRANSFER, still 1 |
 | logout/reload during the prompt (BUY) | 1 | late outcome via the old gate | old owner paints nothing; new owner → READY_TRANSFER only after a check |
-| session expired by time during the prompt, after the provider request was issued (SELL) | 1 | 0 outcomes: the gate refuses the late hash before any request (claim stays REQUEST_MAY_START, no hash) | same screen shows the hash; next session's check → UNKNOWN without hash, never resent |
+| session expired by time during the prompt, after the provider request was issued (SELL) | 1 | 0 outcomes: the gate refuses the late hash before any request (claim stays REQUEST_MAY_START, no hash) | Controller snapshot with the host session left in place: shows the hash (`RECOVERY_REQUIRED`). On the real page expiry disposes the registry, so the hash is not painted (003B-1 `page.dom` scenarios 11–12). Next session's check → UNKNOWN without hash, never resent |
 | late 401 on outcomes | 1 | invalidates the captured session | APPROVAL_SUBMITTED |
 | cancel during the prompt | 1 | outcome SUBMITTED | APPROVAL_SUBMITTED |
 | 4001 / -32603 / invalid hash | 1 each, never retried | UNKNOWN | UNKNOWN recovery-only |
 | reverted approval / pending finality | 1 | REVERTED / RECEIPT_PENDING → CONFIRMED after finality | BLOCKED `APPROVAL_REVERTED` / READY_TRANSFER after an explicit check |
 
-`page.dom.test.tsx` (11 = gate + 10) runs the real `/stocks` routes in StrictMode with the real host, investor feature, provider, panel, controller, reads, gate and ports over the in-process server:
+`page.dom.test.tsx` (11 = gate + 10 at 003B; 003B-1 adds scenarios 11–12, see the 003B-1 section) runs the real `/stocks` routes in StrictMode with the real host, investor feature, provider, panel, controller, reads, gate and ports over the in-process server:
 1. mount and sign-in: 0 wallet and 0 execution requests; capability copy only after sign-in
 2. BUY accept → check (1 evidence read) → Approve armed ≥700 ms → 1 exact send → claim/outcome/reconcile → READY_TRANSFER, then no send for 2.5 s → Deposit → SUBMITTED
 3. SELL through the Orders tab
@@ -305,7 +305,7 @@ Locale golden: verified earlier on Node 24 (en-US/cs-CZ/sk-SK) and by Codex in C
    - The server gives quotes 60 s (`clock_timestamp()+interval '60 seconds'`), and the order's `quoteExpiresAt` is that deadline. An order created some time after its quote has less than 60 s left.
    - An approval is confirmed only by `reconcile`, whose receipt verifier returns pending until the receipt block is finalized. The deposit/escrow step is offered only after that confirmation.
    - **What is verified offline:** when the approval's finality arrives after the remaining deadline, the next send is refused.
-     - Codex's independent API probe confirmed an approval only after 60,001 ms. The server then refused the transfer claim with 409 `ORDER_EXPIRED`, still with 1 claim and 1 chain transaction.
+     - Codex's independent API probe, over the in-process fake SQL and fake chain (`/private/tmp/arco-giwa-003b-api-review-evidence-20260917/README.md`, recovery-boundaries), confirmed an approval only after 60,001 ms. The server then refused the transfer claim with 409 `ORDER_EXPIRED`, still with 1 claim and 1 simulated chain transaction. This is neither a PostgreSQL result nor a builder check.
      - After the deadline, the builder's browser check showed no deposit/escrow step and the message "Quote deadline passed — do not deposit".
    - **What is not verified:** how long finality takes on the public network. This does not show that real-network use is impossible, only that it fails whenever finality is slower than the time left.
    - The fake chain finalizes immediately. The builder's browser check still hit the deadline twice with manual steps.
@@ -327,7 +327,7 @@ Locale golden: verified earlier on Node 24 (en-US/cs-CZ/sk-SK) and by Codex in C
    - **What is missing:** the browser link that carries the originally known hash into an explicit recovery step in the new session. It is not built here.
    - A hash the application never received cannot be restored by a check or a claim.
    - No automatic recording or retry exists.
-6. **The session-end notice is page state.** It does not survive a reload or remount. The next check then shows only what the server recorded.
+6. **The session-end notice is page state.** It does not survive a reload or remount. While the order can still be checked, the next check shows only what the server recorded. After the quote deadline the panel offers no check.
 7. **The checkpoint attestation cannot detect a fork after the checkpoint block, or a lying wallet.** Only the server's finalized receipt verification binds a transaction to the reviewed chain.
 8. **The planner throws a plain `TypeError`** for input that is not a URL at all (refused, not `INVALID_API_BASE`; planner not owned).
 9. **Not verified:** a real wallet extension, the Dynamic SDK, a public network, a real database (Codex follow-up), Node 22, other browsers.
