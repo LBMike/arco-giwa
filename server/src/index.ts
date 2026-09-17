@@ -1,3 +1,4 @@
+import { StocksSubmissionDiagnosticsService } from './stocks-submission-diagnostics/service.js'
 import { pathToFileURL } from "node:url"
 import { configuredStocksRuntime, stocksAutodispatch } from "./stocks-runtime/runtime.js"
 import { closeOnce, installServerShutdown, startManagedStocksServer } from "./stocks-runtime/lifecycle.js"
@@ -314,6 +315,7 @@ async function composeServer(
           } : undefined,
           stocksExecution: stocks ? { service: stocks.execution, resolveActor: sessions!.resolveActor } : undefined,
           stocksRuntimeStatus: stocks ? { getSnapshot: stocks.status, resolveOperator: sessions!.resolveOperator } : undefined,
+          stocksSubmissionDiagnostics: stocks ? { service: new StocksSubmissionDiagnosticsService(stocks.service), resolveOperator: sessions!.resolveOperator } : undefined,
           stocksSubmissions: stocks ? {
             service: new StocksSubmissionsService(stocks.service, stocks.submissionReceipts),
             resolveActor: sessions!.resolveActor,
