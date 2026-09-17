@@ -189,3 +189,33 @@ test("portfolio accepts signed deficits that satisfy the server identities, and 
     assert.equal((await rejection(client.getPortfolio(token, signal))).kind, "INVALID_RESPONSE", JSON.stringify(bad))
   }
 })
+
+test("a base with a bare query or fragment delimiter is refused before an authenticated quote is sent", () => {
+  for (const baseUrl of ["https://api.test?", "https://api.test#", "https://api.test/prefix?", "https://api.test/prefix#"]) {
+    const calls: string[] = []
+    assert.throws(
+      () => createGiwaStocksHttpClient({ baseUrl, fetch: async (url) => { calls.push(url); return Response.json({}) } }),
+      (error: unknown) => error instanceof Error && error.message === "GIWA_STOCKS_INVALID_BASE_URL",
+      baseUrl,
+    )
+    assert.equal(calls.length, 0)
+  }
+})
+
+test("a path-prefixed base sends each route under the prefix, with Authorization only on authenticated calls", async () => {
+  const calls: { url: string; init: RequestInit }[] = []
+  const client = createGiwaStocksHttpClient({
+    baseUrl: "https://api.test/prefix//",
+    fetch: async (url, init) => { calls.push({ url, init }); return Response.json({ error: "FIXTURE_REFUSED" }, { status: 403 }) },
+  })
+  assert.equal(client.baseUrl, "https://api.test/prefix")
+  const signal = new AbortController().signal
+  await client.getCatalog(signal).catch(() => {})
+  await client.createQuote("BUY", { symbol: "NVDA", quantity: "1" }, "session.jwt", signal).catch(() => {})
+  await client.getOrder("SELL", "a/b", "session.jwt", signal).catch(() => {})
+  assert.deepEqual(calls.map(c => [c.init.method, c.url, new Headers(c.init.headers).get("authorization")]), [
+    ["GET", "https://api.test/prefix/api/v1/stocks/catalog", null],
+    ["POST", "https://api.test/prefix/api/v1/stocks/quotes", "Bearer session.jwt"],
+    ["GET", "https://api.test/prefix/api/v1/stocks/sell-orders/a%2Fb", "Bearer session.jwt"],
+  ])
+})

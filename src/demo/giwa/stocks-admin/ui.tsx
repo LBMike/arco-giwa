@@ -184,6 +184,8 @@ export function RefreshButton({ onClick, busy, what }: { onClick: () => void; bu
 export function errorCopy(error: StocksAdminError): { title: string; body: string } {
   const suffix = [error.status, error.code].filter((part) => part !== null).join(" · ")
   switch (error.kind) {
+    case "configuration":
+      return { title: "Stocks admin API is not configured", body: "No request was sent. Nothing new is shown." }
     case "network":
       return { title: "Could not reach the API", body: "The request failed before a response arrived. Nothing new is shown." }
     case "server":

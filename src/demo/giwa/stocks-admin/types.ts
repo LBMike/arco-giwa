@@ -209,6 +209,7 @@ export type Reconciliation = {
 }
 
 export type StocksAdminErrorKind =
+  | "configuration" // the API base is not a valid absolute http(s) base; nothing was sent
   | "unauthenticated" // no session token on the client; nothing was sent
   | "unauthorized" // 401
   | "forbidden" // 403
