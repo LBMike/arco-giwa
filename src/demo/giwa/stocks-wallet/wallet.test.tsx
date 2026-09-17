@@ -192,10 +192,10 @@ test("order changed during claim is re-read before the first wallet request", as
 })
 
 test("server revert, mismatched reconciliation and pending approval never issue transfer", async () => {
-  for (const kind of ["revert", "wrong-hash", "wrong-binding", "pending", "missing"]) {
+  // A missing reconcile port is refused before the approval claim; see the TRUSTED_RECONCILIATION_REQUIRED tests.
+  for (const kind of ["revert", "wrong-hash", "wrong-binding", "pending"]) {
     const f = fixture()
-    if (kind === "missing") delete f.ports.submissions.reconcile
-    else f.ports.submissions.reconcile = async request => {
+    f.ports.submissions.reconcile = async request => {
       const old = f.shared.data.get(`${request.intentKey}:APPROVAL`)!
       if (kind === "pending") return old
       const next: AttemptRecord = { ...old, ...(kind === "revert" ? { status: "REVERTED" } : kind === "wrong-hash" ? { txHash: h("f"), status: "CONFIRMED" } : { claimId: "wrong", status: "CONFIRMED" }) }
@@ -465,12 +465,97 @@ test("server terminal history cannot change status or hash and confirmed transfe
 })
 
 test("an outstanding approval requires server reconciliation even when allowance already looks sufficient", async () => {
-  const f = fixture(); delete f.ports.submissions.reconcile
+  // The approval is recorded while trusted reconciliation still answers "pending"; the port disappears afterwards.
+  const f = fixture(); const reconcile = f.ports.submissions.reconcile!
+  f.ports.submissions.reconcile = async req => f.shared.data.get(`${req.intentKey}:APPROVAL`)!
   let walletReceiptCalls = 0
   f.ports.waitApprovalReceipt = async () => { walletReceiptCalls++; return null }
-  await f.controller.prepare(); await f.controller.approve(); f.setAllowance("999999999999")
-  await f.controller.prepare(); await f.controller.submit()
+  await f.controller.prepare(); await f.controller.approve()
+  assert.equal(f.controller.getSnapshot().error, "RECEIPT_PENDING"); assert.equal(f.walletCalls.length, 1)
+  delete f.ports.submissions.reconcile; f.setAllowance("999999999999")
+  await f.controller.prepare(); await f.controller.submit(); await f.controller.approve()
   assert.equal(walletReceiptCalls, 0); assert.equal(f.walletCalls.length, 1)
-  assert.equal(f.controller.getSnapshot().status, "APPROVAL_SUBMITTED"); assert.equal(f.controller.getSnapshot().error, "TRUSTED_RECONCILIATION_REQUIRED")
+  assert.equal(f.controller.getSnapshot().status, "APPROVAL_SUBMITTED"); assert.equal(f.controller.getSnapshot().error, "TRUSTED_RECONCILIATION_REQUIRED"); assert.equal(f.controller.getSnapshot().txHash, h("c"))
+  // Read-only recovery of the recorded hash still works once trusted reconciliation is back.
+  f.ports.submissions.reconcile = reconcile
+  await f.controller.prepare(); assert.equal(f.controller.getSnapshot().status, "READY_TRANSFER"); assert.equal(f.walletCalls.length, 1)
+  f.controller.dispose()
+})
+
+// GIWA-STOCKS-WALLET-INTEGRATION-003A A3: an approval that the server can never verify must not be
+// requested at all. The check uses the SubmissionGate captured by the attempt, before the new
+// APPROVAL claim and again at the wallet dispatch boundary.
+function countClaims(f: ReturnType<typeof fixture>) {
+  const calls = { claims: 0 }; const claim = f.ports.submissions.claim
+  f.ports.submissions.claim = async request => { calls.claims++; return claim(request) }
+  return calls
+}
+for (const side of ["BUY", "SELL"] as const) {
+  test(`${side}: direct prepare → approve without trusted reconciliation neither claims nor opens the wallet`, async () => {
+    const f = fixture(side); const counted = countClaims(f); delete f.ports.submissions.reconcile
+    await f.controller.prepare(); assert.equal(f.controller.getSnapshot().status, "APPROVAL_REQUIRED", "the read-only check itself is unchanged")
+    await f.controller.approve()
+    assert.equal(f.walletCalls.length, 0); assert.equal(counted.claims, 0); assert.equal(f.shared.data.size, 0)
+    assert.deepEqual([f.controller.getSnapshot().status, f.controller.getSnapshot().error], ["BLOCKED", "TRUSTED_RECONCILIATION_REQUIRED"])
+    f.controller.dispose()
+  })
+  test(`${side}: reconciliation removed after prepare or during the pre-claim wallet read never claims`, async () => {
+    for (const moment of ["after-prepare", "allowance-read", "pre-claim-wallet-read"] as const) {
+      const f = fixture(side); const counted = countClaims(f)
+      await f.controller.prepare(); assert.equal(f.controller.getSnapshot().status, "APPROVAL_REQUIRED")
+      if (moment === "after-prepare") delete f.ports.submissions.reconcile
+      if (moment === "allowance-read") { const read = f.ports.readAllowance; f.ports.readAllowance = async request => { delete f.ports.submissions.reconcile; return read(request) } }
+      if (moment === "pre-claim-wallet-read") {
+        // The second wallet read after the allowance read is send()'s own identity read, just before the claim.
+        const readAllowance = f.ports.readAllowance, readWallet = f.ports.readWallet; let after = -1
+        f.ports.readAllowance = async request => { after = 0; return readAllowance(request) }
+        f.ports.readWallet = async () => { if (after >= 0 && ++after === 2) delete f.ports.submissions.reconcile; return readWallet() }
+      }
+      await f.controller.approve()
+      assert.equal(f.walletCalls.length, 0, moment); assert.equal(counted.claims, 0, moment)
+      assert.deepEqual([f.controller.getSnapshot().status, f.controller.getSnapshot().error], ["BLOCKED", "TRUSTED_RECONCILIATION_REQUIRED"], moment)
+      f.controller.dispose()
+    }
+  })
+  test(`${side}: reconciliation removed during the claim or by a SIGNING subscriber keeps the claim and opens no wallet`, async () => {
+    for (const moment of ["during-claim", "signing-subscriber"] as const) {
+      const f = fixture(side); const plan = planOrder(f.selected, f.context(), START)
+      const reconcile = f.ports.submissions.reconcile!
+      await f.controller.prepare()
+      const published: string[] = []
+      let unsubscribe = f.controller.subscribe(() => { published.push(f.controller.getSnapshot().status) })
+      if (moment === "during-claim") { const claim = f.ports.submissions.claim; f.ports.submissions.claim = async request => { const result = await claim(request); delete f.ports.submissions.reconcile; return result } }
+      else { unsubscribe(); unsubscribe = f.controller.subscribe(() => { published.push(f.controller.getSnapshot().status); if (f.controller.getSnapshot().status === "SIGNING") delete f.ports.submissions.reconcile }) }
+      try {
+        await f.controller.approve()
+        assert.equal(f.walletCalls.length, 0, moment)
+        // Found before SIGNING: the wallet step is never shown. Either way the reason stays visible and, as no
+        // wallet request was made, no uncertain outcome is recorded over the reserved claim.
+        if (moment === "during-claim") assert.ok(!published.includes("SIGNING"), "SIGNING is not published")
+        else assert.equal(published.filter((status) => status === "SIGNING").length, 1)
+        assert.equal(f.controller.getSnapshot().error, "TRUSTED_RECONCILIATION_REQUIRED", moment)
+        assert.equal(f.shared.data.get(`${plan.intentKey}:APPROVAL`)?.status, "REQUEST_MAY_START", `${moment}: no UNKNOWN outcome for a request that was never sent`)
+        const claim = f.shared.data.get(`${plan.intentKey}:APPROVAL`)
+        assert.ok(claim, `${moment}: the durable claim is never deleted`); assert.equal(claim.txHash, undefined)
+        assert.equal(f.controller.getSnapshot().status, "UNKNOWN", `${moment}: a consumed claim stays recovery-only`)
+        // Restoring the port does not turn the consumed claim into a new permission.
+        f.ports.submissions.reconcile = reconcile
+        await f.controller.approve(); f.controller.cancel(); await f.controller.prepare(); await f.controller.approve()
+        assert.equal(f.walletCalls.length, 0, moment); assert.equal(f.shared.data.get(`${plan.intentKey}:APPROVAL`)?.claimId, claim.claimId)
+        assert.equal(f.controller.getSnapshot().status, "UNKNOWN", moment)
+      } finally { unsubscribe(); f.controller.dispose() }
+    }
+  })
+}
+test("the precondition uses the gate captured by the attempt, not a replacement installed mid-attempt", async () => {
+  const f = fixture(); const counted = countClaims(f); const captured = f.ports.submissions
+  delete captured.reconcile
+  await f.controller.prepare()
+  const approving = f.controller.approve()
+  // A host swapping in a gate that has reconcile cannot rescue the attempt that captured the old gate.
+  f.ports.submissions = { ...gate().submissions }
+  await approving
+  assert.equal(f.walletCalls.length, 0); assert.equal(counted.claims, 0)
+  assert.equal(f.controller.getSnapshot().error, "TRUSTED_RECONCILIATION_REQUIRED")
   f.controller.dispose()
 })

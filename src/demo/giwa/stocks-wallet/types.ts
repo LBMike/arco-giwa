@@ -19,7 +19,7 @@ export type ExecutionContext = {
 }
 export type Side = "BUY" | "SELL"
 export type Stage = "APPROVAL" | "TRANSFER"
-/** Raw accepted create-order row; GET sell-order rows have no side field. */
+/** Raw accepted create-order row. BUY rows carry no side field; SELL rows carry side "SELL". `side` here is always required. */
 export type Selection = { side: Side; order: unknown }
 export type Order = Readonly<{
   id: string; orderKey: Hex; quoteId: string; actorId: string; wallet: Address; symbol: "NVDA"
