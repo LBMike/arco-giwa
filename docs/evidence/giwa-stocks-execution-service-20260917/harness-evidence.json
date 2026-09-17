@@ -1,0 +1,13 @@
+{
+  "temp": "/private/tmp/stocks-submissions-pg-ZfuVHK",
+  "data": "/private/tmp/stocks-submissions-pg-ZfuVHK/data",
+  "socket": "/private/tmp/stocks-submissions-pg-ZfuVHK/socket",
+  "tcp": false,
+  "started": true,
+  "stopped": true,
+  "restarts": 1,
+  "pids": [
+    31416,
+    31515
+  ]
+}
