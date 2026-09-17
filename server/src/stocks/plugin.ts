@@ -26,6 +26,30 @@ export async function stocksPlugin(app: FastifyInstance, options: StocksPluginOp
         return reply.code(500).send({ error: 'INTERNAL_ERROR', ...PROFILE });
     });
     app.get('/api/v1/stocks/catalog', async () => s.catalog());
+    const recoveryActors = new WeakMap<FastifyRequest, Actor>();
+    for (const [path, service] of [['orders', s], ['sell-orders', s.sell]] as const) {
+        app.post(`/api/v1/stocks/${path}/recover`, {
+            onRequest: async (r, reply) => {
+                reply.header('Cache-Control', 'no-store');
+                recoveryActors.set(r, await actor(r));
+            },
+            errorHandler: (error, _r, reply) => {
+                if (error instanceof StocksError) return reply.code(error.status).send({ error: error.code, ...PROFILE });
+                if (error.statusCode === 400) return reply.code(400).send({ error: 'INVALID_BODY', ...PROFILE });
+                if (error.statusCode === 413) return reply.code(413).send({ error: 'BODY_TOO_LARGE', ...PROFILE });
+                if (error.statusCode === 415) return reply.code(415).send({ error: 'UNSUPPORTED_MEDIA_TYPE', ...PROFILE });
+                app.log.error({ code: 'STOCKS_RECOVERY_INTERNAL_ERROR' });
+                return reply.code(500).send({ error: 'INTERNAL_ERROR', ...PROFILE });
+            },
+        }, async (r) => {
+            const a = recoveryActors.get(r);
+            ensure(a, 'UNAUTHORIZED', 401);
+            ensure(Object.keys(r.query as object).length === 0, 'UNEXPECTED_FIELDS');
+            const b = body(r.body, ['quoteId', 'idempotencyKey']);
+            ensure(typeof b.quoteId === 'string' && typeof b.idempotencyKey === 'string', 'INVALID_ORDER_REQUEST');
+            return envelope(await service.recoverOrder(a, b.quoteId, b.idempotencyKey));
+        });
+    }
     app.post('/api/v1/stocks/quotes', async (r) => { const a = await actor(r); const b = body(r.body, ['symbol', 'quantity']); ensure(typeof b.symbol === 'string', 'INVALID_SYMBOL'); return envelope(await s.quote(a, b.symbol, b.quantity)); });
     app.post('/api/v1/stocks/orders', async (r) => { const a = await actor(r); const b = body(r.body, ['quoteId', 'idempotencyKey']); ensure(typeof b.quoteId === 'string' && typeof b.idempotencyKey === 'string', 'INVALID_ORDER_REQUEST'); return envelope(await s.createOrder(a, b.quoteId, b.idempotencyKey)); });
     app.post('/api/v1/stocks/sell-quotes', async (r) => { const a = await actor(r); const b = body(r.body, ['symbol', 'quantity']); ensure(typeof b.symbol === 'string', 'INVALID_SYMBOL'); return envelope(await s.sell.quote(a, b.symbol, b.quantity)); });

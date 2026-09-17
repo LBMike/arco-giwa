@@ -1,4 +1,5 @@
 import { enrollWalletSubmission } from '../stocks-submissions/enrollment.js';
+import { recoverOrder } from './order-recovery.js';
 import { StocksSellService, type EscrowReturnPolicy } from './sell-service.js';
 import { randomUUID } from 'node:crypto';
 import { address, ensure, immutable, liquidityScope, manifestDigest, operationKey, PROFILE, units, validateActor, freezeManifest, type Activation, type Actor, type Manifest, type PausePolicy, type SqlClient } from './contracts.js';
@@ -73,6 +74,7 @@ export class StocksService {
             return row;
         });
     }
+    recoverOrder(actor: Actor, quoteId: string, key: string) { return recoverOrder(this.repo, actor, 'BUY', quoteId, key); }
     // Internal indexer boundary only. A hash causes a fresh trusted RPC read; clients cannot submit proof envelopes.
     async observeFunding(txHash: Hex) {
         await this.bindDeployment();

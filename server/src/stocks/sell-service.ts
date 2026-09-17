@@ -1,4 +1,5 @@
 import { enrollWalletSubmission } from '../stocks-submissions/enrollment.js';
+import { recoverOrder } from './order-recovery.js';
 import { randomUUID } from 'node:crypto';
 import type { Hex } from 'viem';
 import { address, callDigest, ensure, hash, immutable, liquidityScope, operationKey, units, validateActor, type Actor, type BrokerPort, type SqlClient, type SignerPort } from './contracts.js';
@@ -64,6 +65,7 @@ export class StocksSellService {
             return { ...row, side: 'SELL' };
         });
     }
+    recoverOrder(actor: Actor, quoteId: string, key: string) { return recoverOrder(this.parent.repo, actor, 'SELL', quoteId, key); }
     async expireReservations(): Promise<number> {
         const s = this.parent;
         const cursor = (await s.repo.pool.query('SELECT * FROM arco_evm."StocksObserverCursor" WHERE "deploymentDigest"=$1', [s.digest])).rows[0];
