@@ -1,6 +1,6 @@
 # GIWA Stocks wallet execution panel
 
-An **unmounted** UI module for an accepted GIWA Stocks order: check → exact approval → separate deposit (BUY) or escrow (SELL) → order result from the server. It presents the existing wallet controller (`../stocks-wallet`) and adds no transport, wallet, journal, verification or default of its own. The `/stocks` route (`../stocks-market`) and the Stocks session host (`../stocks-host`) already exist; this panel is not mounted in them yet. Mounting it in the accepted-order flow together with a real wallet adapter is the next step (003B).
+A UI module for an accepted GIWA Stocks order: check → exact approval → separate deposit (BUY) or escrow (SELL) → order result from the server. It presents the existing wallet controller (`../stocks-wallet`) and adds no transport, wallet, journal, verification or default of its own. Since 003B it is mounted on `/stocks` by `../stocks-execution-host` next to an accepted order's status card.
 
 No real wallet, signature, transfer, public network or server was used to build or verify it.
 
@@ -32,6 +32,9 @@ No real wallet, signature, transfer, public network or server was used to build 
 | `headingLevel` | no | `2` (default) or `3`. State and result headings follow one level below. |
 | `armDelayMs` | no | How long a wallet-opening step is shown before its button accepts activation. Default 800 ms. |
 | `tickMs` | no | Re-render interval for the deadline countdown. Default 1000 ms; 0 disables. |
+| `refreshEvidence` | no | Host read of current deployment review evidence (003B). When given, the read-only check runs it first, and the check stays available while only the evidence is missing or ended (`DEPLOYMENT_NOT_REVIEWED`, `DEPLOYMENT_EVIDENCE_EXPIRED`). Approve and deposit/escrow never run it and still need current evidence. |
+| `evidenceFailure` | no | Stable code of the host's last failed evidence read, shown on "Review evidence not loaded". |
+| `unavailableCode` | no | Why the host has no controller (for example `WALLET_SOURCE_UNSUPPORTED`). Used only when `controller` is null. |
 
 The component root is `w-full`; the page owns width.
 
@@ -125,15 +128,15 @@ Accessibility: labelled section, heading hierarchy, one persistent polite status
 
 Contracts: `docs/contracts/stocks-execution-v1.md`, `stocks-wallet-submissions-v1.md`, `stocks-order-recovery-v1.md`.
 
-**Browser adapters: partly done.**
+**Browser adapters: done.**
 - Done: `../stocks-wallet-http` (003A) implements `readDeployment`, `readExecutionPolicy`, `readOrder` (original envelope with PROFILE) and `readCatalog`.
 - Done: `createSubmissionGate` in `../stocks-wallet-submissions` implements the durable journal including `reconcile`.
-- Not done: the real wallet ports through the active injected/Dynamic source.
+- Done (003B): the wallet ports through the captured injected source (`../stocks-wallet-source`). Dynamic mode is reported unavailable (no single-attempt raw request).
   - `readWallet`, with network-instance and checkpoint attestation through that source; copying manifest fields or checking the numeric chain ID alone is not attestation.
   - `readAllowance`.
   - `requestTransaction`: exact `to/data/value=0`, no fallback or resubmission.
 
-**Panel mounting: not done (003B).**
+**Panel mounting: done (003B), see `../stocks-execution-host`.**
 - Host composition: evidence lease refresh, gate/ports/controller ownership and disposal, epoch source.
 - `serverOrder` reads and the refresh policy.
 - Placing this panel in the `/stocks` accepted-order flow.

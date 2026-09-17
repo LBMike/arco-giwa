@@ -1,6 +1,6 @@
 # Stocks execution read adapter (`stocks-wallet-http`)
 
-A browser adapter for the four read-only Stocks endpoints that the wallet controller (`../stocks-wallet`) and its host need. It is **not mounted** in any route, provider or host yet (003B).
+A browser adapter for the four read-only Stocks endpoints that the wallet controller (`../stocks-wallet`) and its host need. The `/stocks` execution host (`../stocks-execution-host`, 003B) composes it; see that README for the lifetime and evidence rules actually used.
 
 It holds no session, cache, journal or wallet. It never retries and performs no I/O when created. It never produces `VERIFIED` evidence or an `allowed` policy by itself: every value comes from a server response it has validated.
 
@@ -61,7 +61,8 @@ const ports: WalletPorts = {
     onSessionRejected: (id) => host.invalidate(id),
   }),
   invalidateSession: (id) => host.invalidate(id),
-  readWallet, readAllowance, requestTransaction, waitApprovalReceipt, // active wallet source (003B)
+  readWallet, readAllowance, requestTransaction, // ../stocks-wallet-source over the captured injected provider
+  waitApprovalReceipt, // explicitly inactive: approval confirmation is the gate's server reconcile
 }
 const controller = createStocksWalletController(ports) // the owner disposes it
 ```
@@ -160,7 +161,7 @@ Money and units stay decimal strings; no floating point is used.
 
 ## Known limits (outside this module)
 
-- **Other API base checks.** `stocks-host/session.ts`, `stocks-investor/client.ts` and `stocks-market/client.ts` still accept a base ending in an empty `?` or `#` (they check only `url.search`/`url.hash`), and `stocks-admin/client.ts` does not validate the base at all. They are outside this module's ownership; the wallet read adapter, the submission gate and `planner.validateContext` refuse such bases before any request.
+- **Other API base checks.** Since 003B, `stocks-host/session.ts`, `stocks-investor/client.ts`, `stocks-market/client.ts` and `stocks-admin/client.ts` use the common rule in `../api-base.ts` (no credentials, no `?` or `#` in the normalized href, http(s) only), and `StocksPages.tsx` resolves one base for every client. The planner still throws a plain `TypeError` for input that is not a URL at all (refused, but not with `INVALID_API_BASE`).
 - **Collation data.** `planner.ts` and the server now sort canonical keys with an explicit `en-US` collation, so the default locale no longer matters (tested in real en-US, cs-CZ and sk-SK processes). The result still depends on the runtime's ICU data; keep the frozen backend vectors and re-verify when runtimes change. Records written earlier under another collation are not accepted or rewritten automatically.
 - **Clock accuracy.** Server and browser clocks must agree to within the envelope and lease bounds: a response observed "in the future" by the browser is refused.
 
