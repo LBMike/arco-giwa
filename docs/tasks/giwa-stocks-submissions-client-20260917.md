@@ -1,0 +1,9 @@
+# GIWA-STOCKS-SUBMISSIONS-001 — browser adapter plan
+
+Base00ddcf49f2b7f8814f9e0093d39efd449d118031; separate clone/branch codex/giwa-stocks-submissions-client-20260917. Read CLAUDE.md, integration task, fixed submissions-v1 contract and reviewed SubmissionGate/HostSession/planner types. Scope only stocks-wallet-submissions/** and dedicated docs. Root owns registration/integration, server agent owns persistence. No UI activation, changes to wallet/controller/host/routes, secret access, installation, public network, DB, push/deploy or subagents.
+
+1. Export a SubmissionGate-compatible factory with copied immutable session/API/order/side/deployment scope, optional caller-bound wallet validation. Use the reviewed planner digest for transaction equality; server remains authoritative for order/calldata/physical intent permission.
+2. Strict envelope/record/transaction parsers; retain only validation bindings for records observed through this gate, never use memory as durable permission. Bind the expected intent on first valid inspect/claim; reject cross-intent or unknown local record reports. inspect errors never become empty success; null claim remains null; recovered claims never become new wallet permission.
+3. Authenticated no-store/no-cookie bounded HTTP transport, captured token and session ID, original-session401 callback, monotonic timeout through body collection/parse and local session-expiry guards. No resend, storage, implicit session refresh or fake persistence.
+4. Offline fake-HTTP regressions for strict DTO/profile/scope, dropped claim/retry/null, captured immutable auth and late outcome,401 reentrancy, stream/deadline/body-size failures, expiry, malformed states/hash conflicts. Root separately verifies real API roundtrip.
+5. Module/full frontend, types/build/security/repo checks; document inherited token debt, exact scope and remaining boundaries; local clean commit for independent review.
