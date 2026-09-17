@@ -161,3 +161,24 @@ Tests (fake EIP-1193 provider, Dynamic-shaped clients, fake HTTP, in-process ser
   - design tokens/stories, whitespace
 - **Reference baseline:** frontend 558/558, server 330 pass / 68 DB skip, 7 token findings.
 - Locale golden: already verified on Node 24 (en/cs/sk) and Chrome 152 (ko). Node 22 is not available locally; recorded as unverified.
+
+## Changes after planning (recorded at completion)
+
+- **Streams:** implementation ran as five builder-side streams in separate clones (wallet-source, api-base, harness, browser-fixture, page-dom) plus the host/panel/page work in this clone. Each was merged with `--no-ff`.
+- **Owner selection:** the owner selects its pinned order on creation, so the controller never starts without a selection.
+- **Builder browser check:**
+  - The verification page gained the `.arco-demo` theme scope.
+  - Two product timing findings were recorded for decision: the 60 s quote vs. finalized approval confirmation, and the short evidence window.
+- **Builder-side review:** 18 findings, none P0/P1. Resolved:
+  - latest-read attestation
+  - abort before `eth_call`
+  - failed evidence drops the lease
+  - Dynamic unsupported before sign-in
+  - restart eligibility
+  - session notice clearing
+  - neutral card copy
+  - evidence-failure notes
+  - missing tests (captured-session 401, other manifest, chain identity, invalid hash)
+  - README session-end wording
+- **Kept as a documented limit:** a synchronous port refusal is recorded as UNKNOWN (controller-owned).
+- Details: `docs/evidence/giwa-wallet-host-integration-20260917.md`.
