@@ -312,6 +312,7 @@ async function composeServer(
             reconciliationCoverage: stocks.reconciliationCoverage,
             ...sessions,
           } : undefined,
+          stocksExecution: stocks ? { service: stocks.execution, resolveActor: sessions!.resolveActor } : undefined,
           stocksSubmissions: stocks ? {
             service: new StocksSubmissionsService(stocks.service, stocks.submissionReceipts),
             resolveActor: sessions!.resolveActor,

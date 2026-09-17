@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { encodeFunctionData, parseAbi } from 'viem';
 import { ensure, freezeManifest, manifestDigest, PROFILE, type Manifest, type SignerPort, type SqlPool } from '../stocks/contracts.js';
 import { ReceiptVerifier, type ChainPort } from '../stocks/chain.js';
 import { StocksRepository } from '../stocks/repository.js';
@@ -13,6 +12,10 @@ import { endpoint, externalStocksSigner, httpStocksRpc } from './transport.js';
 import type { NamedOperator } from './session.js';
 import { StocksObservationHealth } from './health.js';
 import { createSubmissionReceiptVerifier } from '../stocks-submissions/receipts.js';
+import { verifyStocksDeployment } from './deployment.js';
+export { verifyStocksDeployment } from './deployment.js';
+import { createDeploymentEvidence } from '../stocks-execution/deployment.js';
+import { StocksExecutionService } from '../stocks-execution/service.js';
 
 export type StocksRuntimeConfig = {
   profile: 'DEMO_TESTNET'; manifest: Manifest & { schemaVersion: 2; redemptionEscrow: `0x${string}` };
@@ -33,32 +36,6 @@ export function parseStocksRuntimeConfig(value: unknown): StocksRuntimeConfig {
   endpoint(row.rpcUrl); endpoint(row.signerUrl);
   ensure(Array.isArray(row.operators) && row.operators.every(op => op && typeof op.wallet === 'string' && typeof op.operatorId === 'string' && Array.isArray(op.permissions) && op.permissions.every(p => typeof p === 'string')), 'INVALID_STOCKS_OPERATORS');
   return structuredClone(row);
-}
-
-export async function verifyStocksDeployment(manifest: StocksRuntimeConfig['manifest'], rpc: ChainPort, transport: JsonRpcTransport): Promise<void> {
-  manifest = freezeManifest(manifest) as StocksRuntimeConfig['manifest'];
-  const network = await rpc.network();
-  ensure(network.chainId === 91342 && network.networkInstance === manifest.networkInstance && network.checkpointHash === manifest.checkpointHash, 'STOCKS_CHECKPOINT_MISMATCH');
-  const finalized = await rpc.block('finalized');
-  ensure(finalized && BigInt(finalized.number) >= BigInt(manifest.checkpointNumber), 'STOCKS_FINALITY_UNAVAILABLE');
-  for (const target of [manifest.cashToken, manifest.stockToken, manifest.fundingVault, manifest.mintController, manifest.redemptionEscrow]) ensure(await rpc.codeHash(target, finalized.number) === manifest.codeHashes[target.toLowerCase()], 'STOCKS_CODE_MISMATCH');
-  const bindings: [string, string, string][] = [
-    [manifest.stockToken, 'mintController', manifest.mintController], [manifest.stockToken, 'redemptionEscrow', manifest.redemptionEscrow],
-    [manifest.fundingVault, 'cashToken', manifest.cashToken], [manifest.fundingVault, 'redemptionEscrow', manifest.redemptionEscrow], [manifest.fundingVault, 'operator', manifest.signerAddress],
-    [manifest.mintController, 'stockToken', manifest.stockToken], [manifest.mintController, 'operator', manifest.signerAddress],
-    [manifest.redemptionEscrow, 'stockToken', manifest.stockToken], [manifest.redemptionEscrow, 'cashToken', manifest.cashToken], [manifest.redemptionEscrow, 'fundingVault', manifest.fundingVault], [manifest.redemptionEscrow, 'operator', manifest.signerAddress],
-  ];
-  for (const [target, getter, expected] of bindings) {
-    const data = encodeFunctionData({ abi: parseAbi([`function ${getter}() view returns (address)`]), functionName: getter });
-    const value = await transport('eth_call', [{ to: target, data }, `0x${BigInt(finalized.number).toString(16)}`]);
-    ensure(value === `0x${expected.slice(2).toLowerCase().padStart(64, '0')}`, 'STOCKS_CONSTRUCTOR_BINDING_MISMATCH');
-  }
-  for (const [target, expected] of [[manifest.cashToken, 6n], [manifest.stockToken, 9n]] as const) {
-    const data = encodeFunctionData({ abi: parseAbi(['function decimals() view returns (uint8)']), functionName: 'decimals' });
-    const value = await transport('eth_call', [{ to: target, data }, `0x${BigInt(finalized.number).toString(16)}`]);
-    ensure(typeof value === 'string' && /^0x[0-9a-f]{64}$/.test(value) && BigInt(value) === expected, 'STOCKS_TOKEN_SCALE_MISMATCH');
-  }
-  ensure((await rpc.block(finalized.number))?.hash === finalized.hash, 'STOCKS_FINALIZED_BLOCK_CHANGED');
 }
 
 // Optional composition: absence leaves every legacy route and worker unchanged.
@@ -127,7 +104,7 @@ export async function createStocksRuntime(options: {
   const stop = () => { stopped = true; health.record('STOPPED'); };
   // The owning server lifecycle schedules only explicitly enabled dispatch.
   return {
-    service, submissionReceipts: createSubmissionReceiptVerifier(manifest, rpc), operators, reconciliationCoverage: () => observer.coverage(),
+    service, execution: new StocksExecutionService(service, createDeploymentEvidence(manifest, transport, { available: () => !stopped })), submissionReceipts: createSubmissionReceiptVerifier(manifest, rpc), operators, reconciliationCoverage: () => observer.coverage(),
     status: () => ({ ...PROFILE, enabled: true, autodispatch, observerStatus: health.status(), newOrdersPaused: stopped || !autodispatch || paused || !health.current(), deploymentId: manifest.deploymentId, observedAt: new Date().toISOString() }),
     tick,
     stop,

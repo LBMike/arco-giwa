@@ -18,6 +18,8 @@ import { stocksSessionResolvers } from '../../server/dist/stocks-runtime/session
 import { StocksFinalizedObserver } from '../../server/dist/stocks-runtime/observer.js';
 import { createStocksRuntime, verifyStocksDeployment } from '../../server/dist/stocks-runtime/runtime.js';
 import { startManagedStocksServer } from '../../server/dist/stocks-runtime/lifecycle.js';
+import { StocksExecutionService } from '../../server/dist/stocks-execution/service.js';
+import { createDeploymentEvidence } from '../../server/dist/stocks-execution/deployment.js';
 import { StocksSubmissionsService } from '../../server/dist/stocks-submissions/service.js';
 import { createSubmissionReceiptVerifier } from '../../server/dist/stocks-submissions/receipts.js';
 import { deriveOrder, digest as transactionDigest } from '../../server/dist/stocks-submissions/contracts.js';
@@ -99,6 +101,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
   const app = buildApp(appEnv, {
     ...legacy,
     stocks: { service, ...resolvers, reconciliationCoverage: () => observer.coverage() },
+    stocksExecution: { service: new StocksExecutionService(service, createDeploymentEvidence(manifest, transport)), ...resolvers },
     stocksSubmissions: { service: new StocksSubmissionsService(service, createSubmissionReceiptVerifier(manifest, chain)), ...resolvers },
   });
   try {
@@ -173,6 +176,13 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     }
     // Real HTTP journal + real local-chain receipts. No browser-provided terminal proof.
     async function journalPayment(order, side) {
+      const reviewed = await api('stocks/execution/deployment');
+      assert.equal(reviewed.status, 'VERIFIED'); assert.equal(reviewed.manifestDigest, digest);
+      assert.deepEqual(reviewed.manifest, manifest);
+      const policy = await api(`stocks/execution/${side}/${order.id}`);
+      assert.equal(policy.allowed, true); assert.equal(policy.deploymentDigest, digest);
+      assert.ok(policy.validUntil <= reviewed.validUntil && policy.validUntil <= policy.observedAt + 15000);
+      await api(`stocks/execution/${side}/${order.id}`, undefined, 'otherHolder', 404);
       const plan = deriveOrder(manifest, order, side);
       const prefix = 'stocks/wallet-submissions';
       let transferHash;
@@ -202,6 +212,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
       }
       assert.equal(side === 'BUY' ? await buyState(order.id) : await sellState(order.id),
         side === 'BUY' ? 'AWAITING_FUNDING' : 'AWAITING_ESCROW');
+      passed(`${side}: fresh deployment proof and owner-scoped execution policy from actual local chain and DB`);
       passed(`${side}: authenticated durable claims, actual Approval and transfer receipts, immutable confirmation before observer settlement`);
       return transferHash;
     }
@@ -400,7 +411,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
         },
         buildApp: configured => buildApp(appEnv, { ...legacy, stocks: {
           service: configured.service, ...resolvers, reconciliationCoverage: configured.reconciliationCoverage,
-        } }),
+        }, stocksExecution: { service: configured.execution, ...resolvers } }),
         listen: async instance => { managedUrl = await instance.listen({ host: '127.0.0.1', port: 0 }); },
         closeDatabase: async () => {}, // The fixture's separate original pool is not owned by this app.
         autodispatch,
@@ -423,6 +434,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     const idle = await managedApp(false);
     try {
       assert.equal(idle.runtime.status().newOrdersPaused, true);
+      assert.equal((await idle.request('stocks/execution/deployment')).status, 'VERIFIED');
       await idle.request('stocks/quotes', { symbol: 'NVDA', quantity: '0.125' }, 503);
       await idle.request('stocks/sell-quotes', { symbol: 'NVDA', quantity: '0.125' }, 503);
       await Promise.all([idle.runtime.tick(), idle.runtime.tick()]);
@@ -430,6 +442,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
       assert.equal(await signerCount(), noDispatchBefore.signerCount);
       assert.equal(await cursorVersion(), noDispatchBefore.cursorVersion);
     } finally { await idle.app.close(); }
+    await assert.rejects(() => idle.runtime.execution.deployment({ actorId: `evm:${accounts.holder}`, wallet: accounts.holder, chainId: 91342, scope: 'STOCKS_TESTNET', verified: true }), /EXECUTION_UNAVAILABLE/);
     await assert.rejects(() => idle.pool.query('SELECT 1'), /Cannot use a pool after calling end/);
     passed('Actual runtime autodispatch disabled keeps quotes paused and tick inert, then closes its owned pool');
 

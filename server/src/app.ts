@@ -1,3 +1,4 @@
+import { stocksExecutionPlugin, type StocksExecutionPluginOptions } from './stocks-execution/plugin.js'
 import { createRequire } from "node:module"
 import cors from "@fastify/cors"
 import { stocksPlugin, type StocksPluginOptions } from "./stocks/plugin.js"
@@ -73,6 +74,7 @@ export type VaultLimitsRaw = {
 }
 
 export type ArcoAppServices = {
+  readonly stocksExecution?: StocksExecutionPluginOptions
   readonly stocksSubmissions?: StocksSubmissionsPluginOptions
   readonly stocksMarketData?: StocksMarketDataService
   readonly stocks?: StocksPluginOptions
@@ -1261,6 +1263,7 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
   })
 
   if (services.stocks) app.register(stocksPlugin, services.stocks)
+  if (services.stocksExecution) app.register(stocksExecutionPlugin, services.stocksExecution)
   if (services.stocksSubmissions) app.register(stocksSubmissionsPlugin, services.stocksSubmissions)
   if (services.stocksMarketData) app.register(stocksMarketDataPlugin, { service: services.stocksMarketData })
   return app
