@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url"
 import { configuredStocksRuntime, stocksAutodispatch } from "./stocks-runtime/runtime.js"
 import { closeOnce, installServerShutdown, startManagedStocksServer } from "./stocks-runtime/lifecycle.js"
 import { stocksSessionResolvers } from "./stocks-runtime/session.js"
+import { StocksSubmissionsService } from "./stocks-submissions/service.js"
 import { configuredStocksMarketData } from "./stocks-market-runtime/config.js"
 import type { StocksMarketDataService } from "./stocks-market-data/index.js"
 import { createPublicClient, http, keccak256, parseAbi, toBytes, type Hex } from "viem"
@@ -293,24 +294,31 @@ async function composeServer(
   })
   const app = await startManagedStocksServer({
     createRuntime: () => configuredStocksRuntime(envSource, env.databaseUrl),
-    buildApp: stocks => buildApp(
-      {
-        corsAllowedOrigins: env.corsAllowedOrigins,
-        authNonceTtlSeconds: env.authNonceTtlSeconds,
-        authJwtSecret: env.authJwtSecret,
-        adminOperatorToken: env.adminOperatorToken,
-        registryPath: env.registryPath,
-      },
-      {
-        arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits, stocksMarketData,
-        stocks: stocks ? {
-          service: stocks.service,
-          reconciliationCoverage: stocks.reconciliationCoverage,
-          ...stocksSessionResolvers(env.authJwtSecret,
-            env.corsAllowedOrigins.map(origin => new URL(origin).host), stocks.operators),
-        } : undefined,
-      },
-    ),
+    buildApp: stocks => {
+      const sessions = stocks ? stocksSessionResolvers(env.authJwtSecret,
+        env.corsAllowedOrigins.map(origin => new URL(origin).host), stocks.operators) : undefined
+      return buildApp(
+        {
+          corsAllowedOrigins: env.corsAllowedOrigins,
+          authNonceTtlSeconds: env.authNonceTtlSeconds,
+          authJwtSecret: env.authJwtSecret,
+          adminOperatorToken: env.adminOperatorToken,
+          registryPath: env.registryPath,
+        },
+        {
+          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits, stocksMarketData,
+          stocks: stocks ? {
+            service: stocks.service,
+            reconciliationCoverage: stocks.reconciliationCoverage,
+            ...sessions,
+          } : undefined,
+          stocksSubmissions: stocks ? {
+            service: new StocksSubmissionsService(stocks.service),
+            resolveActor: sessions!.resolveActor,
+          } : undefined,
+        },
+      )
+    },
     // Dual-stack preserves existing localhost IPv4/IPv6 behavior.
     listen: app => app.listen({ host: "::", port: env.port }),
     closeDatabase,
