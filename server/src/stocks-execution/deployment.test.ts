@@ -101,7 +101,7 @@ test('runtime stop denies cached and pending evidence with no subsequent RPC', a
 test('manifest extension/config secrets are rejected before RPC; whitelist output is unchanged and snapshotted', async () => {
   const f = fixture();
   assert.throws(() => createDeploymentEvidence({ ...f.m, signerToken: 'NOT_PUBLIC' } as Manifest, f.rpc), /EXECUTION_MANIFEST_NOT_PUBLIC/);
-  assert.throws(() => createDeploymentEvidence({ ...f.m, codeHashes: { ...f.m.codeHashes, privateConfig: 'NOT_PUBLIC' } } as Manifest, f.rpc), /EXECUTION_MANIFEST_NOT_PUBLIC/);
+  assert.throws(() => createDeploymentEvidence({ ...f.m, codeHashes: { ...f.m.codeHashes, privateConfig: 'NOT_PUBLIC' } } as unknown as Manifest, f.rpc), /EXECUTION_MANIFEST_NOT_PUBLIC/);
   assert.equal(f.calls.length, 0); const port = createDeploymentEvidence(f.m, f.rpc, f.opts); const digest = manifestDigest(f.m); f.m.deploymentId = 'MUTATED_TEST_CONFIG';
   assert.equal((await port.get()).manifestDigest, digest);
 });

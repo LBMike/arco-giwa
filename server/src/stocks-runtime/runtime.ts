@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { ensure, freezeManifest, manifestDigest, PROFILE, type Manifest, type SignerPort, type SqlPool } from '../stocks/contracts.js';
-import { ReceiptVerifier, type ChainPort } from '../stocks/chain.js';
+import { ReceiptVerifier } from '../stocks/chain.js';
 import { StocksRepository } from '../stocks/repository.js';
 import { StocksService } from '../stocks/service.js';
 import { StocksWorker } from '../stocks/worker.js';
