@@ -292,7 +292,8 @@ function VerificationPage() {
     walletEpoch: `fixture:${view.epoch}`,
   }
   return (
-    <main className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-6 bg-[var(--color-arco-page)] px-4 py-6 text-[var(--color-arco-ink)]">
+    // The app shell (GiwaPreprodApp) scopes the theme tokens with .arco-demo; this page supplies the same scope.
+    <main className="arco-demo mx-auto flex min-h-screen w-full max-w-5xl min-w-0 flex-col gap-6 bg-[var(--color-arco-page)] px-4 py-6 text-[var(--color-arco-ink)]">
       <FixtureBar view={view} setView={setView} />
       <StocksHostProvider context={context} dependencies={HOST_DEPENDENCIES} walletSource={view.dynamic ? DYNAMIC_SOURCE : INJECTED_SOURCE}>
         <StocksPageEnvironment.Provider value={PAGE_ENVIRONMENT}>
