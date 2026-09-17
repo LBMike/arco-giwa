@@ -174,9 +174,26 @@ function revertedStage(snapshot: WalletSnapshot): Stage | null {
   return snapshot.error === "APPROVAL_REVERTED" ? "APPROVAL" : snapshot.error === "TRANSFER_REVERTED" ? "TRANSFER" : null
 }
 
-/** APPROVAL_SUBMITTED means "not yet confirmed" only without a code or with a pending-confirmation code. */
+/**
+ * APPROVAL_SUBMITTED means "not yet confirmed" only while the wallet's answer is being verified (no code)
+ * or when the server's verification said it is still pending (RECEIPT_PENDING). The controller also
+ * publishes RECOVERY_REQUIRED for an approval the server already CONFIRMED (for example after cancel),
+ * so that code only means "check again", never "unconfirmed".
+ */
 function approvalAwaitingConfirmation(snapshot: WalletSnapshot): boolean {
-  return snapshot.status === "APPROVAL_SUBMITTED" && (snapshot.error === null || snapshot.error === "RECEIPT_PENDING" || snapshot.error === "RECOVERY_REQUIRED")
+  return snapshot.status === "APPROVAL_SUBMITTED" && (snapshot.error === null || snapshot.error === "RECEIPT_PENDING")
+}
+
+/** A matching server order state that ends the order (status table `terminal`): COMPLETED, REFUNDED, RETURNED. */
+function finalResult(server: PanelServerStatus | null): boolean {
+  return server !== null && (server.category === "COMPLETED" || server.category === "RETURNED")
+}
+
+/** What the screen can say about the order result for a recorded deposit/escrow request. Never derived from a hash. */
+function orderResultSentence(server: PanelServerStatus | null): string {
+  if (finalResult(server)) return "The server reports a final result for this order; see the order result below."
+  if (server !== null) return "The server's latest order status is not a final result yet; see the order result below."
+  return "No final order result from the server is shown for this order yet."
 }
 
 /** Why a displayed wallet step cannot be taken now. */
@@ -416,8 +433,15 @@ export function derivePanelModel(input: PanelInput): PanelModel {
       const confirming = approvalAwaitingConfirmation(snapshot)
       const paragraphs = [`The approval transaction was sent. The server verifies it on chain before the ${word} is offered; the ${word} is never sent automatically.`]
       let tone: PanelTone = "info"
-      if (snapshot.error === "RECEIPT_PENDING" || snapshot.error === "RECOVERY_REQUIRED")
+      if (snapshot.error === "RECEIPT_PENDING")
         paragraphs.push(ready ? "The server has not confirmed the approval yet. Check again in a moment; the approval is not sent again." : "The server has not confirmed the approval yet; the approval is not sent again.")
+      // Ambiguous: pending verification, a cancelled check of an already confirmed approval, or an unrecorded hash.
+      else if (snapshot.error === "RECOVERY_REQUIRED")
+        paragraphs.push(
+          ready
+            ? `The approval's status needs another check before the ${word} can be offered. Check the approval status; the approval is not sent again.`
+            : `The approval's status needs another check before the ${word} can be offered; the approval is not sent again.`,
+        )
       else if (snapshot.error === "ORDER_CHANGED" || snapshot.error === "ORDER_NOT_PAYABLE") paragraphs.push("The order has moved on at the server; see the order result below. The approval is not sent again.")
       else if (snapshot.error !== null) {
         const described = describeCode(snapshot.error, side)
@@ -467,14 +491,16 @@ export function derivePanelModel(input: PanelInput): PanelModel {
       ]
       let tone: PanelTone = "info"
       if (snapshot.error === "ORDER_CHANGED" || snapshot.error === "ORDER_NOT_PAYABLE") paragraphs.push("The order has moved on at the server; see the order result below.")
-      // An explicit check of a submitted transfer without a final server result ends in RECOVERY_REQUIRED.
-      else if (snapshot.error === "RECOVERY_REQUIRED") paragraphs.push("The server has not reported a final result for this transaction yet.")
+      // An explicit check of a recorded transfer ends in RECOVERY_REQUIRED whatever the order state is:
+      // only the matching injected server status can say whether the order has a final result.
+      else if (snapshot.error === "RECOVERY_REQUIRED") paragraphs.push(orderResultSentence(server))
       else if (snapshot.error !== null) {
         const described = describeCode(snapshot.error, side)
         paragraphs.push(described.reason, described.step === "CHECK_AGAIN" ? "The transaction hash is kept and nothing is sent again." : described.next)
         tone = described.step === "RECOVERY" ? "error" : "warning"
       }
-      if (expired) paragraphs.push("If the transaction was included after the quote deadline, the server holds it for review.", noLongerCheckable)
+      // A final server result already answers what happened; review and "unresolved" wording would contradict it.
+      if (expired && !finalResult(server)) paragraphs.push("If the transaction was included after the quote deadline, the server holds it for review.", noLongerCheckable)
       const code = fallbackCode
       return finish(
         {
@@ -492,12 +518,16 @@ export function derivePanelModel(input: PanelInput): PanelModel {
     }
     case "UNKNOWN": {
       const transfer = snapshot.stage === "TRANSFER"
+      const settled = transfer && finalResult(server)
       const paragraphs = [
         transfer ? `A ${word} request may have reached your wallet, but no transaction hash was received.` : "An approval request may have reached your wallet, but no transaction hash was received.",
-        "This screen does not send it again. Do not repeat it from another app or wallet; check your wallet activity. The recorded request needs a server check before anything else can happen.",
+        settled
+          ? "This screen does not send it again. Do not repeat it from another app or wallet; check your wallet activity."
+          : "This screen does not send it again. Do not repeat it from another app or wallet; check your wallet activity. The recorded request needs a server check before anything else can happen.",
       ]
+      if (settled) paragraphs.push(orderResultSentence(server))
       if (transfer && side === "BUY") paragraphs.push("A second deposit would not be refunded automatically.")
-      if (expired) paragraphs.push("The quote deadline has passed, so this screen can no longer check the recorded request. Contact operations if it stays unresolved.")
+      if (expired && !settled) paragraphs.push("The quote deadline has passed, so this screen can no longer check the recorded request. Contact operations if it stays unresolved.")
       const code = fallbackCode
       return finish(
         {

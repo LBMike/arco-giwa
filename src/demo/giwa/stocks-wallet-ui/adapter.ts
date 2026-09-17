@@ -15,8 +15,8 @@ export type ExpectedScope = {
   account: string | null
   /**
    * Fresh local availability at activation time. Every action does nothing unless it returns true.
-   * This matters beyond the disabled button: the controller does not itself require trusted
-   * reconciliation before opening an approval request.
+   * Defense in depth: the controller itself also refuses a new approval without trusted
+   * reconciliation, but only after its reads; this check keeps a missing port from starting them.
    */
   ready: () => boolean
   /**

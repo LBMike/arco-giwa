@@ -430,12 +430,15 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
     await m.click(m.button("approve"))
     await m.until(() => m.status() === "APPROVAL_SUBMITTED", "APPROVAL_SUBMITTED")
     await m.settle(20)
+    // RECEIPT_PENDING from the approval itself is evidence the server has not confirmed it yet.
+    assert.match(region.textContent ?? "", /^Approval submitted — confirming\./)
     const beforeCheck = region.textContent
     await m.click(m.button("prepare"))
     await m.settle(30)
     assert.equal(m.status(), "APPROVAL_SUBMITTED")
     assert.notEqual(region.textContent, beforeCheck, "a check that ends on the same screen is still announced")
-    assert.match(region.textContent ?? "", /^Check finished\. Approval submitted — confirming\./)
+    // The controller ends an explicit check of a pending approval with the ambiguous RECOVERY_REQUIRED: neutral wording.
+    assert.match(region.textContent ?? "", /^Check finished\. Approval sent — check needed\./)
     // Text moves away and back without a new check: no second "Check finished."
     m.setServerOrder(m.f.serverOrder(A_BUY))
     await m.render()
@@ -447,7 +450,7 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
       const before = region.textContent
       await m.click(m.button("prepare"))
       await m.settle(30)
-      assert.match(region.textContent ?? "", /^Check finished\. Approval submitted — confirming\./)
+      assert.match(region.textContent ?? "", /^Check finished\. Approval sent — check needed\./)
       assert.notEqual(region.textContent, before, `repeat ${repeat}: an identical result is announced again`)
     }
 

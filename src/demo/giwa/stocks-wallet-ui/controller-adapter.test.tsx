@@ -328,16 +328,19 @@ test("missing review evidence, policy, reconciliation or a denied policy: disabl
     assert.equal(h.f.requests.length, 0, label)
     h.controller.dispose()
   }
-  // Why the adapter re-checks availability itself: called directly, the existing controller opens the
-  // approval request without trusted reconciliation and only fails afterwards (an approval that can
-  // never be confirmed). The panel adapter never lets that request start.
-  const direct = harness()
-  direct.f.controls.setPortPresent("reconcile", false)
-  direct.controller.select(direct.f.selection(ORDER.BUY))
-  await direct.controller.prepare()
-  await direct.controller.approve()
-  assert.equal(direct.f.requests.length, 1, "controller-only behavior (unchanged by this module)")
-  direct.controller.dispose()
+  // Defense in depth: called directly (bypassing the adapter's availability check), the controller itself
+  // refuses an approval without trusted reconciliation before any claim or wallet request (003A A3).
+  for (const side of ["BUY", "SELL"] as const) {
+    const direct = harness(side)
+    direct.f.controls.setPortPresent("reconcile", false)
+    direct.controller.select(direct.f.selection(ORDER[side]))
+    await direct.controller.prepare()
+    await direct.controller.approve()
+    assert.equal(direct.f.requests.length, 0, `${side}: direct controller call opens no wallet`)
+    assert.equal(direct.f.reads.claim, 0, `${side}: and consumes no durable claim`)
+    assert.deepEqual([direct.controller.getSnapshot().status, direct.controller.getSnapshot().error], ["BLOCKED", "TRUSTED_RECONCILIATION_REQUIRED"])
+    direct.controller.dispose()
+  }
 
   const denied = harness()
   denied.f.controls.setPolicyAllowed(false)
@@ -441,3 +444,132 @@ test("real controller: a wallet on another network instance blocks with a read-o
   assert.equal(h.f.requests.length, 0)
   h.controller.dispose()
 })
+
+// GIWA-STOCKS-WALLET-INTEGRATION-003A A1/A2: the independent model review reproduced these four
+// wording contradictions with the real controller (BUY/SELL). The expectations below are the
+// correct ones; they failed on the reviewed candidate 68bb1ec.
+function reviewed(h: ReturnType<typeof harness>, side: Side) {
+  const orderId = ORDER[side]
+  return (serverOrder: ReturnType<typeof h.f.serverOrder> | null = null) => {
+    const selection = h.f.selection(orderId)
+    h.controller.select(selection)
+    return derivePanelModel({
+      snapshot: h.controller.getSnapshot(),
+      selection,
+      account: h.f.context().walletAddress,
+      availability: executionAvailability({ configured: true, ports: h.f.ports, context: h.f.context(), selection, now: h.f.now() }),
+      now: h.f.now(),
+      serverOrder,
+    })
+  }
+}
+const UNCONFIRMED_CLAIM = /server has not confirmed the approval yet|submitted — confirming/i
+
+for (const side of ["BUY", "SELL"] as const) {
+  test(`${side}: cancelling a later check never relabels a server-confirmed approval as unconfirmed (A1)`, async () => {
+    const h = harness(side)
+    const view = reviewed(h, side)
+    try {
+      await h.actions().prepare()
+      await h.actions().approve()
+      await flush()
+      assert.equal(h.controller.getSnapshot().status, "READY_TRANSFER")
+      const approval = [...h.f.journal().values()].find((row) => row.stage === "APPROVAL")
+      assert.equal(approval?.status, "CONFIRMED")
+      h.f.controls.setHoldReads(true)
+      const reading = h.controller.prepare()
+      await new Promise((resolve) => setImmediate(resolve))
+      h.controller.cancel()
+      h.f.controls.releaseReads()
+      await reading
+      // The unchanged controller republishes the known approval with RECOVERY_REQUIRED after cancel.
+      assert.deepEqual([h.controller.getSnapshot().status, h.controller.getSnapshot().error], ["APPROVAL_SUBMITTED", "RECOVERY_REQUIRED"])
+      const model = view()
+      assert.doesNotMatch([model.title, ...model.paragraphs, model.announcement].join(" "), UNCONFIRMED_CLAIM)
+      assert.notEqual(model.steps[0]?.detail, "Confirming")
+      assert.equal(model.title, "Approval sent — check needed")
+      assert.equal(model.txHash, approval?.txHash, "the approval hash stays visible")
+      assert.deepEqual(model.buttons.map((button) => [button.action, button.opensWallet]), [["prepare", false]], "only a read-only check is offered")
+      assert.equal(h.f.requests.length, 1)
+      // The explicit check reads the confirmed record again: the separate deposit/escrow step returns, nothing is re-sent.
+      await h.actions().prepare()
+      await flush()
+      assert.equal(view().kind, "READY_TRANSFER")
+      assert.equal(h.f.requests.length, 1)
+    } finally {
+      h.f.controls.releaseReads()
+      h.controller.dispose()
+    }
+  })
+
+  test(`${side}: "confirming" is kept only for evidence of a pending server verification (A1)`, async () => {
+    const h = harness(side)
+    const view = reviewed(h, side)
+    try {
+      h.f.controls.setReconcileMode("pending")
+      await h.actions().prepare()
+      await h.actions().approve()
+      await flush()
+      assert.deepEqual([h.controller.getSnapshot().status, h.controller.getSnapshot().error], ["APPROVAL_SUBMITTED", "RECEIPT_PENDING"])
+      const pending = view()
+      assert.equal(pending.title, "Approval submitted — confirming")
+      assert.match(pending.paragraphs.join(" "), /server has not confirmed the approval yet/)
+      assert.equal(pending.steps[0]?.detail, "Confirming")
+      // An explicit check that still finds it pending ends in the controller's ambiguous RECOVERY_REQUIRED.
+      await h.actions().prepare()
+      await flush()
+      assert.deepEqual([h.controller.getSnapshot().status, h.controller.getSnapshot().error], ["APPROVAL_SUBMITTED", "RECOVERY_REQUIRED"])
+      const checked = view()
+      assert.doesNotMatch([checked.title, ...checked.paragraphs].join(" "), UNCONFIRMED_CLAIM)
+      assert.match(checked.paragraphs.join(" "), /needs another check/)
+      assert.equal(checked.buttons[0]?.enabled, true)
+      assert.equal(h.f.requests.length, 1)
+    } finally {
+      h.controller.dispose()
+    }
+  })
+
+  test(`${side}: a final server result replaces the waiting wording of a recorded ${side === "BUY" ? "deposit" : "escrow"} (A2)`, async () => {
+    const h = harness(side)
+    const view = reviewed(h, side)
+    const orderId = ORDER[side]
+    const NO_RESULT = /server has not reported a final result/i
+    try {
+      h.f.controls.setAllowance(orderId, "999999999999")
+      await h.actions().prepare()
+      await h.actions().submit()
+      await h.actions().prepare()
+      await flush()
+      assert.deepEqual([h.controller.getSnapshot().status, h.controller.getSnapshot().error], ["SUBMITTED", "RECOVERY_REQUIRED"])
+      const hash = h.controller.getSnapshot().txHash
+      const without = view()
+      assert.doesNotMatch(without.paragraphs.join(" "), NO_RESULT, "without a server status nothing is asserted about the server")
+      assert.match(without.paragraphs.join(" "), /No final order result/)
+
+      h.f.controls.setServerState(orderId, side === "BUY" ? "BROKER_PENDING" : "SELL_BROKER_PENDING")
+      const processing = view(h.f.serverOrder(orderId))
+      assert.match(processing.paragraphs.join(" "), /not a final result yet/)
+
+      for (const state of side === "BUY" ? ["COMPLETED", "REFUNDED"] : ["COMPLETED", "RETURNED"]) {
+        h.f.controls.setServerState(orderId, state)
+        const final = view(h.f.serverOrder(orderId))
+        const shown = [final.title, ...final.paragraphs, final.announcement].join(" ")
+        assert.doesNotMatch(shown, NO_RESULT, state)
+        assert.doesNotMatch(shown, /not a final result|No final order result/, state)
+        assert.match(final.paragraphs.join(" "), /server reports a final result for this order/, state)
+        assert.equal(final.server?.completed, state === "COMPLETED", `${state}: only COMPLETED is completion`)
+        assert.equal(final.txHash, hash, "the recorded hash is still shown, never as the result")
+        assert.deepEqual(final.buttons.map((button) => button.opensWallet), [false])
+      }
+
+      // Past the quote deadline a final server result is not described as held for review or unresolved.
+      h.f.controls.setServerState(orderId, "COMPLETED")
+      h.f.controls.advance(700_000)
+      const late = view(h.f.serverOrder(orderId))
+      assert.doesNotMatch(late.paragraphs.join(" "), /holds it for review|stays unresolved|server has not reported/i)
+      assert.equal(h.f.requests.length, 1)
+    } finally {
+      h.controller.dispose()
+    }
+  })
+}

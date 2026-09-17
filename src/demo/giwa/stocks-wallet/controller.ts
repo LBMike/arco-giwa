@@ -168,11 +168,16 @@ export function createStocksWalletController(ports: WalletPorts) {
     }
     await a.submissions.record(freeze(value))
   }
+  // An approval only unlocks the transfer through trusted server reconciliation. Without it on the
+  // attempt's captured gate, no new APPROVAL claim or wallet request may start.
+  function reconcilable(a: Attempt, stage: Stage) {
+    if (stage === "APPROVAL") ensure(typeof a.submissions.reconcile === "function", "TRUSTED_RECONCILIATION_REQUIRED")
+  }
   async function send(a: Attempt, stage: Stage, policyUntil: number) {
     const tx = stage === "APPROVAL" ? a.plan.approval : a.plan.transfer
     assertTransaction(tx, stage === "APPROVAL" ? planOrder(a.selection, a.context, now()).approval : planOrder(a.selection, a.context, now()).transfer)
     await wallet(a)
-    const claim = await read(a, () => a.submissions.claim({ intentKey: a.plan.intentKey, stage, transactionDigest: digest(tx), transaction: tx, orderId: a.plan.order.id, deploymentDigest: a.plan.manifestDigest }))
+    const claim = await read(a, () => { reconcilable(a, stage); return a.submissions.claim({ intentKey: a.plan.intentKey, stage, transactionDigest: digest(tx), transaction: tx, orderId: a.plan.order.id, deploymentDigest: a.plan.manifestDigest }) })
     ensure(claim, "SUBMISSION_ALREADY_CLAIMED"); validateRecord(claim, a, stage)
     ensure(claim.status === "REQUEST_MAY_START" && !claim.txHash, "SUBMISSION_ALREADY_CLAIMED")
     attempted.set(`${a.plan.intentKey}:${stage}`, freeze(claim))
@@ -181,11 +186,11 @@ export function createStocksWalletController(ports: WalletPorts) {
     ensure(finalResponse.profile === "DEMO_TESTNET" && finalResponse.valuePolicy === "TEST_VALUE_ONLY" && finalResponse.brokerMode === "MOCK_BROKER" && finalResponse.chainId === 91342 && finalResponse.priceSource === "FIXED_MOCK_PRICE", "ORDER_PROFILE_MISMATCH")
     freshResponse(finalResponse)
     ensure(canonical(parseOrder({ side: a.plan.side, order: finalResponse.data })) === canonical(a.plan.order), "ORDER_CHANGED")
-    guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED")
+    guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED"); reconcilable(a, stage)
     state(a, "SIGNING", { stage })
     let result: unknown
-    // SIGNING subscribers run synchronously and may consume the policy's remaining lifetime.
-    try { guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED"); result = await ports.requestTransaction(tx) }
+    // SIGNING subscribers run synchronously and may consume the policy's remaining lifetime or remove ports.
+    try { guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED"); reconcilable(a, stage); result = await ports.requestTransaction(tx) }
     catch {
       const unknown = { ...claim, status: "UNKNOWN" as const }
       try { await persist(a, unknown) } catch { /* The pre-request claim still blocks re-signing. */ }

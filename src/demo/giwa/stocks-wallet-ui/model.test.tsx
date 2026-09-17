@@ -319,10 +319,22 @@ test("an approval the controller republishes with a later failure shows that rea
   assert.match(moved.paragraphs.join(" "), /moved on at the server/)
   const network = s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "WALLET_NETWORK_INSTANCE_MISMATCH"))
   assert.match(network.paragraphs.join(" "), /Switch the wallet to GIWA Sepolia/)
-  for (const pending of [null, "RECEIPT_PENDING", "RECOVERY_REQUIRED"]) {
+  for (const pending of [null, "RECEIPT_PENDING"]) {
     const model = s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, pending))
     assert.equal(model.title, "Approval submitted — confirming")
     assert.equal(model.steps[0]?.detail, "Confirming")
+  }
+  // RECOVERY_REQUIRED is also published for an approval the server already confirmed: neutral, never "unconfirmed".
+  for (const side of ["BUY", "SELL"] as const) {
+    const t = setup(side === "BUY" ? "fixture-order-a-buy-1" : "fixture-order-a-sell-1")
+    const recovery = t.model(t.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "RECOVERY_REQUIRED"))
+    assert.equal(recovery.title, "Approval sent — check needed")
+    assert.equal(recovery.steps[0]?.detail, "Approval sent")
+    assert.equal(recovery.tone, "info")
+    assert.doesNotMatch([recovery.title, ...recovery.paragraphs, recovery.announcement].join(" "), /has not confirmed|confirming|was confirmed|is confirmed/i)
+    assert.match(recovery.paragraphs.join(" "), new RegExp(`needs another check before the ${side === "BUY" ? "deposit" : "escrow"} can be offered\\. Check the approval status; the approval is not sent again\\.`))
+    assert.deepEqual(recovery.buttons.map((button) => [button.action, button.enabled, button.opensWallet]), [["prepare", true, false]])
+    assert.equal(recovery.txHash, APPROVAL_HASH)
   }
   const submitted = s.model(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH, "WALLET_NETWORK_INSTANCE_MISMATCH"))
   assert.match(submitted.paragraphs.join(" "), /different network/)
@@ -446,4 +458,37 @@ test("after the deadline, submitted and pending screens say they can no longer b
   assert.deepEqual([ready.steps[1]?.status, ready.steps[1]?.detail], ["problem", "Deadline passed"])
   const approval = s.model(s.snap("APPROVAL_REQUIRED"), { now: later, availability: expiredAvailability })
   assert.deepEqual([approval.steps[0]?.status, approval.steps[0]?.detail], ["problem", "Deadline passed"])
+})
+
+test("a recorded transfer without a hash follows the matching server result: final states replace the pending check wording (003A A2)", () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    const s = setup(side === "BUY" ? "fixture-order-a-buy-1" : "fixture-order-a-sell-1")
+    const server = (state: string, orderId = s.plan.order.id) => ({ orderId, side, state, observedAt: new Date(s.now).toISOString() })
+    const unknown = s.snap("UNKNOWN", "TRANSFER", null, "RECOVERY_REQUIRED")
+    const later = Date.parse(s.plan.order.quoteExpiresAt) + 1_000
+    const expired = { now: later, availability: executionAvailability({ configured: true, ports: s.f.ports, context: s.context, selection: s.selection, now: later }) }
+    for (const state of side === "BUY" ? ["COMPLETED", "REFUNDED"] : ["COMPLETED", "RETURNED"]) {
+      for (const extra of [{}, expired]) {
+        const model = s.model(unknown, { serverOrder: server(state), ...extra })
+        const shown = model.paragraphs.join(" ")
+        assert.match(shown, /server reports a final result for this order/, `${side}/${state}`)
+        assert.doesNotMatch(shown, /needs a server check before anything else|stays unresolved/, `${side}/${state}`)
+        assert.match(shown, /does not send it again/, "the no-resend statement stays")
+        assert.deepEqual(model.buttons.map((button) => button.opensWallet), [false])
+      }
+    }
+    for (const serverOrder of [null, server(side === "BUY" ? "MINT_UNKNOWN" : "SETTLEMENT_UNKNOWN"), server("COMPLETED", "fixture-order-other")]) {
+      const model = s.model(unknown, { serverOrder })
+      assert.match(model.paragraphs.join(" "), /needs a server check before anything else can happen/, `${side}: non-final or non-matching status keeps the check wording`)
+      assert.doesNotMatch(model.paragraphs.join(" "), /final result/)
+    }
+    // SUBMITTED + RECOVERY_REQUIRED: one sentence per server knowledge level, never derived from the hash.
+    const submitted = s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH, "RECOVERY_REQUIRED")
+    assert.match(s.model(submitted).paragraphs.join(" "), /No final order result from the server is shown for this order yet\./)
+    assert.match(s.model(submitted, { serverOrder: server("COMPLETED", "fixture-order-other") }).paragraphs.join(" "), /No final order result/, "another order's result is ignored")
+    assert.match(s.model(submitted, { serverOrder: server(side === "BUY" ? "BROKER_PENDING" : "LIQUIDITY_PENDING") }).paragraphs.join(" "), /latest order status is not a final result yet/)
+    const review = s.model(submitted, { serverOrder: server("REVIEW_REQUIRED"), ...expired })
+    assert.match(review.paragraphs.join(" "), /holds it for review/, "a non-final review state keeps the late-inclusion note")
+    if (side === "SELL") assert.match(s.model(submitted, { serverOrder: server("EXPIRED") }).paragraphs.join(" "), /not a final result yet/, "SELL EXPIRED is not a terminal order result")
+  }
 })

@@ -1,6 +1,6 @@
 # GIWA Stocks wallet execution panel
 
-An **unmounted** UI module for an accepted GIWA Stocks order: check → exact approval → separate deposit (BUY) or escrow (SELL) → order result from the server. It presents the existing wallet controller (`../stocks-wallet`) and adds no transport, wallet, journal, verification or default of its own. It is not connected to `/stocks`, a route, a provider or a menu; that is a later integration step.
+An **unmounted** UI module for an accepted GIWA Stocks order: check → exact approval → separate deposit (BUY) or escrow (SELL) → order result from the server. It presents the existing wallet controller (`../stocks-wallet`) and adds no transport, wallet, journal, verification or default of its own. The `/stocks` route (`../stocks-market`) and the Stocks session host (`../stocks-host`) already exist; this panel is not mounted in them yet. Mounting it in the accepted-order flow together with a real wallet adapter is the next step (003B).
 
 No real wallet, signature, transfer, public network or server was used to build or verify it.
 
@@ -35,7 +35,7 @@ No real wallet, signature, transfer, public network or server was used to build 
 
 The component root is `w-full`; the page owns width.
 
-## Host integration (later `/stocks` step)
+## Host integration (003B, `/stocks` accepted-order flow)
 
 ```tsx
 import { createStocksWalletController } from "../stocks-wallet"
@@ -52,10 +52,16 @@ import { StocksWalletExecutionPanel } from "../stocks-wallet-ui"
 />
 ```
 
-1. Build `ports.context()` from the current `stocks-host` session, active wallet address/chain/**connection epoch**, API base and an independently reviewed deployment. The epoch must advance on A→B→A and wallet-source replacement.
-2. Re-render the panel whenever that context or the selected order changes. During render the adapter calls `controller.select(selection)` before `getSnapshot()`, so a changed account, epoch, session, API, deployment or order resets the snapshot in the same render. The panel is also keyed by account/epoch/session/API/side/order.
-3. Read and pass `serverOrder` yourself (polling is allowed for the server order status; it never triggers a wallet action).
-4. Dispose the controller when its owner unmounts. Cancelling cannot close an already-open wallet prompt; its late result stays with the original durable claim.
+Host contract:
+
+1. **`selection` stays pinned to the accepted original order row** (the create-order or recovery response). Later server progress for the same order goes to `serverOrder` only. Replacing `selection` with a refreshed row changes the controller scope, resets the screen and fails the controller's order-equality check.
+2. **`controller` and `ports` are the same pair**: `controller = createStocksWalletController(ports)`, and the panel receives exactly that `ports` object. Ports for the read adapter come from `../stocks-wallet-http`, the durable journal from `createSubmissionGate` (`../stocks-wallet-submissions`), wallet ports from the active wallet source (003B). The gate binds session, side, order, deployment digest and API base, so a new session or order scope needs a new gate, ports object and controller.
+3. **The owner disposes** the controller when it unmounts or replaces the pair. Cancelling or disposing cannot close an already-open wallet prompt; its late result is recorded through the original gate and never painted into a new scope.
+4. **`ports.context()`** is synchronous. It is built from the current `stocks-host` session, the active wallet address and chain, a **connection epoch**, the API base and the current deployment evidence. The epoch must change on account A→B→A and on wallet-source replacement **even for the same address**.
+5. **Deployment evidence** is read explicitly by the host (`readDeployment`), not by the panel. Its lease lasts at most 15 s. Supply `reads.currentDeployment(lease)` in `context()`, which becomes null when the lease ends. Refreshing evidence changes the context (evidence ID and dates are part of the controller scope), so **a refresh cancels a check in progress**. The user must press the button again; nothing re-checks, re-approves or re-signs automatically. Refresh evidence when the user starts a check or when the lease is about to lapse on an idle screen, not while a wallet prompt is open.
+6. Re-render the panel whenever that context or the selected order changes. During render the adapter calls `controller.select(selection)` before `getSnapshot()`, so a changed account, epoch, session, API, deployment or order resets the snapshot in the same render. The panel is also keyed by account/epoch/session/API/side/order.
+7. Read and pass `serverOrder` yourself. Polling is allowed for the server order status; it never triggers a wallet action.
+8. Wire both `ports.invalidateSession` and the read adapter's `onSessionRejected` to `host.invalidate(capturedSessionId)`. They only ever name the session captured for the failing request, so a late 401 cannot sign out a newer account.
 
 ## Screens
 
@@ -66,10 +72,10 @@ import { StocksWalletExecutionPanel } from "../stocks-wallet-ui"
 | `CHECKING` | Checking execution conditions | none (disabled "Checking…") |
 | `APPROVAL_REQUIRED` | Approval required | **Approve _exact amount_** |
 | `SIGNING` | Confirm in your wallet | none; all actions disabled |
-| `APPROVAL_SUBMITTED` | Approval submitted — confirming (no code / `RECEIPT_PENDING` / `RECOVERY_REQUIRED`), otherwise Approval sent — check needed with the code's reason | **Check approval status** (explicit reconciliation check), hash shown |
+| `APPROVAL_SUBMITTED` | Approval submitted — confirming (no code, or `RECEIPT_PENDING` = the server said verification is pending). Approval sent — check needed with neutral re-check text for `RECOVERY_REQUIRED`, which the controller also publishes for an already confirmed approval, for example after cancel, and after a check that is still pending. Otherwise Approval sent — check needed with the code's reason | **Check approval status** (explicit reconciliation check), hash shown |
 | `READY_TRANSFER` | Ready to deposit / Ready to escrow (or Quote deadline passed — do not deposit / Order moved on — do not deposit / Deposit unavailable) | **Deposit _amount_** (BUY) / **Escrow _amount_** (SELL), its own click |
-| `SUBMITTED` | Deposit/Escrow submitted — waiting for the order result, or — server status: _label_ | **Check transaction status** (read-only), hash shown |
-| `UNKNOWN` | Wallet result unknown — check required | **Check again** (read-only); never a resend |
+| `SUBMITTED` | Deposit/Escrow submitted — waiting for the order result, or — server status: _label_. After a check (`RECOVERY_REQUIRED`) the sentence follows the matching server status: a final result (`COMPLETED`, BUY `REFUNDED`, SELL `RETURNED`), a status that is not final yet, or none shown | **Check transaction status** (read-only), hash shown |
+| `UNKNOWN` | Wallet result unknown — check required. For a transfer with a matching final server result, "needs a server check" is replaced by the final-result sentence | **Check again** (read-only); never a resend |
 | `BLOCKED` | Execution blocked / Approval reverted / Deposit (Escrow) reverted | reason + next step; read-only "Check again" for transient, network-instance and recovery codes; none for expiry, sign-in, wallet, configuration or reverted attempts |
 
 The summary shows side, NVDA test units, exact order quantity, exact approval and deposit/escrow amounts (with base units and decimals; the smallest unit renders as `0.000001 ARCO_TEST_USDC` or `0.000000001 NVDA`, never 0), SELL payout if completed, network (GIWA Sepolia testnet · chain 91342, reviewed network instance), quote deadline with open/expired state, order ID, spender and token. A "Test assets only" notice is always shown. Three steps (approve → deposit/escrow → order result from the server) show progress; "Completed" appears only when the injected server status says so.
@@ -83,27 +89,42 @@ Financial numbers here are deliberately exact rather than the app's 2-decimal di
 - Actions run only from activation of their own enabled button. Nothing calls `prepare`, `approve` or `submit` on render, mount, StrictMode replay, effects, timers, the countdown, polling or a state change.
 - One action at a time: a synchronous activation gate blocks a second activation before React re-renders; the controller also shares same-scope promises.
 - Wallet-opening buttons (approve, deposit/escrow) accept activation only after their step has been shown for `armDelayMs`, render as new elements per step, and never receive focus automatically. A repeated click or key press cannot carry from approval into the deposit.
-- Every action re-checks `executionAvailability` at activation; approve/submit also require that the injected server status does not show the order moved on, and that the controller snapshot is still the displayed order, side, account and step. This matters because the existing controller does not itself require trusted reconciliation before opening an approval request.
+- Every action re-checks `executionAvailability` at activation; approve/submit also require that the injected server status does not show the order moved on, and that the controller snapshot is still the displayed order, side, account and step. Since 003A the controller also refuses a new approval claim or wallet request itself when its captured gate has no trusted reconciliation; the adapter check keeps the button disabled with the reason.
 - Disabled actions always say why (deadline, moved-on order, missing configuration/evidence): the step's call to action and its step-list entry are replaced, and after the quote deadline submitted/pending screens say they can no longer be checked from here.
 - After an approval or deposit/escrow hash exists, no message claims that nothing was sent; failed checks say the hash is kept and nothing is sent again.
 - Missing controller/ports, execution policy port, durable submission gate, trusted reconciliation, session, reviewed deployment, or an invalid/mismatched/expired order disables execution with the reason. No production default supplies VERIFIED evidence, an allowed policy or a journal.
-- Transaction hashes and confirmed approvals are never shown as order completion or a holding change.
+- Transaction hashes and confirmed approvals are never shown as order completion or a holding change. "Not confirmed" wording needs evidence (`RECEIPT_PENDING`); "final result" wording needs a matching final server order status.
 - `BLOCKED` with a recorded stage is treated as a server-verified REVERTED attempt of that stage (the controller's follow-up code may be `RECOVERY_REQUIRED`).
 - Session or deployment-review expiry makes the controller drop the displayed hash (`CONTEXT_EXPIRED`); the durable journal still holds it and "Check order" after signing in shows it again.
 
 Accessibility: labelled section, heading hierarchy, one persistent polite status region (outside the scope-keyed panel in `StocksWalletExecutionPanel`) whose text is the state title, every paragraph and the server result, prefixed "Check finished." after an explicit check (dropped for good once the text changes, so it is never repeated without a new check); step list with `aria-current="step"`; native buttons with `aria-busy` and `aria-describedby`; visible focus ring token; a focus stranded by a state change moves to the state heading (without scrolling) only while the user's pointer/focus was last inside the panel; "Refresh order status" stays focusable while busy (`aria-disabled`). Mobile: stacked summary rows, full-width buttons below `sm`, wrapping hashes/addresses, 44 px targets. Colors are `src/demo/theme.css` tokens only.
 
-## Not connected yet (integration dependencies)
+## Integration status
 
-The panel is ready for these, but none exists as a production adapter in this repository today:
+**Backend: complete.** These endpoints exist on the current backend and are optional runtime registrations; a missing service returns 404, never an allowed answer:
+- deployment evidence GET `/api/v1/stocks/execution/deployment`
+- execution policy GET `/api/v1/stocks/execution/{BUY|SELL}/{orderId}`
+- order reads GET `/api/v1/stocks/orders/:id` and `/sell-orders/:id`
+- catalog
+- durable wallet submissions with trusted reconciliation (`/api/v1/stocks/wallet-submissions/*`)
+- order creation recovery
 
-1. **Reviewed deployment attestation** for `context().deployment` (manifest v2, evidence ID/digest/lifetime bound to verified runtime code). The catalog is not evidence; do not manufacture it.
-2. **Current execution policy** `readExecutionPolicy` — no public server endpoint implements it.
-3. **Wallet ports** through the active injected/Dynamic source: `readWallet` (with network-instance/checkpoint attestation), `readAllowance`, `requestTransaction` (exact `to/data/value=0`, no fallback or resubmission).
-4. **Authenticated order/catalog reads** `readOrder`/`readCatalog` with the captured session token and response envelope.
-5. **Durable submission gate with trusted reconciliation** — `createSubmissionGate` in `../stocks-wallet-submissions` exists and the server endpoints were accepted, but it is not wired into a host.
-6. **Server order status** for `serverOrder` (the investor client can read it) and the host's refresh/polling policy.
-7. **Controller ownership** in the `/stocks` host (create per reviewed ports, dispose on unmount) and the route/menu mount itself.
+Contracts: `docs/contracts/stocks-execution-v1.md`, `stocks-wallet-submissions-v1.md`, `stocks-order-recovery-v1.md`.
+
+**Browser adapters: partly done.**
+- Done: `../stocks-wallet-http` (003A) implements `readDeployment`, `readExecutionPolicy`, `readOrder` (original envelope with PROFILE) and `readCatalog`.
+- Done: `createSubmissionGate` in `../stocks-wallet-submissions` implements the durable journal including `reconcile`.
+- Not done: the real wallet ports through the active injected/Dynamic source.
+  - `readWallet`, with network-instance and checkpoint attestation through that source; copying manifest fields or checking the numeric chain ID alone is not attestation.
+  - `readAllowance`.
+  - `requestTransaction`: exact `to/data/value=0`, no fallback or resubmission.
+
+**Panel mounting: not done (003B).**
+- Host composition: evidence lease refresh, gate/ports/controller ownership and disposal, epoch source.
+- `serverOrder` reads and the refresh policy.
+- Placing this panel in the `/stocks` accepted-order flow.
+
+Nothing in this repository has been exercised with a real wallet, signature, transfer or public network.
 
 ## Verification page
 
@@ -128,7 +149,7 @@ GIWA_HOST_DOM_RUNTIME=/path/to/existing/node_modules/jsdom/package.json \
 
 - `model.test.tsx` — every status, amounts, completion only from server status, scope binding, hidden details, expiry, UNKNOWN/REVERTED, availability codes, code catalog drift against controller/planner source.
 - `panel.test.tsx` — static markup of all states, arming on first paint, accessibility structure, tokens.
-- `controller-adapter.test.tsx` — real controller + fixture: zero requests/reads on render and host changes, no automatic deposit/escrow, one request per action, duplicates, stale actions, account/order switch with late hash, expiry, UNKNOWN (and reload), REVERTED approval/transfer, missing evidence/policy/reconciliation.
+- `controller-adapter.test.tsx` — real controller + fixture: zero requests/reads on render and host changes, no automatic deposit/escrow, one request per action, duplicates, stale actions, account/order switch with late hash, expiry, UNKNOWN (and reload), REVERTED approval/transfer, missing evidence/policy/reconciliation (panel and direct controller call). The independent review's wording cases (003A A1/A2) are included for BUY and SELL: a cancelled check of a confirmed approval, a still-pending approval, and a recorded deposit/escrow with no, non-final and final server results.
 - `activation.test.tsx` — React-free activation gate and arm keys (runs in every environment).
 - `panel.dom.test.tsx` — real React DOM + StrictMode clicks: the same behaviors through buttons, minutes of mocked timers with no automatic approval/deposit, per-commit capture for account/order switches during SIGNING and during an in-flight check, persistent status region, focus rescue limits, refresh focus.
 
