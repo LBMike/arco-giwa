@@ -46,3 +46,18 @@ test('submission routes inherit the explicit CORS allowlist', async () => {
     assert.notEqual(bad.headers['access-control-allow-origin'], 'https://other.local.test');
   } finally { await app.close(); }
 });
+
+test('receipt reconciliation is optional and authenticates before parsing or invoking its verifier', async () => {
+  const disabled = fixture(false);
+  try {
+    assert.equal((await disabled.app.inject({ method: 'POST', url: '/api/v1/stocks/wallet-submissions/reconcile', payload: {} })).statusCode, 404);
+  } finally { await disabled.app.close(); }
+  const { app } = fixture();
+  try {
+    for (const authorization of ['', `Bearer ${env.adminOperatorToken}`, `Bearer ${token({ chainId: 1 })}`, `Bearer ${token({ domain: 'foreign.test' })}`]) {
+      const result = await app.inject({ method: 'POST', url: '/api/v1/stocks/wallet-submissions/reconcile', headers: { authorization, 'content-type': 'application/json' }, payload: '{ malformed json' });
+      assert.equal(result.statusCode, 401);
+      assert.match(result.headers['cache-control'] ?? '', /no-store/);
+    }
+  } finally { await app.close(); }
+});

@@ -12,6 +12,7 @@ import { StocksFinalizedObserver } from './observer.js';
 import { endpoint, externalStocksSigner, httpStocksRpc } from './transport.js';
 import type { NamedOperator } from './session.js';
 import { StocksObservationHealth } from './health.js';
+import { createSubmissionReceiptVerifier } from '../stocks-submissions/receipts.js';
 
 export type StocksRuntimeConfig = {
   profile: 'DEMO_TESTNET'; manifest: Manifest & { schemaVersion: 2; redemptionEscrow: `0x${string}` };
@@ -126,7 +127,7 @@ export async function createStocksRuntime(options: {
   const stop = () => { stopped = true; health.record('STOPPED'); };
   // The owning server lifecycle schedules only explicitly enabled dispatch.
   return {
-    service, operators, reconciliationCoverage: () => observer.coverage(),
+    service, submissionReceipts: createSubmissionReceiptVerifier(manifest, rpc), operators, reconciliationCoverage: () => observer.coverage(),
     status: () => ({ ...PROFILE, enabled: true, autodispatch, observerStatus: health.status(), newOrdersPaused: stopped || !autodispatch || paused || !health.current(), deploymentId: manifest.deploymentId, observedAt: new Date().toISOString() }),
     tick,
     stop,

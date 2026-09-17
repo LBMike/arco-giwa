@@ -313,7 +313,7 @@ async function composeServer(
             ...sessions,
           } : undefined,
           stocksSubmissions: stocks ? {
-            service: new StocksSubmissionsService(stocks.service),
+            service: new StocksSubmissionsService(stocks.service, stocks.submissionReceipts),
             resolveActor: sessions!.resolveActor,
           } : undefined,
         },

@@ -18,6 +18,9 @@ import { stocksSessionResolvers } from '../../server/dist/stocks-runtime/session
 import { StocksFinalizedObserver } from '../../server/dist/stocks-runtime/observer.js';
 import { createStocksRuntime, verifyStocksDeployment } from '../../server/dist/stocks-runtime/runtime.js';
 import { startManagedStocksServer } from '../../server/dist/stocks-runtime/lifecycle.js';
+import { StocksSubmissionsService } from '../../server/dist/stocks-submissions/service.js';
+import { createSubmissionReceiptVerifier } from '../../server/dist/stocks-submissions/receipts.js';
+import { deriveOrder, digest as transactionDigest } from '../../server/dist/stocks-submissions/contracts.js';
 import { localSigner } from './local-signer.mjs';
 
 const require = createRequire(import.meta.url);
@@ -96,6 +99,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
   const app = buildApp(appEnv, {
     ...legacy,
     stocks: { service, ...resolvers, reconciliationCoverage: () => observer.coverage() },
+    stocksSubmissions: { service: new StocksSubmissionsService(service, createSubmissionReceiptVerifier(manifest, chain)), ...resolvers },
   });
   try {
     const resetSigner = async () => {
@@ -167,6 +171,40 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
       await send(accounts.holder, manifest.stockToken, tokenAbi, 'approve', [manifest.redemptionEscrow, BigInt(quantity)]);
       return send(accounts.holder, manifest.redemptionEscrow, ABI, 'escrowForOrder', [order.orderKey, manifest.stockToken, BigInt(quantity)]);
     }
+    // Real HTTP journal + real local-chain receipts. No browser-provided terminal proof.
+    async function journalPayment(order, side) {
+      const plan = deriveOrder(manifest, order, side);
+      const prefix = 'stocks/wallet-submissions';
+      let transferHash;
+      for (const stage of ['APPROVAL', 'TRANSFER']) {
+        const transaction = stage === 'APPROVAL' ? plan.approval : plan.transfer;
+        const request = { side, orderId: order.id, intentKey: plan.intentKey, stage,
+          transactionDigest: transactionDigest(transaction), transaction, deploymentDigest: digest };
+        const claim = await api(`${prefix}/claims`, request);
+        assert.equal(claim.status, 'REQUEST_MAY_START');
+        const hash = await rpc('eth_sendTransaction', [{ from: transaction.from, to: transaction.to,
+          data: transaction.data, value: '0x0', gas: '0x1e8480' }]);
+        await waitReceipt(hash);
+        await api(`${prefix}/outcomes`, { ...claim, status: 'SUBMITTED', txHash: hash });
+        const reconcile = { claimId: claim.claimId, intentKey: claim.intentKey, stage,
+          transactionDigest: claim.transactionDigest, txHash: hash };
+        const confirmed = await api(`${prefix}/reconcile`, reconcile);
+        assert.equal(confirmed.status, 'CONFIRMED');
+        assert.equal(confirmed.txHash, hash);
+        // Replays and late client errors cannot undo server evidence or obtain another permission.
+        assert.equal((await api(`${prefix}/reconcile`, reconcile)).status, 'CONFIRMED');
+        assert.equal((await api(`${prefix}/outcomes`, { ...claim, status: 'UNKNOWN' })).status, 'CONFIRMED');
+        assert.equal((await api(`${prefix}/${side}/${order.id}`))[stage === 'APPROVAL' ? 'approval' : 'transfer'].status, 'CONFIRMED');
+        const duplicate = await api(`${prefix}/claims`, request);
+        // api() unwraps non-null data; null remains the envelope.
+        assert.equal(duplicate.data, null);
+        if (stage === 'TRANSFER') transferHash = hash;
+      }
+      assert.equal(side === 'BUY' ? await buyState(order.id) : await sellState(order.id),
+        side === 'BUY' ? 'AWAITING_FUNDING' : 'AWAITING_ESCROW');
+      passed(`${side}: authenticated durable claims, actual Approval and transfer receipts, immutable confirmation before observer settlement`);
+      return transferHash;
+    }
     async function drain(predicate, context) {
       for (let n = 0; n < 30; n++) {
         await Promise.all([worker().runOne(), worker().runOne()]);
@@ -209,7 +247,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     await api(`stocks/orders/${first.id}`, undefined, 'otherHolder', 404);
     const replayOrder = await api('stocks/orders', { quoteId: first.quoteId, idempotencyKey: 'local-buy-first' });
     assert.equal(replayOrder.id, first.id);
-    const fundingHash = await deposit(first);
+    const fundingHash = await journalPayment(first, 'BUY');
 
     // Crash after recording one funding fact but before advancing cursor; a second
     // observer must see BUSY while the first owns its PostgreSQL advisory lock.
@@ -236,7 +274,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     passed('HTTP BUY -> actual funding receipt -> durable mock fill -> actual mint -> finalized holding');
 
     const partial = await sell('0.5', 'partial');
-    await escrow(partial);
+    await journalPayment(partial, 'SELL');
     await observer.runOnce();
     await drain(async () => await sellState(partial.id) === 'COMPLETED', 'redeeming a partial holding');
     assert.equal(await currentBalance(manifest.stockToken, accounts.holder), '1500000000');
