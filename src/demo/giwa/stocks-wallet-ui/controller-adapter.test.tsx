@@ -662,3 +662,14 @@ test("003B: prepare loads evidence first, then checks only if the fresh availabi
   await actions.submit()
   assert.deepEqual(log, ["approve", "submit"], "wallet-opening steps never load evidence")
 })
+
+test("003B: without a controller the host's unavailability code is what the panel explains", () => {
+  const f = createScriptedWallet()
+  const selection = f.selection("fixture-order-a-buy-1")
+  const unsupported = renderToStaticMarkup(<StocksWalletExecutionPanel controller={null} ports={null} selection={selection} unavailableCode="WALLET_SOURCE_UNSUPPORTED" tickMs={0} />)
+  assert.match(unsupported, /cannot send exactly one transaction request from this app/)
+  assert.doesNotMatch(unsupported, /not configured in this app/)
+  const plain = renderToStaticMarkup(<StocksWalletExecutionPanel controller={null} ports={null} selection={selection} tickMs={0} />)
+  assert.match(plain, /not configured in this app/, "no host code: the existing NOT_CONFIGURED reason")
+  assert.equal((unsupported.match(/<button[^>]*data-action="(approve|submit)"/g) ?? []).length, 0)
+})

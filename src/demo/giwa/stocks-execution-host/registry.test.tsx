@@ -204,3 +204,14 @@ test("the registry and page provider never call prepare, approve or submit and n
     assert.doesNotMatch(source, /window\.ethereum|eth_sendTransaction|localStorage|sessionStorage|setInterval|setTimeout/, file)
   }
 })
+
+test("an owner never reads evidence with a newer session's token, even if it is still called after the host moved on", async () => {
+  const w = world()
+  const owner = w.registry.ownerFor("BUY", orderRow("BUY")).owner!
+  w.setView({ session: { ...SESSION, id: "session-b", accessToken: "other-header.other-payload.other-signature" } })
+  await owner.refreshEvidence()
+  assert.equal(w.http.calls.length, 0, "no request: the owner's session is no longer the host's")
+  w.setView({ session: null })
+  await owner.refreshEvidence()
+  assert.equal(w.http.calls.length, 0)
+})
