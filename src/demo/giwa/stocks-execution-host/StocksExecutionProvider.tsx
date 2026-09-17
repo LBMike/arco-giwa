@@ -99,15 +99,20 @@ export function useStocksOrderExecutionSlot(): OrderExecutionSlot | null {
 /**
  * Shown while signed out with the same wallet after a session ended with an open, answered or uncertain wallet
  * request. It names no order, amount or hash.
+ *
+ * A check never records a late answer: an expired session's gate refuses it before any request, and the browser
+ * does not carry that hash into the next session. The check only reads the server's record, so the copy promises
+ * no recovery and sends an unknown result to operations instead.
  */
 export function StocksExecutionSessionNotice() {
   const host = useContext(ExecutionHostContext)
   const ended = host?.endedWithAttempt ?? null
   if (!host || !ended || host.signedIn || ended.wallet === null || host.wallet === null || ended.wallet.toLowerCase() !== host.wallet.toLowerCase()) return null
   return (
-    <Notice tone="warning" title="A wallet request from your last Stocks session may still be open or recorded">
-      <p>Sign in to Stocks again with the same wallet, open the order and check it. The check shows what the server recorded. Do not send the approval, deposit or escrow again from another app or wallet.</p>
-      <p className="mt-2">A wallet answer that arrived after the session ended may not be recorded until that check.</p>
+    <Notice tone="warning" title="A wallet request from your last Stocks session may still be open or unrecorded">
+      <p>If your wallet answered after that session ended, the server may not have recorded the request, even if the transaction was sent.</p>
+      <p className="mt-2">Sign in to Stocks again with the same wallet, open the order and check it. The check only shows what the server has already recorded. It cannot add a request the server never received.</p>
+      <p className="mt-2">If the check shows the result as unknown, do not send the approval, deposit or escrow again from this or any other app or wallet. Contact operations to confirm what happened.</p>
     </Notice>
   )
 }

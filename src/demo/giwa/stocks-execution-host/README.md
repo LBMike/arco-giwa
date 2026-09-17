@@ -60,20 +60,34 @@ When the capability is not READY, the investor order card keeps its "not availab
 
 ## Session end
 
-When a signed-in identity ends with an open, answered or uncertain wallet request (logout or session expiry while the page stays mounted), the registry is disposed. `StocksExecutionSessionNotice` then shows, while signed out with the same wallet, a notice without order, amount or hash. It says to sign in again, check the order, and not repeat anything from another app. A later session for the same wallet that ends without such a request clears it.
+When a signed-in identity ends with an open, answered or uncertain wallet request (logout or session expiry while the page stays mounted), the registry is disposed. `StocksExecutionSessionNotice` then shows, while signed out with the same wallet, a notice. It names no order, amount or hash, and has no link or button. It says:
 
-The notice lives in page state: after a reload or remount it is gone. Recovery then comes only from the next check, which shows the reserved claim as recovery-only (UNKNOWN, do not repeat) or the recorded hash.
+- a wallet answer that arrived after the session ended may not have been recorded by the server, even if the transaction was sent;
+- sign in again with the same wallet and check the order. The check only shows what the server has already recorded, and cannot add a request the server never received;
+- if the result is unknown, do not send the approval, deposit or escrow again from any app or wallet, and contact operations.
 
-Known limit: the original gate refuses to record a late hash once its session has expired by time. The server journal then keeps only the reserved claim. The next session's check shows it as recovery-only (UNKNOWN, do not repeat), not as the hash; see `full-stack.test.tsx`. Nothing re-issues the old request with a new session, and no automatic retry exists.
+A later session for the same wallet that ends without such a request clears it.
+
+The notice lives in page state: after a reload or remount it is gone. The next check then shows the reserved claim as recovery-only (UNKNOWN, do not repeat) or the recorded hash.
+
+Known limit (browser): once the session has expired by time, the original gate refuses a late hash before any request.
+- The server journal keeps only the reserved claim (`REQUEST_MAY_START`, no hash).
+- The next session's check reads that record and shows UNKNOWN without the hash. It posts no outcome and sends nothing (`full-stack.test.tsx`; `page.dom.test.tsx` scenarios 11–12).
+- The backend already lets a new valid session of the same owner record and reconcile a known hash on the original immutable claim (`inspect → outcomes → reconcile`). This also works after quote expiry or pause and grants no new send or claim. Codex verified it independently; this module's tests do not exercise it.
+- What is missing is the browser link: carrying the originally known hash into an explicit recovery step in the new session. It is not built.
+- A hash the application never received cannot be restored by a check or a claim.
+- Nothing re-issues the old request, and nothing records or retries automatically.
 
 ## Wallet request rules (from `../stocks-wallet-source`)
 
 - **The only requests through the captured provider:** `eth_chainId`, `eth_accounts`, `eth_getBlockByNumber(checkpoint)`, `eth_call(allowance)`, and one `eth_sendTransaction`.
 - **Never used:** `wallet_sendTransaction`, `eth_sendRawTransaction`, account requests, chain switches, gas or nonce reads.
 - **Dispatch:** `requestTransaction` checks everything synchronously and issues the single send before returning. The controller's last policy and authority checks are therefore the last code before the wallet.
-- **Synchronous refusal (for example an account change inside a SIGNING subscriber):**
-  - It happens inside the controller's dispatch `try`, so the reserved claim is recorded as `UNKNOWN` (recovery-only), although nothing was sent.
+- **Synchronous refusal before the provider call (for example an account change inside a SIGNING subscriber):**
+  - No `eth_sendTransaction` is issued (0 sends).
+  - It happens inside the controller's dispatch `try`, so the reserved claim is still recorded as `UNKNOWN` (recovery-only, no hash).
   - This is fail-closed but pessimistic. Changing it needs a controller change, which was not part of this task.
+- **A change after the provider request is open** is a different case. The request was issued (1 send) and cannot be cancelled. A late hash may still arrive, and it goes to the original gate.
 
 ## Tests
 
@@ -113,5 +127,6 @@ GIWA_HOST_DOM_RUNTIME=/path/to/node_modules/jsdom/package.json TMPDIR=/private/t
   - account switch and sign-out during a held send
   - Dynamic source
   - remount during a held send
+  - BUY and SELL: session expiry by time during a held approval. The late hash stays unrecorded (0 outcomes, claim without hash, not painted). The notice promises no recovery by checking. A new session's check shows UNKNOWN without the hash, with 0 outcomes and 1 send in total
 - `testing/`: a TEST-ONLY in-process server (real Stocks, execution and submission plugins over memory SQL, the real evidence and receipt verifier over a fake chain, fake EIP-1193 wallet). Never imported by product code.
 - `verification/`: an offline loopback page for a browser check of the same real page code (see its README). Not part of the app build.

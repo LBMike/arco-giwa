@@ -29,7 +29,7 @@ const READ_METHODS = new Set(["eth_chainId", "eth_accounts", "eth_getBlockByNumb
 const READY_COPY = "입금·매도 예치는 수락된 주문 카드에서 진행합니다"
 const SESSION_COPY = "입금·매도 예치는 주문한 지갑으로 Stocks에 로그인한 뒤 진행할 수 있습니다."
 const UNSUPPORTED_COPY = "현재 연결된 지갑 방식은 거래 요청을 한 번만 보내도록 보장할 수 없어"
-const SESSION_NOTICE = "A wallet request from your last Stocks session may still be open or recorded"
+const SESSION_NOTICE = "A wallet request from your last Stocks session may still be open or unrecorded"
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
@@ -75,12 +75,23 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
 
     type Page = Awaited<ReturnType<typeof mount>>
 
-    async function mount(harness: InProcessStocks, options: { wallet: FakeEip1193Wallet | null; address: string; epoch: string; source?: ActiveWalletSource; clock?: ExecutionClockSeam }) {
+    async function mount(harness: InProcessStocks, options: { wallet: FakeEip1193Wallet | null; address: string; epoch: string; source?: ActiveWalletSource; clock?: ExecutionClockSeam; sessionSeconds?: number }) {
       const element = document.createElement("div")
       document.body.append(element)
       const root = createRoot(element)
       const router = createMemoryRouter(stocksRoutes(h(Outlet)), { initialEntries: ["/stocks"] })
-      const dependencies = harness.signInDependencies()
+      const signIn = harness.signInDependencies()
+      // A shorter session only rewrites the fixture verify response's expiresIn; the token and every other request are unchanged.
+      const dependencies = options.sessionSeconds === undefined
+        ? signIn
+        : {
+            ...signIn,
+            async fetch(input: RequestInfo | URL, init?: RequestInit) {
+              const response = await signIn.fetch(input, init)
+              if (!String(input).endsWith("/api/v1/auth/verify") || response.status !== 200) return response
+              return new Response(JSON.stringify({ ...(await response.json()), expiresIn: options.sessionSeconds }), { status: 200, headers: { "content-type": "application/json" } })
+            },
+          }
       let view = { address: options.address, epoch: options.epoch, source: options.source ?? ({ mode: "injected", provider: options.wallet } as ActiveWalletSource) }
       // Stable identities: a new function or clock object would be another execution identity.
       const environment = { apiBase: harness.apiBase, fetch: harness.fetch, executionClock: options.clock, activeWalletSource: () => view.source }
@@ -653,6 +664,122 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       assert.equal(sends(wallet), 1, "total sends 1")
       assert.equal(forbiddenSends(wallet), 0)
     })
+
+    // Review 003B-1 (Codex P3): the session-end notice must not promise that a later check records a late wallet answer.
+    // A 30 s session expires by time while the approval prompt is open. The original gate refuses the late hash before any
+    // request; a new session's check only reads the journal (reserved claim, no hash) and shows UNKNOWN. One send in total.
+    const noticeElement = (page: Page) => [...page.element.querySelectorAll("p")].find((p) => p.textContent?.startsWith("A wallet request from your last Stocks session"))?.parentElement ?? null
+    function assertSessionNoticeMeaning(notice: HTMLElement, secrets: string[]) {
+      const text = notice.textContent ?? ""
+      // No promise that checking or signing in records, attaches or restores the late answer.
+      assert.doesNotMatch(text, /until (?:that|the|this|you) check/i, text)
+      assert.doesNotMatch(text, /\bcheck(?:ing)?\s+(?:will\s+|can\s+|may\s+|does\s+)?(?:record|attach|restore|recover|add|save)/i, text)
+      assert.doesNotMatch(text, /sign(?:ing)? in again\s+(?:will\s+|to\s+)?(?:record|attach|restore|recover)/i, text)
+      assert.doesNotMatch(text, /will be recorded|is recorded (?:when|after|once)|gets recorded/i, text)
+      // What it must say instead.
+      assert.match(text, /server may not have recorded the request, even if the transaction was sent/i, text)
+      assert.match(text, /check only shows what the server has already recorded/i, text)
+      assert.match(text, /cannot add a request the server never received/i, text)
+      assert.match(text, /do not send the approval, deposit or escrow again from this or any other app or wallet/i, text)
+      assert.match(text, /contact operations/i, text)
+      // Nothing to click and nothing about the order: no link, button, number, amount, order or hash.
+      assert.equal(notice.querySelectorAll("a, button").length, 0, "no link or button in the notice")
+      assert.doesNotMatch(text, /\d/, text)
+      for (const secret of secrets) assert.ok(!text.includes(secret), `notice leaks ${secret}`)
+    }
+
+    const expiredSessionLateHash = (side: "BUY" | "SELL") => async () => {
+      let offset = 0
+      const wall = () => Date.now() + offset
+      // One stable seam for the page: the host session, the execution clocks and the server fixture read the same shifted wall.
+      const clock: ExecutionClockSeam = { now: wall, monotonicNow: () => performance.now() + offset }
+      const harness = await createInProcessStocks({ wall })
+      cleanups.push(() => harness.close())
+      const wallet = createFakeEip1193Wallet(harness.chain, { account: getAddress(WALLET_A) })
+      if (side === "BUY") harness.seedCash(WALLET_A, 1_000_000_000n)
+      else harness.seedStock(WALLET_A, "3000000000")
+      const sendsAt: Record<string, number> = {}
+      const page = await mount(harness, { wallet, address: WALLET_A, epoch: `injected:a:${side}`, clock, sessionSeconds: 30 })
+      sendsAt.mount = sends(wallet)
+      await page.signIn()
+      sendsAt.signIn = sends(wallet)
+      await page.placeOrder(side)
+      const order = orderRow(harness, side, WALLET_A)
+      await page.waitFor(() => page.action("prepare"), "panel")
+      sendsAt.accepted = sends(wallet)
+      await page.checkToApproval()
+      sendsAt.check = sends(wallet)
+      const hold = wallet.holdNext("eth_sendTransaction")
+      await page.click(page.action("approve"), "Approve")
+      await act(async () => {
+        await hold.arrived
+      })
+      await page.waitStatus("SIGNING")
+      sendsAt.approve = sends(wallet)
+      const approvals = () =>
+        ((harness.sql.snapshot() as unknown as Record<string, Row[]>).StocksWalletSubmission ?? [])
+          .filter((row) => String(row.wallet).toLowerCase() === WALLET_A.toLowerCase() && row.stage === "APPROVAL")
+          .map((row) => [row.status, row.txHash ?? null])
+      assert.deepEqual(approvals(), [["REQUEST_MAY_START", null]], "one reserved claim while the prompt is open")
+
+      // The session expires by time with the prompt open; the page re-reads the host snapshot on the next render.
+      offset += 31_000
+      await page.rerender({})
+      await page.waitFor(() => page.text().includes("Your Stocks session expired. Sign in again."), "expired session")
+      const notice = await page.waitFor(() => noticeElement(page), "session notice")
+      assert.equal(page.panel(), null)
+      assert.equal(page.element.querySelector('[data-testid="stocks-order-card"]'), null)
+
+      await act(async () => {
+        hold.release()
+        await sleep(0)
+      })
+      await page.settle(1_000)
+      const hash = harness.chain.transactions[harness.chain.transactions.length - 1]?.hash
+      assert.ok(hash, "the wallet sent the approval: the fake chain applied it")
+      assert.equal(bodies(harness, /wallet-submissions\/outcomes$/).length, 0, "the expired session's gate refuses the late hash before any request")
+      assert.deepEqual(approvals(), [["REQUEST_MAY_START", null]], "the server journal has no hash")
+      assert.ok(!page.text().includes(hash), "the late hash is not painted")
+      assertSessionNoticeMeaning(notice, [order.id, order.orderKey, hash])
+
+      // A new session: sign in again and check. The check reads what the server recorded; it cannot attach the lost hash.
+      offset = 0
+      await page.waitFor(() => page.button("Retry Stocks sign-in") && !page.button("Retry Stocks sign-in")!.disabled, "sign-in button after expiry")
+      await page.click(page.button("Retry Stocks sign-in"), "Retry Stocks sign-in")
+      await page.waitFor(() => page.text().includes("Signed in to Stocks."), "signed in again")
+      await page.waitFor(() => page.element.querySelector('[data-testid="giwa-stocks-session"]')?.textContent?.startsWith("Signed in as"), "investor session again")
+      sendsAt.signInAgain = sends(wallet)
+      assert.equal(noticeElement(page), null, "hidden while signed in")
+      await page.waitFor(() => page.panelStatus() === "IDLE", "IDLE panel for the accepted order after signing in again")
+      const journalReads = requestsTo(harness, "GET", new RegExp(`/wallet-submissions/${side}/${order.id}$`)).length
+      await page.click(page.action("prepare"), "Check order")
+      await page.waitStatus("UNKNOWN")
+      sendsAt.checkAgain = sends(wallet)
+      assert.ok(requestsTo(harness, "GET", new RegExp(`/wallet-submissions/${side}/${order.id}$`)).length > journalReads, "the check read the server journal")
+      const panelText = page.panel()!.textContent!
+      assert.ok(panelText.includes("Result unknown"), panelText)
+      assert.ok(panelText.includes("Do not repeat it from another app or wallet"), panelText)
+      assert.equal(page.hash(), null, "no hash: the server never received it")
+      assert.ok(!page.text().includes(hash))
+      assert.equal(page.action("approve"), null, "no approval button on the recovery-only screen")
+      assert.equal(page.action("submit"), null)
+      await page.settle(1_000)
+      assert.equal(bodies(harness, /wallet-submissions\/outcomes$/).length, 0, "the check posts no outcome")
+      assert.equal(bodies(harness, /wallet-submissions\/claims$/).length, 1, "no new claim")
+      assert.equal(requestsTo(harness, "POST", /wallet-submissions\/reconcile$/).length, 0)
+      assert.deepEqual(approvals(), [["REQUEST_MAY_START", null]], "still no hash on the server")
+      sendsAt.end = sends(wallet)
+      assert.deepEqual(sendsAt, { mount: 0, signIn: 0, accepted: 0, check: 0, approve: 1, signInAgain: 1, checkAgain: 1, end: 1 })
+      assert.equal(forbiddenSends(wallet), 0)
+
+      // Signing out after that uncertain check keeps the same caution for the same wallet.
+      await page.click(page.button("Sign out of Stocks"), "Sign out of Stocks")
+      assertSessionNoticeMeaning(await page.waitFor(() => noticeElement(page), "notice after the uncertain check"), [order.id, order.orderKey, hash])
+      assert.equal(sends(wallet), 1)
+    }
+
+    await scenario("11. BUY: a session that expires during an open approval leaves the late hash unrecorded; the notice and a new check promise no recovery", expiredSessionLateHash("BUY"))
+    await scenario("12. SELL: a session that expires during an open approval leaves the late hash unrecorded; the notice and a new check promise no recovery", expiredSessionLateHash("SELL"))
   } finally {
     await runCleanups(shared)
     await runCleanups(cleanups)
