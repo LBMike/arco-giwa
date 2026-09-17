@@ -19,7 +19,7 @@ import { API, catalog, clocks, deferred, DIGEST, envelope, evidence, flush, json
 const SESSION_A: HostSession = Object.freeze({ id: "session-a", walletAddress: WALLET, chainId: 91342, accessToken: TOKEN, createdAt: START - 1_000, expiresAt: START + 900_000 })
 const SESSION_B: HostSession = Object.freeze({ id: "session-b", walletAddress: "0x2222222222222222222222222222222222222222", chainId: 91342, accessToken: "other-header.other-payload.other-signature", createdAt: START - 1_000, expiresAt: START + 900_000 })
 
-type Hold = "policy" | "catalog" | "order" | "wallet"
+type Hold = "policy" | "catalog" | "order" | "wallet" | "claim"
 
 type WorldOptions = {
   /** Host passes createExecutionClock() as ports.now and the adapter clock (recommended), else the raw wall clock. */
@@ -71,6 +71,7 @@ function world(side: Side, options: WorldOptions = {}) {
   let allowanceRead = false
   let walletReadsAfterAllowance = 0
   let afterAllowanceWalletRead: (index: number) => void = () => undefined
+  let onAllowance: () => void = () => undefined
   let cached: ReturnType<typeof evidence> | null = null
 
   const context = (): ExecutionContext => ({ session: host.session, walletAddress: host.walletAddress, chainId: host.chainId, walletEpoch: host.epoch, apiBase: host.apiBase, deployment: host.deploymentOverride ?? reads.currentDeployment(host.lease) })
@@ -116,6 +117,7 @@ function world(side: Side, options: WorldOptions = {}) {
     }
     const body = JSON.parse(String(init.body)) as Record<string, unknown>
     if (path === "/api/v1/stocks/wallet-submissions/claims") {
+      await gate("claim")
       claims++
       claimed = true
       const key = `${body.intentKey}:${body.stage}`
@@ -147,9 +149,10 @@ function world(side: Side, options: WorldOptions = {}) {
     now,
     ...(options.controllerMonotonic ? { monotonicNow: clock.monotonicNow } : {}),
     async readWallet() {
-      await gate("wallet")
+      // Hooks run before the hold gate, so a hook can hold the very read it observes.
       if (claimed) afterClaimWalletRead(++walletReadsAfterClaim)
       else if (allowanceRead) afterAllowanceWalletRead(++walletReadsAfterAllowance)
+      await gate("wallet")
       return { address: host.walletAddress, chainId: 91342, connectionEpoch: host.epoch, deploymentDigest: DIGEST, networkInstance: m.networkInstance, checkpointHash: m.checkpointHash }
     },
     readOrder: reads.readOrder,
@@ -157,6 +160,7 @@ function world(side: Side, options: WorldOptions = {}) {
     readExecutionPolicy: reads.readExecutionPolicy,
     async readAllowance(request) {
       allowanceRead = true
+      onAllowance()
       return allowances.get(allowanceKey(request.owner, request.spender, request.token)) ?? "0"
     },
     async requestTransaction(transaction) {
@@ -192,6 +196,9 @@ function world(side: Side, options: WorldOptions = {}) {
     },
     onWalletReadAfterClaim(hook: (index: number) => void) {
       afterClaimWalletRead = hook
+    },
+    onAllowanceRead(hook: () => void) {
+      onAllowance = hook
     },
     /** Wallet read 1 after the allowance read belongs to that read; read 2 is send()'s own read just before the claim. */
     onWalletReadAfterAllowance(hook: (index: number) => void) {
@@ -418,8 +425,8 @@ for (const side of ["BUY", "SELL"] as const) {
     })
 
     test(`${side} ${action}: the controller bounds the execution policy by monotonic time even with a raw wall clock`, async () => {
-      type Variant = "expires-before-claim" | "rollback-after-final-read" | "slow-policy-response" | "signing-subscriber" | "monotonic-nan" | "monotonic-regression" | "long-policy-control"
-      const variants: Variant[] = ["expires-before-claim", "rollback-after-final-read", "slow-policy-response", "signing-subscriber", "monotonic-nan", "monotonic-regression", "long-policy-control"]
+      type Variant = "expires-before-claim" | "rollback-after-final-read" | "slow-policy-response" | "signing-subscriber" | "monotonic-nan" | "monotonic-regression" | "monotonic-regression-above-start" | "wall-regression-above-start" | "server-observed-before-request" | "long-policy-control"
+      const variants: Variant[] = ["expires-before-claim", "rollback-after-final-read", "slow-policy-response", "signing-subscriber", "monotonic-nan", "monotonic-regression", "monotonic-regression-above-start", "wall-regression-above-start", "server-observed-before-request", "long-policy-control"]
       for (const variant of variants) {
         let delayPolicy = false
         const w = world(side, {
@@ -436,6 +443,9 @@ for (const side of ["BUY", "SELL"] as const) {
           if (action === "submit") w.setAllowance("999999999999")
           await w.controller.prepare()
           delayPolicy = variant === "slow-policy-response"
+          // The server's observedAt is 3 s before this client's request (its clock is behind, or the policy was
+          // cached): only 1 s of the 4 s lease is really left.
+          if (variant === "server-observed-before-request") w.answers.policy = (body) => ({ ...(body as object), observedAt: w.clock.now() - 3_000, validUntil: w.clock.now() + 1_000 })
           if (variant === "expires-before-claim") {
             w.onWalletReadAfterAllowance((index) => {
               if (index === 2) w.clock.advanceMonotonic(6_000)
@@ -446,6 +456,19 @@ for (const side of ["BUY", "SELL"] as const) {
               w.clock.advanceMonotonic(6_000)
               w.clock.setWall(w.clock.now() + 1_000)
             })
+          } else if (variant === "monotonic-regression-above-start" || variant === "wall-regression-above-start") {
+            // Time moves forward during the final order read, then a SIGNING subscriber steps a clock back to a
+            // value still after the policy request start.
+            w.onWalletReadAfterClaim((index) => {
+              if (index !== 2) return
+              w.clock.advanceMonotonic(3_900)
+              if (variant === "wall-regression-above-start") w.clock.setWall(w.clock.now() + 3_000)
+            })
+            unsubscribe = w.controller.subscribe(() => {
+              if (w.snapshot().status !== "SIGNING") return
+              if (variant === "monotonic-regression-above-start") w.clock.setMonotonic(w.clock.monotonicNow() - 3_800)
+              else w.clock.setWall(w.clock.now() - 2_000)
+            })
           } else {
             w.onWalletReadAfterClaim((index) => {
               if (index !== 2) return
@@ -453,7 +476,7 @@ for (const side of ["BUY", "SELL"] as const) {
                 w.clock.advanceMonotonic(6_000)
                 w.clock.setWall(w.clock.now() + 1_000)
               }
-              if (variant === "slow-policy-response") w.clock.advanceMonotonic(2_000)
+              if (variant === "slow-policy-response" || variant === "server-observed-before-request") w.clock.advanceMonotonic(2_000)
               if (variant === "monotonic-nan") w.clock.setMonotonic(Number.NaN)
               if (variant === "monotonic-regression") w.clock.setMonotonic(0)
             })
@@ -474,6 +497,7 @@ for (const side of ["BUY", "SELL"] as const) {
           }
           assert.equal(w.claims(), 1, variant)
           assert.equal(w.snapshot().status, "UNKNOWN", variant)
+          assert.equal(w.journal.get(`${w.plan().intentKey}:${action === "approve" ? "APPROVAL" : "TRANSFER"}`)?.status, "REQUEST_MAY_START", `${variant}: refused before dispatch, no uncertain outcome recorded`)
           // A later allowed policy with fresh evidence never reopens the consumed claim or retries automatically.
           w.clock.setMonotonic(200_000)
           w.clock.advance(1)
@@ -564,7 +588,8 @@ for (const side of ["BUY", "SELL"] as const) {
           const intent = w.plan().intentKey
           assert.equal(w.journal.get(`${intent}:${stage}`)?.txHash, late, "recorded through the original gate")
           const shown = w.snapshot()
-          assert.deepEqual([shown.status, shown.txHash, shown.error], [stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED", late, "EXECUTION_AUTHORITY_CHANGED"])
+          // Nothing ever follows a transfer, so only the approval carries the "did not continue" code.
+          assert.deepEqual([shown.status, shown.txHash, shown.error], stage === "APPROVAL" ? ["APPROVAL_SUBMITTED", late, "EXECUTION_AUTHORITY_CHANGED"] : ["SUBMITTED", late, null])
           assert.equal(w.requests.length, 1)
           assert.ok(!w.seen.some((request) => request.path.endsWith("/reconcile")), "no automatic verification step toward READY_TRANSFER")
 
@@ -692,6 +717,137 @@ test("identity boundaries still isolate an open wallet prompt: its late hash is 
       }
     } finally {
       w.controller.dispose()
+    }
+  }
+})
+
+test("prepare never shows a ready screen when the policy lease ends during the allowance read", async () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    const w = world(side, { controllerMonotonic: true, policyLeaseMs: 4_000 })
+    try {
+      await w.refreshEvidence()
+      w.onAllowanceRead(() => w.clock.advanceMonotonic(5_000))
+      await w.controller.prepare()
+      assert.deepEqual([w.snapshot().status, w.snapshot().error], ["BLOCKED", "EXECUTION_POLICY_EXPIRED"], side)
+    } finally {
+      w.controller.dispose()
+    }
+  }
+})
+
+for (const side of ["BUY", "SELL"] as const) {
+  test(`${side}: an approval answered after only its policy expired stops at the hash; an explicit check is required`, async () => {
+    const w = world(side, { controllerMonotonic: true, policyLeaseMs: 4_000 })
+    const late = sha256(toHex(`policy-only-${side}`)) as Hex
+    try {
+      await w.refreshEvidence()
+      await w.controller.prepare()
+      const held = holdPrompt(w)
+      const approving = w.controller.approve()
+      await flush()
+      assert.equal(w.snapshot().status, "SIGNING")
+      w.clock.advance(6_000)
+      assert.ok(w.reads.currentDeployment(w.host.lease), "the evidence is still current: only the policy ended")
+      held.prompt.resolve(late)
+      await approving
+      await flush()
+      held.restore()
+      assert.deepEqual([w.snapshot().status, w.snapshot().txHash, w.snapshot().error], ["APPROVAL_SUBMITTED", late, "EXECUTION_POLICY_EXPIRED"])
+      assert.ok(!w.seen.some((request) => request.path.endsWith("/reconcile")), "no automatic verification toward READY_TRANSFER")
+      await w.controller.prepare()
+      await flush()
+      assert.equal(w.snapshot().status, "READY_TRANSFER", "an explicit check with fresh reads recovers")
+      assert.equal(w.requests.length, 1)
+    } finally {
+      w.controller.dispose()
+    }
+  })
+
+  test(`${side}: authority lost while the claim or the wallet read after the approval hash is in flight is still shown`, async () => {
+    for (const moment of ["claim-in-flight", "wallet-read-after-hash"] as const) {
+      const w = world(side)
+      try {
+        await w.refreshEvidence()
+        await w.controller.prepare()
+        if (moment === "claim-in-flight") {
+          const releaseClaim = w.hold("claim")
+          const approving = w.controller.approve()
+          for (let i = 0; i < 50 && !w.seen.some((request) => request.path.endsWith("/claims")); i++) await flush()
+          w.clock.advance(1_000)
+          await w.refreshEvidence() // renewed evidence while the claim request is outstanding
+          assert.equal(w.snapshot().status, "IDLE")
+          releaseClaim()
+          await approving
+          await flush()
+          assert.equal(w.requests.length, 0)
+          assert.equal(w.journal.get(`${w.plan().intentKey}:APPROVAL`)?.status, "REQUEST_MAY_START")
+          assert.deepEqual([w.snapshot().status, w.snapshot().stage, w.snapshot().error], ["UNKNOWN", "APPROVAL", "EXECUTION_AUTHORITY_CHANGED"], moment)
+        } else {
+          let releaseRead: (() => void) | null = null
+          // The first wallet read after the hash outcome was recorded is the follow-up read before verification.
+          w.onWalletReadAfterClaim(() => {
+            if (releaseRead === null && w.seen.some((request) => request.path.endsWith("/outcomes"))) releaseRead = w.hold("wallet")
+          })
+          const approving = w.controller.approve()
+          for (let i = 0; i < 50 && releaseRead === null; i++) await flush()
+          assert.ok(releaseRead, "the wallet read after the hash is held")
+          w.clock.advance(1_000)
+          await w.refreshEvidence()
+          ;(releaseRead as unknown as () => void)()
+          await approving
+          await flush()
+          const shown = w.snapshot()
+          assert.deepEqual([shown.status, shown.error], ["APPROVAL_SUBMITTED", "EXECUTION_AUTHORITY_CHANGED"], moment)
+          assert.ok(shown.txHash)
+          assert.ok(!w.seen.some((request) => request.path.endsWith("/reconcile")))
+          assert.equal(w.requests.length, 1)
+        }
+      } finally {
+        w.controller.dispose()
+      }
+    }
+  })
+}
+
+test("remounting a controller while the wallet prompt is open sends nothing twice and recovers only through an explicit check", async () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    for (const stage of ["APPROVAL", "TRANSFER"] as const) {
+      const w = world(side)
+      const late = sha256(toHex(`remount-${side}-${stage}`)) as Hex
+      let second: ReturnType<typeof createStocksWalletController> | null = null
+      try {
+        await w.refreshEvidence()
+        if (stage === "TRANSFER") w.setAllowance("999999999999")
+        await w.controller.prepare()
+        const held = holdPrompt(w)
+        const sending = stage === "APPROVAL" ? w.controller.approve() : w.controller.submit()
+        await flush()
+        assert.equal(w.snapshot().status, "SIGNING")
+        // The screen is remounted: the owner disposes the controller and builds a new gate and controller for the same scope.
+        w.controller.dispose()
+        second = createStocksWalletController({ ...w.ports, submissions: createSubmissionGate({ session: SESSION_A, side, orderId: ORDER_ID, deploymentDigest: DIGEST, apiBase: API, fetch: w.fetch as typeof globalThis.fetch, now: w.clock.now, monotonicNow: w.clock.monotonicNow }) })
+        second.select(w.selection)
+        await second.prepare()
+        assert.deepEqual([second.getSnapshot().status, second.getSnapshot().txHash], ["UNKNOWN", null], "the new screen shows the reserved claim, no hash yet")
+        await second.approve()
+        await second.submit()
+        assert.equal(w.requests.length, 1)
+        held.prompt.resolve(late)
+        await sending
+        await flush()
+        held.restore()
+        assert.equal(w.journal.get(`${w.plan().intentKey}:${stage}`)?.txHash, late, "recorded through the original gate")
+        assert.equal(second.getSnapshot().txHash, null, "the old controller never paints the new one")
+        await second.prepare()
+        await flush()
+        assert.equal(second.getSnapshot().status, stage === "APPROVAL" ? "READY_TRANSFER" : "SUBMITTED")
+        if (stage === "TRANSFER") assert.equal(second.getSnapshot().txHash, late)
+        assert.equal(w.requests.length, 1)
+        assert.equal(w.claims(), 1)
+      } finally {
+        second?.dispose()
+        w.controller.dispose()
+      }
     }
   }
 })

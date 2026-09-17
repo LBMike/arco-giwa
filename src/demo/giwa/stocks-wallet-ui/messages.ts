@@ -66,9 +66,9 @@ export function describeCode(code: string, side: Side | null): CodeDescription {
     case "EXECUTION_NOT_ALLOWED":
       return { reason: "Execution is not allowed for this order right now, for example because trading is paused.", next: "Check again later.", step: "CHECK_AGAIN" }
     case "EXECUTION_AUTHORITY_CHANGED":
-      // Published only for an attempt this controller already reserved or sent: never "nothing was sent".
+      // Published only for an approval request or a reserved claim: never "nothing was sent", never after a transfer hash.
       return {
-        reason: "The deployment review or the sign-in session expired or was renewed while this step was in progress, so it did not continue.",
+        reason: "The deployment review expired or was renewed during this step, so no further step ran automatically.",
         next: "Check again with current review evidence. What is already recorded for this order is kept and nothing is sent again.",
         step: "CHECK_AGAIN",
       }

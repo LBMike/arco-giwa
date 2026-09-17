@@ -533,6 +533,8 @@ export function derivePanelModel(input: PanelInput): PanelModel {
           : "This screen does not send it again. Do not repeat it from another app or wallet; check your wallet activity. The recorded request needs a server check before anything else can happen.",
       ]
       if (settled) paragraphs.push(orderResultSentence(server))
+      // A reserved claim stopped by a review-evidence change: say why nothing continued (no hash exists).
+      if (snapshot.error === "EXECUTION_AUTHORITY_CHANGED") paragraphs.push(describeCode(snapshot.error, side).reason)
       if (transfer && side === "BUY") paragraphs.push("A second deposit would not be refunded automatically.")
       if (expired && !settled) paragraphs.push("The quote deadline has passed, so this screen can no longer check the recorded request. Contact operations if it stays unresolved.")
       const code = fallbackCode

@@ -160,6 +160,7 @@ Money and units stay decimal strings; no floating point is used.
 
 ## Known limits (outside this module)
 
+- **Other API base checks.** `stocks-host/session.ts`, `stocks-investor/client.ts` and `stocks-market/client.ts` still accept a base ending in an empty `?` or `#` (they check only `url.search`/`url.hash`), and `stocks-admin/client.ts` does not validate the base at all. They are outside this module's ownership; the wallet read adapter, the submission gate and `planner.validateContext` refuse such bases before any request.
 - **Collation data.** `planner.ts` and the server now sort canonical keys with an explicit `en-US` collation, so the default locale no longer matters (tested in real en-US, cs-CZ and sk-SK processes). The result still depends on the runtime's ICU data; keep the frozen backend vectors and re-verify when runtimes change. Records written earlier under another collation are not accepted or rewritten automatically.
 - **Clock accuracy.** Server and browser clocks must agree to within the envelope and lease bounds: a response observed "in the future" by the browser is refused.
 

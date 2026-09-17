@@ -49,10 +49,11 @@ function fixture(side: Side = "BUY", shared = gate()) {
   const order: Order = { id: "order-1", orderKey: sha256(toHex(`${side === "SELL" ? "sell:" : ""}${manifest.networkInstance}:order-1`)), quoteId: "quote-1", actorId: "actor-a", wallet: A, symbol: "NVDA", quantity: "1000000000", cashAmount: "120000000", deploymentId: manifest.deploymentId, deploymentDigest: digest(manifest), quoteExpiresAt: new Date(START + 60000).toISOString(), state: side === "BUY" ? "AWAITING_FUNDING" : "AWAITING_ESCROW", version: 0, idempotencyKey: "request-1" }
   const selected: Selection = { side, order }
   let time = START, allowance = "0", monotonicOffset = 0
+  let nowHook: (() => void) | null = null
   const walletCalls: Transaction[] = [], orderReads: unknown[] = []
   const ports: WalletPorts = {
     context: () => context,
-    now: () => time,
+    now: () => { nowHook?.(); return time },
     // The fake monotonic clock moves with the fake wall clock unless a test moves one alone.
     monotonicNow: () => time + monotonicOffset,
     async readWallet() { return { address: context.walletAddress!, chainId: context.chainId!, connectionEpoch: context.walletEpoch, deploymentDigest: context.deployment!.manifestDigest, networkInstance: context.deployment!.manifest.networkInstance, checkpointHash: context.deployment!.manifest.checkpointHash } },
@@ -71,6 +72,9 @@ function fixture(side: Side = "BUY", shared = gate()) {
   const controller = createStocksWalletController(ports); controller.select(selected)
   return { ports, controller, selected, order, manifest, walletCalls, orderReads, shared,
     context: () => context, setContext(value: ExecutionContext) { context = value; controller.refreshContext() },
+    /** Replaces the host context without notifying the controller (it notices on its next read). */
+    replaceContext(value: ExecutionContext) { context = value },
+    onNow(hook: (() => void) | null) { nowHook = hook },
     setTime(value: number) { time = value }, setAllowance(value: string) { allowance = value },
     advanceMonotonic(ms: number) { monotonicOffset += ms },
   }
@@ -382,9 +386,10 @@ for (const windowMs of [1, 15000]) for (const action of ["approve", "submit"] as
       })
       await f.controller[action]()
       assert.equal(f.walletCalls.length, 0)
-      assert.equal(f.controller.getSnapshot().status, "UNKNOWN")
+      // 003A-1: refused before the wallet request, so the reserved claim stays REQUEST_MAY_START with the real reason.
+      assert.deepEqual([f.controller.getSnapshot().status, f.controller.getSnapshot().error], ["UNKNOWN", "EXECUTION_POLICY_EXPIRED"])
       const claim = f.shared.data.get(`${plan.intentKey}:${stage}`)
-      assert.equal(claim?.status, "UNKNOWN")
+      assert.equal(claim?.status, "REQUEST_MAY_START")
       assert.equal(claim?.txHash, undefined)
       assert.equal(f.shared.data.size, 1)
       unsubscribe()
@@ -595,6 +600,29 @@ test("every bounded read uses the same monotonic port: 15 s of monotonic time, a
     await f.controller.prepare()
     assert.deepEqual([f.controller.getSnapshot().status, f.controller.getSnapshot().error], ["BLOCKED", "READ_TIMEOUT"], fault)
     assert.equal(f.walletCalls.length, 0)
+    f.controller.dispose()
+  }
+})
+
+test("an approval whose evidence expires between the last read and READY_TRANSFER never publishes READY_TRANSFER", async () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    const f = fixture(side)
+    const reconcile = f.ports.submissions.reconcile!
+    let armed = false, policyChecks = 0
+    f.ports.submissions.reconcile = async request => { const result = await reconcile(request); armed = true; return result }
+    // Deterministic race: flip the host evidence inside the controller's own policy time check after the allowance read.
+    f.onNow(() => {
+      if (!armed || !(new Error().stack ?? "").includes("policyLive")) return
+      if (++policyChecks === 2) f.replaceContext({ ...f.context(), deployment: null })
+    })
+    const published: string[] = []
+    const unsubscribe = f.controller.subscribe(() => published.push(f.controller.getSnapshot().status))
+    await f.controller.prepare(); await f.controller.approve(); await flush()
+    unsubscribe(); f.onNow(null)
+    assert.ok(policyChecks >= 2, "the race point was reached")
+    assert.ok(!published.includes("READY_TRANSFER"), `${side}: ${published.join(" > ")}`)
+    assert.deepEqual([f.controller.getSnapshot().status, f.controller.getSnapshot().txHash, f.controller.getSnapshot().error], ["APPROVAL_SUBMITTED", h("c"), "EXECUTION_AUTHORITY_CHANGED"])
+    assert.equal(f.walletCalls.length, 1)
     f.controller.dispose()
   }
 })

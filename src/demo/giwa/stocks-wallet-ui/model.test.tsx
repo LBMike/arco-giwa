@@ -549,3 +549,24 @@ test("003A review: settled UNKNOWN title, unrecognized server state, CONTEXT_EXP
     } else assert.match(describeCode("ORDER_NOT_PAYABLE", "BUY").reason, /no longer waits for a deposit\./)
   }
 })
+
+test("003A-1: authority and policy stop codes keep the recorded attempt honest on every screen", () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    const s = setup(side === "BUY" ? "fixture-order-a-buy-1" : "fixture-order-a-sell-1")
+    const reserved = s.model(s.snap("UNKNOWN", "APPROVAL", null, "EXECUTION_AUTHORITY_CHANGED"))
+    assert.equal(reserved.title, "Wallet result unknown — check required")
+    assert.match(reserved.paragraphs.join(" "), /review expired or was renewed during this step, so no further step ran automatically/)
+    assert.match(reserved.paragraphs.join(" "), /Do not repeat it from another app or wallet/)
+    assert.equal(reserved.txHash, null)
+    const approval = s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "EXECUTION_AUTHORITY_CHANGED"))
+    assert.equal(approval.title, "Approval sent — check needed")
+    assert.match(approval.paragraphs.join(" "), /approval hash is kept and the approval is not sent again/)
+    const policy = s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "EXECUTION_POLICY_EXPIRED"))
+    assert.equal(policy.title, "Approval sent — check needed")
+    assert.doesNotMatch(policy.paragraphs.join(" "), /confirming|nothing was sent/i)
+    for (const model of [reserved, approval, policy]) {
+      assert.ok(model.buttons.every((button) => !button.opensWallet))
+      assertNoCompletionClaim(`${text(model)} ${model.announcement}`, model.code ?? "")
+    }
+  }
+})

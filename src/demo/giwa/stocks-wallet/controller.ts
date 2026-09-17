@@ -10,6 +10,10 @@ type Attempt = {
   dispatched: boolean
   /** The authority changed or expired after dispatch: record and show the answer, but take no further step. */
   authorityLost: boolean
+  /** Stopped by an authority change before dispatch; a claim that resolves afterwards is still shown. */
+  fenced: boolean
+  /** Highest wall-clock reading this attempt has seen: a later lower reading refuses the attempt. */
+  wallHigh: number
 }
 /** An accepted execution policy: the server's validUntil plus a monotonic bound counted from before the request was sent. */
 type PolicyLease = Readonly<{ validUntil: number; startedWall: number; startedMonotonic: number; monotonicUntil: number }>
@@ -19,7 +23,24 @@ const RECORDED: readonly WalletSnapshot["status"][] = ["SIGNING", "APPROVAL_SUBM
 /** Explicit actions only. No transport, wallet or persistence implementation is selected implicitly. */
 export function createStocksWalletController(ports: WalletPorts) {
   const now = ports.now ?? Date.now
-  const monotonicNow = ports.monotonicNow ?? (() => performance.now())
+  const monotonicSource = ports.monotonicNow ?? (() => performance.now())
+  let lastMonotonic = Number.NEGATIVE_INFINITY, monotonicBroken = false
+  /** Monotonic readings never decrease. A non-finite or regressing reading breaks this controller's clock for good (NaN). */
+  function monotonicNow() {
+    if (monotonicBroken) return Number.NaN
+    let value: number
+    try { value = monotonicSource() } catch { value = Number.NaN }
+    if (!Number.isFinite(value) || value < lastMonotonic) { monotonicBroken = true; return Number.NaN }
+    lastMonotonic = value
+    return value
+  }
+  /** Wall reading for time checks of an attempt: non-finite or lower than an earlier reading of the same attempt refuses it. */
+  function observeWall(a: Attempt, code: string) {
+    const wall = now()
+    ensure(Number.isFinite(wall) && wall >= a.wallHigh, code)
+    a.wallHigh = wall
+    return wall
+  }
   let selected: Selection | null = null
   let generation = 0, disposed = false
   let scope = ""
@@ -78,6 +99,7 @@ export function createStocksWalletController(ports: WalletPorts) {
       else {
         // Work before a new signature stops. A claim it already reserved stays visible and recovery-only.
         const stopped = active
+        stopped.fenced = true
         generation++; stopped.abort.abort(); active = null; changed = true
         const known = attempted.get(`${stopped.plan.intentKey}:TRANSFER`) ?? attempted.get(`${stopped.plan.intentKey}:APPROVAL`)
         if (known) snapshot = freeze(knownState(stopped.plan, known, "EXECUTION_AUTHORITY_CHANGED"))
@@ -97,14 +119,17 @@ export function createStocksWalletController(ports: WalletPorts) {
     validateContext(ports.context(), now())
     ensure(now() < a.plan.deadline, "ORDER_EXPIRED")
   }
-  function policyLive(lease: PolicyLease) {
-    const wall = now(), mono = monotonicNow()
-    ensure(Number.isFinite(wall) && Number.isFinite(mono) && wall >= lease.startedWall && mono >= lease.startedMonotonic && wall < lease.validUntil && mono < lease.monotonicUntil, "EXECUTION_POLICY_EXPIRED")
+  function policyLive(a: Attempt, lease: PolicyLease) {
+    const wall = observeWall(a, "EXECUTION_POLICY_EXPIRED"), mono = monotonicNow()
+    ensure(Number.isFinite(mono) && wall >= lease.startedWall && mono >= lease.startedMonotonic && wall < lease.validUntil && mono < lease.monotonicUntil, "EXECUTION_POLICY_EXPIRED")
+  }
+  function policyAlive(a: Attempt, lease: PolicyLease) {
+    try { policyLive(a, lease); return true } catch { return false }
   }
   async function bounded<T>(a: Attempt, work: () => Promise<T>): Promise<T> {
     guard(a)
-    const start = now(), startedMono = monotonicNow(); let timer: ReturnType<typeof setTimeout> | undefined
-    ensure(Number.isFinite(start) && Number.isFinite(startedMono), "READ_TIMEOUT")
+    const start = observeWall(a, "READ_TIMEOUT"), startedMono = monotonicNow(); let timer: ReturnType<typeof setTimeout> | undefined
+    ensure(Number.isFinite(startedMono), "READ_TIMEOUT")
     let onAbort = () => {}
     const stop = new Promise<never>((_, reject) => {
       onAbort = () => reject(new StocksWalletError("CONTEXT_CHANGED"))
@@ -114,8 +139,8 @@ export function createStocksWalletController(ports: WalletPorts) {
     try {
       const value = await Promise.race([Promise.resolve().then(() => { guard(a); return work() }), stop])
       guard(a)
-      const endWall = now(), endMono = monotonicNow()
-      ensure(Number.isFinite(endWall) && Number.isFinite(endMono) && endWall >= start && endWall - start < 15_000 && endMono >= startedMono && endMono - startedMono < 15_000, "READ_TIMEOUT"); return value
+      const endWall = observeWall(a, "READ_TIMEOUT"), endMono = monotonicNow()
+      ensure(Number.isFinite(endMono) && endWall - start < 15_000 && endMono >= startedMono && endMono - startedMono < 15_000, "READ_TIMEOUT"); return value
     } finally { if (timer) clearTimeout(timer); a.abort.signal.removeEventListener("abort", onAbort) }
   }
   async function wallet(a: Attempt) {
@@ -133,7 +158,11 @@ export function createStocksWalletController(ports: WalletPorts) {
     return { apiBase: a.context.apiBase, token: a.context.session!.accessToken, sessionId: a.context.session!.id, side: a.plan.side, orderId: a.plan.order.id, deploymentDigest: a.plan.manifestDigest, signal: a.abort.signal }
   }
   function state(a: Attempt, status: WalletSnapshot["status"], extra: Partial<WalletSnapshot> = {}) {
-    if (current(a)) { snapshotAuthority = a.authority; publish({ ...IDLE, status, plan: a.plan, orderId: a.plan.order.id, intentKey: a.plan.intentKey, ...extra }) }
+    if (!current(a)) return
+    // An attempt that lost its authority after dispatch never publishes a new ready or checking screen.
+    if (a.authorityLost && !RECORDED.includes(status) && !(status === "BLOCKED" && extra.stage)) throw new StocksWalletError("EXECUTION_AUTHORITY_CHANGED")
+    snapshotAuthority = a.authority
+    publish({ ...IDLE, status, plan: a.plan, orderId: a.plan.order.id, intentKey: a.plan.intentKey, ...extra })
   }
   function validateRecord(value: AttemptRecord, a: Attempt, stage: Stage) {
     ensure(value.intentKey === a.plan.intentKey && value.stage === stage && value.transactionDigest === digest(stage === "APPROVAL" ? a.plan.approval : a.plan.transfer) && typeof value.claimId === "string" && value.claimId.length > 0, "SUBMISSION_RECORD_MISMATCH")
@@ -215,17 +244,17 @@ export function createStocksWalletController(ports: WalletPorts) {
     ensure(typeof ports.readExecutionPolicy === "function", "CURRENT_POLICY_REQUIRED")
     // The policy's lifetime is counted from before its request was sent, so neither request delay nor a stalled or
     // stepped-back wall clock re-grants the server's TTL at receipt.
-    const startedWall = now(), startedMonotonic = monotonicNow()
-    ensure(Number.isFinite(startedWall) && Number.isFinite(startedMonotonic), "EXECUTION_POLICY_EXPIRED")
+    const startedWall = observeWall(a, "EXECUTION_POLICY_EXPIRED"), startedMonotonic = monotonicNow()
+    ensure(Number.isFinite(startedMonotonic), "EXECUTION_POLICY_EXPIRED")
     const policy = await read(a, () => ports.readExecutionPolicy(req))
     ensure(policy?.allowed === true && policy.deploymentDigest === a.plan.manifestDigest && policy.orderId === a.plan.order.id && policy.side === a.plan.side && Number.isFinite(policy.observedAt) && Number.isFinite(policy.validUntil) && policy.observedAt <= now() && now() < policy.validUntil && policy.validUntil - policy.observedAt <= 15_000, "EXECUTION_NOT_ALLOWED")
     const lease: PolicyLease = Object.freeze({ validUntil: policy.validUntil, startedWall, startedMonotonic, monotonicUntil: startedMonotonic + Math.min(policy.validUntil - policy.observedAt, policy.validUntil - startedWall) })
-    policyLive(lease)
+    policyLive(a, lease)
     const journal = await inspect(a, recoverApproval)
     ensure(journal !== "blocked", "RECOVERY_REQUIRED")
     if (journal === "reconciled") return preflight(a) // New verification requires entirely fresh authorization reads.
     const allowance = integer(await read(a, () => ports.readAllowance({ token: a.plan.token, owner: a.plan.order.wallet, spender: a.plan.spender, chainId: 91342, signal: a.abort.signal })), true)
-    policyLive(lease)
+    policyLive(a, lease)
     ensure(allowance >= BigInt(a.plan.amount) || !attempted.has(`${a.plan.intentKey}:APPROVAL`), "ALLOWANCE_RECOVERY_REQUIRED")
     return { allowance, policy: lease }
   }
@@ -251,12 +280,14 @@ export function createStocksWalletController(ports: WalletPorts) {
     assertTransaction(tx, stage === "APPROVAL" ? planOrder(a.selection, a.context, now()).approval : planOrder(a.selection, a.context, now()).transfer)
     await wallet(a)
     const claim = await read(a, async () => {
-      reconcilable(a, stage); policyLive(policy)
+      reconcilable(a, stage); policyLive(a, policy)
       const won = await a.submissions.claim({ intentKey: a.plan.intentKey, stage, transactionDigest: digest(tx), transaction: tx, orderId: a.plan.order.id, deploymentDigest: a.plan.manifestDigest })
       ensure(won, "SUBMISSION_ALREADY_CLAIMED"); validateRecord(won, a, stage)
       ensure(won.status === "REQUEST_MAY_START" && !won.txHash, "SUBMISSION_ALREADY_CLAIMED")
       // Remember the reserved claim as soon as it is won, even if the check that follows is stopped.
       attempted.set(`${a.plan.intentKey}:${stage}`, freeze(won))
+      // Stopped by an authority change while this claim was in flight: still show the reserved claim on the same screen.
+      if (a.fenced && !disposed && scope === a.scope && active === null && !recorded(snapshot)) publish(knownState(a.plan, won, "EXECUTION_AUTHORITY_CHANGED"))
       return won
     })
     // Claim/allowance reads can take time. Re-authorize the accepted order immediately before signing.
@@ -264,14 +295,15 @@ export function createStocksWalletController(ports: WalletPorts) {
     ensure(finalResponse.profile === "DEMO_TESTNET" && finalResponse.valuePolicy === "TEST_VALUE_ONLY" && finalResponse.brokerMode === "MOCK_BROKER" && finalResponse.chainId === 91342 && finalResponse.priceSource === "FIXED_MOCK_PRICE", "ORDER_PROFILE_MISMATCH")
     freshResponse(finalResponse)
     ensure(canonical(parseOrder({ side: a.plan.side, order: finalResponse.data })) === canonical(a.plan.order), "ORDER_CHANGED")
-    guard(a); policyLive(policy); reconcilable(a, stage)
+    guard(a); policyLive(a, policy); reconcilable(a, stage)
     state(a, "SIGNING", { stage })
-    // SIGNING subscribers run synchronously and may remove ports. This refusal happens before any wallet
-    // request, so it keeps the claim as REQUEST_MAY_START instead of recording an uncertain outcome.
-    reconcilable(a, stage)
+    // SIGNING subscribers run synchronously and may remove ports, change the context or consume the policy's
+    // remaining lifetime. Every refusal here happens before any wallet request, so the claim stays
+    // REQUEST_MAY_START and no uncertain outcome is recorded.
+    reconcilable(a, stage); guard(a); policyLive(a, policy)
+    a.dispatched = true
     let result: unknown
-    // SIGNING subscribers may also consume the policy's remaining lifetime (wall and monotonic).
-    try { guard(a); policyLive(policy); a.dispatched = true; result = await ports.requestTransaction(tx) }
+    try { result = await ports.requestTransaction(tx) }
     catch {
       const unknown = { ...claim, status: "UNKNOWN" as const }
       try { await persist(a, unknown) } catch { /* The pre-request claim still blocks re-signing. */ }
@@ -288,11 +320,17 @@ export function createStocksWalletController(ports: WalletPorts) {
     }
     // No further wallet request can follow an unchecked late result. Never paint it into a new scope.
     if (!current(a)) return
-    // Authority changed or expired while the wallet had the request: show the answer, continue nothing.
-    if (a.authorityLost) { state(a, stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED", { stage, txHash, error: "EXECUTION_AUTHORITY_CHANGED" }); return }
-    state(a, stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED", { stage, txHash })
-    try { await wallet(a) } catch { return }
-    if (stage === "TRANSFER") return // Receipt/hash is not Stocks order completion.
+    // Receipt/hash is not Stocks order completion, and nothing ever follows a transfer automatically.
+    if (stage === "TRANSFER") { state(a, "SUBMITTED", { stage, txHash }); return }
+    // An approval answered after its authority changed or its policy ended continues nothing on its own: an explicit
+    // check with fresh reads is required before the separate transfer step can be offered.
+    if (a.authorityLost) { state(a, "APPROVAL_SUBMITTED", { stage, txHash, error: "EXECUTION_AUTHORITY_CHANGED" }); return }
+    if (!policyAlive(a, policy)) { state(a, "APPROVAL_SUBMITTED", { stage, txHash, error: "EXECUTION_POLICY_EXPIRED" }); return }
+    state(a, "APPROVAL_SUBMITTED", { stage, txHash })
+    try { await wallet(a) } catch {
+      if (current(a) && a.authorityLost) state(a, "APPROVAL_SUBMITTED", { stage, txHash, error: "EXECUTION_AUTHORITY_CHANGED" })
+      return
+    }
     if (!await reconcileApproval(a, submitted)) return
     const fresh = await preflight(a)
     ensure(fresh.allowance >= BigInt(a.plan.amount), "ALLOWANCE_NOT_CONFIRMED")
@@ -330,7 +368,7 @@ export function createStocksWalletController(ports: WalletPorts) {
       if (action === "approve") ensure(snapshot.status === "APPROVAL_REQUIRED", "PREPARE_REQUIRED")
       if (action === "submit") ensure(snapshot.status === "READY_TRANSFER", "PREPARE_REQUIRED")
       const context = freeze(ports.context())
-      const a: Attempt = { context, selection: selected, plan: planOrder(selected, context, now()), scope, generation, abort: new AbortController(), submissions: ports.submissions, authority: digest(context), dispatched: false, authorityLost: false }
+      const a: Attempt = { context, selection: selected, plan: planOrder(selected, context, now()), scope, generation, abort: new AbortController(), submissions: ports.submissions, authority: digest(context), dispatched: false, authorityLost: false, fenced: false, wallHigh: Number.NEGATIVE_INFINITY }
       active = a
       a.promise = Promise.resolve().then(() => run(a, action))
       return a.promise

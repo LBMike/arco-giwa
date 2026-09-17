@@ -41,7 +41,9 @@ Not changed:
 - server, DB, contracts, registry, runtime config, dependencies
 - router, auth provider (`stocks-host`), real wallet sources
 
-`stocks-host/session.ts` and `stocks-investor/client.ts` use the same `url.search`/`url.hash` check. They are outside ownership (auth provider / investor feature); they will be reported, not changed.
+Outside ownership, reported rather than changed:
+- `stocks-host/session.ts` (auth provider), `stocks-investor/client.ts` and `stocks-market/client.ts` use the same `url.search`/`url.hash` check.
+- `stocks-admin/client.ts` does not validate the base at all.
 
 ## 1. Execution clock floor (`stocks-wallet-http/clock.ts`)
 
@@ -65,7 +67,7 @@ A monotone lower bound anchored at the latest observation.
   - after the allowance read
   - inside the claim callback (before a new claim)
   - after the final order read (before SIGNING)
-  - inside the dispatch `try` right before `requestTransaction`, after SIGNING subscribers ran
+  - right before `requestTransaction`, after SIGNING subscribers ran (as implemented after builder review: before the dispatch `try`, so a refusal keeps REQUEST_MAY_START and records no outcome)
 - The A3 reconcile checks (claim callback, before SIGNING, after SIGNING subscribers) stay.
 - A consumed claim stays recovery-only: no reopen, no retry.
 
@@ -115,3 +117,28 @@ Then fix, add mutation checks and run the full suite:
 - token, story and whitespace checks
 
 Reference (Codex): frontend 524/524, server 327 pass / 68 DB skip at `c97c5c9`; the locale backend reports 330 pass / 68 DB skip. Existing token findings: 7.
+
+## Changes after builder-side review (checkpoint `7aef443`)
+
+A four-lens adversarial builder-side review with one skeptic verifier per lens reported 16 findings. None was refuted and none was P0/P1. Resulting changes:
+- **Clock regressions:** the controller's monotonic reading never decreases (a non-finite or lower reading latches NaN for the controller). Wall readings are tracked per attempt, and a lower later reading refuses the read or request. Previously a regression that stayed above the policy request start was accepted.
+- **Approval answered after its policy ended:** stops at the hash with `EXECUTION_POLICY_EXPIRED` instead of verifying and publishing READY_TRANSFER on its own.
+- **No ready screen after lost authority:** a dispatched attempt that lost its authority can no longer publish READY_TRANSFER or another unrecorded status. Authority lost during the wallet read after an approval hash is shown with `EXECUTION_AUTHORITY_CHANGED` instead of "confirming".
+- **Claim in flight:** a claim whose request was in flight when the attempt was stopped is shown as UNKNOWN when it resolves.
+- **Refusals in SIGNING subscribers:** policy, context or authority refusals inside a SIGNING subscriber happen before the dispatch `try`, so the claim stays REQUEST_MAY_START and no uncertain outcome is recorded (previously UNKNOWN was persisted, inherited from the base).
+- **Transfer after authority change:** a transfer answered under a changed authority shows plain SUBMITTED.
+- **UI copy and tests:** the UNKNOWN screen adds the reason for `EXECUTION_AUTHORITY_CHANGED`. The cs/sk roundtrip test uses an explicit TAP reporter (Node 22 CI).
+- **New regressions:**
+  - clock regression above the request start
+  - server `observedAt` before the client request start
+  - lease end during the prepare allowance read
+  - policy-only expiry during the open approval prompt
+  - authority lost with the claim or the post-hash wallet read in flight
+  - the READY_TRANSFER race
+  - remount with an open prompt
+- **Docs:**
+  - session expiry: `stocks-host` clears the session, so the screen resets like logout
+  - the screens table
+  - the full list of out-of-ownership API base gaps
+
+Details are in `docs/evidence/giwa-wallet-hardening-20260917.md`.

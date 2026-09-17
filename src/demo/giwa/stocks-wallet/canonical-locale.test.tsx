@@ -36,10 +36,11 @@ for (const [lang, locale] of LOCALES) {
 
 for (const [lang, locale] of LOCALES.slice(1)) {
   test(`actual server plugin DTOs → read adapter → planner roundtrip passes under a real ${locale} process`, () => {
-    const child = spawnSync(process.execPath, ["--import", "tsx", "--test", "src/demo/giwa/stocks-wallet-http/server-roundtrip.test.tsx"], { cwd: repo, env: environment(lang), encoding: "utf8", timeout: 120_000 })
+    // An explicit TAP reporter: the default reporter differs between Node 22 (CI) and newer releases.
+    const child = spawnSync(process.execPath, ["--import", "tsx", "--test", "--test-reporter=tap", "src/demo/giwa/stocks-wallet-http/server-roundtrip.test.tsx"], { cwd: repo, env: environment(lang), encoding: "utf8", timeout: 120_000 })
     assert.equal(child.error, undefined)
-    assert.match(child.stdout, /ℹ pass 5\b/, child.stdout.slice(-2_000))
-    assert.match(child.stdout, /ℹ fail 0\b/)
+    assert.match(child.stdout, /^# pass 5$/m, child.stdout.slice(-2_000))
+    assert.match(child.stdout, /^# fail 0$/m)
     assert.equal(child.status, 0)
   })
 }

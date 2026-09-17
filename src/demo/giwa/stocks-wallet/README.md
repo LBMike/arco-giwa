@@ -28,9 +28,10 @@ The planner requires chain 91342, NVDA, ARCO_TEST_USDC, manifest v2, exact curre
 Same-scope double clicks share one promise. Account, chain, wallet source/connection epoch, SIWE session, API, manifest digest and selection changes are **display scope** changes: they retire work and reset the snapshot (a late wallet answer is recorded through the original gate but never painted into the new scope). The host's epoch MUST advance on A→B→A, even if React batches the events.
 
 Deployment evidence (ID, dates, expiry) and session validity are **execution authority**, checked separately (003A-1):
-- If authority changes or expires, work that has not reached the wallet stops. A claim it reserved stays visible as UNKNOWN / `EXECUTION_AUTHORITY_CHANGED`.
-- An attempt whose wallet request is already open stays on screen. Its answer is recorded and shown with `EXECUTION_AUTHORITY_CHANGED`, and no later step (verification, READY_TRANSFER, transfer) runs automatically.
-- Recorded screens are kept; unrecorded ready screens return to IDLE, so a kept screen is never permission.
+- If authority changes or expires, work that has not reached the wallet stops. A claim it reserved (also one whose claim request was still in flight) stays visible as UNKNOWN / `EXECUTION_AUTHORITY_CHANGED`.
+- An attempt whose wallet request is already open stays on screen. Its answer is recorded and shown; an approval then stops with `EXECUTION_AUTHORITY_CHANGED` and no later step (verification, READY_TRANSFER, transfer) runs automatically. A transfer shows SUBMITTED (nothing follows a transfer). If the session itself expired, the attempt's captured submission gate refuses to record the late hash (it is shown with `RECOVERY_REQUIRED`); `stocks-host` normally clears an expired session, which resets the screen like logout.
+- An approval answered after its execution policy ended also stops at the hash with `EXECUTION_POLICY_EXPIRED`; READY_TRANSFER only follows an explicit check with fresh reads.
+- Recorded screens are kept; unrecorded ready screens return to IDLE, and a dispatched attempt that lost its authority never publishes a new ready screen, so a kept screen is never permission.
 
 Every awaited preflight read is followed by a current-wallet read and scope/deadline verification. Reads have a 15-second deadline checked on both the wall clock and `ports.monotonicNow` (default `performance.now()`). Order/catalog observedAt must be less than 15 seconds old.
 
@@ -38,7 +39,9 @@ The execution policy is bounded twice:
 - by its server `validUntil` on the wall clock
 - by `monotonicStart + min(validUntil − observedAt, validUntil − wallStart)`, where both starts are sampled before the policy request is sent, so request delay, stalled or stepped-back wall clocks cannot re-grant its TTL
 
-Both bounds are checked after the allowance read, before a new claim, before SIGNING and immediately before the wallet request (after SIGNING subscribers). A non-finite or regressing clock reading refuses the request. Accurate host/server clocks and trusted transport are required.
+Both bounds are checked after the allowance read, before a new claim, before SIGNING and immediately before the wallet request (after SIGNING subscribers); refusals up to that point keep a reserved claim at REQUEST_MAY_START and record no outcome.
+
+Clock readings fail closed: the controller's monotonic reading never decreases (a non-finite or lower reading makes it NaN for the rest of the controller's life), and within an attempt a non-finite wall reading or one lower than an earlier reading of the same attempt refuses the read or the request. Accurate host/server clocks and trusted transport are required.
 
 Canonical JSON digests (`planner.canonical` / `digest`) sort keys with an explicit `en-US` collation, identical to the backend (`docs/contracts/stocks-canonical-locale-v1.md`). A browser in, for example, a Czech or Slovak default locale produces the historical en-US manifest, transaction and intent digests. This still depends on the runtime ICU collation data; it is not a version-independent canonical format.
 
