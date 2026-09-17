@@ -1,0 +1,21 @@
+# Stocks known-hash recovery after session expiry
+
+This documents existing backend behavior. It adds no endpoint, execution permission, token grace period, retry, schema change or order deadline extension.
+
+A captured browser submission gate refuses requests after its original session expires. That is correct: an expired JWT is not usable for a late wallet outcome. The durable claim remains reserved even if the wallet answered after expiry, the browser closed, or the order deadline passed. Claim age/absence of a hash is not evidence that no transaction was sent.
+
+When the original transaction hash is actually known, a user can authenticate again as the same wallet, in the same chain/domain and deployment scope, and explicitly recover:
+
+1. GET `/api/v1/stocks/wallet-submissions/:side/:orderId` using the new valid Bearer session. Capture the existing approval/transfer binding; never request a new claim or wallet transaction to recover it.
+2. POST `/api/v1/stocks/wallet-submissions/outcomes` with the observed claimId, intentKey, stage, transactionDigest, `status: SUBMITTED` (or UNKNOWN with a known hash) and the original txHash. Exact ownership/physical binding and stored-hash immutability still apply. Identical duplicate outcomes are idempotent.
+3. POST `/api/v1/stocks/wallet-submissions/reconcile` with that binding/hash. Only the configured trusted receipt verifier can make the record CONFIRMED/REVERTED. Missing or unfinalized receipts leave it nonterminal. The receipt proves the claimed transaction; it does not by itself complete the business order.
+
+Inspect, outcomes and reconcile remain available for an owned current-deployment record after order expiry and trading pause. New execution admission does not: a fresh TRANSFER claim still requires a trusted confirmed approval when applicable, an eligible order, unpaused trading and the original DB deadline. Existing same-stage claims never return another REQUEST_MAY_START. Outcomes supplied as CONFIRMED/REVERTED are rejected, and a second hash cannot overwrite the first.
+
+The existing server already supports this flow. What the browser still needs is an explicit way to carry or recover the known original hash after renewed authentication and bind it to the inspected claim. This contract does not implement browser persistence, show another account's history, adopt a current session automatically for an old asynchronous callback, search a wallet's transactions, or infer an unknown hash. If the hash was never captured, remain recovery-only; do not resend or reset the claim.
+
+The quote expiration is presently also the order payment deadline (60 seconds from quote issuance). An approval that reaches finality after that deadline can be recorded/reconciled, but cannot authorize a new transfer. No public-network finality timing was measured here and this verification does not alter those terms.
+
+Verification file: `server/src/stocks-submissions/session-recovery.postgres.test.ts`. It uses the existing isolated fresh-PostgreSQL gate, real signed HS256 session resolver, real Fastify submission plugin and services, and trusted receipt verifier over TestChain. BUY/SELL cases cover actual expired-JWT rejection before parsing/SQL/RPC, a distinct new same-owner JWT, expired immutable order plus pause, wrong owner, hash conflict, duplicate idempotence, client-terminal refusal, pending/trusted confirmation, preserved order state and no new claim permission. A new short-lived fixture quote is inserted before calling real createOrder; existing production deadlines and immutable rows are never edited. Test JWTs use explicit nonproduction fixture keys, and no real wallet/signature/RPC is involved.
+
+Run build and default gate: `npm run build:server`, then `node --test server/dist/stocks-submissions/session-recovery.postgres.test.js` (2 SKIP without explicit harness configuration). Actual DB verification must use the repository's owned fresh harness with this compiled file as an additional test argument; do not point it at an existing database. Builder only compiled and checked gating; root runs and records the actual PostgreSQL result separately.
