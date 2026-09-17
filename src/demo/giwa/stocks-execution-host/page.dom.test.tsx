@@ -560,6 +560,14 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       await page.waitFor(() => bodies(harness, /wallet-submissions\/outcomes$/).length > 0, "late outcome recorded")
       assert.deepEqual(bodies(harness, /wallet-submissions\/outcomes$/).map((body) => [body.stage, body.status, body.txHash]), [["APPROVAL", "SUBMITTED", hash]])
       assert.equal(requestsTo(harness, "POST", /wallet-submissions\/reconcile$/).length, 0)
+
+      // Review HL-3: a later session for the same wallet that ends without a wallet request clears the notice.
+      await page.signIn()
+      assert.ok(!page.text().includes(SESSION_NOTICE), "hidden while signed in")
+      await page.click(page.button("Sign out of Stocks"), "Sign out of Stocks")
+      await page.settle(300)
+      assert.ok(!page.text().includes(SESSION_NOTICE), "the notice does not come back after a session without a wallet request")
+      assert.equal(sends(wallet), 1)
     })
 
     await scenario("9. a Dynamic source is unsupported: unsupported copy, status-only card, zero client access and zero wallet requests", async () => {
