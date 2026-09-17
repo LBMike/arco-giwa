@@ -182,3 +182,52 @@ Tests (fake EIP-1193 provider, Dynamic-shaped clients, fake HTTP, in-process ser
   - README session-end wording
 - **Kept as a documented limit:** a synchronous port refusal is recorded as UNKNOWN (controller-owned).
 - Details: `docs/evidence/giwa-wallet-host-integration-20260917.md`.
+
+## 003B-1 — session-end notice and documentation corrections (plan, recorded before code)
+
+Follow-up to Codex's independent review of `eda0bc0` (`review-results/20260918/wallet-host-003b-review.md`: core wiring accepted; one P3 copy finding and P3 documentation corrections).
+
+| Item | Value |
+| --- | --- |
+| Base | `/private/tmp/arco-giwa-wallet-host-integration-20260917` @ `eda0bc02bfa61fc72f4bb9305dbcf0255c4c3faa` (feature base `b27b259`) |
+| Work clone / branch | `/private/tmp/arco-giwa-wallet-host-copy-20260918`, `codex/giwa-wallet-host-copy-20260918` (new path; push URL disabled) |
+| Untouched | the 003B checkout and the Codex review clones and evidence directories (their probes are read, not edited) |
+| Commander | user / conductor (003B-1 prompt) |
+| Builder | Claude Code, same session as 003B, `claude-opus-5` |
+| Independent reviewer | Codex (separate) |
+
+**Finding.** `StocksExecutionSessionNotice` says a late wallet answer "may not be recorded until that check". A check never records it:
+- If the session expired by time during an open prompt, the original gate refuses the late hash before any HTTP request.
+- A later session's check reads the server journal: the reserved claim is still `REQUEST_MAY_START` with no hash, so the panel shows UNKNOWN without a hash.
+- The browser never carries the old hash into the new session, and no outcome is posted for it.
+
+**Owned changes:**
+1. `stocks-execution-host/StocksExecutionProvider.tsx`: notice copy only. It will say:
+   - a late answer may stay unrecorded even if the transaction was sent;
+   - a check only shows what the server already recorded and cannot add a request it never received;
+   - when the result is unknown, nothing is sent again from any app or wallet, and operations must confirm it.
+
+   It will offer no button or URL, name no order, amount or hash, and keep the same-wallet-only and clearing rules.
+2. `stocks-execution-host/page.dom.test.tsx`: the notice constant, plus new BUY and SELL scenarios on the real `/stocks` route (host, provider, panel, controller, reads, gate, ports) against the in-process real server plugins. Each scenario:
+   - uses a 30 s session and holds the approval prompt;
+   - expires the session by time and checks the notice;
+   - releases the hash: 0 outcomes, claim `REQUEST_MAY_START` without hash, hash not painted;
+   - signs in again and checks: UNKNOWN with no hash, 0 outcomes, 1 claim, still 1 wallet send;
+   - counts wallet sends after mount, sign-in, check, approval, second sign-in and second check;
+   - asserts what the copy means (no promise of recovery by checking, do-not-resend and operations guidance), not only that one string is gone.
+
+   Failure first: the new scenarios run against the current copy before it changes.
+3. `docs/evidence/giwa-wallet-host-integration-20260917.md`, `stocks-execution-host/README.md`, this file:
+   - **Late-hash recovery.** The backend already supports a new, valid, same-owner session doing `inspect → outcomes → reconcile` for a known hash on the original immutable claim, including after quote expiry or pause, without granting a new send or claim. What is missing is the browser carrying the originally known hash into an explicit recovery flow in the new session (not built here). A hash the application never knew cannot be restored by a check or a claim.
+   - **Quote deadline vs. finality.** Only the verified condition is stated: when approval finality arrives after the remaining deadline, the next send is refused. Public-network finality was not measured.
+   - **Two separate cases.** A synchronous source change inside a SIGNING subscriber (before the provider call: 0 sends) is kept distinct from a change after the provider request is open (1 send, late hash).
+
+**Not changed:** server, DB, Solidity, deployments, dependencies, wallet send logic, controller, session authority, order deadlines. No recovery UI, automatic recording or retry; no Dynamic work.
+
+**Checks:**
+- focused DOM, registry and full-stack runs;
+- typecheck, build;
+- `test:frontend` with DOM + `GIWA_STOCKS_ARTIFACTS`, and CI-like;
+- `test:server`, `test:security`, design tokens/stories, `git diff --check`.
+
+Baseline at `eda0bc0`: frontend 661, server 330 pass / 68 DB skip, 7 token findings.
