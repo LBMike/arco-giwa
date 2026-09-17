@@ -1,0 +1,291 @@
+// TEST ONLY. Frozen from unchanged backend c97c5c9 using actual en-US Node/ICU.
+// Never regenerate these expected bytes/digests using the implementation under test.
+export const canonicalLocaleVectors: {name: string; value: unknown; canonical: string; digest: string}[] = [
+  {
+    "name": "manifest",
+    "value": {
+      "schemaVersion": 2,
+      "redemptionEscrow": "0x0000000000000000000000000000000000000069",
+      "deploymentId": "TEST_HARNESS_ONLY_STOCKS_V1",
+      "profile": "DEMO_TESTNET",
+      "chainId": 91342,
+      "networkInstance": "TEST_HARNESS_ONLY_NETWORK_V1",
+      "checkpointNumber": "1",
+      "checkpointHash": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "abiDigest": "a0d31f9e9c54e63b38215aa64b271ff08d72d16b3a893dfa64652e4eabdaf974",
+      "finalityPolicy": "FINALIZED",
+      "cashToken": "0x0000000000000000000000000000000000000064",
+      "cashSymbol": "ARCO_TEST_USDC",
+      "cashScale": 6,
+      "stockToken": "0x0000000000000000000000000000000000000065",
+      "quantityScale": 9,
+      "fundingVault": "0x0000000000000000000000000000000000000066",
+      "mintController": "0x0000000000000000000000000000000000000067",
+      "signerAddress": "0x0000000000000000000000000000000000000068",
+      "codeHashes": {
+        "0x0000000000000000000000000000000000000064": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+        "0x0000000000000000000000000000000000000065": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+        "0x0000000000000000000000000000000000000066": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+        "0x0000000000000000000000000000000000000067": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+        "0x0000000000000000000000000000000000000069": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d"
+      },
+      "restrictedTransfers": true,
+      "nonUpgradeable": true
+    },
+    "canonical": "{\"abiDigest\":\"a0d31f9e9c54e63b38215aa64b271ff08d72d16b3a893dfa64652e4eabdaf974\",\"cashScale\":6,\"cashSymbol\":\"ARCO_TEST_USDC\",\"cashToken\":\"0x0000000000000000000000000000000000000064\",\"chainId\":91342,\"checkpointHash\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"checkpointNumber\":\"1\",\"codeHashes\":{\"0x0000000000000000000000000000000000000064\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000065\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000066\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000067\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000069\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\"},\"deploymentId\":\"TEST_HARNESS_ONLY_STOCKS_V1\",\"finalityPolicy\":\"FINALIZED\",\"fundingVault\":\"0x0000000000000000000000000000000000000066\",\"mintController\":\"0x0000000000000000000000000000000000000067\",\"networkInstance\":\"TEST_HARNESS_ONLY_NETWORK_V1\",\"nonUpgradeable\":true,\"profile\":\"DEMO_TESTNET\",\"quantityScale\":9,\"redemptionEscrow\":\"0x0000000000000000000000000000000000000069\",\"restrictedTransfers\":true,\"schemaVersion\":2,\"signerAddress\":\"0x0000000000000000000000000000000000000068\",\"stockToken\":\"0x0000000000000000000000000000000000000065\"}",
+    "digest": "36c4a290f3adb77af023db4699007ea8e74f5ba7da85f1449c7aeaa2437d9000"
+  },
+  {
+    "name": "approvalTransaction",
+    "value": {
+      "chainId": 91342,
+      "from": "0x000000000000000000000000000000000000000A",
+      "value": "0",
+      "to": "0x0000000000000000000000000000000000000064",
+      "data": "0x095ea7b300000000000000000000000000000000000000000000000000000000000000660000000000000000000000000000000000000000000000000000000007270e00"
+    },
+    "canonical": "{\"chainId\":91342,\"data\":\"0x095ea7b300000000000000000000000000000000000000000000000000000000000000660000000000000000000000000000000000000000000000000000000007270e00\",\"from\":\"0x000000000000000000000000000000000000000A\",\"to\":\"0x0000000000000000000000000000000000000064\",\"value\":\"0\"}",
+    "digest": "cf6d35e2270da8a3a0d9d9cc78cb6497bb113a88e9261b4c7f9227e50676dc75"
+  },
+  {
+    "name": "transferTransaction",
+    "value": {
+      "chainId": 91342,
+      "from": "0x000000000000000000000000000000000000000A",
+      "value": "0",
+      "to": "0x0000000000000000000000000000000000000066",
+      "data": "0x0907e7436ef1fa9812a9960dd3b943d177ece230984ba987f0a55d2a1c0c3568f2c678660000000000000000000000000000000000000000000000000000000007270e00"
+    },
+    "canonical": "{\"chainId\":91342,\"data\":\"0x0907e7436ef1fa9812a9960dd3b943d177ece230984ba987f0a55d2a1c0c3568f2c678660000000000000000000000000000000000000000000000000000000007270e00\",\"from\":\"0x000000000000000000000000000000000000000A\",\"to\":\"0x0000000000000000000000000000000000000066\",\"value\":\"0\"}",
+    "digest": "052c78511b94290ce26d62266106557e96b72b4b5c3073cb3f8419b3cf6d1491"
+  },
+  {
+    "name": "intentArray",
+    "value": [
+      91342,
+      "0x0000000000000000000000000000000000000066",
+      "0x0000000000000000000000000000000000000064",
+      "0x000000000000000000000000000000000000000a",
+      "0x6ef1fa9812a9960dd3b943d177ece230984ba987f0a55d2a1c0c3568f2c67866"
+    ],
+    "canonical": "[91342,\"0x0000000000000000000000000000000000000066\",\"0x0000000000000000000000000000000000000064\",\"0x000000000000000000000000000000000000000a\",\"0x6ef1fa9812a9960dd3b943d177ece230984ba987f0a55d2a1c0c3568f2c67866\"]",
+    "digest": "557244fa1f60dc1e0e005849780936600d2d685bba17bf7fb3a7dad7a6661b11"
+  },
+  {
+    "name": "orderBinding",
+    "value": {
+      "side": "BUY",
+      "orderId": "receipt-order",
+      "orderKey": "0x6ef1fa9812a9960dd3b943d177ece230984ba987f0a55d2a1c0c3568f2c67866",
+      "actorId": "test-actor",
+      "wallet": "0x000000000000000000000000000000000000000a",
+      "symbol": "NVDA",
+      "quantity": "1000000000",
+      "cashAmount": "120000000",
+      "deploymentId": "TEST_HARNESS_ONLY_STOCKS_V1",
+      "deploymentDigest": "36c4a290f3adb77af023db4699007ea8e74f5ba7da85f1449c7aeaa2437d9000",
+      "quoteExpiresAt": "2026-09-17T00:15:00.000Z"
+    },
+    "canonical": "{\"actorId\":\"test-actor\",\"cashAmount\":\"120000000\",\"deploymentDigest\":\"36c4a290f3adb77af023db4699007ea8e74f5ba7da85f1449c7aeaa2437d9000\",\"deploymentId\":\"TEST_HARNESS_ONLY_STOCKS_V1\",\"orderId\":\"receipt-order\",\"orderKey\":\"0x6ef1fa9812a9960dd3b943d177ece230984ba987f0a55d2a1c0c3568f2c67866\",\"quantity\":\"1000000000\",\"quoteExpiresAt\":\"2026-09-17T00:15:00.000Z\",\"side\":\"BUY\",\"symbol\":\"NVDA\",\"wallet\":\"0x000000000000000000000000000000000000000a\"}",
+    "digest": "571ec0cac9189aa5db3ccb79e8f006f483e6f5d26cf39ab8bb2ec3e3e3fa710e"
+  },
+  {
+    "name": "brokerRequest",
+    "value": {
+      "operationId": "broker:receipt-order",
+      "orderId": "receipt-order",
+      "symbol": "NVDA",
+      "quantity": "1000000000",
+      "cashAmount": "120000000"
+    },
+    "canonical": "{\"cashAmount\":\"120000000\",\"operationId\":\"broker:receipt-order\",\"orderId\":\"receipt-order\",\"quantity\":\"1000000000\",\"symbol\":\"NVDA\"}",
+    "digest": "865a5136a1cc22d9e8e1a7e2e288de579ce3ec8a6b451eead9e1f0139034614e"
+  },
+  {
+    "name": "sellBrokerRequest",
+    "value": {
+      "operationId": "sell-broker:receipt-order",
+      "orderId": "receipt-order",
+      "symbol": "NVDA",
+      "side": "SELL",
+      "quantity": "1000000000",
+      "cashAmount": "120000000",
+      "custodyId": "fixture-custody"
+    },
+    "canonical": "{\"cashAmount\":\"120000000\",\"custodyId\":\"fixture-custody\",\"operationId\":\"sell-broker:receipt-order\",\"orderId\":\"receipt-order\",\"quantity\":\"1000000000\",\"side\":\"SELL\",\"symbol\":\"NVDA\"}",
+    "digest": "eca615171c2f87941b164f47fd2cf788f412e2e27b96ef776b679de15a36362b"
+  },
+  {
+    "name": "authorizedCall",
+    "value": {
+      "operationId": "fixed-operation",
+      "chainId": 91342,
+      "networkInstance": "TEST_HARNESS_ONLY_NETWORK_V1",
+      "deploymentId": "TEST_HARNESS_ONLY_STOCKS_V1",
+      "from": "0x000000000000000000000000000000000000000a",
+      "to": "0x0000000000000000000000000000000000000066",
+      "data": "0x0907e7436ef1fa9812a9960dd3b943d177ece230984ba987f0a55d2a1c0c3568f2c678660000000000000000000000000000000000000000000000000000000007270e00",
+      "value": "0"
+    },
+    "canonical": "{\"chainId\":91342,\"data\":\"0x0907e7436ef1fa9812a9960dd3b943d177ece230984ba987f0a55d2a1c0c3568f2c678660000000000000000000000000000000000000000000000000000000007270e00\",\"deploymentId\":\"TEST_HARNESS_ONLY_STOCKS_V1\",\"from\":\"0x000000000000000000000000000000000000000a\",\"networkInstance\":\"TEST_HARNESS_ONLY_NETWORK_V1\",\"operationId\":\"fixed-operation\",\"to\":\"0x0000000000000000000000000000000000000066\",\"value\":\"0\"}",
+    "digest": "fcf755940c128157b428596077a26c3f897d3989f14ffc59de84dbe5abf33a65"
+  },
+  {
+    "name": "receiptProof",
+    "value": {
+      "version": 1,
+      "deploymentDigest": "36c4a290f3adb77af023db4699007ea8e74f5ba7da85f1449c7aeaa2437d9000",
+      "claimId": "fixture-claim",
+      "intentKey": "557244fa1f60dc1e0e005849780936600d2d685bba17bf7fb3a7dad7a6661b11",
+      "transactionDigest": "cf6d35e2270da8a3a0d9d9cc78cb6497bb113a88e9261b4c7f9227e50676dc75",
+      "txHash": "0x0000000000000000000000000000000000000000000000000000000000000384",
+      "status": "CONFIRMED",
+      "blockNumber": "10",
+      "blockHash": "0x000000000000000000000000000000000000000000000000000000000000000a",
+      "evidence": {
+        "network": {
+          "chainId": 91342,
+          "networkInstance": "TEST_HARNESS_ONLY_NETWORK_V1",
+          "checkpointHash": "0x0000000000000000000000000000000000000000000000000000000000000001"
+        },
+        "tx": {
+          "hash": "0x0000000000000000000000000000000000000000000000000000000000000384",
+          "from": "0x000000000000000000000000000000000000000a",
+          "to": "0x0000000000000000000000000000000000000064",
+          "input": "0x095ea7b300000000000000000000000000000000000000000000000000000000000000660000000000000000000000000000000000000000000000000000000007270e00",
+          "value": "0"
+        },
+        "receipt": {
+          "transactionHash": "0x0000000000000000000000000000000000000000000000000000000000000384",
+          "blockNumber": "10",
+          "blockHash": "0x000000000000000000000000000000000000000000000000000000000000000a",
+          "status": "success",
+          "logs": [
+            {
+              "address": "0x0000000000000000000000000000000000000064",
+              "topics": [
+                "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
+                "0x000000000000000000000000000000000000000000000000000000000000000a",
+                "0x0000000000000000000000000000000000000000000000000000000000000066"
+              ],
+              "data": "0x0000000000000000000000000000000000000000000000000000000007270e00",
+              "logIndex": 0,
+              "removed": false
+            }
+          ]
+        },
+        "block": {
+          "number": "10",
+          "hash": "0x000000000000000000000000000000000000000000000000000000000000000a",
+          "timestamp": "1789603200"
+        },
+        "finalized": {
+          "number": "100",
+          "hash": "0x0000000000000000000000000000000000000000000000000000000000000064",
+          "timestamp": "2000000000"
+        },
+        "checkpoint": {
+          "number": "1",
+          "hash": "0x0000000000000000000000000000000000000000000000000000000000000001",
+          "timestamp": "1"
+        },
+        "code": {
+          "0x0000000000000000000000000000000000000064": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+          "0x0000000000000000000000000000000000000065": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+          "0x0000000000000000000000000000000000000066": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+          "0x0000000000000000000000000000000000000067": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+          "0x0000000000000000000000000000000000000069": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d"
+        }
+      }
+    },
+    "canonical": "{\"blockHash\":\"0x000000000000000000000000000000000000000000000000000000000000000a\",\"blockNumber\":\"10\",\"claimId\":\"fixture-claim\",\"deploymentDigest\":\"36c4a290f3adb77af023db4699007ea8e74f5ba7da85f1449c7aeaa2437d9000\",\"evidence\":{\"block\":{\"hash\":\"0x000000000000000000000000000000000000000000000000000000000000000a\",\"number\":\"10\",\"timestamp\":\"1789603200\"},\"checkpoint\":{\"hash\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"number\":\"1\",\"timestamp\":\"1\"},\"code\":{\"0x0000000000000000000000000000000000000064\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000065\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000066\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000067\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000069\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\"},\"finalized\":{\"hash\":\"0x0000000000000000000000000000000000000000000000000000000000000064\",\"number\":\"100\",\"timestamp\":\"2000000000\"},\"network\":{\"chainId\":91342,\"checkpointHash\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"networkInstance\":\"TEST_HARNESS_ONLY_NETWORK_V1\"},\"receipt\":{\"blockHash\":\"0x000000000000000000000000000000000000000000000000000000000000000a\",\"blockNumber\":\"10\",\"logs\":[{\"address\":\"0x0000000000000000000000000000000000000064\",\"data\":\"0x0000000000000000000000000000000000000000000000000000000007270e00\",\"logIndex\":0,\"removed\":false,\"topics\":[\"0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925\",\"0x000000000000000000000000000000000000000000000000000000000000000a\",\"0x0000000000000000000000000000000000000000000000000000000000000066\"]}],\"status\":\"success\",\"transactionHash\":\"0x0000000000000000000000000000000000000000000000000000000000000384\"},\"tx\":{\"from\":\"0x000000000000000000000000000000000000000a\",\"hash\":\"0x0000000000000000000000000000000000000000000000000000000000000384\",\"input\":\"0x095ea7b300000000000000000000000000000000000000000000000000000000000000660000000000000000000000000000000000000000000000000000000007270e00\",\"to\":\"0x0000000000000000000000000000000000000064\",\"value\":\"0\"}},\"intentKey\":\"557244fa1f60dc1e0e005849780936600d2d685bba17bf7fb3a7dad7a6661b11\",\"status\":\"CONFIRMED\",\"transactionDigest\":\"cf6d35e2270da8a3a0d9d9cc78cb6497bb113a88e9261b4c7f9227e50676dc75\",\"txHash\":\"0x0000000000000000000000000000000000000000000000000000000000000384\",\"version\":1}",
+    "digest": "a5aab15af6ac827c407a901f99c07d3fd21f4a5419c9c7ca2fca8ee7593c305f"
+  },
+  {
+    "name": "counterexample",
+    "value": {
+      "a": 1,
+      "A": 2,
+      "_key": 3,
+      "a-b": 4,
+      "aB": 5
+    },
+    "canonical": "{\"_key\":3,\"a\":1,\"A\":2,\"a-b\":4,\"aB\":5}",
+    "digest": "f2598c402c7a8948cb121dd1b87d355d983b828d4d0fac842cc38a3c5732a398"
+  },
+  {
+    "name": "unicodeCounterexample",
+    "value": {
+      "ä": 1,
+      "z": 2,
+      "a": 3
+    },
+    "canonical": "{\"a\":3,\"ä\":1,\"z\":2}",
+    "digest": "db1796e0fb21fbd70c2b4b7ade2a3570a4ace8b2eeb1fe14d324360c6c72bcb2"
+  },
+  {
+    "name": "validatedExtendedManifestCounterexample",
+    "value": {
+      "schemaVersion": 2,
+      "redemptionEscrow": "0x0000000000000000000000000000000000000069",
+      "deploymentId": "TEST_HARNESS_ONLY_STOCKS_V1",
+      "profile": "DEMO_TESTNET",
+      "chainId": 91342,
+      "networkInstance": "TEST_HARNESS_ONLY_NETWORK_V1",
+      "checkpointNumber": "1",
+      "checkpointHash": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "abiDigest": "a0d31f9e9c54e63b38215aa64b271ff08d72d16b3a893dfa64652e4eabdaf974",
+      "finalityPolicy": "FINALIZED",
+      "cashToken": "0x0000000000000000000000000000000000000064",
+      "cashSymbol": "ARCO_TEST_USDC",
+      "cashScale": 6,
+      "stockToken": "0x0000000000000000000000000000000000000065",
+      "quantityScale": 9,
+      "fundingVault": "0x0000000000000000000000000000000000000066",
+      "mintController": "0x0000000000000000000000000000000000000067",
+      "signerAddress": "0x0000000000000000000000000000000000000068",
+      "codeHashes": {
+        "0x0000000000000000000000000000000000000064": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+        "0x0000000000000000000000000000000000000065": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+        "0x0000000000000000000000000000000000000066": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+        "0x0000000000000000000000000000000000000067": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d",
+        "0x0000000000000000000000000000000000000069": "0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d"
+      },
+      "restrictedTransfers": true,
+      "nonUpgradeable": true,
+      "A": 1,
+      "a": 2
+    },
+    "canonical": "{\"a\":2,\"A\":1,\"abiDigest\":\"a0d31f9e9c54e63b38215aa64b271ff08d72d16b3a893dfa64652e4eabdaf974\",\"cashScale\":6,\"cashSymbol\":\"ARCO_TEST_USDC\",\"cashToken\":\"0x0000000000000000000000000000000000000064\",\"chainId\":91342,\"checkpointHash\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"checkpointNumber\":\"1\",\"codeHashes\":{\"0x0000000000000000000000000000000000000064\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000065\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000066\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000067\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\",\"0x0000000000000000000000000000000000000069\":\"0x07ad118d6cc8642c86c03827f276d8b791a65e5c99a3845faf186be720a1455d\"},\"deploymentId\":\"TEST_HARNESS_ONLY_STOCKS_V1\",\"finalityPolicy\":\"FINALIZED\",\"fundingVault\":\"0x0000000000000000000000000000000000000066\",\"mintController\":\"0x0000000000000000000000000000000000000067\",\"networkInstance\":\"TEST_HARNESS_ONLY_NETWORK_V1\",\"nonUpgradeable\":true,\"profile\":\"DEMO_TESTNET\",\"quantityScale\":9,\"redemptionEscrow\":\"0x0000000000000000000000000000000000000069\",\"restrictedTransfers\":true,\"schemaVersion\":2,\"signerAddress\":\"0x0000000000000000000000000000000000000068\",\"stockToken\":\"0x0000000000000000000000000000000000000065\"}",
+    "digest": "523e1f3d5c4fbd77b4422848c8b53635e9df3b2abef8f03e0bab109e168321b3"
+  },
+  {
+    "name": "nestedPayload",
+    "value": {
+      "outer": {
+        "z": 1,
+        "A": 2,
+        "a": 3,
+        "_key": 4,
+        "é": 5
+      },
+      "items": [
+        {
+          "chainId": 91342,
+          "checkpointHash": "fixed",
+          "cashAmount": "1"
+        },
+        [
+          "z",
+          "a"
+        ]
+      ],
+      "numericKeys": {
+        "2": "two",
+        "10": "ten"
+      }
+    },
+    "canonical": "{\"items\":[{\"cashAmount\":\"1\",\"chainId\":91342,\"checkpointHash\":\"fixed\"},[\"z\",\"a\"]],\"numericKeys\":{\"2\":\"two\",\"10\":\"ten\"},\"outer\":{\"_key\":4,\"a\":3,\"A\":2,\"é\":5,\"z\":1}}",
+    "digest": "5147b9951f5b16be873d183cb8c5168241b50fab4aabf5fb0a4f1502fdc6e025"
+  }
+];

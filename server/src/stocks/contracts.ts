@@ -87,7 +87,8 @@ export function canonicalJson(value: unknown): string {
         if (Array.isArray(input))
             return input.map(ordered);
         if (input !== null && typeof input === 'object')
-            return Object.fromEntries(Object.entries(input).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, ordered(child)]));
+            // Preserve historical en-US hashes independently of the host's default locale.
+            return Object.fromEntries(Object.entries(input).sort(([a], [b]) => a.localeCompare(b, 'en-US')).map(([key, child]) => [key, ordered(child)]));
         return input;
     };
     return JSON.stringify(ordered(value));
