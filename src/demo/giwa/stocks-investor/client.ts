@@ -8,6 +8,7 @@
 // • Errors are classified so callers can tell "the server definitely did not do it" from
 //   "the outcome is unknown".
 
+import { normalizeApiBase } from "../api-base"
 import {
   isRouteNotRegisteredBody,
   parseCatalog,
@@ -66,7 +67,7 @@ export type GiwaStocksClient = {
 }
 
 export type GiwaStocksHttpClientOptions = {
-  /** API origin, e.g. the host's ARCO_API_BASE. Must be http(s) without credentials, query or hash. */
+  /** API base, e.g. the host's ARCO_API_BASE. Must be absolute http(s) without credentials and without any "?" or "#". */
   baseUrl: string
   /** Injected transport for tests and the explicit verification fixture. Defaults to globalThis.fetch. */
   fetch?: FetchLike
@@ -77,16 +78,9 @@ export type GiwaStocksHttpClientOptions = {
 const MAX_BODY_CHARS = 1_000_000
 
 function normalizeBaseUrl(value: string): string {
-  let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    throw new Error("GIWA_STOCKS_INVALID_BASE_URL")
-  }
-  if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password || url.search || url.hash) {
-    throw new Error("GIWA_STOCKS_INVALID_BASE_URL")
-  }
-  return url.toString().replace(/\/+$/, "")
+  const base = normalizeApiBase(value)
+  if (base === null) throw new Error("GIWA_STOCKS_INVALID_BASE_URL")
+  return base
 }
 
 function sidePath(side: StocksSide, buy: string, sell: string): string {

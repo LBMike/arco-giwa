@@ -261,3 +261,35 @@ test("nonce and JWT binding/expiry are checked before publishing a session", asy
     f.controller.dispose()
   }
 })
+
+test("an API base with a bare query or fragment delimiter is refused before any nonce request or signature", async () => {
+  for (const apiBase of ["https://api.example?", "https://api.example#", "/api?", "/api#"]) {
+    assert.throws(() => fixture({ initial: { ...context, apiBase } }), /INVALID_AUTH_CONTEXT/, apiBase)
+    const f = fixture()
+    assert.throws(() => f.controller.setContext({ ...context, apiBase }), error => error instanceof Error && error.message === "INVALID_AUTH_CONTEXT")
+    assert.equal(await f.controller.signIn(), null)
+    assert.equal(f.calls.length, 0); assert.equal(f.signatures.length, 0); f.controller.dispose()
+  }
+})
+
+test("a frontend origin with a bare query or fragment delimiter is refused", () => {
+  for (const frontendOrigin of ["https://app.example:8443?", "https://app.example:8443#", "https://app.example:8443/?", "https://app.example:8443/#"]) {
+    assert.throws(() => fixture({ initial: { ...context, frontendOrigin } }), /INVALID_AUTH_CONTEXT/, frontendOrigin)
+  }
+})
+
+test("prefixed, relative and empty API bases send the auth requests to the exact normalized route without Authorization", async () => {
+  const cases: [string, string][] = [
+    ["https://api.example/prefix//", "https://api.example/prefix/api/v1/auth/"],
+    ["/api/", "https://app.example:8443/api/api/v1/auth/"],
+    ["", "https://app.example:8443/api/v1/auth/"],
+    ["https://api.example/prefix%3Fsegment", "https://api.example/prefix%3Fsegment/api/v1/auth/"],
+  ]
+  for (const [apiBase, route] of cases) {
+    const f = fixture({ initial: { ...context, apiBase } })
+    assert.ok(await f.controller.signIn(), apiBase)
+    assert.deepEqual(f.calls.map(c => c.url), [`${route}nonce`, `${route}verify`])
+    for (const c of f.calls) assert.equal(new Headers(c.init.headers).get("authorization"), null)
+    f.controller.dispose()
+  }
+})

@@ -1,5 +1,6 @@
 import { createSiweMessage } from "viem/siwe"
 import { getAddress, isAddress, type Address } from "viem"
+import { resolveApiBase } from "../api-base"
 
 export type HostContext = {
   walletAddress: string | null
@@ -38,11 +39,12 @@ function object(value: unknown): Record<string, unknown> {
 }
 function scopeOf(context: HostContext): Scope {
   const origin = new URL(context.frontendOrigin)
-  const api = new URL(context.apiBase || origin.origin, origin.origin)
-  for (const url of [origin, api]) ensure(["http:", "https:"].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash, "INVALID_AUTH_CONTEXT")
+  // An empty "?" or "#" leaves url.search/url.hash empty, so the href itself is checked.
+  ensure(["http:", "https:"].includes(origin.protocol) && !origin.username && !origin.password && !origin.href.includes("?") && !origin.href.includes("#"), "INVALID_AUTH_CONTEXT")
   ensure(origin.pathname === "/", "INVALID_AUTH_CONTEXT")
+  const base = resolveApiBase(context.apiBase, origin.origin)
+  ensure(base, "INVALID_AUTH_CONTEXT")
   const wallet = context.walletAddress === null ? null : getAddress(context.walletAddress)
-  const base = api.href.replace(/\/$/, "")
   return { key: JSON.stringify([wallet, context.chainId, origin.origin, base, context.walletEpoch ?? ""]), wallet, chain: context.chainId, origin: origin.origin, domain: origin.host, api: base }
 }
 function jwtClaims(token: string): Record<string, unknown> {

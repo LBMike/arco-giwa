@@ -1,7 +1,12 @@
+import { normalizeApiBase as normalizeCommonApiBase } from "../api-base"
 import type { Catalog, Chart, Envelope, MarketFetch, Profile, Quote, Range } from "./contracts"
 import { envelope, parseCatalog, parseChart, parseProfile, parseQuotes, symbol } from "./validate"
 export type MarketClient = { baseUrl: string; catalog(signal: AbortSignal): Promise<Envelope<Catalog>>; quotes(symbols: readonly string[], signal: AbortSignal): Promise<Envelope<Quote[]>>; profile(name: string, signal: AbortSignal): Promise<Envelope<Profile>>; chart(name: string, range: Range, signal: AbortSignal): Promise<Envelope<Chart>> }
-export function normalizeApiBase(value: string): string { const url = new URL(value); if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error("INVALID_API_BASE"); return url.href.replace(/\/+$/, "") }
+export function normalizeApiBase(value: string): string {
+  const base = normalizeCommonApiBase(value)
+  if (base === null) throw new Error("INVALID_API_BASE")
+  return base
+}
 export function createMarketClient(base: string, fetcher: MarketFetch = (url, init) => globalThis.fetch(url, init), timeoutMs = 10_000): MarketClient {
   const baseUrl = normalizeApiBase(base)
   async function get<T>(path: string, signal: AbortSignal, parse: (value: unknown) => T): Promise<Envelope<T>> {

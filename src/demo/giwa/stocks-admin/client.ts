@@ -1,5 +1,6 @@
 // Read-only transport for the Stocks admin API. Authenticates only with the host's SIWE
 // Bearer session; never sends the legacy shared operator header, cookies or any stored credential.
+import { normalizeApiBase } from "../api-base"
 import { parseAudit, parseEnvelope, parseOrderDetail, parseOrders, parseOverview, parseReconciliation } from "./parse"
 import type {
   ListResourceKey,
@@ -54,10 +55,13 @@ export async function stocksAdminGet<T>(options: {
   readonly fetch?: StocksAdminFetch
 }): Promise<StocksAdminResult<T>> {
   const { signal } = options
+  // Checked before the token so a misconfigured base never receives an authenticated request.
+  const apiBase = normalizeApiBase(options.apiBase)
+  if (apiBase === null) return failure("configuration")
   if (!options.accessToken) return failure("unauthenticated")
   let status: number | null = null
   try {
-    const response = await (options.fetch ?? defaultFetch)(`${options.apiBase.replace(/\/+$/, "")}${options.path}`, {
+    const response = await (options.fetch ?? defaultFetch)(`${apiBase}${options.path}`, {
       method: "GET",
       headers: { accept: "application/json", authorization: `Bearer ${options.accessToken}` },
       credentials: "omit",

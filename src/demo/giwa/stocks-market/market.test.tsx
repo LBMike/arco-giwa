@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
-import { createMarketClient } from "./client"
+import { createMarketClient, normalizeApiBase } from "./client"
 import { fixtureCatalog, fixtureChart, fixtureEnvelope, fixtureMarketFetch, fixtureProfile, fixtureQuote } from "./fixtures"
 import { decimal, envelope, parseCatalog, parseChart, parseProfile, parseQuotes, safeLogo } from "./validate"
 import { chartPoints, dollars, windowChange } from "./display"
@@ -75,4 +75,21 @@ test("monotonic elapsed guard rejects late success before a delayed timeout call
     return Response.json(fixtureEnvelope(fixtureCatalog()))
   }, 5)
   await assert.rejects(client.catalog(new AbortController().signal), /MARKET_REQUEST_CANCELLED/)
+})
+test("a base with a bare query or fragment delimiter is refused before the public catalog request", () => {
+  for (const base of ["https://api.test?", "https://api.test#", "https://api.test/prefix?", "https://api.test/prefix#"]) {
+    const calls: string[] = []
+    assert.throws(() => createMarketClient(base, async url => { calls.push(url); return Response.json({}) }), (error: unknown) => error instanceof Error && error.message === "INVALID_API_BASE", base)
+    assert.throws(() => normalizeApiBase(base), (error: unknown) => error instanceof Error && error.message === "INVALID_API_BASE", base)
+    assert.equal(calls.length, 0)
+  }
+})
+test("a path-prefixed base sends the public catalog under the prefix without Authorization", async () => {
+  const calls: { url: string; init: RequestInit }[] = []
+  const fixture = fixtureMarketFetch()
+  const client = createMarketClient("https://api.test/prefix//", async (url, init) => { calls.push({ url, init }); return fixture(url, init) })
+  assert.equal(client.baseUrl, "https://api.test/prefix")
+  assert.equal(normalizeApiBase("https://api.test/prefix%3Fsegment/"), "https://api.test/prefix%3Fsegment")
+  await client.catalog(new AbortController().signal)
+  assert.deepEqual(calls.map(c => [c.url, new Headers(c.init.headers).get("authorization")]), [["https://api.test/prefix/api/v1/stocks/market/catalog", null]])
 })
