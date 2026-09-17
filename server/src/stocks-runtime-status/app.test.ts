@@ -17,7 +17,7 @@ function fixture(enabled = true) {
   const base = { arco: {}, registry: { listNetworks: async () => [] }, portfolio: {}, readiness: { check: async () => ({ ok: true, checks: {} }) } } as unknown as ArcoAppServices;
   const app = buildApp(env, { ...base, stocksRuntimeStatus: enabled ? {
     ...stocksSessionResolvers(env.authJwtSecret, [domain], [{ wallet, operatorId: 'named-reader', permissions: ['stocks:read'] }]),
-    getSnapshot: () => { calls++; return runtimeSnapshot({ deploymentId: 'fixture', deploymentDigest: 'a'.repeat(64), autodispatch: true, configuredPause: false, stopped: false, tickInFlight: false, health: health.snapshot() }); },
+    getSnapshot: () => { calls++; return runtimeSnapshot({ deploymentId: 'fixture-deployment', deploymentDigest: 'a'.repeat(64), autodispatch: true, configuredPause: false, stopped: false, tickInFlight: false, health: health.snapshot() }); },
   } : undefined });
   return { app, health, calls: () => calls, advance: (ms: number) => { wall += ms; mono += ms; } };
 }
