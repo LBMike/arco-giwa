@@ -119,12 +119,12 @@ export function createStocksExecutionReads(options: StocksExecutionReadsOptions)
       return transport.get(captured, `/api/v1/stocks/execution/${scope.side}/${encodeURIComponent(scope.orderId)}`, () => "EXECUTION_NOT_ALLOWED", (json, clock) => acceptPolicy(json, clock, scope))
     },
 
-    /** WalletPorts.readOrder: the validated original envelope, PROFILE included. 404 → ORDER_CHANGED, other non-2xx → REQUEST_FAILED. */
+    /** WalletPorts.readOrder: the validated original envelope, PROFILE included. Non-2xx → REQUEST_FAILED (a 404 is not proof the order moved on). */
     async readOrder(request: AuthenticatedRead): Promise<unknown> {
       const captured = capture(request, true)
       const scope = orderScope(request)
       const path = `${scope.side === "SELL" ? "/api/v1/stocks/sell-orders" : "/api/v1/stocks/orders"}/${encodeURIComponent(scope.orderId)}`
-      return transport.get(captured, path, (status) => (status === 404 ? "ORDER_CHANGED" : "REQUEST_FAILED"), (json, clock) => acceptOrder(json, clock, scope))
+      return transport.get(captured, path, () => "REQUEST_FAILED", (json, clock) => acceptOrder(json, clock, scope))
     },
 
     /** WalletPorts.readCatalog: public route, sent without Authorization. Non-2xx → REQUEST_FAILED. */

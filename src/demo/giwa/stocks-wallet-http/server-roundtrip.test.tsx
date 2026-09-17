@@ -205,7 +205,7 @@ test("actual server denials: bad token, unknown order, paused trading and failed
     await expectCode(reads.readOrder({ ...base, token: "forged.token.value", sessionId: "roundtrip-session-old" }), "SESSION_REJECTED", 401)
     assert.deepEqual(rejected, ["roundtrip-session-a", "roundtrip-session-old"])
     await expectCode(reads.readExecutionPolicy({ ...base, orderId: "missing-order" }), "EXECUTION_NOT_ALLOWED", 404)
-    await expectCode(reads.readOrder({ ...base, orderId: "missing-order" }), "ORDER_CHANGED", 404)
+    await expectCode(reads.readOrder({ ...base, orderId: "missing-order" }), "REQUEST_FAILED", 404)
   } finally {
     await w.app.close()
   }

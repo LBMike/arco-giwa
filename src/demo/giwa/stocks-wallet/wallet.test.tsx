@@ -529,8 +529,12 @@ for (const side of ["BUY", "SELL"] as const) {
       try {
         await f.controller.approve()
         assert.equal(f.walletCalls.length, 0, moment)
-        // Found before SIGNING: the wallet step is never shown and the reason stays visible.
-        if (moment === "during-claim") { assert.ok(!published.includes("SIGNING"), "SIGNING is not published"); assert.equal(f.controller.getSnapshot().error, "TRUSTED_RECONCILIATION_REQUIRED") }
+        // Found before SIGNING: the wallet step is never shown. Either way the reason stays visible and, as no
+        // wallet request was made, no uncertain outcome is recorded over the reserved claim.
+        if (moment === "during-claim") assert.ok(!published.includes("SIGNING"), "SIGNING is not published")
+        else assert.equal(published.filter((status) => status === "SIGNING").length, 1)
+        assert.equal(f.controller.getSnapshot().error, "TRUSTED_RECONCILIATION_REQUIRED", moment)
+        assert.equal(f.shared.data.get(`${plan.intentKey}:APPROVAL`)?.status, "REQUEST_MAY_START", `${moment}: no UNKNOWN outcome for a request that was never sent`)
         const claim = f.shared.data.get(`${plan.intentKey}:APPROVAL`)
         assert.ok(claim, `${moment}: the durable claim is never deleted`); assert.equal(claim.txHash, undefined)
         assert.equal(f.controller.getSnapshot().status, "UNKNOWN", `${moment}: a consumed claim stays recovery-only`)

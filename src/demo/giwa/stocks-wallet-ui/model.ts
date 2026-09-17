@@ -175,10 +175,12 @@ function revertedStage(snapshot: WalletSnapshot): Stage | null {
 }
 
 /**
- * APPROVAL_SUBMITTED means "not yet confirmed" only while the wallet's answer is being verified (no code)
- * or when the server's verification said it is still pending (RECEIPT_PENDING). The controller also
- * publishes RECOVERY_REQUIRED for an approval the server already CONFIRMED (for example after cancel),
- * so that code only means "check again", never "unconfirmed".
+ * APPROVAL_SUBMITTED means "not yet confirmed" only without a code (the wallet just returned the hash and
+ * server verification is starting; if the controller could not start it, for example because the wallet
+ * moved to another network, the code stays empty until the next explicit check shows the reason) or with
+ * RECEIPT_PENDING (the server's verification said it is still pending). The controller also publishes
+ * RECOVERY_REQUIRED for an approval the server already CONFIRMED (for example after cancel), so that code
+ * only means "check again", never "unconfirmed".
  */
 function approvalAwaitingConfirmation(snapshot: WalletSnapshot): boolean {
   return snapshot.status === "APPROVAL_SUBMITTED" && (snapshot.error === null || snapshot.error === "RECEIPT_PENDING")
@@ -192,6 +194,8 @@ function finalResult(server: PanelServerStatus | null): boolean {
 /** What the screen can say about the order result for a recorded deposit/escrow request. Never derived from a hash. */
 function orderResultSentence(server: PanelServerStatus | null): string {
   if (finalResult(server)) return "The server reports a final result for this order; see the order result below."
+  // An unrecognized state is neither called final nor non-final.
+  if (server !== null && server.category === "UNRECOGNIZED") return "The server reported an order status this screen does not recognize; see the order result below."
   if (server !== null) return "The server's latest order status is not a final result yet; see the order result below."
   return "No final order result from the server is shown for this order yet."
 }
@@ -416,7 +420,7 @@ export function derivePanelModel(input: PanelInput): PanelModel {
           title: "Confirm in your wallet",
           paragraphs: [
             transfer
-              ? `A ${word} request for exactly ${exact} to ${spender} is open in your wallet. Confirm or reject it there.`
+              ? `${side === "SELL" ? "An escrow" : "A deposit"} request for exactly ${exact} to ${spender} is open in your wallet. Confirm or reject it there.`
               : `An approval request for exactly ${exact} is open in your wallet. Confirm or reject it there.`,
             "The buttons stay disabled until the wallet answers. Leaving this page does not cancel the wallet request.",
           ],
@@ -436,11 +440,14 @@ export function derivePanelModel(input: PanelInput): PanelModel {
       if (snapshot.error === "RECEIPT_PENDING")
         paragraphs.push(ready ? "The server has not confirmed the approval yet. Check again in a moment; the approval is not sent again." : "The server has not confirmed the approval yet; the approval is not sent again.")
       // Ambiguous: pending verification, a cancelled check of an already confirmed approval, or an unrecorded hash.
+      // Past the deadline or for a moved-on order no deposit/escrow will be offered, so none is promised here.
       else if (snapshot.error === "RECOVERY_REQUIRED")
         paragraphs.push(
-          ready
-            ? `The approval's status needs another check before the ${word} can be offered. Check the approval status; the approval is not sent again.`
-            : `The approval's status needs another check before the ${word} can be offered; the approval is not sent again.`,
+          expired || movedOn
+            ? "The approval's status needs another check; the approval is not sent again."
+            : ready
+              ? `The approval's status needs another check before the ${word} can be offered. Check the approval status; the approval is not sent again.`
+              : `The approval's status needs another check before the ${word} can be offered; the approval is not sent again.`,
         )
       else if (snapshot.error === "ORDER_CHANGED" || snapshot.error === "ORDER_NOT_PAYABLE") paragraphs.push("The order has moved on at the server; see the order result below. The approval is not sent again.")
       else if (snapshot.error !== null) {
@@ -520,7 +527,7 @@ export function derivePanelModel(input: PanelInput): PanelModel {
       const transfer = snapshot.stage === "TRANSFER"
       const settled = transfer && finalResult(server)
       const paragraphs = [
-        transfer ? `A ${word} request may have reached your wallet, but no transaction hash was received.` : "An approval request may have reached your wallet, but no transaction hash was received.",
+        transfer ? `${side === "SELL" ? "An escrow" : "A deposit"} request may have reached your wallet, but no transaction hash was received.` : "An approval request may have reached your wallet, but no transaction hash was received.",
         settled
           ? "This screen does not send it again. Do not repeat it from another app or wallet; check your wallet activity."
           : "This screen does not send it again. Do not repeat it from another app or wallet; check your wallet activity. The recorded request needs a server check before anything else can happen.",
@@ -533,7 +540,7 @@ export function derivePanelModel(input: PanelInput): PanelModel {
         {
           kind: "UNKNOWN",
           tone: "warning",
-          title: "Wallet result unknown — check required",
+          title: settled ? "Wallet result unknown — the server reports a final order result" : "Wallet result unknown — check required",
           paragraphs: withCheckNote(paragraphs, snapshot.error),
           code,
           buttons: [{ action: "prepare", label: "Check again", enabled: ready, opensWallet: false }],

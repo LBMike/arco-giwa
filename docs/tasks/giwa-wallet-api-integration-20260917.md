@@ -31,8 +31,8 @@ Environment (untracked, not committed):
 
 ## Owned files
 
-1. `src/demo/giwa/stocks-wallet-ui/` — `model.ts`, the tests covering the two wording defects (`model.test.tsx`, `controller-adapter.test.tsx`, `panel.dom.test.tsx` where it asserts the old wording), `README.md`, and comments that describe the old controller gap (`adapter.ts`).
-2. `src/demo/giwa/stocks-wallet/controller.ts` — trusted-reconcile precondition only. Regression tests in `wallet.test.tsx`; the README note about the gap. Types are not expected to change.
+1. `src/demo/giwa/stocks-wallet-ui/` — `model.ts`, the tests covering the two wording defects (`model.test.tsx`, `controller-adapter.test.tsx`, `panel.dom.test.tsx` where it asserts the old wording), `README.md`, and comments that describe the old controller gap (`adapter.ts`). After review, also `messages.ts` copy (article, `CONTEXT_EXPIRED` promise).
+2. `src/demo/giwa/stocks-wallet/controller.ts` — trusted-reconcile precondition only. Regression tests in `wallet.test.tsx`; the README note about the gap. No type change was needed. After review, doc-only fixes in `README.md` and one comment in `types.ts` about SELL rows carrying `side`. These are flagged for the reviewer because the file list named only the controller and its tests.
 3. New `src/demo/giwa/stocks-wallet-http/` — read-only HTTP adapter, validation, tests, README.
 4. `docs/tasks/giwa-wallet-api-integration-20260917.md` (this file) and `docs/evidence/giwa-wallet-api-integration-20260917.md`.
 
@@ -40,7 +40,7 @@ Not changed:
 - server, DB/Prisma, contracts, deployment registry, dependencies/lockfile
 - `stocks-host` (login provider), routes and router, real wallet sources, runtime configuration
 - `stocks-wallet-submissions` (reused as is), `stocks-investor` (validators reused by import only)
-- `planner.ts` and `types.ts` (unless a minimal type proves necessary)
+- `planner.ts`; `types.ts` has no type change (one comment only)
 
 ## A1 — ambiguous `APPROVAL_SUBMITTED / RECOVERY_REQUIRED`
 
@@ -72,13 +72,14 @@ With a final server result, the post-deadline "held for review / contact operati
 
 ## A3 — controller trusted-reconcile precondition
 
-For stage `APPROVAL`, `send()` checks `typeof a.submissions.reconcile === "function"` on the gate captured at `start()`. The check runs at these points:
-1. Before the wallet identity read.
-2. Inside the claim callback, immediately before `claim()`. This covers removal while the wallet read is pending.
-3. After the final order re-read, before `SIGNING` is published.
-4. Inside the dispatch `try`, immediately before `requestTransaction`. This covers removal by a synchronous SIGNING subscriber or during the claim.
+For stage `APPROVAL`, `send()` checks `typeof a.submissions.reconcile === "function"` on the gate captured at `start()`. As implemented after builder review, the check runs at three points:
+1. Inside the claim callback, immediately before `claim()`. This covers a missing port from the start, removal after prepare, and removal during `send()`'s pre-claim wallet read.
+2. After the final order re-read, before `SIGNING` is published. This covers removal during the claim or the final read.
+3. After `SIGNING` subscribers ran, before the dispatch `try` and `requestTransaction`. This covers removal by a synchronous SIGNING subscriber.
 
-Failure before a claim gives `BLOCKED / TRUSTED_RECONCILIATION_REQUIRED` with no claim. Failure after a claim reuses the existing post-claim paths: the claim is never deleted or released, the attempt stays UNKNOWN/recovery and no wallet request occurs.
+The planned "before the wallet identity read" check was removed: point 1 already covers it, and no test could tell them apart. A check originally placed inside the dispatch `try` was moved before it, so that a refusal does not record an uncertain wallet outcome.
+
+Failure before a claim gives `BLOCKED / TRUSTED_RECONCILIATION_REQUIRED` with no claim. Failure after a claim gives `UNKNOWN / TRUSTED_RECONCILIATION_REQUIRED`: the reserved claim stays `REQUEST_MAY_START` (never deleted, released or re-opened), no outcome is recorded and no wallet request occurs.
 
 Unchanged:
 - `prepare`/`inspect` read-only recovery, including existing hashes and pending approvals
@@ -87,7 +88,11 @@ Unchanged:
 - no automatic deposit/escrow after approval
 - the panel's availability guard
 
-The two existing `wallet.test.tsx` cases that relied on the gap (`missing` in the reconciliation matrix, and "outstanding approval requires server reconciliation") are rewritten. They now create the outstanding approval first and remove reconcile afterwards, which keeps their recovery intent.
+Two existing `wallet.test.tsx` cases relied on the gap:
+- The `missing` entry of the reconciliation matrix was **removed**. Its coverage moved to the new direct-approve and removal-timing tests.
+- "Outstanding approval requires server reconciliation" was **rewritten**. It creates the approval first with a pending server verification and removes reconcile afterwards, which keeps its recovery intent.
+
+The panel adapter test that pinned the old direct-call gap now asserts 0 requests and 0 claims.
 
 ## B — `stocks-wallet-http` read adapter
 
@@ -95,7 +100,7 @@ The two existing `wallet.test.tsx` cases that relied on the gap (`missing` in th
 
 | Method | Request | Returns |
 | --- | --- | --- |
-| `readDeployment({apiBase, token, sessionId, signal, deploymentDigest?})` | GET `/api/v1/stocks/execution/deployment` | frozen `{ deployment: ReviewedDeployment, observedAt, monotonicDeadline }` lease. The host stores it and supplies `deployment` in `context()` only while `deploymentLeaseCurrent(lease)` holds |
+| `readDeployment({apiBase, token, sessionId, signal, deploymentDigest?})` | GET `/api/v1/stocks/execution/deployment` | frozen lease `{ deployment: ReviewedDeployment, sessionId, apiBase, receivedAt, monotonicDeadline }` (as implemented). The host stores it and supplies `reads.currentDeployment(lease)` in `context()` |
 | `readExecutionPolicy(AuthenticatedRead)` | GET `/api/v1/stocks/execution/{side}/{encodeURIComponent(orderId)}` | validated `ExecutionPolicy`, server times unchanged |
 | `readOrder(AuthenticatedRead)` | GET `/api/v1/stocks/orders/:id` (BUY) or `/sell-orders/:id` (SELL) | the validated original envelope, PROFILE included, frozen |
 | `readCatalog(AuthenticatedRead)` | GET `/api/v1/stocks/catalog`, public, sent without Authorization | validated top-level catalog, frozen |
@@ -121,11 +126,12 @@ Errors are `StocksWalletError` subclasses whose codes already have panel copy. T
 | 401 | `SESSION_REJECTED`, with `status: 401`, calling `onSessionRejected(capturedSessionId)` once |
 | policy non-2xx | `EXECUTION_NOT_ALLOWED` |
 | deployment non-2xx | `DEPLOYMENT_NOT_REVIEWED` |
-| order / catalog non-2xx | `REQUEST_FAILED` |
+| order / catalog non-2xx | `REQUEST_FAILED` (a catalog 401 has `status: null`) |
 | stale or future envelope | `STALE_RESPONSE` |
 | expired policy | `EXECUTION_POLICY_EXPIRED` |
 | expired evidence | `DEPLOYMENT_EVIDENCE_EXPIRED` |
-| scope mismatch | `EXECUTION_NOT_ALLOWED`, `ORDER_SCOPE_MISMATCH` or `MANIFEST_DIGEST_MISMATCH` |
+| scope mismatch | policy `EXECUTION_NOT_ALLOWED`, order row `INVALID_RESPONSE`, evidence `MANIFEST_DIGEST_MISMATCH` |
+| lease longer than 15 s | policy `EXECUTION_NOT_ALLOWED`, evidence `DEPLOYMENT_NOT_REVIEWED` |
 
 Validation:
 - **Envelope:** exact keys PROFILE5 + `observedAt` + `data`; canonical ISO `observedAt` (ms, `Z`, round-trip); `observedAt ≤ wall` and `effectiveNow − observedAt < 15 s`, where `effectiveNow = max(wall, requestStartWall + monotonic elapsed)`.
@@ -181,3 +187,17 @@ Commands:
 - `git diff --check`
 
 Baseline on the unmodified merge: frontend 467 tests, 466 pass, 1 fail. The failure is the pre-existing timing test `stocks-wallet-submissions/client.test.tsx` "transport times out stalled body and cancels its reader", which uses a 10 ms timeout under full-suite load; the file passes 27/27 in 5 isolated runs. It is not owned here and is left unchanged.
+
+## Changes after builder-side review (recorded after the checkpoint `1ae7654`)
+
+A six-lens adversarial builder-side review with one skeptic verifier per lens reported 21 findings. None was refuted and none was P0/P1. Resulting changes:
+- The A3 check placement above.
+- Neutral approval wording on the expired, moved-on and not-ready branches. A settled UNKNOWN title. A neutral sentence for unrecognized server states. A softened `CONTEXT_EXPIRED` promise. "an escrow" articles.
+- Order non-2xx maps to `REQUEST_FAILED` and a wrong order row to `INVALID_RESPONSE`, instead of the misleading "moved on" `ORDER_CHANGED`.
+- A catalog 401 carries no 401 status, so it no longer signs the user out through the controller.
+- An API base with an empty `?` or `#` is refused.
+- `createExecutionClock()` for hosts, which mitigates the controller's wall-clock-only policy check.
+- More tests.
+- Documentation of controller limits that 003A cannot change: evidence lease end resets a displayed attempt; the locale-dependent canonical key order in `planner.ts` and the server.
+
+Details and verdicts are in `docs/evidence/giwa-wallet-api-integration-20260917.md`.

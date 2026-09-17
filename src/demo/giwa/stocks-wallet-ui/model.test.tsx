@@ -492,3 +492,60 @@ test("a recorded transfer without a hash follows the matching server result: fin
     if (side === "SELL") assert.match(s.model(submitted, { serverOrder: server("EXPIRED") }).paragraphs.join(" "), /not a final result yet/, "SELL EXPIRED is not a terminal order result")
   }
 })
+
+test("003A review: the neutral approval check wording holds on every branch and never promises what cannot happen", () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    const s = setup(side === "BUY" ? "fixture-order-a-buy-1" : "fixture-order-a-sell-1")
+    const word = side === "BUY" ? "deposit" : "escrow"
+    const recovery = s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "RECOVERY_REQUIRED")
+    const later = Date.parse(s.plan.order.quoteExpiresAt) + 1_000
+    const variants: [string, Partial<PanelInput>, RegExp][] = [
+      // Not ready (for example the deployment evidence lease ended): the button is disabled, the wording stays neutral.
+      ["unavailable", { availability: { status: "UNAVAILABLE", code: "DEPLOYMENT_NOT_REVIEWED" } }, new RegExp(`needs another check before the ${word} can be offered; the approval is not sent again\\.`)],
+      ["expired", { now: later, availability: executionAvailability({ configured: true, ports: s.f.ports, context: s.context, selection: s.selection, now: later }) }, /The approval's status needs another check; the approval is not sent again\./],
+      ["moved on", { serverOrder: { orderId: s.plan.order.id, side, state: "COMPLETED", observedAt: new Date(s.now).toISOString() } }, /The approval's status needs another check; the approval is not sent again\./],
+    ]
+    for (const [label, extra, expected] of variants) {
+      const model = s.model(recovery, extra)
+      const shown = [model.title, ...model.paragraphs, model.announcement].join(" ")
+      assert.equal(model.title, "Approval sent — check needed", `${side}/${label}`)
+      assert.doesNotMatch(shown, /has not confirmed|confirming/i, `${side}/${label}`)
+      assert.match(model.paragraphs.join(" "), expected, `${side}/${label}`)
+      assert.equal(model.txHash, APPROVAL_HASH)
+      if (label !== "unavailable") assert.doesNotMatch(model.paragraphs.join(" "), new RegExp(`before the ${word} can be offered`), `${side}/${label}: no ${word} will be offered`)
+      if (label !== "moved on") assert.equal(model.buttons[0]?.enabled, false, `${side}/${label}`)
+    }
+  }
+})
+
+test("003A review: settled UNKNOWN title, unrecognized server state, CONTEXT_EXPIRED promise and SELL articles", () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    const s = setup(side === "BUY" ? "fixture-order-a-buy-1" : "fixture-order-a-sell-1")
+    const server = (state: string) => ({ orderId: s.plan.order.id, side, state, observedAt: new Date(s.now).toISOString() })
+    const unknown = s.snap("UNKNOWN", "TRANSFER", null, "RECOVERY_REQUIRED")
+    assert.equal(s.model(unknown, { serverOrder: server("COMPLETED") }).title, "Wallet result unknown — the server reports a final order result")
+    assert.equal(s.model(unknown, { serverOrder: server(side === "BUY" ? "BROKER_PENDING" : "ESCROW_HELD") }).title, "Wallet result unknown — check required")
+    assert.equal(s.model(unknown).title, "Wallet result unknown — check required")
+
+    const unrecognized = s.model(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH, "RECOVERY_REQUIRED"), { serverOrder: server("SETTLED_V2") })
+    assert.equal(unrecognized.server?.category, "UNRECOGNIZED")
+    assert.match(unrecognized.paragraphs.join(" "), /does not recognize/)
+    assert.doesNotMatch(unrecognized.paragraphs.join(" "), /final result/)
+
+    const expiredContext = describeCode("CONTEXT_EXPIRED", side)
+    assert.doesNotMatch(expiredContext.next, /is shown again after the check\./)
+    assert.match(expiredContext.next, new RegExp(`while the order still waits for the ${side === "BUY" ? "deposit" : "escrow"}, otherwise see the order result`))
+
+    if (side === "SELL") {
+      const shown = [
+        describeCode("ORDER_NOT_PAYABLE", "SELL").reason,
+        ...s.model(s.snap("SIGNING", "TRANSFER")).paragraphs,
+        ...s.model(s.snap("UNKNOWN", "TRANSFER", null, "WALLET_OUTCOME_UNKNOWN")).paragraphs,
+      ].join(" ")
+      assert.doesNotMatch(shown, /\b[Aa] escrow\b/)
+      assert.match(shown, /no longer waits for an escrow/)
+      assert.match(shown, /An escrow request for exactly/)
+      assert.match(shown, /An escrow request may have reached your wallet/)
+    } else assert.match(describeCode("ORDER_NOT_PAYABLE", "BUY").reason, /no longer waits for a deposit\./)
+  }
+})

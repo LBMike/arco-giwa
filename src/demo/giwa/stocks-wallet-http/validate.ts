@@ -146,7 +146,8 @@ export function acceptOrder(json: unknown, clock: ReadClock, scope: PolicyScope)
     fail("INVALID_RESPONSE", "SHAPE")
   }
   const data = root.data as Record<string, unknown>
-  if (data.id !== scope.orderId || data.deploymentDigest !== scope.deploymentDigest) fail("ORDER_CHANGED", "SCOPE")
+  // A row for another order or deployment is a wrong answer, not evidence that the order moved on.
+  if (data.id !== scope.orderId || data.deploymentDigest !== scope.deploymentDigest) fail("INVALID_RESPONSE", "SCOPE")
   return freeze(root)
 }
 

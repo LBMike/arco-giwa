@@ -2,8 +2,11 @@ import assert from "node:assert/strict"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import test from "node:test"
+import { fileURLToPath } from "node:url"
 
+import { digest } from "../stocks-wallet/planner"
 import { describeCode } from "../stocks-wallet-ui/messages"
+import { createExecutionClock } from "./clock"
 import { createStocksExecutionReads, type StocksExecutionReadsOptions } from "./reads"
 import { EXECUTION_READ_CODES, StocksExecutionReadError, type ExecutionReadCode } from "./errors"
 import { API, catalog, clocks, deferred, DIGEST, envelope, evidence, fakeFetch, json, manifest, ORDER_ID, orderRow, policy, read, START, TOKEN, WALLET, type Call } from "./test-support"
@@ -50,7 +53,7 @@ function server(overrides: { deployment?: unknown; policy?: unknown; order?: unk
 test("creation performs no request and refuses an unusable API base or timeout", () => {
   const { calls } = setup(server())
   assert.equal(calls.length, 0)
-  for (const apiBase of ["not a url", "ftp://stocks-api.test", "https://user:pass@stocks-api.test", "https://stocks-api.test/?q=1", "https://stocks-api.test/#h"]) {
+  for (const apiBase of ["not a url", "ftp://stocks-api.test", "https://user:pass@stocks-api.test", "https://stocks-api.test/?q=1", "https://stocks-api.test/#h", "https://stocks-api.test?", "https://stocks-api.test/?", "https://stocks-api.test#", "https://stocks-api.test/api?"]) {
     assert.throws(() => createStocksExecutionReads({ apiBase }), (error: unknown) => error instanceof StocksExecutionReadError && error.code === "INVALID_CONTEXT", apiBase)
   }
   for (const timeoutMs of [0, -1, 15_001, Number.NaN, Number.POSITIVE_INFINITY]) {
@@ -131,7 +134,8 @@ test("401 notifies once with the captured id even if the callback throws; the pu
   await rejectsWith(reads.readOrder(read()), "SESSION_REJECTED", { status: 401 })
   await rejectsWith(reads.readDeployment({ apiBase: API, token: TOKEN, sessionId: "session-a", signal: new AbortController().signal }), "SESSION_REJECTED", { status: 401 })
   assert.equal(calls, 2)
-  await rejectsWith(reads.readCatalog(read()), "REQUEST_FAILED", { status: 401 })
+  // No status 401 either: the wallet controller would otherwise treat it as a session rejection.
+  await rejectsWith(reads.readCatalog(read()), "REQUEST_FAILED", { status: null })
   assert.equal(calls, 2)
 })
 
@@ -140,6 +144,7 @@ test("invalid requests never reach the network: other API base, missing token/se
   const bad: [string, Record<string, unknown>][] = [
     ["other api", { apiBase: "https://evil.test" }],
     ["api with path", { apiBase: `${API}/other` }],
+    ["api with empty query", { apiBase: `${API}?` }],
     ["no token", { token: "" }],
     ["token with space", { token: "a b" }],
     ["no session", { sessionId: "" }],
@@ -217,7 +222,11 @@ test("evidence: only VERIFIED, exact public manifest, five code hashes, matching
     ["extra manifest field", envelope(evidence({ manifest: { ...manifest(), privateNote: "x" } })), "INVALID_RESPONSE"],
     ["six code hashes", envelope(evidence({ manifest: sixHashes })), "INVALID_RESPONSE"],
     ["manifest changed under the same digest", envelope(evidence({ manifest: altered })), "MANIFEST_DIGEST_MISMATCH"],
-    ["other ABI", envelope(evidence({ manifest: { ...manifest(), abiDigest: "0".repeat(64) }, manifestDigest: undefined })), "INVALID_RESPONSE"],
+    ...(["abiDigest", "finalityPolicy", "nonUpgradeable"] as const).map((field): [string, unknown, ExecutionReadCode] => {
+      // Correctly digested, so only the planner's supported-deployment check can refuse it.
+      const unsupported = { ...manifest(), [field]: field === "abiDigest" ? "0".repeat(64) : field === "finalityPolicy" ? "LATEST" : false }
+      return [`unsupported ${field}`, envelope(evidence({ manifest: unsupported, manifestDigest: digest(unsupported) })), "UNSUPPORTED_DEPLOYMENT"]
+    }),
     ["expected digest", envelope(evidence()), "MANIFEST_DIGEST_MISMATCH", "e".repeat(64)],
   ]
   for (const [label, body, code, expected] of cases) {
@@ -232,8 +241,9 @@ test("order envelope: PROFILE, other order or deployment, investor and planner v
     ["profile dropped (investor getOrder shape)", "BUY", { observedAt: new Date(START).toISOString(), data: orderRow("BUY") }, "INVALID_RESPONSE"],
     ["other profile", "BUY", { ...envelope(orderRow("BUY")), valuePolicy: "REAL_VALUE" }, "INVALID_RESPONSE"],
     ["extra envelope field", "BUY", { ...envelope(orderRow("BUY")), wallet: WALLET }, "INVALID_RESPONSE"],
-    ["other order", "BUY", envelope(orderRow("BUY", { id: "order-2" })), "ORDER_CHANGED"],
-    ["other deployment", "BUY", envelope(orderRow("BUY", { deploymentDigest: "e".repeat(64) })), "ORDER_CHANGED"],
+    // A wrong row is a wrong answer, not evidence that the order moved on.
+    ["other order", "BUY", envelope(orderRow("BUY", { id: "order-2" })), "INVALID_RESPONSE"],
+    ["other deployment", "BUY", envelope(orderRow("BUY", { deploymentDigest: "e".repeat(64) })), "INVALID_RESPONSE"],
     ["SELL row without side", "SELL", envelope({ ...orderRow("SELL"), side: undefined }), "INVALID_RESPONSE"],
     ["BUY row labelled SELL", "BUY", envelope(orderRow("BUY", { side: "SELL" })), "INVALID_RESPONSE"],
     ["numeric quantity", "BUY", envelope(orderRow("BUY", { quantity: 1000000000 })), "INVALID_RESPONSE"],
@@ -311,7 +321,7 @@ test("currentDeployment: wall expiry, monotonic deadline, stepped-back wall cloc
   clock.advance(13_999)
   assert.ok(reads.currentDeployment(lease))
   clock.advance(1)
-  assert.equal(reads.currentDeployment(lease), null, "wall clock reached validUntil")
+  assert.equal(reads.currentDeployment(lease), null, "both bounds reached together")
 
   const rollback = clocks()
   const second = setup(server(), {}, rollback)
@@ -377,20 +387,34 @@ test("transport: network errors, refused or followed redirects, oversize, malfor
     ["204", () => new Response(null, { status: 204 }), "INVALID_RESPONSE", "HTTP_STATUS"],
   ]
   for (const [label, respond, code, reason] of cases) {
-    const { reads } = setup(respond)
+    const { reads, calls } = setup(respond)
     await rejectsWith(reads.readOrder(read()), code, { reason }).catch((error) => assert.fail(`${label}: ${error}`))
+    assert.equal(calls.length, 1, `${label}: exactly one request, no retry`)
   }
 })
 
 test("non-2xx answers map to fixed codes per endpoint and keep only the status", async () => {
   const body = { error: "EXECUTION_DATABASE_TIMEOUT", detail: "password=hunter2 host=db.internal", ...envelope(null) }
-  for (const status of [403, 404, 409, 500, 503]) {
-    const { reads } = setup(() => json(body, status))
-    await rejectsWith(reads.readExecutionPolicy(read()), "EXECUTION_NOT_ALLOWED", { status })
-    await rejectsWith(reads.readDeployment({ apiBase: API, token: TOKEN, sessionId: "session-a", signal: new AbortController().signal }), "DEPLOYMENT_NOT_REVIEWED", { status })
-    await rejectsWith(reads.readOrder(read()), status === 404 ? "ORDER_CHANGED" : "REQUEST_FAILED", { status })
-    await rejectsWith(reads.readCatalog(read()), "REQUEST_FAILED", { status })
+  for (const status of [401, 403, 404, 409, 500, 503]) {
+    const { reads, calls } = setup(() => json(body, status))
+    const authenticated = status === 401 ? "SESSION_REJECTED" : null
+    await rejectsWith(reads.readExecutionPolicy(read()), authenticated ?? "EXECUTION_NOT_ALLOWED", { status })
+    assert.equal(calls.length, 1)
+    await rejectsWith(reads.readDeployment({ apiBase: API, token: TOKEN, sessionId: "session-a", signal: new AbortController().signal }), authenticated ?? "DEPLOYMENT_NOT_REVIEWED", { status })
+    assert.equal(calls.length, 2)
+    // A 404 for the order means "not found for this actor/deployment" (or no route), never "moved on".
+    await rejectsWith(reads.readOrder(read()), authenticated ?? "REQUEST_FAILED", { status })
+    assert.equal(calls.length, 3)
+    await rejectsWith(reads.readCatalog(read()), "REQUEST_FAILED", { status: status === 401 ? null : status })
+    assert.equal(calls.length, 4, `${status}: one request per read, no retry`)
   }
+  // A network failure is not retried either, for any read.
+  const offline = setup(() => Promise.reject(new TypeError("offline")))
+  await rejectsWith(offline.reads.readExecutionPolicy(read()), "REQUEST_FAILED")
+  await rejectsWith(offline.reads.readDeployment({ apiBase: API, token: TOKEN, sessionId: "session-a", signal: new AbortController().signal }), "REQUEST_FAILED")
+  await rejectsWith(offline.reads.readOrder(read()), "REQUEST_FAILED")
+  await rejectsWith(offline.reads.readCatalog(read()), "REQUEST_FAILED")
+  assert.equal(offline.calls.length, 4)
 })
 
 test("no token, URL, header or server text appears in any error, and nothing is logged", async () => {
@@ -421,19 +445,20 @@ test("every adapter failure code has fixed panel copy (INVALID_CONTEXT deliberat
     if (code === "INVALID_CONTEXT") assert.deepEqual(describeCode(code, "BUY"), generic)
     else assert.notDeepEqual(describeCode(code, "BUY"), generic, `${code} needs panel copy`)
   }
-  const source = readdirSync(new URL(".", import.meta.url).pathname)
+  const dir = fileURLToPath(new URL(".", import.meta.url))
+  const source = readdirSync(dir)
     .filter((name) => /\.ts$/.test(name) && name !== "test-support.ts")
-    .map((name) => readFileSync(new URL(name, import.meta.url), "utf8"))
+    .map((name) => readFileSync(join(dir, name), "utf8"))
     .join("\n")
   // First argument of every fail()/constructor call (ternaries included) and every endpoint's denied mapping.
   const firstArguments = [...source.matchAll(/(?:\bfail|new StocksExecutionReadError)\(([^,)]+)[,)]/g), ...source.matchAll(/=> \(?((?:status === \d+ \? )?"[A-Z_]+"(?: : "[A-Z_]+")?)\)?/g)].map((match) => match[1]!)
   const thrown = new Set(firstArguments.flatMap((argument) => [...argument.matchAll(/"([A-Z_]+)"/g)].map((match) => match[1]!)))
-  assert.ok(thrown.size >= 12, `found ${thrown.size} thrown codes`)
+  assert.ok(thrown.size >= 10, `found ${thrown.size} thrown codes`)
   for (const code of thrown) assert.ok((EXECUTION_READ_CODES as readonly string[]).includes(code), `${code} is listed`)
 })
 
 test("module source: no storage, console output, retries, floating-point money or hidden defaults", () => {
-  const dir = new URL(".", import.meta.url).pathname
+  const dir = fileURLToPath(new URL(".", import.meta.url))
   const files = readdirSync(dir).filter((name) => /\.tsx?$/.test(name) && !name.endsWith(".test.tsx"))
   assert.ok(files.includes("reads.ts") && files.includes("transport.ts") && files.includes("validate.ts"))
   for (const name of files) {
@@ -448,4 +473,53 @@ test("module source: no storage, console output, retries, floating-point money o
   }
   const index = readFileSync(join(dir, "index.ts"), "utf8")
   assert.doesNotMatch(index, /test-support/)
+})
+
+test("deployment lease: request delay shortens the monotonic deadline, and each bound ends the lease on its own", async () => {
+  // Only the monotonic clock moves during the request (the wall clock stalls): 5 s of the 15 s lease are gone.
+  const stalled = clocks()
+  const request = { apiBase: API, token: TOKEN, sessionId: "session-a", signal: new AbortController().signal }
+  const slow = setup(async () => {
+    stalled.advanceMonotonic(5_000)
+    return json(envelope(evidence({ verifiedAt: START, validUntil: START + 15_000 })))
+  }, { timeoutMs: 15_000 }, stalled)
+  const lease = await slow.reads.readDeployment(request)
+  assert.equal(lease.monotonicDeadline - stalled.monotonicNow(), 10_000, "measured from the effective clock, not the stalled wall clock")
+  stalled.advance(9_999)
+  assert.ok(slow.reads.currentDeployment(lease))
+  stalled.advance(1)
+  assert.equal(stalled.now(), START + 10_000)
+  assert.equal(slow.reads.currentDeployment(lease), null, "the monotonic deadline ends it while the wall clock is still before validUntil")
+
+  // Only the wall clock reaches validUntil: the lease ends although the monotonic deadline is still ahead.
+  const wallOnly = clocks()
+  const second = setup(server(), {}, wallOnly)
+  const other = await second.reads.readDeployment(request)
+  wallOnly.setWall(START + 14_000)
+  assert.equal(second.reads.currentDeployment(other), null)
+})
+
+test("createExecutionClock never runs behind monotonic time since creation and follows forward corrections", () => {
+  const clock = clocks()
+  const now = createExecutionClock({ now: clock.now, monotonicNow: clock.monotonicNow })
+  assert.equal(now(), START)
+  clock.advance(1_000)
+  assert.equal(now(), START + 1_000)
+  // Stepped back 5 s while 6 s pass: the clock reports the monotonic floor, never the earlier wall time.
+  clock.advanceMonotonic(6_000)
+  clock.setWall(START - 4_000)
+  assert.equal(now(), START + 7_000)
+  // A forward correction is followed.
+  clock.setWall(START + 60_000)
+  assert.equal(now(), START + 60_000)
+  // Fractional monotonic readings still give integer milliseconds.
+  clock.setWall(START)
+  clock.advanceMonotonic(0.75)
+  assert.ok(Number.isInteger(now()))
+  // A reading that becomes unusable fails closed as NaN; an unusable clock cannot be created at all.
+  let wall = START
+  const breaking = createExecutionClock({ now: () => wall, monotonicNow: () => 0 })
+  wall = Number.NaN
+  assert.ok(Number.isNaN(breaking()))
+  assert.throws(() => createExecutionClock({ now: () => Number.NaN, monotonicNow: () => 0 }), StocksExecutionReadError)
 })

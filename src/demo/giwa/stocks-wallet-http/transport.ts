@@ -40,6 +40,8 @@ export function normalizeApiBase(value: unknown): string | null {
     return null
   }
   if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password || url.search || url.hash) return null
+  // An empty "?" or "#" leaves url.search/url.hash empty but would turn the API path into a query or fragment.
+  if (url.href.includes("?") || url.href.includes("#")) return null
   return url.href.replace(/\/+$/, "")
 }
 
@@ -114,7 +116,9 @@ export function createReadTransport(options: TransportOptions) {
         }
         fail("SESSION_REJECTED", "UNAUTHENTICATED", 401)
       }
-      if (response.status < 200 || response.status > 299) fail(denied(response.status), "HTTP_STATUS", response.status)
+      // A 401 on a public read says nothing about the session: it carries no status the wallet controller
+      // would treat as a session rejection.
+      if (response.status < 200 || response.status > 299) fail(denied(response.status), "HTTP_STATUS", response.status === 401 && captured.sessionId === null ? null : response.status)
       if (response.status !== 200) fail("INVALID_RESPONSE", "HTTP_STATUS", response.status)
       const length = response.headers.get("content-length")
       if (length !== null && !(/^\d{1,10}$/.test(length) && BigInt(length) <= BigInt(MAX_RESPONSE_BYTES))) fail("INVALID_RESPONSE", "BODY_TOO_LARGE", 200)

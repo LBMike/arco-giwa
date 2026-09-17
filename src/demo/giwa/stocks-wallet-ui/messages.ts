@@ -49,7 +49,7 @@ export function describeCode(code: string, side: Side | null): CodeDescription {
     case "CONTEXT_EXPIRED":
       return {
         reason: "The sign-in session or the deployment review expired.",
-        next: "Sign in again, then check the order. A wallet request that was already sent stays recorded and is shown again after the check.",
+        next: `Sign in again, then check the order. A wallet request that was already sent stays recorded; the check shows it again while the order still waits for the ${transfer(s)}, otherwise see the order result.`,
         step: "SIGN_IN",
       }
     case "WALLET_MISMATCH":
@@ -62,7 +62,7 @@ export function describeCode(code: string, side: Side | null): CodeDescription {
     case "INVALID_DEADLINE":
       return { reason: "The quote deadline for this order has passed.", next: `Do not ${payment(s)} for this order. Get a new quote from the order screen.`, step: "NEW_QUOTE" }
     case "ORDER_NOT_PAYABLE":
-      return { reason: `This order no longer waits for a ${transfer(s)}.`, next: "Its status comes from the server; see the order result below.", step: "SERVER_STATUS" }
+      return { reason: `This order no longer waits for ${s === "SELL" ? "an escrow" : "a deposit"}.`, next: "Its status comes from the server; see the order result below.", step: "SERVER_STATUS" }
     case "EXECUTION_NOT_ALLOWED":
       return { reason: "Execution is not allowed for this order right now, for example because trading is paused.", next: "Check again later.", step: "CHECK_AGAIN" }
     case "CONTEXT_CHANGED":

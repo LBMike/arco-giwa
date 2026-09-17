@@ -21,11 +21,16 @@ Contracts: `docs/contracts/stocks-execution-v1.md` (evidence, policy), `stocks-w
 ```ts
 import { createStocksWalletController } from "../stocks-wallet"
 import { createSubmissionGate } from "../stocks-wallet-submissions/client"
-import { createStocksExecutionReads, type DeploymentEvidenceLease } from "../stocks-wallet-http"
+import { createExecutionClock, createStocksExecutionReads, type DeploymentEvidenceLease } from "../stocks-wallet-http"
+
+// One clock for the controller and the adapter: never behind monotonic time, so a wall clock stepped back
+// cannot make an expired policy, session or evidence look valid again.
+const now = createExecutionClock()
 
 // One adapter per API base. Creating it sends nothing.
 const reads = createStocksExecutionReads({
   apiBase: ARCO_API_BASE,
+  now,
   onSessionRejected: (capturedSessionId) => host.invalidate(capturedSessionId),
 })
 
@@ -42,6 +47,7 @@ async function refreshEvidence(session: HostSession, signal: AbortSignal) {
 
 // Ports for ONE session/order/deployment scope; the controller is created from exactly this object.
 const ports: WalletPorts = {
+  now,
   context: () => ({
     session: hostSnapshot().session, walletAddress, chainId, walletEpoch, apiBase: ARCO_API_BASE,
     deployment: reads.currentDeployment(lease), // null as soon as the lease ends
@@ -50,7 +56,7 @@ const ports: WalletPorts = {
   readCatalog: reads.readCatalog,
   readExecutionPolicy: reads.readExecutionPolicy,
   submissions: createSubmissionGate({
-    session, side, orderId, deploymentDigest, apiBase: ARCO_API_BASE,
+    session, side, orderId, deploymentDigest, apiBase: ARCO_API_BASE, now,
     onSessionRejected: (id) => host.invalidate(id),
   }),
   invalidateSession: (id) => host.invalidate(id),
@@ -65,14 +71,20 @@ const controller = createStocksWalletController(ports) // the owner disposes it
   - Keep only the latest lease for the current scope.
   - Supply `reads.currentDeployment(lease)` from the synchronous `context()`.
   - Refresh explicitly, for example when the user starts a check.
-- **A refresh can cancel work in progress.** The controller's scope includes the evidence ID and dates, so a refresh cancels a check in progress. Nothing restarts or re-signs automatically; the user presses the button again. Do not refresh while a wallet prompt is open. If a refresh does happen then, the late hash is still recorded on the original claim and the next explicit check shows it.
+- **Evidence renewal and lease end reset the controller scope.** The controller's scope includes the evidence ID and dates.
+  - The lease ends at the server's `validUntil`. The server caches evidence, so a fresh read may have only seconds left.
+  - When `currentDeployment` turns null, or a read returns new evidence, work in progress is cancelled and the displayed attempt is reset.
+  - A refresh while the server still returns the same cached evidence changes nothing and extends nothing.
+  - Nothing restarts or re-signs automatically. A late hash is still recorded on the original claim, and an explicit check with current evidence shows it while the order still waits for the transfer.
+  - With the current controller, a check, the approval click, wallet confirmation and server verification must fit in one lease. See "Known limits".
 - **Discard stale leases.** A lease that arrives after the host scope changed is discarded: compare `lease.sessionId` and `lease.apiBase` with the current scope. `currentDeployment` only accepts leases issued by the same adapter instance, so a copied or forged object returns `null`.
 - **Session invalidation contract.**
   - A 401 on an authenticated read calls `onSessionRejected(capturedSessionId)` once, with the id copied from **this request** when the call started. It then fails with `SESSION_REJECTED` and `status: 401`.
   - The wallet controller also calls `ports.invalidateSession` with its captured id for that error.
   - Both must go to an id-comparing `host.invalidate(id)` (stocks-host does this), so a late 401 for account A never signs out account B.
-  - The public catalog never triggers invalidation.
-- **One API base per adapter.** A request whose `apiBase` differs from the adapter's is refused before any network call, so a token is never sent elsewhere. Use a new adapter for a new API base.
+  - The public catalog never triggers invalidation: its 401 calls no callback and carries `status: null`, so the controller does not invalidate either.
+- **One API base per adapter.** A request whose `apiBase` differs from the adapter's is refused before any network call, so a token is never sent elsewhere. A base with credentials, a query, a fragment or even an empty `?` or `#` is refused. Use a new adapter for a new API base.
+- **Use `createExecutionClock()`** for `ports.now`, the adapter and the submission gate. The adapter itself measures each request against monotonic time, but the unchanged controller later compares the policy's `validUntil` with `ports.now()` alone.
 
 ## Request capture and transport
 
@@ -93,7 +105,7 @@ const controller = createStocksWalletController(ports) // the owner disposes it
 Failures are `StocksExecutionReadError`, a `StocksWalletError`:
 - `code` is one that already has fixed wording in `stocks-wallet-ui/messages.ts`
 - `reason` is a fixed diagnostic word
-- `status` is the HTTP status
+- `status` is the HTTP status, except `null` for a 401 on the public catalog
 
 No URL, token, header, response body or server message is kept or logged.
 
@@ -111,7 +123,8 @@ No URL, token, header, response body or server message is kept or logged.
 | evidence non-2xx, not `VERIFIED`, lease > 15 s | `DEPLOYMENT_NOT_REVIEWED` |
 | evidence from the future or ended | `DEPLOYMENT_EVIDENCE_EXPIRED` |
 | manifest or expected digest mismatch | `MANIFEST_DIGEST_MISMATCH` (and the planner's other deployment codes) |
-| order 404 or other order/deployment | `ORDER_CHANGED`; other order and catalog non-2xx: `REQUEST_FAILED` |
+| order or catalog non-2xx (a 404 is not proof the order moved on) | `REQUEST_FAILED`; a catalog 401 has `status: null` so the controller does not treat it as a session rejection |
+| order row for another id or deployment | `INVALID_RESPONSE` |
 
 ## Validation
 
@@ -143,6 +156,13 @@ No URL, token, header, response body or server message is kept or logged.
 
 Money and units stay decimal strings; no floating point is used.
 
+## Known limits (outside this module)
+
+- **Wall-clock policy check in the controller.** The controller checks `policy.validUntil` against `ports.now()`, which is wall-clock only. With `createExecutionClock()` a stepped-back wall clock cannot extend it; `controller-integration.test.tsx` shows both cases. A monotonic bound inside the controller would need a controller change.
+- **Lease end resets the attempt.** Evidence renewal or lease end resets the controller's displayed attempt (see above). Keeping it needs a controller scope change.
+- **Locale-dependent digests.** `planner.ts` and the server both sort canonical JSON keys with `localeCompare` and no fixed locale. A browser running in a Czech or Slovak locale (and a few others) computes a different manifest digest. Real evidence is then refused as `MANIFEST_DIGEST_MISMATCH` (fail closed), and transaction digests would differ as well. The fix is a code-unit key order in both `planner.ts` and the server, as a separate task.
+- **Clock accuracy.** Server and browser clocks must agree to within the envelope and lease bounds: a response observed "in the future" by the browser is refused.
+
 ### PROFILE loss
 
 The investor client's `getOrder()` validates PROFILE and then returns only `{ observedAt, data }`. Passed to `WalletPorts.readOrder`, it makes the controller fail with `ORDER_PROFILE_MISMATCH`. `readOrder` here returns the validated original envelope instead. PROFILE is never re-added to an unvalidated value.
@@ -159,6 +179,9 @@ The investor client's `getOrder()` validates PROFILE and then returns only `{ ob
   - lease currency and forged leases
   - timeout, abort, stalled body, redirects, oversize, bad JSON and UTF-8
   - non-2xx mapping
+  - exactly one request per read on every failure (no retry)
+  - deployment lease bounds moved one clock at a time
+  - `createExecutionClock`
   - no secrets and no console output
   - panel copy for every code
   - source guards
@@ -166,7 +189,9 @@ The investor client's `getOrder()` validates PROFILE and then returns only `{ ob
   - evidence → check → exact approval → reconciliation → separate transfer
   - PROFILE loss regression
   - late 401 after an account switch
-  - evidence expiry and refresh without automatic re-signing
+  - a catalog 401 signs nobody out
+  - evidence expiry and refresh without automatic re-signing; a refresh returning the server's cached evidence cancels nothing
+  - a wall clock stepped back after the final order read: 1 wallet request with the raw clock (the controller limit), 0 with `createExecutionClock`
   - cross-deployment, paused and missing policy
 - `server-roundtrip.test.tsx`: the **actual** server Fastify execution and Stocks plugins with the real `StocksService` and `StocksExecutionService` over an in-memory SQL fake, through `app.inject` (no socket, DB or RPC).
   - Real DTOs pass the adapter; the planner derives the same intent and calldata as the server.

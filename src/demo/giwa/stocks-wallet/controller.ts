@@ -188,9 +188,12 @@ export function createStocksWalletController(ports: WalletPorts) {
     ensure(canonical(parseOrder({ side: a.plan.side, order: finalResponse.data })) === canonical(a.plan.order), "ORDER_CHANGED")
     guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED"); reconcilable(a, stage)
     state(a, "SIGNING", { stage })
+    // SIGNING subscribers run synchronously and may remove ports. This refusal happens before any wallet
+    // request, so it keeps the claim as REQUEST_MAY_START instead of recording an uncertain outcome.
+    reconcilable(a, stage)
     let result: unknown
-    // SIGNING subscribers run synchronously and may consume the policy's remaining lifetime or remove ports.
-    try { guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED"); reconcilable(a, stage); result = await ports.requestTransaction(tx) }
+    // SIGNING subscribers may also consume the policy's remaining lifetime.
+    try { guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED"); result = await ports.requestTransaction(tx) }
     catch {
       const unknown = { ...claim, status: "UNKNOWN" as const }
       try { await persist(a, unknown) } catch { /* The pre-request claim still blocks re-signing. */ }
