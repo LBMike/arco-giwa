@@ -1,0 +1,27 @@
+# Stocks wallet submissions v1 — implementation contract
+
+Approved scope: continue local development from integrated a50e2f9 plus reviewed wallet module518bcb5/fix9389723 (local base d4668ff). This milestone adds durable pre-wallet claims and their authenticated HTTP adapter. It does NOT resolve investor create-order uncertainty or enable the actual wallet UI. These are distinct boundaries.
+
+## Routes and DTO
+
+All routes use existing Stocks actor authentication, current deployment scoping, PROFILE envelope `{...PROFILE,observedAt:ISO,data:T}`, no-store responses. No shared operator token. Errors use fixed StocksError codes, no tokens/raw SQL/body logging.
+
+- GET `/api/v1/stocks/wallet-submissions/:side/:orderId`: side BUY|SELL. data `{intentKey,approval:AttemptRecord|null,transfer:AttemptRecord|null}`. Both order owner actorId AND wallet must match. Read/recovery works after order expiry/pause, but never grants submission permission. Derive physical intent from the authoritative current-deployment order; not a browser key.
+- POST `/api/v1/stocks/wallet-submissions/claims`: exact body `{side,orderId,intentKey,stage,transactionDigest,transaction,deploymentDigest}`. data is one new AttemptRecord or null if already claimed. Only the sole newly inserted claim returns REQUEST_MAY_START. A lost response/retry MUST NOT return the original record as new permission. Wrong body/scope/derived transaction is an error. Stage APPROVAL|TRANSFER.
+- POST `/api/v1/stocks/wallet-submissions/outcomes`: exact AttemptRecord fields, optional txHash. data is stored AttemptRecord. Match actor/wallet/claimId/intentKey/stage/transactionDigest. Client may report UNKNOWN or SUBMITTED only. Client CONFIRMED/REVERTED are rejected with RECEIPT_VERIFICATION_REQUIRED and cannot erase or unlock a claim. This milestone does not add trusted receipt reconciliation.
+
+AttemptRecord matches `stocks-wallet/types.ts`: `{claimId,intentKey,stage,transactionDigest,status,txHash?}`. Status values on this API are REQUEST_MAY_START, UNKNOWN, SUBMITTED (CONFIRMED/REVERTED reserved, not client-writable). All hash/key formats strictly checked. txHash is unverified client observation, never settlement proof. Unknown after submitted must preserve stored hash/status; same hash repeat idempotent, different hash conflict. No delete/reset/expiry-based release/retry permission. Terminal client reports fail closed.
+
+## Persistence and validation
+
+Use PostgreSQL and existing SqlPool/StocksRepository transaction style. New migration/model, immutable claim binding; unique physical(intentKey,stage) excludes actor/deployment aliases. No in-memory production store. Server computes exact calldata, intentKey and transactionDigest equivalent to reviewed wallet planner (canonical sorted JSON sha256, addresses EIP55 in transaction, lower-case physical identity). BUY depositForOrder vs SELL escrowForOrder; bounded exact approval. Verify authoritative order owner, deployment, NVDA, amounts, orderKey, payable state and DB deadline. Claim requires service.ready(), locks authoritative order, atomic insert and audit in one DB transaction. A prior claim remains blocking after expiry, pause, crash, account change or deployment alias. TRANSFER cannot bypass an existing unresolved APPROVAL claim. No actual signing/RPC/private keys in the journal service.
+
+Production construction is optional via Stocks runtime service. Missing service means routes absent. Do not enable real wallet actions. Server root owns app registration; builder exports plugin/service only. New migration is applied ONLY to a fresh isolated test DB during tests; never an existing database.
+
+## Browser adapter
+
+New `stocks-wallet-submissions/**`, imports reviewed SubmissionGate types. Factory binds immutable API base, side/orderId/deploymentDigest, verified host session (including id/token/wallet). No localStorage/IndexedDB/automatic resend. Strict response/profile/scope/record checks; bounded transport including body read and elapsed deadline. inspect checks expected intentKey; claim validates local request against bound order and sends full body; null remains null. record uses original captured session even for late outcomes, never silently changes to a newer account. 401 callback carries original session id. Do not implement fake persistence or convert request failures to successful/no-prior reads. Missing/expired auth fails closed. No UI/router/provider changes.
+
+## Required proof
+
+Fresh PostgreSQL tests for simultaneous claims, client recreation/process restart persistence, dropped claim response then retry, owner/side/deployment separation, immutable binding, hash preservation/conflict, pause/expiry before claim vs recovery after, rollback atomicity. Tests must not silently substitute memory for durable storage. Frontend fake HTTP tests plus root actual plugin→adapter roundtrip, no signatures/public network. Independently verify final immutable commits before integration acceptance. Reuse dependencies with exact lockfile equality; no installs or secrets.
