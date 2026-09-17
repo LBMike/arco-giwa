@@ -10,7 +10,7 @@ import type { Side } from "../stocks-wallet/types"
 import { stocksWalletPanelActions } from "./adapter"
 import { executionAvailability } from "./availability"
 import { countControllerActions, createScriptedWallet, type FixtureAccount } from "./fixtures/scripted-wallet"
-import { derivePanelModel } from "./model"
+import { derivePanelModel, serverOrderAwaitsTransfer } from "./model"
 import { StocksWalletExecutionPanel } from "./StocksWalletExecutionPanel"
 
 const ORDER = { BUY: "fixture-order-a-buy-1", SELL: "fixture-order-a-sell-1" } as const
@@ -354,4 +354,90 @@ test("the connected panel renders not configured without a controller or ports",
   assert.match(html, /data-status="UNAVAILABLE"/)
   assert.match(html, /Wallet execution is not configured in this app/)
   assert.doesNotMatch(html, /fixture-order-a-buy-1/, "no signed-in account, so no order details")
+})
+
+test("through the adapter: signed out, or a session for another wallet, renders no order details", () => {
+  const f = createScriptedWallet()
+  const controller = createStocksWalletController(f.ports)
+  const selection = f.selection(ORDER.SELL)
+  const render = (ports: typeof f.ports) => renderToStaticMarkup(<StocksWalletExecutionPanel controller={controller} ports={ports} selection={selection} tickMs={0} />)
+  const leaked = new RegExp(`${ORDER.SELL}|0\\.123456789 NVDA|14\\.814814|${f.manifest.redemptionEscrow}|Sell NVDA`)
+  assert.match(render(f.ports), leaked, "baseline: the owner sees the order")
+  f.controls.setSignedIn(false)
+  const signedOut = render(f.ports)
+  assert.doesNotMatch(signedOut, leaked)
+  assert.match(signedOut, /Code <span class="font-mono">SESSION_REQUIRED<\/span>/)
+  f.controls.setSignedIn(true)
+  // Connected wallet B while the session belongs to A.
+  const otherWallet = { ...f.ports, context: () => ({ ...f.context(), walletAddress: "0x2222222222222222222222222222222222222222" }) }
+  const mismatched = render(otherWallet)
+  assert.doesNotMatch(mismatched, leaked)
+  assert.match(mismatched, /data-status="UNAVAILABLE"/)
+  assert.equal(f.requests.length, 0)
+  controller.dispose()
+})
+
+test("a server status showing the order moved on makes approve and submit refuse, even when called directly", async () => {
+  for (const [start, action] of [
+    ["APPROVAL_REQUIRED", "approve"],
+    ["READY_TRANSFER", "submit"],
+  ] as const) {
+    const h = harness()
+    if (start === "READY_TRANSFER") h.f.controls.setAllowance(ORDER.BUY, "300000000")
+    await h.actions().prepare()
+    assert.equal(h.model().kind, start)
+    h.f.controls.setServerState(ORDER.BUY, "BROKER_PENDING")
+    const serverOrder = h.f.serverOrder(ORDER.BUY)
+    const bound = h.f.selection(ORDER.BUY)
+    const guarded = stocksWalletPanelActions(h.controller, {
+      orderId: ORDER.BUY,
+      side: "BUY",
+      account: h.f.context().walletAddress,
+      ready: () => executionAvailability({ configured: true, ports: h.f.ports, context: h.f.context(), selection: bound, now: h.f.now() }).status === "READY",
+      signable: () => serverOrderAwaitsTransfer(serverOrder, ORDER.BUY, "BUY"),
+    })
+    await guarded[action]()
+    await flush()
+    assert.equal(h.f.requests.length, 0, action)
+    assert.equal(h.controller.getSnapshot().status, start, "the controller was not invoked")
+    h.controller.dispose()
+  }
+})
+
+test("real controller: a confirmed approval followed by a paused policy reads 'approval sent', and recovers with a check", async () => {
+  const h = harness()
+  await h.actions().prepare()
+  await h.actions().approve()
+  await flush()
+  assert.equal(h.model().kind, "READY_TRANSFER")
+  h.f.controls.setPolicyAllowed(false)
+  await h.actions().submit()
+  await flush()
+  const paused = h.model()
+  assert.equal(h.controller.getSnapshot().status, "APPROVAL_SUBMITTED")
+  assert.equal(paused.title, "Approval sent — check needed")
+  assert.match(paused.paragraphs.join(" "), /Execution is not allowed for this order right now/)
+  assert.equal(paused.steps[0]?.detail, "Approval sent")
+  assert.equal(h.f.requests.length, 1)
+  h.f.controls.setPolicyAllowed(true)
+  await h.actions().prepare()
+  await flush()
+  assert.equal(h.model().kind, "READY_TRANSFER", "an explicit check recovers once the policy allows execution")
+  assert.equal(h.f.requests.length, 1)
+  h.controller.dispose()
+})
+
+test("real controller: a wallet on another network instance blocks with a read-only check that recovers", async () => {
+  const h = harness()
+  h.f.controls.setNetworkMatches(false)
+  await h.actions().prepare()
+  const blocked = h.model()
+  assert.equal(blocked.kind, "BLOCKED")
+  assert.equal(blocked.code, "WALLET_NETWORK_INSTANCE_MISMATCH")
+  assert.deepEqual(blocked.buttons.map((button) => [button.label, button.enabled]), [["Check again", true]])
+  h.f.controls.setNetworkMatches(true)
+  await h.actions().prepare()
+  assert.equal(h.model().kind, "APPROVAL_REQUIRED")
+  assert.equal(h.f.requests.length, 0)
+  h.controller.dispose()
 })

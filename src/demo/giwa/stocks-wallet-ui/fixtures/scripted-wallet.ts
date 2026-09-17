@@ -102,6 +102,10 @@ export function createScriptedWallet(options: ScriptedWalletOptions = {}) {
   const journal = new Map<string, AttemptRecord>()
   const intents = new Map<string, string>() // intentKey → orderId, recorded at claim time
   const held: { resolve: () => void; reject: () => void }[] = []
+  let holdReads = false
+  const heldReads: (() => void)[] = []
+  /** Keeps a read-only check in flight (CHECKING) until released. */
+  const readGate = () => (holdReads ? new Promise<void>((resolve) => heldReads.push(resolve)) : Promise.resolve())
   const requests: Transaction[] = []
   const reads = { context: 0, readWallet: 0, readOrder: 0, readCatalog: 0, readExecutionPolicy: 0, readAllowance: 0, inspect: 0, claim: 0, record: 0, reconcile: 0 }
 
@@ -221,6 +225,7 @@ export function createScriptedWallet(options: ScriptedWalletOptions = {}) {
     },
     async readOrder(request) {
       reads.readOrder++
+      await readGate()
       const order = spec(request.orderId)
       if (!order || FIXTURE_WALLETS[order.account] !== context.session?.walletAddress) throw Object.assign(new Error("FIXTURE_ORDER_NOT_FOUND"), { status: 404 })
       const { ...data } = row(order, serverStates.get(order.id) ?? initialState(order.side))
@@ -310,7 +315,7 @@ export function createScriptedWallet(options: ScriptedWalletOptions = {}) {
       }
     },
     getVersion: () => version,
-    state: () => ({ account, signedIn, reviewed, policyAllowed, networkMatches, walletMode, reconcileMode, held: held.length, offset }),
+    state: () => ({ account, signedIn, reviewed, policyAllowed, networkMatches, walletMode, reconcileMode, held: held.length, heldReads: heldReads.length, offset }),
     controls: {
       setAccount(next: FixtureAccount) {
         if (next === account) return
@@ -368,6 +373,15 @@ export function createScriptedWallet(options: ScriptedWalletOptions = {}) {
       },
       setServerState(orderId: string, state: string) {
         serverStates.set(orderId, state)
+        notify()
+      },
+      setHoldReads(value: boolean) {
+        holdReads = value
+        notify()
+      },
+      releaseReads() {
+        holdReads = false
+        heldReads.splice(0).forEach((resolve) => resolve())
         notify()
       },
       releaseHeld() {

@@ -1,13 +1,30 @@
 // Connected panel: the thin controller adapter plus the presentational panel, keyed by scope so no
-// local UI state (in-flight lock, arming, focus) survives an account, session or order change.
+// local UI state (in-flight gate, arming, focus) survives an account, session or order change. The
+// polite status region lives outside that key, so a scope change is announced by the same region.
 
 import { useStocksWalletPanel, type UseStocksWalletPanelOptions } from "./adapter"
-import { StocksWalletPanel, type StocksWalletPanelProps } from "./StocksWalletPanel"
+import { derivePanelModel } from "./model"
+import { StatusRegion, StocksWalletPanel, useStatusAnnouncement, type StocksWalletPanelProps } from "./StocksWalletPanel"
 
 export type StocksWalletExecutionPanelProps = UseStocksWalletPanelOptions &
-  Pick<StocksWalletPanelProps, "serverOrder" | "onRefreshServerOrder" | "serverOrderRefreshing" | "headingLevel" | "armDelayMs">
+  Pick<StocksWalletPanelProps, "onRefreshServerOrder" | "serverOrderRefreshing" | "headingLevel" | "armDelayMs">
 
-export function StocksWalletExecutionPanel({ controller, ports, selection, tickMs, ...display }: StocksWalletExecutionPanelProps) {
-  const { scopeKey, ...binding } = useStocksWalletPanel({ controller, ports, selection, tickMs })
-  return <StocksWalletPanel key={scopeKey} {...binding} {...display} />
+export function StocksWalletExecutionPanel({ controller, ports, selection, serverOrder = null, tickMs, ...display }: StocksWalletExecutionPanelProps) {
+  const { scopeKey, ...binding } = useStocksWalletPanel({ controller, ports, selection, serverOrder, tickMs })
+  const status = useStatusAnnouncement(derivePanelModel({ ...binding, serverOrder }).announcement)
+  return (
+    <div className="flex w-full flex-col">
+      <StocksWalletPanel
+        key={scopeKey}
+        {...binding}
+        {...display}
+        serverOrder={serverOrder}
+        announce={false}
+        onActionSettled={(action) => {
+          if (action === "prepare") status.checkFinished()
+        }}
+      />
+      <StatusRegion text={status.text} />
+    </div>
+  )
 }

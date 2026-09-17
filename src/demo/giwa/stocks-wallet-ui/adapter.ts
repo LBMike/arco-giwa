@@ -6,8 +6,8 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 
 import type { ExecutionContext, Selection, Side, WalletPorts, WalletSnapshot } from "../stocks-wallet/types"
 import { executionAvailability } from "./availability"
-import { IDLE_SNAPSHOT } from "./model"
-import type { StocksWalletAvailability, StocksWalletControllerApi, StocksWalletNetwork, StocksWalletPanelActions } from "./types"
+import { IDLE_SNAPSHOT, serverOrderAwaitsTransfer } from "./model"
+import type { StocksServerOrderStatus, StocksWalletAvailability, StocksWalletControllerApi, StocksWalletNetwork, StocksWalletPanelActions } from "./types"
 
 export type ExpectedScope = {
   orderId: string | null
@@ -19,22 +19,29 @@ export type ExpectedScope = {
    * reconciliation before opening an approval request.
    */
   ready: () => boolean
+  /**
+   * False when the injected server status shows this order no longer waits for the deposit/escrow.
+   * approve/submit then do nothing (a moved-on order must not be paid twice). Default: always true.
+   */
+  signable?: () => boolean
 }
 
 /**
  * Maps the panel's explicit actions onto the controller. Each first re-checks local availability;
- * approve/submit also re-read the controller snapshot and do nothing unless it is still the displayed
- * order, side, account and step. The controller then repeats its own full preflight. prepare only
- * reads and never opens the wallet.
+ * approve/submit also require the injected server status not to show the order moved on, and re-read
+ * the controller snapshot: they do nothing unless it is still the displayed order, side, account and
+ * step. The controller then repeats its own full preflight. prepare only reads and never opens the wallet.
  */
 export function stocksWalletPanelActions(controller: StocksWalletControllerApi, expected: ExpectedScope): StocksWalletPanelActions {
-  const available = () => {
+  const check = (predicate: (() => boolean) | undefined, fallback: boolean) => {
     try {
-      return expected.ready() === true
+      return predicate ? predicate() === true : fallback
     } catch {
       return false
     }
   }
+  const available = () => check(expected.ready, false)
+  const signable = () => available() && check(expected.signable, true)
   const displayed = (status: WalletSnapshot["status"]) => {
     const snapshot = controller.getSnapshot()
     const plan = snapshot.plan
@@ -50,8 +57,8 @@ export function stocksWalletPanelActions(controller: StocksWalletControllerApi, 
   }
   return {
     prepare: () => (available() ? controller.prepare() : undefined),
-    approve: () => (available() && displayed("APPROVAL_REQUIRED") ? controller.approve() : undefined),
-    submit: () => (available() && displayed("READY_TRANSFER") ? controller.submit() : undefined),
+    approve: () => (signable() && displayed("APPROVAL_REQUIRED") ? controller.approve() : undefined),
+    submit: () => (signable() && displayed("READY_TRANSFER") ? controller.submit() : undefined),
   }
 }
 
@@ -62,6 +69,8 @@ export type UseStocksWalletPanelOptions = {
   ports: WalletPorts | null
   /** The accepted create-order row and its side. Never a refreshed row: pass later server state as serverOrder. */
   selection: Selection | null
+  /** Separately read server order status. Used only to refuse approve/submit for a moved-on order. */
+  serverOrder?: StocksServerOrderStatus | null
   /** Re-render interval for the deadline display only. 0 disables. Default 1000 ms. */
   tickMs?: number
 }
@@ -100,7 +109,7 @@ function orderIdOf(selection: Selection | null): string | null {
   return order !== null && typeof order === "object" && typeof (order as { id?: unknown }).id === "string" ? (order as { id: string }).id : null
 }
 
-export function useStocksWalletPanel({ controller, ports, selection, tickMs = 1000 }: UseStocksWalletPanelOptions): StocksWalletPanelBinding {
+export function useStocksWalletPanel({ controller, ports, selection, serverOrder = null, tickMs = 1000 }: UseStocksWalletPanelOptions): StocksWalletPanelBinding {
   const context = readContext(ports)
 
   // Synchronize the displayed order before the snapshot is read. select() is idempotent for an equal
@@ -143,9 +152,10 @@ export function useStocksWalletPanel({ controller, ports, selection, tickMs = 10
             account,
             // Re-evaluated at activation with the host's then-current context and clock.
             ready: () => executionAvailability({ configured: true, ports, context: readContext(ports), selection, now: clockOf(ports) }).status === "READY",
+            signable: () => serverOrderAwaitsTransfer(serverOrder, orderId, side),
           })
         : null,
-    [controller, synchronized, ports, selection, orderId, side, account],
+    [controller, synchronized, ports, selection, serverOrder, orderId, side, account],
   )
   const manifest = availability.status === "READY" ? context?.deployment?.manifest : null
   const network = manifest ? { networkInstance: manifest.networkInstance, deploymentId: manifest.deploymentId } : null

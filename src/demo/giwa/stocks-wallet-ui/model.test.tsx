@@ -8,7 +8,7 @@ import type { Stage, WalletSnapshot } from "../stocks-wallet/types"
 import { executionAvailability } from "./availability"
 import { createScriptedWallet, FIXTURE_WALLETS } from "./fixtures/scripted-wallet"
 import { describeCode } from "./messages"
-import { bindSnapshot, derivePanelModel, IDLE_SNAPSHOT, type PanelInput } from "./model"
+import { bindSnapshot, derivePanelModel, IDLE_SNAPSHOT, serverOrderAwaitsTransfer, type PanelInput } from "./model"
 
 const APPROVAL_HASH: Hex = sha256(toHex("model-approval"))
 const TRANSFER_HASH: Hex = sha256(toHex("model-transfer"))
@@ -28,6 +28,13 @@ function setup(orderId = "fixture-order-a-buy-1") {
 }
 
 const text = (model: ReturnType<typeof derivePanelModel>) => [model.title, ...model.paragraphs, ...model.buttons.map((button) => button.label), ...model.steps.map((step) => step.detail), model.server?.label ?? ""].join(" ")
+
+/** Any claim of order completion or a holding change. The one allowed sentence says what completion requires. */
+const COMPLETION_CLAIM = /\b(order|deposit|escrow|trade|purchase|sale)\b[^.]{0,20}\b(is |was |now )?(complete|completed|filled|settled|executed)\b|\bfilled\b|\bsettled\b|(added to|now in|increase[sd]?)[^.]{0,20}holdings|holdings[^.]{0,20}(increase|grew|updated)/i
+const ALLOWED_COMPLETION_TEXT = /reports this order completed|Payout if completed/g
+function assertNoCompletionClaim(value: string, label: string) {
+  assert.doesNotMatch(value.replace(ALLOWED_COMPLETION_TEXT, ""), COMPLETION_CLAIM, label)
+}
 
 test("every controller status maps to its own panel with at most one enabled action", () => {
   const s = setup()
@@ -75,6 +82,9 @@ test("exact approval, deposit and escrow amounts; the smallest amount is never r
   assert.equal(buy.order?.payout, null)
   const sellSetup = setup("fixture-order-a-sell-1")
   const sell = sellSetup.model(sellSetup.snap("READY_TRANSFER"))
+  // Another SELL order's EXPIRED status does not disable this one.
+  const otherExpired = sellSetup.model(sellSetup.snap("READY_TRANSFER"), { serverOrder: { orderId: "fixture-order-other-sell", side: "SELL", state: "EXPIRED", observedAt: new Date(sellSetup.now).toISOString() } })
+  assert.equal(otherExpired.buttons[0]?.enabled, true)
   assert.equal(sell.order?.approval.text, "0.123456789 NVDA")
   assert.equal(sell.order?.transfer.scale, 9)
   assert.equal(sell.order?.payout?.text, "14.814814 ARCO_TEST_USDC")
@@ -89,13 +99,30 @@ test("exact approval, deposit and escrow amounts; the smallest amount is never r
 
 test("a hash, a confirmed approval or a submitted transfer is never shown as order completion", () => {
   const s = setup()
-  for (const snapshot of [s.snap("READY_TRANSFER"), s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH)]) {
-    const model = s.model(snapshot)
-    assert.equal(model.server, null)
-    // No status label claims completion; the explanatory text may only say what completion requires.
-    assert.doesNotMatch(text(model), /\bCompleted\b|\bFilled\b|holdings increased/)
-    assert.ok(![model.title, ...model.steps.map((step) => step.detail)].some((label) => /complete|filled|settled/i.test(label)), snapshot.status)
+  const everyState = [
+    IDLE_SNAPSHOT,
+    s.snap("CHECKING"),
+    s.snap("APPROVAL_REQUIRED"),
+    s.snap("SIGNING", "APPROVAL"),
+    s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH),
+    s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "EXECUTION_NOT_ALLOWED"),
+    s.snap("READY_TRANSFER"),
+    s.snap("SIGNING", "TRANSFER"),
+    s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH),
+    s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH, "RECOVERY_REQUIRED"),
+    s.snap("UNKNOWN", "TRANSFER", null, "WALLET_OUTCOME_UNKNOWN"),
+    s.snap("BLOCKED", "TRANSFER", TRANSFER_HASH, "RECOVERY_REQUIRED"),
+  ]
+  for (const snapshot of everyState) {
+    for (const serverState of [null, "AWAITING_FUNDING", "BROKER_PENDING", "MINT_UNKNOWN"]) {
+      const model = s.model(snapshot, { serverOrder: serverState ? { orderId: s.plan.order.id, side: "BUY", state: serverState, observedAt: null } : null })
+      assert.equal(model.server?.completed ?? false, false)
+      assertNoCompletionClaim(`${text(model)} ${model.announcement}`, `${snapshot.status}/${snapshot.error}/${serverState}`)
+    }
   }
+  assertNoCompletionClaim("Holdings and balances change only after the server reports this order completed.", "allowed sentence")
+  assert.throws(() => assertNoCompletionClaim("Your order is complete: the NVDA units are now in your holdings.", "claim"))
+  assert.throws(() => assertNoCompletionClaim("Deposit completed.", "claim"))
   const submitted = s.model(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH))
   assert.equal(submitted.txHash, TRANSFER_HASH)
   assert.equal(submitted.steps[2]?.detail, "Waiting for the server")
@@ -106,6 +133,11 @@ test("a hash, a confirmed approval or a submitted transfer is never shown as ord
   // Only the SAME order's server state counts.
   const otherOrder = s.model(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), { serverOrder: { orderId: "fixture-order-a-sell-1", side: "SELL", state: "COMPLETED", observedAt: null } })
   assert.equal(otherOrder.server, null)
+  // Same side, different order: still not this order's result.
+  const sameSideOther = s.model(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), { serverOrder: { orderId: "fixture-order-other-buy", side: "BUY", state: "COMPLETED", observedAt: null } })
+  assert.equal(sameSideOther.server, null)
+  assert.notEqual(sameSideOther.steps[2]?.status, "done")
+  assert.doesNotMatch(sameSideOther.title, /Completed/)
   const unrecognized = s.model(IDLE_SNAPSHOT, { serverOrder: { orderId: s.plan.order.id, side: "BUY", state: "SETTLED_MAYBE", observedAt: null } })
   assert.equal(unrecognized.server?.completed, false)
   assert.equal(unrecognized.server?.category, "UNRECOGNIZED")
@@ -143,6 +175,7 @@ test("order details are shown only to the signed-in wallet that placed the order
     assert.equal(model.kind, "UNAVAILABLE")
     assert.equal(model.code, code)
     assert.equal(model.order, null)
+    assert.equal(model.side, null, "not even Buy/Sell of a hidden order")
     assert.equal(model.plan, null)
     assert.equal(model.txHash, null)
     assert.deepEqual(model.buttons.map((button) => button.enabled), [false])
@@ -167,11 +200,22 @@ test("expiry disables approval and transfer; late submissions keep their hash", 
   assert.equal(idle.title, "Quote deadline passed")
   assert.equal(idle.order?.expired, true)
   assert.match(text(idle), /Do not send test cash for this order/)
-  for (const status of ["APPROVAL_REQUIRED", "READY_TRANSFER"] as const) {
+  for (const [status, title] of [
+    ["APPROVAL_REQUIRED", "Quote deadline passed — do not approve"],
+    ["READY_TRANSFER", "Quote deadline passed — do not deposit"],
+  ] as const) {
+    const open = s.model(s.snap(status))
     const model = s.model(s.snap(status), { now: later })
     assert.equal(model.buttons[0]?.enabled, false, status)
-    assert.match(model.paragraphs.join(" "), /quote deadline has passed/)
+    assert.equal(model.title, title, "the actionable title is replaced")
+    assert.match(model.paragraphs[0]!, /quote deadline has passed/)
+    assert.doesNotMatch(model.paragraphs.join(" "), /Nothing is sent until you press the button/)
+    assert.notEqual(model.announcement, open.announcement, "expiry changes the announcement")
+    assert.equal(model.code, "ORDER_EXPIRED")
   }
+  const unknownLate = s.model(s.snap("UNKNOWN", "APPROVAL", null, "WALLET_OUTCOME_UNKNOWN"), { now: later })
+  assert.equal(unknownLate.buttons[0]?.enabled, false)
+  assert.match(unknownLate.paragraphs.join(" "), /can no longer check the recorded request/)
   const late = s.model(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), { now: later })
   assert.equal(late.txHash, TRANSFER_HASH)
   assert.equal(late.buttons[0]?.enabled, false)
@@ -256,4 +300,99 @@ test("every stable code the wallet planner and controller can report has a speci
   assert.match(describeCode("TRANSFER_REVERTED", "SELL").reason, /escrow transaction reverted/)
   assert.equal(describeCode("READ_TIMEOUT", "BUY").step, "CHECK_AGAIN")
   assert.equal(describeCode("APPROVAL_REVERTED", "BUY").step, "RECOVERY")
+})
+
+test("an approval the controller republishes with a later failure shows that reason, not 'confirming'", () => {
+  const s = setup()
+  const paused = s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "EXECUTION_NOT_ALLOWED"))
+  assert.equal(paused.title, "Approval sent — check needed")
+  assert.equal(paused.steps[0]?.detail, "Approval sent")
+  assert.match(paused.paragraphs.join(" "), /Execution is not allowed for this order right now/)
+  assert.doesNotMatch(paused.paragraphs.join(" "), /did not finish/)
+  assert.equal(paused.tone, "warning")
+  assert.equal(paused.buttons[0]?.enabled, true, "a read-only check stays available as the way out")
+  const history = s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "SUBMISSION_HISTORY_MISMATCH"))
+  assert.equal(history.tone, "error")
+  assert.match(history.paragraphs.join(" "), /needs a server check/)
+  assert.match(history.paragraphs.join(" "), /contact operations/)
+  const moved = s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "ORDER_CHANGED"))
+  assert.match(moved.paragraphs.join(" "), /moved on at the server/)
+  const network = s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "WALLET_NETWORK_INSTANCE_MISMATCH"))
+  assert.match(network.paragraphs.join(" "), /Switch the wallet to GIWA Sepolia/)
+  for (const pending of [null, "RECEIPT_PENDING", "RECOVERY_REQUIRED"]) {
+    const model = s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, pending))
+    assert.equal(model.title, "Approval submitted — confirming")
+    assert.equal(model.steps[0]?.detail, "Confirming")
+  }
+  const submitted = s.model(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH, "WALLET_NETWORK_INSTANCE_MISMATCH"))
+  assert.match(submitted.paragraphs.join(" "), /different network/)
+  assert.equal(submitted.txHash, TRANSFER_HASH)
+})
+
+test("a server status showing the order moved on disables approval and deposit/escrow (read-only checks remain)", () => {
+  const s = setup()
+  for (const state of ["BROKER_PENDING", "COMPLETED", "FUNDING_REVIEW_REQUIRED", "SOMETHING_UNRECOGNIZED"]) {
+    const serverOrder = { orderId: s.plan.order.id, side: "BUY" as const, state, observedAt: new Date(s.now).toISOString() }
+    const ready = s.model(s.snap("READY_TRANSFER"), { serverOrder })
+    assert.equal(ready.buttons[0]?.enabled, false, state)
+    assert.equal(ready.title, "Order moved on — do not deposit")
+    assert.equal(ready.code, "ORDER_NOT_PAYABLE")
+    const approval = s.model(s.snap("APPROVAL_REQUIRED"), { serverOrder })
+    assert.equal(approval.buttons[0]?.enabled, false, state)
+    assert.equal(approval.title, "Order moved on — do not approve")
+    assert.equal(s.model(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), { serverOrder }).buttons[0]?.enabled, true, "checks stay available")
+  }
+  const awaiting = s.model(s.snap("READY_TRANSFER"), { serverOrder: { orderId: s.plan.order.id, side: "BUY", state: "AWAITING_FUNDING", observedAt: null } })
+  assert.equal(awaiting.buttons[0]?.enabled, true)
+  const other = s.model(s.snap("READY_TRANSFER"), { serverOrder: { orderId: "fixture-order-other-buy", side: "BUY", state: "BROKER_PENDING", observedAt: null } })
+  assert.equal(other.buttons[0]?.enabled, true, "another order's status is ignored")
+  assert.equal(serverOrderAwaitsTransfer(null, s.plan.order.id, "BUY"), true)
+  assert.equal(serverOrderAwaitsTransfer({ orderId: s.plan.order.id, side: "BUY", state: "MINT_QUEUED", observedAt: null }, s.plan.order.id, "BUY"), false)
+})
+
+test("BLOCKED offers a read-only check for transient, network and recovery codes only", () => {
+  const s = setup()
+  const blocked = (error: string) => s.model(Object.freeze({ ...IDLE_SNAPSHOT, status: "BLOCKED" as const, error }))
+  for (const code of ["READ_TIMEOUT", "EXECUTION_NOT_ALLOWED", "WALLET_NETWORK_INSTANCE_MISMATCH", "SUBMISSION_ALREADY_CLAIMED", "RECOVERY_REQUIRED"]) {
+    assert.deepEqual(blocked(code).buttons.map((button) => [button.action, button.enabled, button.opensWallet]), [["prepare", true, false]], code)
+  }
+  for (const code of ["ORDER_EXPIRED", "SESSION_REQUIRED", "WALLET_MISMATCH", "DEPLOYMENT_NOT_REVIEWED", "ORDER_NOT_PAYABLE"]) {
+    assert.equal(blocked(code).buttons.length, 0, code)
+  }
+  assert.equal(s.model(s.snap("BLOCKED", "TRANSFER", TRANSFER_HASH, "RECOVERY_REQUIRED")).buttons.length, 0, "reverted attempts get no button")
+})
+
+test("disabled wallet steps and checks explain why", () => {
+  const s = setup()
+  const noReconcile = { status: "UNAVAILABLE" as const, code: "TRUSTED_RECONCILIATION_REQUIRED" }
+  const ready = s.model(s.snap("READY_TRANSFER"), { availability: noReconcile })
+  assert.equal(ready.title, "Deposit unavailable")
+  assert.equal(ready.code, "TRUSTED_RECONCILIATION_REQUIRED")
+  assert.match(ready.paragraphs[0]!, /Trusted server verification/)
+  assert.equal(ready.buttons[0]?.enabled, false)
+  const approval = s.model(s.snap("APPROVAL_REQUIRED"), { availability: { status: "UNAVAILABLE", code: "CURRENT_POLICY_REQUIRED" } })
+  assert.equal(approval.title, "Approval unavailable")
+  const unknown = s.model(s.snap("UNKNOWN", "TRANSFER", null, "WALLET_OUTCOME_UNKNOWN"), { availability: { status: "UNAVAILABLE", code: "SESSION_REQUIRED" } })
+  assert.equal(unknown.buttons[0]?.enabled, false)
+  assert.match(unknown.paragraphs.join(" "), /Checking is unavailable right now\. The Stocks sign-in session is missing/)
+  const submitted = s.model(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), { availability: { status: "UNAVAILABLE", code: "DEPLOYMENT_EVIDENCE_EXPIRED" } })
+  assert.equal(submitted.code, "DEPLOYMENT_EVIDENCE_EXPIRED")
+  assert.match(submitted.paragraphs.join(" "), /Checking is unavailable right now/)
+})
+
+test("the announcement changes whenever the outcome text or the server result changes", () => {
+  const s = setup()
+  const a = (snapshot: WalletSnapshot, extra: Partial<PanelInput> = {}) => s.model(snapshot, extra).announcement
+  assert.notEqual(a(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "RECEIPT_PENDING")), a(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "EXECUTION_NOT_ALLOWED")))
+  assert.notEqual(a(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH)), a(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH, "RECOVERY_REQUIRED")))
+  assert.notEqual(a(s.snap("UNKNOWN", "TRANSFER", null, "WALLET_OUTCOME_UNKNOWN")), a(s.snap("UNKNOWN", "TRANSFER", null, "WALLET_OUTCOME_UNKNOWN"), { availability: { status: "UNAVAILABLE", code: "SESSION_REQUIRED" } }))
+  const submitted = s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH)
+  const server = (state: string) => ({ orderId: s.plan.order.id, side: "BUY" as const, state, observedAt: null })
+  const waiting = s.model(submitted)
+  const processing = s.model(submitted, { serverOrder: server("BROKER_PENDING") })
+  const completed = s.model(submitted, { serverOrder: server("COMPLETED") })
+  assert.equal(waiting.title, "Deposit submitted — waiting for the order result")
+  assert.equal(completed.title, "Deposit submitted — server status: Completed")
+  assert.match(completed.announcement, /Order result from the server: Completed\.$/)
+  assert.equal(new Set([waiting.announcement, processing.announcement, completed.announcement]).size, 3)
 })

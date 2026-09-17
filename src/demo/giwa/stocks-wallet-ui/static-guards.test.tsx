@@ -68,9 +68,15 @@ test("feature code supplies no verification, policy, journal, wallet or transpor
 test("controller actions are invoked only by the adapter mapping, never from effects or timers", () => {
   const callers = feature.filter((path) => /\.(prepare|approve|submit)\(\)/.test(code(path))).map((path) => relative(ROOT, path))
   assert.deepEqual(callers, ["adapter.ts"])
+  // The panel runs actions only through the gate, from a button's onClick.
+  const panel = code(join(ROOT, "StocksWalletPanel.tsx"))
+  assert.equal((panel.match(/\bactivate\b/g) ?? []).length, 2, "defined once and referenced once")
+  assert.match(panel, /onClick=\{\(\) => activate\(button\)\}/)
+  assert.equal((panel.match(/startActivation\(/g) ?? []).length, 1)
+  assert.doesNotMatch(panel, /\bactions\[|\bactions\.(prepare|approve|submit)|\.call\(|\.apply\(/, "no direct action calls in the component")
   for (const path of feature) {
     for (const body of callBodies(code(path), ["useEffect", "useLayoutEffect", "useIsomorphicLayoutEffect", "setTimeout", "setInterval", "queueMicrotask"])) {
-      assert.doesNotMatch(body, /\bactions\b|\.prepare\(|\.approve\(|\.submit\(|\bactivate\(/, `${relative(ROOT, path)}: ${body.slice(0, 60)}`)
+      assert.doesNotMatch(body, /\b(actions|activate|startActivation|gate|onActionSettled|checkFinished|prepare|approve|submit|walletButton)\b/, `${relative(ROOT, path)}: ${body.slice(0, 60)}`)
     }
   }
 })

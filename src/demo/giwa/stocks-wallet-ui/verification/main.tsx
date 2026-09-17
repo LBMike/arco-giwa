@@ -108,7 +108,7 @@ function LiveView() {
             </Toggle>
           ))}
           <Toggle onClick={() => live.controls.reconnect()}>Reconnect (new epoch)</Toggle>
-          <Toggle pressed={!state.signedIn} onClick={() => live.controls.setSignedIn(!state.signedIn)}>
+          <Toggle onClick={() => live.controls.setSignedIn(!state.signedIn)}>
             {state.signedIn ? "Sign out" : "Sign in"}
           </Toggle>
         </Group>
@@ -125,6 +125,10 @@ function LiveView() {
               {mode === "hash" ? "Return hash" : mode === "hold" ? "Hold prompt open" : mode === "reject" ? "Reject" : "Malformed result"}
             </Toggle>
           ))}
+          <Toggle onClick={() => live.controls.setHoldReads(true)}>Hold next check</Toggle>
+          <Toggle disabled={state.heldReads === 0} onClick={() => live.controls.releaseReads()}>
+            Release check ({state.heldReads})
+          </Toggle>
           <Toggle disabled={state.held === 0} onClick={() => live.controls.releaseHeld()}>
             Release held ({state.held})
           </Toggle>
@@ -140,19 +144,19 @@ function LiveView() {
           ))}
         </Group>
         <Group label="Evidence and configuration">
-          <Toggle pressed={!state.reviewed} onClick={() => live.controls.setReviewed(!state.reviewed)}>
+          <Toggle onClick={() => live.controls.setReviewed(!state.reviewed)}>
             {state.reviewed ? "Remove deployment review" : "Restore deployment review"}
           </Toggle>
-          <Toggle pressed={!state.policyAllowed} onClick={() => live.controls.setPolicyAllowed(!state.policyAllowed)}>
+          <Toggle onClick={() => live.controls.setPolicyAllowed(!state.policyAllowed)}>
             {state.policyAllowed ? "Deny execution policy" : "Allow execution policy"}
           </Toggle>
-          <Toggle pressed={!state.networkMatches} onClick={() => live.controls.setNetworkMatches(!state.networkMatches)}>
+          <Toggle onClick={() => live.controls.setNetworkMatches(!state.networkMatches)}>
             {state.networkMatches ? "Wallet on other network" : "Wallet on reviewed network"}
           </Toggle>
-          <Toggle pressed={typeof live.ports.readExecutionPolicy !== "function"} onClick={() => live.controls.setPortPresent("readExecutionPolicy", typeof live.ports.readExecutionPolicy !== "function")}>
+          <Toggle onClick={() => live.controls.setPortPresent("readExecutionPolicy", typeof live.ports.readExecutionPolicy !== "function")}>
             {typeof live.ports.readExecutionPolicy === "function" ? "Remove policy port" : "Restore policy port"}
           </Toggle>
-          <Toggle pressed={typeof live.ports.submissions.reconcile !== "function"} onClick={() => live.controls.setPortPresent("reconcile", typeof live.ports.submissions.reconcile !== "function")}>
+          <Toggle onClick={() => live.controls.setPortPresent("reconcile", typeof live.ports.submissions.reconcile !== "function")}>
             {typeof live.ports.submissions.reconcile === "function" ? "Remove reconciliation" : "Restore reconciliation"}
           </Toggle>
         </Group>
@@ -235,6 +239,16 @@ function galleryCases(side: Side, record: (line: string) => void): GalleryCase[]
     { id: "signing-approval", title: "SIGNING — approval", props: { ...base, snapshot: snap("SIGNING", "APPROVAL") } },
     { id: "approval-submitted", title: "APPROVAL_SUBMITTED — server confirmation pending", props: { ...base, snapshot: snap("APPROVAL_SUBMITTED", "APPROVAL", approvalHash, "RECEIPT_PENDING") } },
     { id: "ready-transfer", title: `READY_TRANSFER — ${side === "SELL" ? "escrow" : "deposit"} is its own click`, props: { ...base, snapshot: snap("READY_TRANSFER") } },
+    {
+      id: "ready-transfer-moved-on",
+      title: "READY_TRANSFER — server shows the order moved on (disabled)",
+      props: { ...base, snapshot: snap("READY_TRANSFER"), serverOrder: server(side === "SELL" ? "ESCROW_HELD" : "BROKER_PENDING") },
+    },
+    {
+      id: "approval-sent-paused",
+      title: "APPROVAL_SUBMITTED — approval sent, execution not allowed now",
+      props: { ...base, snapshot: snap("APPROVAL_SUBMITTED", "APPROVAL", approvalHash, "EXECUTION_NOT_ALLOWED") },
+    },
     { id: "signing-transfer", title: "SIGNING — transfer", props: { ...base, snapshot: snap("SIGNING", "TRANSFER") } },
     { id: "submitted", title: "SUBMITTED — hash, server still awaiting", props: { ...base, snapshot: snap("SUBMITTED", "TRANSFER", transferHash), serverOrder: server(side === "SELL" ? "AWAITING_ESCROW" : "AWAITING_FUNDING") } },
     { id: "submitted-processing", title: "SUBMITTED — server processing", props: { ...base, snapshot: snap("SUBMITTED", "TRANSFER", transferHash), serverOrder: server(side === "SELL" ? "SELL_BROKER_PENDING" : "BROKER_PENDING") } },
@@ -247,6 +261,11 @@ function galleryCases(side: Side, record: (line: string) => void): GalleryCase[]
       id: "blocked-policy",
       title: "BLOCKED — execution not allowed",
       props: { ...base, snapshot: Object.freeze({ ...IDLE_SNAPSHOT, status: "BLOCKED", error: "EXECUTION_NOT_ALLOWED" }) },
+    },
+    {
+      id: "blocked-network",
+      title: "BLOCKED — wallet on another network (read-only check offered)",
+      props: { ...base, snapshot: Object.freeze({ ...IDLE_SNAPSHOT, status: "BLOCKED", error: "WALLET_NETWORK_INSTANCE_MISMATCH" }) },
     },
     {
       id: "expired",
@@ -291,7 +310,7 @@ function GalleryView() {
         {cases.map((item) => (
           <section key={item.id} className="flex min-w-0 flex-col gap-2" aria-label={item.title} data-gallery-case={item.id}>
             <p className="font-mono text-xs text-[var(--color-arco-text-soft)]">{item.title}</p>
-            <StocksWalletPanel {...item.props} headingLevel={3} />
+            <StocksWalletPanel {...item.props} headingLevel={2} />
           </section>
         ))}
       </div>

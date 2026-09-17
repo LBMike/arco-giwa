@@ -4,17 +4,19 @@
 // Safety in this component:
 //   • Actions run only from activation of their own enabled button; nothing runs on render, in an
 //     effect, on a timer or on a state change.
-//   • One action at a time: a synchronous lock blocks a second click before React re-renders.
+//   • One action at a time: a synchronous gate blocks a second activation before React re-renders.
 //   • A wallet-opening button (approve, deposit/escrow) accepts activation only after its step has
 //     been on screen for `armDelayMs`, so a repeated click or key press cannot carry into the next step.
-//   • Focus is never moved onto a wallet-opening button; a stranded focus goes to the state heading.
+//   • Focus is never moved onto a wallet-opening button. A focus stranded by a state change goes to the
+//     state heading, and only while the user's focus was inside this panel.
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type SyntheticEvent } from "react"
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 
 import { formatUtc } from "../stocks-investor/display"
 import { CATEGORY_TONE } from "../stocks-investor/status"
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, Chip, FOCUS_RING, Field, Notice, PANEL } from "../stocks-investor/ui"
 import type { Plan } from "../stocks-wallet/types"
+import { armKeyFor, createActivationGate, startActivation } from "./activation"
 import { derivePanelModel, type PanelAction, type PanelAmount, type PanelButton, type PanelInput, type PanelOrder, type PanelServerStatus, type PanelStep, type StepStatus } from "./model"
 import type { StocksWalletNetwork, StocksWalletPanelActions } from "./types"
 
@@ -33,6 +35,13 @@ export type StocksWalletPanelProps = PanelInput & {
   headingLevel?: 2 | 3
   /** How long a wallet-opening step is shown before its button accepts activation. Default 800 ms. */
   armDelayMs?: number
+  /**
+   * Render the polite status region inside the panel (default). A host that remounts the panel per
+   * scope (StocksWalletExecutionPanel) renders one persistent region outside it instead.
+   */
+  announce?: boolean
+  /** Called after an explicit action settled, while this panel is still mounted. */
+  onActionSettled?: (action: PanelAction) => void
 }
 
 const STEP_BOX: Record<StepStatus, string> = {
@@ -175,7 +184,17 @@ function ServerResult({
       {server?.observedAt ? <p className="text-xs text-[var(--color-arco-text-soft)]">Status as of {formatUtc(server.observedAt)}</p> : null}
       {onRefresh ? (
         <div>
-          <button type="button" className={`${BUTTON_SECONDARY} w-full sm:w-auto`} onClick={onRefresh} disabled={refreshing} aria-busy={refreshing || undefined}>
+          {/* aria-disabled keeps keyboard focus on the button while the host refreshes. */}
+          <button
+            type="button"
+            className={`${BUTTON_SECONDARY} w-full aria-disabled:cursor-not-allowed aria-disabled:opacity-40 sm:w-auto`}
+            onClick={() => {
+              if (!refreshing) onRefresh()
+            }}
+            aria-disabled={refreshing || undefined}
+            aria-busy={refreshing || undefined}
+            data-testid="stocks-wallet-refresh-order"
+          >
             {refreshing ? "Refreshing…" : "Refresh order status"}
           </button>
         </div>
@@ -184,18 +203,40 @@ function ServerResult({
   )
 }
 
+/**
+ * Text for a persistent polite status region. After an explicit check that ends with the same screen,
+ * it says "Check finished." (alternating an invisible trailing space so a repeat is announced again).
+ */
+export function useStatusAnnouncement(announcement: string): { text: string; checkFinished: () => void } {
+  const latest = useRef(announcement)
+  latest.current = announcement
+  const [notice, setNotice] = useState<{ base: string; count: number } | null>(null)
+  const checkFinished = useCallback(() => setNotice((previous) => ({ base: latest.current, count: (previous?.count ?? 0) + 1 })), [])
+  const text = notice !== null && notice.base === announcement ? `Check finished. ${announcement}${notice.count % 2 === 0 ? " " : ""}` : announcement
+  return { text, checkFinished }
+}
+
+export function StatusRegion({ text }: { text: string }) {
+  return (
+    <p role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-testid="stocks-wallet-announcement">
+      {text}
+    </p>
+  )
+}
+
 export function StocksWalletPanel(props: StocksWalletPanelProps) {
-  const { actions, network = null, onRefreshServerOrder = null, serverOrderRefreshing = false, headingLevel = 2, armDelayMs = DEFAULT_ARM_DELAY_MS } = props
+  const { actions, network = null, onRefreshServerOrder = null, serverOrderRefreshing = false, headingLevel = 2, armDelayMs = DEFAULT_ARM_DELAY_MS, announce = true, onActionSettled } = props
   const model = derivePanelModel(props)
   const id = useId()
   const titleId = `${id}-title`
   const messageId = `${id}-message`
   const rootRef = useRef<HTMLElement>(null)
   const stateHeadingRef = useRef<HTMLHeadingElement>(null)
-  const interacted = useRef(false)
+  const focusInside = useRef(false)
   const mounted = useRef(false)
-  const pendingRef = useRef<PanelAction | null>(null)
+  const [gate] = useState(createActivationGate)
   const [pending, setPending] = useState<PanelAction | null>(null)
+  const status = useStatusAnnouncement(model.announcement)
 
   useEffect(() => {
     mounted.current = true
@@ -204,10 +245,25 @@ export function StocksWalletPanel(props: StocksWalletPanelProps) {
     }
   }, [])
 
-  // Arming: the key names the exact step on screen. A different step, a pending action or a new
-  // scope produces a different key (or none), so an earlier arming never carries over.
-  const walletButton = model.buttons.find((button) => button.opensWallet && button.enabled)
-  const armKey = walletButton && pending === null && actions !== null ? `${model.kind}|${walletButton.action}|${model.snapshot.intentKey ?? model.order?.orderId ?? ""}` : null
+  // Where the user's focus and pointer are. Only a panel the user is working in may move focus.
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    const track = (event: Event) => {
+      const root = rootRef.current
+      const target = event.target as Node | null
+      focusInside.current = root !== null && target !== null && typeof target.nodeType === "number" && root.contains(target)
+    }
+    document.addEventListener("pointerdown", track, true)
+    document.addEventListener("focusin", track, true)
+    document.addEventListener("keydown", track, true)
+    return () => {
+      document.removeEventListener("pointerdown", track, true)
+      document.removeEventListener("focusin", track, true)
+      document.removeEventListener("keydown", track, true)
+    }
+  }, [])
+
+  const armKey = armKeyFor(model, pending, actions !== null)
   const [armed, setArmed] = useState<string | null>(null)
   useEffect(() => {
     if (armKey === null) return
@@ -219,34 +275,23 @@ export function StocksWalletPanel(props: StocksWalletPanelProps) {
   }, [armKey, armDelayMs])
 
   useIsomorphicLayoutEffect(() => {
-    if (!interacted.current || typeof document === "undefined") return
+    if (!focusInside.current || typeof document === "undefined") return
     const active = document.activeElement as (Element & { disabled?: boolean }) | null
     const lost = active === null || active === document.body
     const stranded = active !== null && rootRef.current !== null && rootRef.current.contains(active) && active.tagName === "BUTTON" && active.disabled === true
-    if (lost || stranded) stateHeadingRef.current?.focus()
-  }, [model.kind, model.stage, pending, armed])
-
-  const markInteracted = (_event: SyntheticEvent) => {
-    interacted.current = true
-  }
+    if (lost || stranded) stateHeadingRef.current?.focus({ preventScroll: true })
+  }, [model.kind, model.stage, model.title, pending, armed])
 
   const activate = (button: PanelButton) => {
-    if (actions === null || !button.enabled || pendingRef.current !== null) return
-    if (button.opensWallet && (armKey === null || armed !== armKey)) return
-    pendingRef.current = button.action
+    const running = startActivation(gate, button, { key: armKey, armed }, actions)
+    if (running === null) return
     setPending(button.action)
-    let result: unknown
-    try {
-      result = actions[button.action]()
-    } catch {
-      result = undefined
-    }
-    void Promise.resolve(result)
-      .catch(() => undefined)
-      .then(() => {
-        pendingRef.current = null
-        if (mounted.current) setPending(null)
-      })
+    void running.then(() => {
+      if (!mounted.current) return
+      setPending(null)
+      if (button.action === "prepare") status.checkFinished()
+      onActionSettled?.(button.action)
+    })
   }
 
   const Heading = headingLevel === 2 ? "h2" : "h3"
@@ -254,15 +299,7 @@ export function StocksWalletPanel(props: StocksWalletPanelProps) {
   const title = model.side === "SELL" ? "Sell NVDA: approve and escrow" : model.side === "BUY" ? "Buy NVDA: approve and deposit" : "Stocks wallet steps"
 
   return (
-    <section
-      ref={rootRef}
-      aria-labelledby={titleId}
-      className={`${PANEL} flex flex-col gap-5`}
-      data-testid="stocks-wallet-panel"
-      data-status={model.kind}
-      onPointerDownCapture={markInteracted}
-      onKeyDownCapture={markInteracted}
-    >
+    <section ref={rootRef} aria-labelledby={titleId} className={`${PANEL} flex flex-col gap-5`} data-testid="stocks-wallet-panel" data-status={model.kind}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <Heading id={titleId} className="text-lg font-medium text-[var(--color-arco-ink)]">
@@ -326,9 +363,7 @@ export function StocksWalletPanel(props: StocksWalletPanelProps) {
 
       {model.order ? <ServerResult server={model.server} level={SubHeading} onRefresh={onRefreshServerOrder} refreshing={serverOrderRefreshing} /> : null}
 
-      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-testid="stocks-wallet-announcement">
-        {model.announcement}
-      </p>
+      {announce ? <StatusRegion text={status.text} /> : null}
     </section>
   )
 }

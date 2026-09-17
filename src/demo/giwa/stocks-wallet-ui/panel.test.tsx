@@ -103,6 +103,10 @@ test("SIGNING, UNKNOWN, REVERTED and SUBMITTED screens", () => {
   assert.equal(button(submitted, "submit"), null)
   const completed = text(s.html({ snapshot: s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), serverOrder: { orderId: s.plan.order.id, side: "BUY", state: "COMPLETED", observedAt: "2026-09-17T00:05:00.000Z" } }))
   assert.match(completed, /Order result from the server Completed The test units are issued and finalized\. Status as of 2026-09-17 00:05:00 UTC/)
+  const refreshing = s.html({ snapshot: s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), onRefreshServerOrder: () => undefined, serverOrderRefreshing: true })
+  const refreshTag = /<button[^>]*data-testid="stocks-wallet-refresh-order"[^>]*>/.exec(refreshing)?.[0] ?? ""
+  assert.match(refreshTag, /aria-disabled="true"/)
+  assert.doesNotMatch(refreshTag, /\sdisabled=""/, "stays focusable while the host refreshes")
 
   const unknown = s.html({ snapshot: s.snap("UNKNOWN", "TRANSFER", null, "WALLET_OUTCOME_UNKNOWN") })
   assert.match(text(unknown), /Wallet result unknown — check required/)
@@ -129,6 +133,9 @@ test("unavailable configuration shows disabled execution; another wallet sees no
   const other = s.html({ account: FIXTURE_WALLETS.B, snapshot: s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH) })
   assert.doesNotMatch(other, new RegExp(`${TRANSFER_HASH}|${s.plan.order.id}|300 ARCO_TEST_USDC|${s.plan.spender}`))
   assert.match(text(other), /The connected wallet is not the wallet that placed this order/)
+  assert.match(other, /<h2 id="[^"]+"[^>]*>Stocks wallet steps<\/h2>/, "the heading does not reveal Buy/Sell either")
+  const sellSetup = setup("fixture-order-a-sell-1")
+  assert.doesNotMatch(sellSetup.html({ account: FIXTURE_WALLETS.B }), /Sell NVDA|escrow/i)
   const signedOut = s.html({ account: null, snapshot: s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH) })
   assert.doesNotMatch(signedOut, new RegExp(`${TRANSFER_HASH}|${s.plan.order.id}`))
 })
