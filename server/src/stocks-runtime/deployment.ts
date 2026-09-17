@@ -28,4 +28,3 @@ export async function verifyStocksDeployment(manifest: Manifest, rpc: ChainPort,
   }
   ensure((await rpc.block(finalized.number))?.hash === finalized.hash, 'STOCKS_FINALIZED_BLOCK_CHANGED');
 }
-
