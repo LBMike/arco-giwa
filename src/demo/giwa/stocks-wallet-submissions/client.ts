@@ -1,6 +1,6 @@
 import type { HostSession } from "../stocks-host/session"
 import { digest } from "../stocks-wallet/planner"
-import type { AttemptRecord, Side, SubmissionGate } from "../stocks-wallet/types"
+import type { AttemptRecord, ReconcileRequest, Side, SubmissionGate } from "../stocks-wallet/types"
 import { attempt, digestString, ensure, envelope, exact, label, object, SubmissionError, transaction, wallet } from "./validate"
 
 export type SubmissionClientOptions = {
@@ -60,11 +60,21 @@ export function createSubmissionGate(options: SubmissionClientOptions): Submissi
   function sameBinding(actual: AttemptRecord, expected: AttemptRecord) {
     ensure(actual.claimId === expected.claimId && actual.intentKey === expected.intentKey && actual.stage === expected.stage && actual.transactionDigest === expected.transactionDigest, "SUBMISSION_SCOPE_MISMATCH")
   }
-  function remember(row: AttemptRecord) {
+  const terminal = (row: AttemptRecord) => row.status === "CONFIRMED" || row.status === "REVERTED"
+  function remember(row: AttemptRecord): AttemptRecord {
     const previous = observed.get(row.stage)
-    if (previous) { sameBinding(row, previous); if (previous.txHash && row.txHash) ensure(previous.txHash === row.txHash, "SUBMISSION_HASH_MISMATCH") }
-    // A stale concurrent response must not erase the locally observed submitted hash.
-    observed.set(row.stage, previous?.status === "SUBMITTED" && row.status !== "SUBMITTED" ? previous : row)
+    if (previous) {
+      sameBinding(row, previous)
+      if (previous.txHash && row.txHash) ensure(previous.txHash === row.txHash, "SUBMISSION_HASH_MISMATCH")
+      if (terminal(previous)) {
+        if (terminal(row)) ensure(row.status === previous.status, "SUBMISSION_TERMINAL_MISMATCH")
+        return previous // A late pending/outcome response cannot erase trusted evidence.
+      }
+      if (previous.status === "SUBMITTED" && !terminal(row) && row.status !== "SUBMITTED") return previous
+      if (previous.txHash && !row.txHash) return previous
+    }
+    observed.set(row.stage, row)
+    return row
   }
   async function request<T>(path: string, body: unknown | undefined, parse: (value: unknown) => T): Promise<T> {
     auth()
@@ -126,14 +136,16 @@ export function createSubmissionGate(options: SubmissionClientOptions): Submissi
       const result = await request(`${side}/${encodeURIComponent(orderId)}`, undefined, value => {
         const row = object(value); exact(row, ["intentKey", "approval", "transfer"])
         ensure(row.intentKey === key, "SUBMISSION_SCOPE_MISMATCH")
-        const approval = row.approval === null ? null : attempt(row.approval)
-        const transfer = row.transfer === null ? null : attempt(row.transfer)
+        const approval = row.approval === null ? null : attempt(row.approval, true)
+        const transfer = row.transfer === null ? null : attempt(row.transfer, true)
         for (const [stage, entry] of [["APPROVAL", approval], ["TRANSFER", transfer]] as const) if (entry) ensure(entry.stage === stage && entry.intentKey === key, "SUBMISSION_SCOPE_MISMATCH")
         return { approval, transfer }
       })
       auth()
-      if (result.approval) remember(result.approval)
-      if (result.transfer) remember(result.transfer)
+      if (result.approval) result.approval = remember(result.approval)
+      else ensure(!observed.has("APPROVAL"), "SUBMISSION_HISTORY_MISSING")
+      if (result.transfer) result.transfer = remember(result.transfer)
+      else ensure(!observed.has("TRANSFER"), "SUBMISSION_HISTORY_MISSING")
       return result
     },
     async claim(input: Parameters<SubmissionGate["claim"]>[0]) {
@@ -162,14 +174,37 @@ export function createSubmissionGate(options: SubmissionClientOptions): Submissi
       sameBinding(row, previous)
       if (previous.txHash && row.txHash) ensure(previous.txHash === row.txHash, "SUBMISSION_HASH_MISMATCH")
       const result = await request("outcomes", row, value => {
-        const result = attempt(value); sameBinding(result, row)
-        ensure(result.status === "UNKNOWN" || result.status === "SUBMITTED", "SUBMISSION_SCOPE_MISMATCH")
-        if (row.status === "SUBMITTED" || previous.status === "SUBMITTED") ensure(result.status === "SUBMITTED", "SUBMISSION_SCOPE_MISMATCH")
+        const result = attempt(value, true); sameBinding(result, row)
+        ensure(result.status === "UNKNOWN" || result.status === "SUBMITTED" || terminal(result), "SUBMISSION_SCOPE_MISMATCH")
+        if (row.status === "SUBMITTED" || previous.status === "SUBMITTED") ensure(result.status === "SUBMITTED" || terminal(result), "SUBMISSION_SCOPE_MISMATCH")
         const expectedHash = row.txHash ?? previous.txHash
         if (expectedHash) ensure(result.txHash === expectedHash, "SUBMISSION_HASH_MISMATCH")
         return result
       })
-      auth(); remember(result)
+      auth()
+      // Outcomes may preserve a server terminal state, but only inspect/reconcile grants authority.
+      if (terminal(result)) {
+        const known = observed.get(row.stage)!
+        if (terminal(known)) remember(result)
+        else remember(row)
+      } else remember(result)
+    },
+    async reconcile(input: ReconcileRequest) {
+      const raw = object(input)
+      exact(raw, ["claimId", "intentKey", "stage", "transactionDigest", "txHash"])
+      const row = attempt({ ...raw, status: "SUBMITTED" })
+      ensure(row.intentKey === intent, "SUBMISSION_SCOPE_MISMATCH")
+      const previous = observed.get(row.stage)
+      ensure(previous && previous.txHash === row.txHash, "SUBMISSION_UNOBSERVED_HASH")
+      sameBinding(row, previous)
+      const body = { claimId: row.claimId, intentKey: row.intentKey, stage: row.stage, transactionDigest: row.transactionDigest, txHash: row.txHash! }
+      const result = await request("reconcile", body, value => {
+        const result = attempt(value, true); sameBinding(result, row)
+        ensure(result.txHash === row.txHash, "SUBMISSION_HASH_MISMATCH")
+        return result
+      })
+      auth()
+      return remember(result)
     },
   })
 }

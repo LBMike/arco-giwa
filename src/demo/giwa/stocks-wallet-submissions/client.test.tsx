@@ -134,3 +134,61 @@ test("an already observed claim is never returned twice as new signing permissio
   await reject(() => f.gate.claim(INPUT), "SUBMISSION_REPLAYED_PERMISSION")
   f.setFetch(async () => response(null)); assert.equal(await f.gate.claim(INPUT), null)
 })
+
+const SUBMITTED: AttemptRecord = { ...CLAIM, status: "SUBMITTED", txHash: HASH }
+const RECONCILE = { claimId: CLAIM.claimId, intentKey: KEY, stage: CLAIM.stage, transactionDigest: CLAIM.transactionDigest, txHash: HASH }
+async function pendingGate(overrides: Partial<SubmissionClientOptions> = {}) {
+  const f = fixture(overrides); f.setFetch(async () => response({ ...empty, transfer: SUBMITTED }))
+  await f.gate.inspect(KEY); return f
+}
+test("reconcile posts exactly the original binding/hash with captured auth and accepts server terminal", async () => {
+  const f = await pendingGate(); Object.assign(f.options.session, { id: "B", accessToken: "newB" })
+  f.setFetch(async () => response({ ...SUBMITTED, status: "CONFIRMED" }))
+  assert.equal((await f.gate.reconcile!(RECONCILE)).status, "CONFIRMED")
+  const call = f.calls[f.calls.length - 1]!
+  assert.match(call.url, /\/wallet-submissions\/reconcile$/); assert.deepEqual(JSON.parse(String(call.init.body)), RECONCILE)
+  assert.equal(new Headers(call.init.headers).get("authorization"), "Bearer original.token.A")
+})
+test("terminal inspect is accepted, terminal/hash identity cannot flip and late pending never downgrades", async () => {
+  for (const status of ["CONFIRMED", "REVERTED"] as const) {
+    const f = fixture(); f.setFetch(async () => response({ ...empty, transfer: { ...SUBMITTED, status } })); assert.equal((await f.gate.inspect(KEY)).transfer?.status, status)
+    f.setFetch(async () => response(SUBMITTED)); assert.equal((await f.gate.reconcile!(RECONCILE)).status, status)
+    f.setFetch(async () => response({ ...SUBMITTED, status: status === "CONFIRMED" ? "REVERTED" : "CONFIRMED" })); await reject(() => f.gate.reconcile!(RECONCILE), "SUBMISSION_TERMINAL_MISMATCH")
+    f.setFetch(async () => response({ ...SUBMITTED, status, txHash: `0x${"d".repeat(64)}` })); await reject(() => f.gate.reconcile!(RECONCILE), "SUBMISSION_HASH_MISMATCH")
+    f.setFetch(async () => response({ ...empty, transfer: SUBMITTED })); assert.equal((await f.gate.inspect(KEY)).transfer?.status, status)
+    f.setFetch(async () => response(empty)); await reject(() => f.gate.inspect(KEY), "SUBMISSION_HISTORY_MISSING")
+  }
+})
+test("reconcile validates observed hash, immutable binding, exact request and response", async () => {
+  const unobserved = fixture(); await reject(() => unobserved.gate.reconcile!(RECONCILE), "SUBMISSION_SCOPE_MISMATCH")
+  for (const mutation of [{ claimId: "wrong" }, { stage: "APPROVAL" }, { transactionDigest: "d".repeat(64) }, { txHash: `0x${"d".repeat(64)}` }, { status: "CONFIRMED" }]) {
+    const f = await pendingGate(); const calls = f.calls.length; await assert.rejects(() => f.gate.reconcile!({ ...RECONCILE, ...mutation } as typeof RECONCILE)); assert.equal(f.calls.length, calls)
+  }
+  for (const mutation of [{ claimId: "wrong" }, { stage: "APPROVAL" }, { status: "CONFIRMED", txHash: undefined }, { status: "COMPLETED" }]) {
+    const f = await pendingGate(); f.setFetch(async () => response({ ...SUBMITTED, ...mutation })); await assert.rejects(() => f.gate.reconcile!(RECONCILE))
+  }
+})
+test("a terminal outcome response resolves but cannot grant authority without inspect or reconcile", async () => {
+  const f = await pendingGate(); f.setFetch(async () => response({ ...SUBMITTED, status: "CONFIRMED" })); await f.gate.record(SUBMITTED)
+  // If record had silently installed terminal authority this pending response would return CONFIRMED.
+  f.setFetch(async () => response(SUBMITTED)); assert.equal((await f.gate.reconcile!(RECONCILE)).status, "SUBMITTED")
+  f.setFetch(async () => response({ ...SUBMITTED, status: "CONFIRMED" })); await f.gate.reconcile!(RECONCILE)
+  await f.gate.record({ ...CLAIM, status: "UNKNOWN" })
+  f.setFetch(async () => response(SUBMITTED)); assert.equal((await f.gate.reconcile!(RECONCILE)).status, "CONFIRMED")
+  const calls = f.calls.length
+  await assert.rejects(() => f.gate.record({ ...SUBMITTED, status: "CONFIRMED" })); assert.equal(f.calls.length, calls)
+})
+test("concurrent delayed pending reconciliation preserves terminal authority and conflicting terminal fails", async () => {
+  const f = await pendingGate(); let resolve!: (r: Response) => void
+  f.setFetch(() => new Promise(r => { resolve = r })); const old = f.gate.reconcile!(RECONCILE)
+  f.setFetch(async () => response({ ...SUBMITTED, status: "CONFIRMED" })); await f.gate.reconcile!(RECONCILE)
+  resolve(response(SUBMITTED)); assert.equal((await old).status, "CONFIRMED")
+})
+test("unsupported reconcile endpoint, timeout and late401 fail closed without terminal cache mutation", async () => {
+  const invalidated: string[] = []; const f = await pendingGate({ timeoutMs: 10, onSessionRejected: id => invalidated.push(id) })
+  f.setFetch(async () => new Response("", { status: 404 })); await reject(() => f.gate.reconcile!(RECONCILE), "SUBMISSION_HTTP_ERROR")
+  let resolve!: (r: Response) => void; f.setFetch(() => new Promise(r => { resolve = r })); await reject(() => f.gate.reconcile!(RECONCILE), "SUBMISSION_TIMEOUT")
+  resolve(response({ ...SUBMITTED, status: "CONFIRMED" })); await Promise.resolve()
+  f.setFetch(async () => response(SUBMITTED)); assert.equal((await f.gate.reconcile!(RECONCILE)).status, "SUBMITTED")
+  f.setFetch(async () => new Response("", { status: 401 })); await reject(() => f.gate.reconcile!(RECONCILE), "SUBMISSION_AUTH_REJECTED"); assert.deepEqual(invalidated, [SESSION.id])
+})

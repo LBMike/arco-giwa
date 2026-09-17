@@ -1,8 +1,8 @@
 import { address, assertTransaction, canonical, digest, ensure, freeze, hash, integer, parseOrder, planOrder, record, StocksWalletError, validateContext } from "./planner"
-import type { AttemptRecord, AuthenticatedRead, ExecutionContext, Plan, Selection, Stage, WalletPorts, WalletSnapshot } from "./types"
+import type { AttemptRecord, AuthenticatedRead, ExecutionContext, Plan, Selection, Stage, SubmissionGate, WalletPorts, WalletSnapshot } from "./types"
 
 const IDLE: WalletSnapshot = Object.freeze({ status: "IDLE", orderId: null, intentKey: null, stage: null, txHash: null, error: null, plan: null })
-type Attempt = { generation: number; scope: string; context: ExecutionContext; selection: Selection; plan: Plan; abort: AbortController; promise?: Promise<void> }
+type Attempt = { generation: number; scope: string; context: ExecutionContext; selection: Selection; plan: Plan; abort: AbortController; submissions: SubmissionGate; promise?: Promise<void> }
 
 /** Explicit actions only. No transport, wallet or persistence implementation is selected implicitly. */
 export function createStocksWalletController(ports: WalletPorts) {
@@ -39,7 +39,7 @@ export function createStocksWalletController(ports: WalletPorts) {
   }
   async function bounded<T>(a: Attempt, work: () => Promise<T>): Promise<T> {
     guard(a)
-    const start = now(); let timer: ReturnType<typeof setTimeout> | undefined
+    const start = now(), startedMono = performance.now(); let timer: ReturnType<typeof setTimeout> | undefined
     let onAbort = () => {}
     const stop = new Promise<never>((_, reject) => {
       onAbort = () => reject(new StocksWalletError("CONTEXT_CHANGED"))
@@ -48,7 +48,7 @@ export function createStocksWalletController(ports: WalletPorts) {
     })
     try {
       const value = await Promise.race([Promise.resolve().then(() => { guard(a); return work() }), stop])
-      guard(a); ensure(now() >= start && now() - start < 15_000, "READ_TIMEOUT"); return value
+      guard(a); ensure(now() >= start && now() - start < 15_000 && performance.now() - startedMono >= 0 && performance.now() - startedMono < 15_000, "READ_TIMEOUT"); return value
     } finally { if (timer) clearTimeout(timer); a.abort.signal.removeEventListener("abort", onAbort) }
   }
   async function wallet(a: Attempt) {
@@ -72,37 +72,66 @@ export function createStocksWalletController(ports: WalletPorts) {
     ensure(value.intentKey === a.plan.intentKey && value.stage === stage && value.transactionDigest === digest(stage === "APPROVAL" ? a.plan.approval : a.plan.transfer) && typeof value.claimId === "string" && value.claimId.length > 0, "SUBMISSION_RECORD_MISMATCH")
     ensure(["REQUEST_MAY_START", "SUBMITTED", "UNKNOWN", "CONFIRMED", "REVERTED"].includes(value.status), "SUBMISSION_RECORD_MISMATCH")
     if (value.txHash) hash(value.txHash)
-    if (value.status === "SUBMITTED" || value.status === "CONFIRMED") ensure(value.txHash, "SUBMISSION_RECORD_MISMATCH")
+    if (value.status === "SUBMITTED" || value.status === "CONFIRMED" || value.status === "REVERTED") ensure(value.txHash, "SUBMISSION_RECORD_MISMATCH")
   }
-  async function inspect(a: Attempt) {
-    ensure(typeof ports.submissions?.inspect === "function" && typeof ports.submissions.claim === "function" && typeof ports.submissions.record === "function", "DURABLE_SUBMISSION_GATE_REQUIRED")
-    const prior = await read(a, () => ports.submissions.inspect(a.plan.intentKey))
-    for (const stage of ["APPROVAL", "TRANSFER"] as const) {
-      const entry = stage === "APPROVAL" ? prior.approval : prior.transfer
-      if (entry) validateRecord(entry, a, stage)
-      const local = attempted.get(`${a.plan.intentKey}:${stage}`)
-      // A disappearing durable record is not proof that a previous wallet request was never sent.
-      if (local) {
-        ensure(entry && entry.claimId === local.claimId, "SUBMISSION_HISTORY_MISSING")
-        ensure(!local.txHash || entry.txHash === local.txHash, "SUBMISSION_HISTORY_MISMATCH")
+  const terminal = (value: AttemptRecord) => value.status === "CONFIRMED" || value.status === "REVERTED"
+  function rememberRecord(value: AttemptRecord, a: Attempt, stage: Stage) {
+    validateRecord(value, a, stage)
+    const key = `${a.plan.intentKey}:${stage}`, previous = attempted.get(key)
+    if (previous) {
+      ensure(value.claimId === previous.claimId, "SUBMISSION_HISTORY_MISMATCH")
+      ensure(!previous.txHash || value.txHash === previous.txHash, "SUBMISSION_HISTORY_MISMATCH")
+      if (terminal(previous)) {
+        if (terminal(value)) ensure(value.status === previous.status, "SUBMISSION_TERMINAL_MISMATCH")
+        return previous
       }
-      else if (entry) attempted.set(`${a.plan.intentKey}:${stage}`, freeze(entry))
+      if (previous.status === "SUBMITTED" && !terminal(value) && value.status !== "SUBMITTED") return previous
     }
-    if (prior.transfer) {
-      state(a, prior.transfer.txHash ? "SUBMITTED" : "UNKNOWN", { stage: "TRANSFER", txHash: prior.transfer.txHash ?? null, error: "RECOVERY_REQUIRED" })
-      return false
-    }
-    if (prior.approval && prior.approval.status !== "CONFIRMED") {
-      state(a, prior.approval.txHash ? "APPROVAL_SUBMITTED" : "UNKNOWN", { stage: "APPROVAL", txHash: prior.approval.txHash ?? null, error: "RECOVERY_REQUIRED" })
+    const result = freeze(value); attempted.set(key, result); return result
+  }
+  async function reconcileApproval(a: Attempt, value: AttemptRecord) {
+    ensure(value.txHash && typeof a.submissions.reconcile === "function", "TRUSTED_RECONCILIATION_REQUIRED")
+    const result = await read(a, () => a.submissions.reconcile!({ claimId: value.claimId, intentKey: value.intentKey, stage: value.stage, transactionDigest: value.transactionDigest, txHash: value.txHash! }))
+    guard(a)
+    ensure(result.claimId === value.claimId && result.txHash === value.txHash, "SUBMISSION_HISTORY_MISMATCH")
+    const known = rememberRecord(result, a, "APPROVAL")
+    ensure(known.status !== "REVERTED", "APPROVAL_REVERTED")
+    if (known.status !== "CONFIRMED") {
+      state(a, "APPROVAL_SUBMITTED", { stage: "APPROVAL", txHash: known.txHash ?? null, error: "RECEIPT_PENDING" })
       return false
     }
     return true
+  }
+  async function inspect(a: Attempt, recoverApproval: boolean): Promise<"ready" | "reconciled" | "blocked"> {
+    ensure(typeof a.submissions?.inspect === "function" && typeof a.submissions.claim === "function" && typeof a.submissions.record === "function", "DURABLE_SUBMISSION_GATE_REQUIRED")
+    const prior = { ...await read(a, () => a.submissions.inspect(a.plan.intentKey)) }
+    guard(a)
+    for (const stage of ["APPROVAL", "TRANSFER"] as const) {
+      const entry = stage === "APPROVAL" ? prior.approval : prior.transfer
+      if (entry) {
+        const known = rememberRecord(entry, a, stage)
+        if (stage === "APPROVAL") prior.approval = known
+        else prior.transfer = known
+      } else ensure(!attempted.has(`${a.plan.intentKey}:${stage}`), "SUBMISSION_HISTORY_MISSING")
+    }
+    if (prior.transfer) {
+      state(a, prior.transfer.status === "REVERTED" ? "BLOCKED" : prior.transfer.txHash ? "SUBMITTED" : "UNKNOWN", { stage: "TRANSFER", txHash: prior.transfer.txHash ?? null, error: prior.transfer.status === "REVERTED" ? "TRANSFER_REVERTED" : "RECOVERY_REQUIRED" })
+      return "blocked" // Even server-confirmed transfer is not Stocks order completion.
+    }
+    if (prior.approval) {
+      ensure(prior.approval.status !== "REVERTED", "APPROVAL_REVERTED")
+      if (prior.approval.status === "CONFIRMED") return "ready"
+      if (recoverApproval && prior.approval.txHash) return await reconcileApproval(a, prior.approval) ? "reconciled" : "blocked"
+      state(a, prior.approval.txHash ? "APPROVAL_SUBMITTED" : "UNKNOWN", { stage: "APPROVAL", txHash: prior.approval.txHash ?? null, error: "RECOVERY_REQUIRED" })
+      return "blocked"
+    }
+    return "ready"
   }
   function freshResponse(value: Record<string, unknown>) {
     const observed = typeof value.observedAt === "string" ? Date.parse(value.observedAt) : NaN
     ensure(Number.isFinite(observed) && observed <= now() && now() - observed < 15_000, "STALE_RESPONSE")
   }
-  async function preflight(a: Attempt) {
+  async function preflight(a: Attempt, recoverApproval = false): Promise<{ allowance: bigint; policyUntil: number }> {
     await wallet(a)
     const req = request(a)
     const response = record(await read(a, () => ports.readOrder(req)))
@@ -119,28 +148,31 @@ export function createStocksWalletController(ports: WalletPorts) {
     ensure(typeof ports.readExecutionPolicy === "function", "CURRENT_POLICY_REQUIRED")
     const policy = await read(a, () => ports.readExecutionPolicy(req))
     ensure(policy?.allowed === true && policy.deploymentDigest === a.plan.manifestDigest && policy.orderId === a.plan.order.id && policy.side === a.plan.side && Number.isFinite(policy.observedAt) && Number.isFinite(policy.validUntil) && policy.observedAt <= now() && now() < policy.validUntil && policy.validUntil - policy.observedAt <= 15_000, "EXECUTION_NOT_ALLOWED")
-    ensure(await inspect(a), "RECOVERY_REQUIRED")
+    const journal = await inspect(a, recoverApproval)
+    ensure(journal !== "blocked", "RECOVERY_REQUIRED")
+    if (journal === "reconciled") return preflight(a) // New verification requires entirely fresh authorization reads.
     const allowance = integer(await read(a, () => ports.readAllowance({ token: a.plan.token, owner: a.plan.order.wallet, spender: a.plan.spender, chainId: 91342, signal: a.abort.signal })), true)
     ensure(now() < policy.validUntil, "EXECUTION_POLICY_EXPIRED")
     ensure(allowance >= BigInt(a.plan.amount) || !attempted.has(`${a.plan.intentKey}:APPROVAL`), "ALLOWANCE_RECOVERY_REQUIRED")
     return { allowance, policyUntil: policy.validUntil }
   }
-  async function persist(value: AttemptRecord) {
+  async function persist(a: Attempt, value: AttemptRecord) {
     // Durable outcome updates ALWAYS refer to the original claimed intent, even after scope changes.
-    attempted.set(`${value.intentKey}:${value.stage}`, freeze(value))
+    ensure(!terminal(value), "CLIENT_TERMINAL_REPORT_FORBIDDEN")
+    const known = rememberRecord(value, a, value.stage)
     synchronize()
     // Cancellation stops further work, not a wallet request already sent. A late hash may
     // update the SAME displayed intent; it can never repopulate a different scope/order.
-    if (!disposed && value.txHash && snapshot.intentKey === value.intentKey && snapshot.stage === value.stage) {
+    if (!disposed && !terminal(known) && scope === a.scope && value.txHash && snapshot.intentKey === value.intentKey && snapshot.stage === value.stage) {
       publish({ ...snapshot, status: value.stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED", txHash: value.txHash })
     }
-    await ports.submissions.record(freeze(value))
+    await a.submissions.record(freeze(value))
   }
   async function send(a: Attempt, stage: Stage, policyUntil: number) {
     const tx = stage === "APPROVAL" ? a.plan.approval : a.plan.transfer
     assertTransaction(tx, stage === "APPROVAL" ? planOrder(a.selection, a.context, now()).approval : planOrder(a.selection, a.context, now()).transfer)
     await wallet(a)
-    const claim = await read(a, () => ports.submissions.claim({ intentKey: a.plan.intentKey, stage, transactionDigest: digest(tx), transaction: tx, orderId: a.plan.order.id, deploymentDigest: a.plan.manifestDigest }))
+    const claim = await read(a, () => a.submissions.claim({ intentKey: a.plan.intentKey, stage, transactionDigest: digest(tx), transaction: tx, orderId: a.plan.order.id, deploymentDigest: a.plan.manifestDigest }))
     ensure(claim, "SUBMISSION_ALREADY_CLAIMED"); validateRecord(claim, a, stage)
     ensure(claim.status === "REQUEST_MAY_START" && !claim.txHash, "SUBMISSION_ALREADY_CLAIMED")
     attempted.set(`${a.plan.intentKey}:${stage}`, freeze(claim))
@@ -156,16 +188,16 @@ export function createStocksWalletController(ports: WalletPorts) {
     try { guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED"); result = await ports.requestTransaction(tx) }
     catch {
       const unknown = { ...claim, status: "UNKNOWN" as const }
-      try { await persist(unknown) } catch { /* The pre-request claim still blocks re-signing. */ }
+      try { await persist(a, unknown) } catch { /* The pre-request claim still blocks re-signing. */ }
       state(a, "UNKNOWN", { stage, error: "WALLET_OUTCOME_UNKNOWN" }); return
     }
     let txHash: `0x${string}`
     try { txHash = hash(result) } catch {
-      try { await persist({ ...claim, status: "UNKNOWN" }) } catch { /* Claimed already. */ }
+      try { await persist(a, { ...claim, status: "UNKNOWN" }) } catch { /* Claimed already. */ }
       state(a, "UNKNOWN", { stage, error: "WALLET_OUTCOME_UNKNOWN" }); return
     }
     const submitted: AttemptRecord = { ...claim, status: "SUBMITTED", txHash }
-    try { await persist(submitted) } catch {
+    try { await persist(a, submitted) } catch {
       state(a, stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED", { stage, txHash, error: "RECOVERY_REQUIRED" }); return
     }
     // No further wallet request can follow an unchecked late result. Never paint it into a new scope.
@@ -173,22 +205,15 @@ export function createStocksWalletController(ports: WalletPorts) {
     state(a, stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED", { stage, txHash })
     try { await wallet(a) } catch { return }
     if (stage === "TRANSFER") return // Receipt/hash is not Stocks order completion.
-    const receipt = await read(a, () => ports.waitApprovalReceipt({ txHash, transaction: tx, signal: a.abort.signal }))
-    if (!receipt) return
-    ensure(receipt.chainId === 91342 && receipt.canonical === true && hash(receipt.transactionHash) === txHash, "APPROVAL_RECEIPT_MISMATCH")
-    hash(receipt.blockHash); integer(receipt.blockNumber, true); assertTransaction(receipt.transaction, tx)
-    ensure(receipt.status === "success" || receipt.status === "reverted", "APPROVAL_RECEIPT_MISMATCH")
-    await persist({ ...submitted, status: receipt.status === "success" ? "CONFIRMED" : "REVERTED" })
-    await wallet(a)
-    ensure(receipt.status === "success", "APPROVAL_REVERTED")
+    if (!await reconcileApproval(a, submitted)) return
     const fresh = await preflight(a)
     ensure(fresh.allowance >= BigInt(a.plan.amount), "ALLOWANCE_NOT_CONFIRMED")
     state(a, "READY_TRANSFER") // Requires a separate explicit submit() click.
   }
   async function run(a: Attempt, action: "prepare" | "approve" | "submit") {
     try {
-      if (!["SUBMITTED", "APPROVAL_SUBMITTED", "UNKNOWN"].includes(snapshot.status)) state(a, "CHECKING")
-      const fresh = await preflight(a)
+      if (!snapshot.txHash && !["SUBMITTED", "APPROVAL_SUBMITTED", "UNKNOWN"].includes(snapshot.status)) state(a, "CHECKING")
+      const fresh = await preflight(a, action === "prepare")
       if (action === "prepare") { state(a, fresh.allowance >= BigInt(a.plan.amount) ? "READY_TRANSFER" : "APPROVAL_REQUIRED"); return }
       if (action === "approve") {
         if (fresh.allowance >= BigInt(a.plan.amount)) { state(a, "READY_TRANSFER"); return }
@@ -203,7 +228,7 @@ export function createStocksWalletController(ports: WalletPorts) {
       if (current(a)) {
         // Keep a known hash/uncertain state; an ordinary error must not turn it into a retry button.
         const known = attempted.get(`${a.plan.intentKey}:TRANSFER`) ?? attempted.get(`${a.plan.intentKey}:APPROVAL`)
-        if (known) state(a, known.txHash ? known.stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED" : "UNKNOWN", { stage: known.stage, txHash: known.txHash ?? null, error: error instanceof StocksWalletError ? error.code : "REQUEST_FAILED" })
+        if (known) state(a, known.status === "REVERTED" ? "BLOCKED" : known.txHash ? known.stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED" : "UNKNOWN", { stage: known.stage, txHash: known.txHash ?? null, error: error instanceof StocksWalletError ? error.code : "REQUEST_FAILED" })
         else if (snapshot.error !== "RECOVERY_REQUIRED") state(a, "BLOCKED", { error: error instanceof StocksWalletError ? error.code : status === 401 ? "SESSION_REJECTED" : "REQUEST_FAILED" })
       }
     } finally { if (active === a) active = null }
@@ -217,13 +242,13 @@ export function createStocksWalletController(ports: WalletPorts) {
       if (action === "approve") ensure(snapshot.status === "APPROVAL_REQUIRED", "PREPARE_REQUIRED")
       if (action === "submit") ensure(snapshot.status === "READY_TRANSFER", "PREPARE_REQUIRED")
       const context = freeze(ports.context())
-      const a: Attempt = { context, selection: selected, plan: planOrder(selected, context, now()), scope, generation, abort: new AbortController() }
+      const a: Attempt = { context, selection: selected, plan: planOrder(selected, context, now()), scope, generation, abort: new AbortController(), submissions: ports.submissions }
       active = a
       a.promise = Promise.resolve().then(() => run(a, action))
       return a.promise
     } catch (error) {
       // Failed direct submit/approve cannot erase a prior submission hash.
-      if (!["SUBMITTED", "APPROVAL_SUBMITTED", "UNKNOWN"].includes(snapshot.status)) publish({ ...IDLE, status: "BLOCKED", error: error instanceof StocksWalletError ? error.code : "INVALID_CONTEXT" })
+      if (!["SUBMITTED", "APPROVAL_SUBMITTED", "UNKNOWN"].includes(snapshot.status) && !snapshot.txHash) publish({ ...IDLE, status: "BLOCKED", error: error instanceof StocksWalletError ? error.code : "INVALID_CONTEXT" })
       return Promise.resolve()
     }
   }
@@ -234,10 +259,10 @@ export function createStocksWalletController(ports: WalletPorts) {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
     prepare: () => start("prepare"), approve: () => start("approve"), submit: () => start("submit"),
     cancel() {
-      if (!active && ["SUBMITTED", "APPROVAL_SUBMITTED", "UNKNOWN"].includes(snapshot.status)) return
+      if (!active && (snapshot.txHash || ["SUBMITTED", "APPROVAL_SUBMITTED", "UNKNOWN"].includes(snapshot.status))) return
       const previous = active; generation++; active?.abort.abort(); active = null
       const known = previous && (attempted.get(`${previous.plan.intentKey}:TRANSFER`) ?? attempted.get(`${previous.plan.intentKey}:APPROVAL`))
-      publish(known ? { ...snapshot, status: known.txHash ? known.stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED" : "UNKNOWN", stage: known.stage, txHash: known.txHash ?? null, error: "RECOVERY_REQUIRED" } : IDLE)
+      publish(known ? { ...snapshot, status: known.status === "REVERTED" ? "BLOCKED" : known.txHash ? known.stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED" : "UNKNOWN", stage: known.stage, txHash: known.txHash ?? null, error: "RECOVERY_REQUIRED" } : IDLE)
     },
     dispose() { disposed = true; generation++; active?.abort.abort(); active = null; snapshot = IDLE; listeners.clear() },
   }

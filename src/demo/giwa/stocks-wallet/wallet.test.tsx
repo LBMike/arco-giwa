@@ -25,7 +25,20 @@ function gate() {
       const claim: AttemptRecord = { claimId: `claim-${++id}`, intentKey: request.intentKey, stage: request.stage, transactionDigest: request.transactionDigest, status: "REQUEST_MAY_START" }
       data.set(key, freeze(claim)); return claim
     },
-    async record(value) { assert.equal(data.get(`${value.intentKey}:${value.stage}`)?.claimId, value.claimId); data.set(`${value.intentKey}:${value.stage}`, freeze(value)) },
+    async record(value) {
+      assert.ok(value.status === "UNKNOWN" || value.status === "SUBMITTED", "browser outcomes cannot write terminal state")
+      const previous = data.get(`${value.intentKey}:${value.stage}`)!
+      assert.equal(previous.claimId, value.claimId)
+      if (previous.status === "CONFIRMED" || previous.status === "REVERTED") return
+      data.set(`${value.intentKey}:${value.stage}`, freeze(value))
+    },
+    // Explicit fixture of the authoritative SERVER reconciliation port (not a wallet receipt).
+    async reconcile(request) {
+      const key = `${request.intentKey}:${request.stage}`, previous = data.get(key)!
+      assert.equal(previous.claimId, request.claimId); assert.equal(previous.txHash, request.txHash)
+      const verified: AttemptRecord = { ...previous, status: "CONFIRMED" }
+      data.set(key, freeze(verified)); return verified
+    },
   }
   return { data, submissions }
 }
@@ -46,8 +59,12 @@ function fixture(side: Side = "BUY", shared = gate()) {
     async readExecutionPolicy() { return { allowed: true, deploymentDigest: digest(manifest), orderId: order.id, side, observedAt: time, validUntil: time + 15000 } },
     async readAllowance(request) { const p = planOrder(selected, context, time); assert.equal(request.token, p.token); assert.equal(request.owner, A); assert.equal(request.spender, p.spender); return allowance },
     async requestTransaction(tx) { walletCalls.push(tx); return h(walletCalls.length === 1 ? "c" : "d") },
-    async waitApprovalReceipt({ txHash, transaction }) { allowance = planOrder(selected, context, time).amount; return { transactionHash: txHash, transaction, chainId: 91342, status: "success", canonical: true, blockHash: h("e"), blockNumber: "2" } },
-    submissions: shared.submissions,
+    async waitApprovalReceipt() { throw new Error("legacy wallet receipt must not be called") },
+    submissions: { ...shared.submissions, async reconcile(request) {
+      const verified = await shared.submissions.reconcile!(request)
+      if (verified.status === "CONFIRMED" && verified.stage === "APPROVAL") allowance = planOrder(selected, context, time).amount
+      return verified
+    } },
   }
   const controller = createStocksWalletController(ports); controller.select(selected)
   return { ports, controller, selected, order, manifest, walletCalls, orderReads, shared,
@@ -57,7 +74,7 @@ function fixture(side: Side = "BUY", shared = gate()) {
 }
 
 for (const side of ["BUY", "SELL"] as const) {
-  test(`${side}: exact approval, matching receipt and separate explicit transfer`, async () => {
+  test(`${side}: exact approval, trusted server reconciliation and separate explicit transfer`, async () => {
     const f = fixture(side); const plan = planOrder(f.selected, f.context(), START)
     assert.equal(f.walletCalls.length, 0)
     await f.controller.prepare(); assert.equal(f.controller.getSnapshot().status, "APPROVAL_REQUIRED")
@@ -174,22 +191,36 @@ test("order changed during claim is re-read before the first wallet request", as
   f.controller.dispose()
 })
 
-test("approval revert and mismatched receipt never issue transfer or erase the hash", async () => {
-  for (const kind of ["revert", "wrong-hash", "wrong-call", "null"]) {
-    const f = fixture(); const original = f.ports.waitApprovalReceipt
-    f.ports.waitApprovalReceipt = async req => {
-      const receipt = (await original(req))!
-      return kind === "revert" ? { ...receipt, status: "reverted" } : kind === "wrong-hash" ? { ...receipt, transactionHash: h("f") } : kind === "wrong-call" ? { ...receipt, transaction: { ...receipt.transaction, to: B } } : null
+test("server revert, mismatched reconciliation and pending approval never issue transfer", async () => {
+  for (const kind of ["revert", "wrong-hash", "wrong-binding", "pending", "missing"]) {
+    const f = fixture()
+    if (kind === "missing") delete f.ports.submissions.reconcile
+    else f.ports.submissions.reconcile = async request => {
+      const old = f.shared.data.get(`${request.intentKey}:APPROVAL`)!
+      if (kind === "pending") return old
+      const next: AttemptRecord = { ...old, ...(kind === "revert" ? { status: "REVERTED" } : kind === "wrong-hash" ? { txHash: h("f"), status: "CONFIRMED" } : { claimId: "wrong", status: "CONFIRMED" }) }
+      if (kind === "revert") f.shared.data.set(`${request.intentKey}:APPROVAL`, next)
+      return next
     }
     await f.controller.prepare(); await f.controller.approve(); await f.controller.submit()
-    assert.equal(f.walletCalls.length, 1); assert.equal(f.controller.getSnapshot().txHash, h("c")); assert.equal(f.controller.getSnapshot().status, "APPROVAL_SUBMITTED"); f.controller.dispose()
+    assert.equal(f.walletCalls.length, 1); assert.equal(f.controller.getSnapshot().txHash, h("c"))
+    assert.equal(f.controller.getSnapshot().status, kind === "revert" ? "BLOCKED" : "APPROVAL_SUBMITTED")
+    f.controller.dispose()
   }
 })
 
-test("approval receipt does not authorize payment after deadline or order change", async () => {
-  for (const change of ["deadline", "state", "allowance"]) {
-    const f = fixture(); const original = f.ports.waitApprovalReceipt
-    f.ports.waitApprovalReceipt = async req => { const result = await original(req); if (change === "deadline") f.setTime(START + 60000); if (change === "state") f.ports.readOrder = async () => ({ ...PROFILE, data: { ...f.order, state: "REVIEW_REQUIRED" } }); if (change === "allowance") f.setAllowance("0"); return result }
+test("server approval confirmation still requires fresh order, policy and allowance", async () => {
+  for (const change of ["deadline", "state", "allowance", "policy", "wallet"]) {
+    const f = fixture(); const original = f.ports.submissions.reconcile!
+    f.ports.submissions.reconcile = async req => {
+      const result = await original(req)
+      if (change === "deadline") f.setTime(START + 60000)
+      if (change === "state") f.ports.readOrder = async () => ({ ...PROFILE, data: { ...f.order, state: "REVIEW_REQUIRED" } })
+      if (change === "allowance") f.setAllowance("0")
+      if (change === "policy") f.ports.readExecutionPolicy = async () => ({ allowed: false } as never)
+      if (change === "wallet") f.ports.readWallet = async () => ({ address: B } as never)
+      return result
+    }
     await f.controller.prepare(); await f.controller.approve(); await f.controller.submit()
     assert.equal(f.walletCalls.length, 1); assert.equal(f.controller.getSnapshot().status, "APPROVAL_SUBMITTED"); assert.equal(f.controller.getSnapshot().txHash, h("c")); f.controller.dispose()
   }
@@ -363,3 +394,83 @@ for (const windowMs of [1, 15000]) for (const action of ["approve", "submit"] as
     } finally { unsubscribe(); f.controller.dispose() }
   })
 }
+
+test("explicit prepare reconciles a pending approval then re-reads policy/order/allowance before separate transfer", async () => {
+  const f = fixture(); const reconcile = f.ports.submissions.reconcile!; let checks = 0
+  f.ports.submissions.reconcile = async req => { checks++; return f.shared.data.get(`${req.intentKey}:APPROVAL`)! }
+  await f.controller.prepare(); await f.controller.approve(); assert.equal(f.controller.getSnapshot().status, "APPROVAL_SUBMITTED")
+  const before = f.orderReads.length
+  f.ports.submissions.reconcile = async req => { checks++; return reconcile(req) }
+  await f.controller.prepare(); assert.equal(f.controller.getSnapshot().status, "READY_TRANSFER")
+  assert.ok(f.orderReads.length >= before + 2, "confirmation must trigger entirely fresh preflight")
+  assert.equal(f.walletCalls.length, 1); assert.equal(checks, 2)
+  await f.controller.submit(); assert.equal(f.walletCalls.length, 2); f.controller.dispose()
+})
+test("reverted approval remains blocked across prepare/cancel/recreation and cannot claim again", async () => {
+  const f = fixture(); f.ports.submissions.reconcile = async req => {
+    const record = { ...f.shared.data.get(`${req.intentKey}:APPROVAL`)!, status: "REVERTED" as const }
+    f.shared.data.set(`${req.intentKey}:APPROVAL`, record); return record
+  }
+  await f.controller.prepare(); await f.controller.approve()
+  assert.equal(f.controller.getSnapshot().status, "BLOCKED"); assert.equal(f.controller.getSnapshot().error, "APPROVAL_REVERTED")
+  f.controller.cancel(); await f.controller.prepare(); await f.controller.approve(); await f.controller.submit()
+  assert.equal(f.walletCalls.length, 1); assert.equal(f.controller.getSnapshot().txHash, h("c"))
+  const recreated = fixture("BUY", f.shared); await recreated.controller.prepare(); await recreated.controller.approve()
+  assert.equal(recreated.walletCalls.length, 0); assert.equal(recreated.controller.getSnapshot().status, "BLOCKED")
+  f.controller.dispose(); recreated.controller.dispose()
+})
+test("delayed reconciliation after cancel, account/API swap, A-B-A or disposal cannot advance or repopulate state", async () => {
+  for (const mode of ["cancel", "account", "api", "aba", "dispose"]) {
+    const f = fixture(); const pending = deferred<AttemptRecord>(); let requested: Parameters<NonNullable<SubmissionGate["reconcile"]>>[0] | null = null
+    f.ports.submissions.reconcile = req => { requested = req; return pending.promise }
+    await f.controller.prepare(); const sending = f.controller.approve(); await new Promise(resolve => setImmediate(resolve)); assert.ok(requested)
+    const a = f.context()
+    if (mode === "cancel") f.controller.cancel()
+    if (mode === "account") f.setContext({ ...a, walletAddress: B, walletEpoch: "B" })
+    if (mode === "api") f.setContext({ ...a, apiBase: "https://new-api.example" })
+    if (mode === "aba") { f.setContext({ ...a, walletAddress: B, walletEpoch: "B" }); f.setContext({ ...a, walletEpoch: "A-again" }) }
+    if (mode === "dispose") f.controller.dispose()
+    pending.resolve({ ...(requested as unknown as AttemptRecord), status: "CONFIRMED" }); await sending
+    assert.equal(f.walletCalls.length, 1); assert.notEqual(f.controller.getSnapshot().status, "READY_TRANSFER")
+    if (mode !== "cancel") assert.equal(f.controller.getSnapshot().plan, null)
+    f.controller.dispose()
+  }
+})
+test("late wallet hash records through the captured gate after the caller replaces the submissions port", async () => {
+  const f = fixture(); const pending = deferred<unknown>(); f.setAllowance("999999999999")
+  f.ports.requestTransaction = async tx => { f.walletCalls.push(tx); return pending.promise }
+  await f.controller.prepare(); const sending = f.controller.submit(); await flush()
+  const oldIntent = planOrder(f.selected, f.context(), START).intentKey
+  let newRecords = 0
+  f.ports.submissions = { ...gate().submissions, async record() { newRecords++ } }
+  f.setContext({ ...f.context(), walletAddress: B, walletEpoch: "B" })
+  pending.resolve(h("f")); await sending
+  assert.equal(newRecords, 0); assert.equal(f.shared.data.get(`${oldIntent}:TRANSFER`)?.txHash, h("f")); assert.equal(f.controller.getSnapshot().plan, null)
+  f.controller.dispose()
+})
+test("slow reconciliation is bounded; late server confirmation never triggers transfer", async () => {
+  const f = fixture(); f.ports.submissions.reconcile = async req => { f.setTime(START + 15000); return { ...req, status: "CONFIRMED" } }
+  await f.controller.prepare(); await f.controller.approve()
+  assert.equal(f.controller.getSnapshot().error, "READ_TIMEOUT"); assert.equal(f.controller.getSnapshot().status, "APPROVAL_SUBMITTED"); assert.equal(f.walletCalls.length, 1); f.controller.dispose()
+})
+test("server terminal history cannot change status or hash and confirmed transfer is not order completion", async () => {
+  const f = fixture(); await f.controller.prepare(); await f.controller.approve(); const intent = planOrder(f.selected, f.context(), START).intentKey
+  const approved = f.shared.data.get(`${intent}:APPROVAL`)!
+  f.shared.data.set(`${intent}:APPROVAL`, { ...approved, status: "REVERTED" })
+  await f.controller.prepare(); assert.equal(f.controller.getSnapshot().error, "SUBMISSION_TERMINAL_MISMATCH"); assert.equal(f.walletCalls.length, 1)
+  f.shared.data.set(`${intent}:APPROVAL`, approved); await f.controller.prepare(); await f.controller.submit()
+  const transfer = f.shared.data.get(`${intent}:TRANSFER`)!
+  f.shared.data.set(`${intent}:TRANSFER`, { ...transfer, status: "CONFIRMED" })
+  await f.controller.prepare(); assert.equal(f.controller.getSnapshot().status, "SUBMITTED"); assert.equal(f.walletCalls.length, 2); f.controller.dispose()
+})
+
+test("an outstanding approval requires server reconciliation even when allowance already looks sufficient", async () => {
+  const f = fixture(); delete f.ports.submissions.reconcile
+  let walletReceiptCalls = 0
+  f.ports.waitApprovalReceipt = async () => { walletReceiptCalls++; return null }
+  await f.controller.prepare(); await f.controller.approve(); f.setAllowance("999999999999")
+  await f.controller.prepare(); await f.controller.submit()
+  assert.equal(walletReceiptCalls, 0); assert.equal(f.walletCalls.length, 1)
+  assert.equal(f.controller.getSnapshot().status, "APPROVAL_SUBMITTED"); assert.equal(f.controller.getSnapshot().error, "TRUSTED_RECONCILIATION_REQUIRED")
+  f.controller.dispose()
+})

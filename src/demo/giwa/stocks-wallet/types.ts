@@ -51,11 +51,14 @@ export type AttemptRecord = {
   claimId: string; intentKey: string; stage: Stage; transactionDigest: string
   status: "REQUEST_MAY_START" | "SUBMITTED" | "UNKNOWN" | "CONFIRMED" | "REVERTED"; txHash?: Hex
 }
+export type ReconcileRequest = Pick<AttemptRecord, "claimId" | "intentKey" | "stage" | "transactionDigest"> & { txHash: Hex }
 /** Must be durable, atomic and shared across tabs/devices. No in-memory/localStorage default. */
 export type SubmissionGate = {
   inspect(intentKey: string): Promise<{ approval: AttemptRecord | null; transfer: AttemptRecord | null }>
   claim(request: { intentKey: string; stage: Stage; transactionDigest: string; transaction: Transaction; orderId: string; deploymentDigest: string }): Promise<AttemptRecord | null>
   record(request: AttemptRecord): Promise<void>
+  /** Only trusted server verification can produce terminal receipt states. */
+  reconcile?(request: ReconcileRequest): Promise<AttemptRecord>
 }
 export type WalletPorts = {
   /** Current synchronous host snapshot; walletEpoch must change for A→B→A and source replacement. */
@@ -66,6 +69,7 @@ export type WalletPorts = {
   readExecutionPolicy(request: AuthenticatedRead): Promise<ExecutionPolicy>
   readAllowance(request: { token: Address; owner: Address; spender: Address; chainId: 91342; signal: AbortSignal }): Promise<string>
   requestTransaction(transaction: Transaction): Promise<unknown>
+  /** Legacy wallet observation only; never authoritative for terminal journal status. */
   waitApprovalReceipt(request: { txHash: Hex; transaction: Transaction; signal: AbortSignal }): Promise<ReceiptEvidence | null>
   submissions: SubmissionGate
   invalidateSession?(capturedSessionId: string): void

@@ -1,0 +1,8 @@
+# Trusted submission receipts — frontend plan
+
+Base a94a2a8bff09a3607e07b6c5acde6c35e9d8bbea, isolated clone/branch codex/giwa-receipts-client-20260917. Read CLAUDE.md and the shared receipts task. Own stocks-wallet-submissions/**, stocks-wallet/{types.ts,controller.ts,wallet.test.tsx}, dedicated docs. Existing matching-lock node_modules symlink; no installation, network, PG, deployed contract edits, UI activation or subagents.
+
+1. Optional SubmissionGate.reconcile exact claim/binding/hash body and captured-session bounded HTTP transport. Terminal statuses only gain authority via inspect/reconcile. Outcomes remain UNKNOWN/SUBMITTED; a preserved terminal outcome response validates but cannot advance a previously nonterminal local binding. Keep terminal/hash identity monotonic through out-of-order responses.
+2. Remove controller trust in waitApprovalReceipt and all client terminal writes. Server reconciliation can confirm approval; unavailable/missing/pending/reverted remains blocking. Explicit prepare can retry pending verification. After confirmation re-run full current wallet/order/policy/allowance checks; transfer still needs a separate explicit submit action. Reverted and transfer claims never reopen signing or imply order completion.
+3. Capture each attempt's submission gate for late hash/outcome work, retain original owner scope, and fence delayed reconciliation or callbacks. Tests explicitly mock the trusted reconcile service, separate from the deprecated wallet receipt port.
+4. Focused adversarial transport/controller regressions, required types/build/frontend/security/checks, exact-file diff and local clean commit/evidence. Root owns real API/PG roundtrip and backend integration; independent review follows frozen candidate.

@@ -26,14 +26,14 @@ export function wallet(value: unknown): string {
   ensure(typeof value === "string" && isAddress(value) && !/^0x0{40}$/i.test(value), "SUBMISSION_INVALID_WALLET")
   return getAddress(value)
 }
-export function attempt(value: unknown): AttemptRecord {
+export function attempt(value: unknown, allowTerminal = false): AttemptRecord {
   const row = object(value)
   exact(row, ["claimId", "intentKey", "stage", "transactionDigest", "status"], ["txHash"])
   label(row.claimId); digestString(row.intentKey); digestString(row.transactionDigest)
   ensure(row.stage === "APPROVAL" || row.stage === "TRANSFER")
-  ensure(["REQUEST_MAY_START", "UNKNOWN", "SUBMITTED"].includes(String(row.status)))
+  ensure(["REQUEST_MAY_START", "UNKNOWN", "SUBMITTED", ...(allowTerminal ? ["CONFIRMED", "REVERTED"] : [])].includes(String(row.status)))
   if (Object.prototype.hasOwnProperty.call(row, "txHash")) ensure(typeof row.txHash === "string" && /^0x[a-f0-9]{64}$/.test(row.txHash) && !/^0x0{64}$/.test(row.txHash))
-  ensure(row.status !== "SUBMITTED" || row.txHash !== undefined)
+  ensure(!["SUBMITTED", "CONFIRMED", "REVERTED"].includes(String(row.status)) || row.txHash !== undefined)
   ensure(row.status !== "REQUEST_MAY_START" || row.txHash === undefined)
   return Object.freeze({ ...row }) as AttemptRecord
 }
