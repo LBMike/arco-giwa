@@ -193,6 +193,8 @@ export function createExecutionRegistry(options: ExecutionRegistryOptions): Exec
     }
     const controller = createStocksWalletController(ports)
     const selection: Selection = Object.freeze({ side, order: row })
+    // The owner's controller always shows the pinned order; the panel's own select() of the same selection is a no-op.
+    controller.select(selection)
     controller.subscribe(() => {
       // Remember (never forget) that a wallet request was open, answered or uncertain, for the session-end notice.
       const shown = controller.getSnapshot()
