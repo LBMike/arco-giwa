@@ -313,6 +313,7 @@ async function composeServer(
             ...sessions,
           } : undefined,
           stocksExecution: stocks ? { service: stocks.execution, resolveActor: sessions!.resolveActor } : undefined,
+          stocksRuntimeStatus: stocks ? { getSnapshot: stocks.status, resolveOperator: sessions!.resolveOperator } : undefined,
           stocksSubmissions: stocks ? {
             service: new StocksSubmissionsService(stocks.service, stocks.submissionReceipts),
             resolveActor: sessions!.resolveActor,

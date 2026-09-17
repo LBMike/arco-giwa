@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { ensure, freezeManifest, manifestDigest, PROFILE, type Manifest, type SignerPort, type SqlPool } from '../stocks/contracts.js';
+import { ensure, freezeManifest, manifestDigest, type Manifest, type SignerPort, type SqlPool } from '../stocks/contracts.js';
 import { ReceiptVerifier } from '../stocks/chain.js';
 import { StocksRepository } from '../stocks/repository.js';
 import { StocksService } from '../stocks/service.js';
@@ -11,6 +11,7 @@ import { StocksFinalizedObserver } from './observer.js';
 import { endpoint, externalStocksSigner, httpStocksRpc } from './transport.js';
 import type { NamedOperator } from './session.js';
 import { StocksObservationHealth } from './health.js';
+import { runtimeSnapshot } from './status.js';
 import { createSubmissionReceiptVerifier } from '../stocks-submissions/receipts.js';
 import { verifyStocksDeployment } from './deployment.js';
 export { verifyStocksDeployment } from './deployment.js';
@@ -105,7 +106,7 @@ export async function createStocksRuntime(options: {
   // The owning server lifecycle schedules only explicitly enabled dispatch.
   return {
     service, execution: new StocksExecutionService(service, createDeploymentEvidence(manifest, transport, { available: () => !stopped })), submissionReceipts: createSubmissionReceiptVerifier(manifest, rpc), operators, reconciliationCoverage: () => observer.coverage(),
-    status: () => ({ ...PROFILE, enabled: true, autodispatch, observerStatus: health.status(), newOrdersPaused: stopped || !autodispatch || paused || !health.current(), deploymentId: manifest.deploymentId, observedAt: new Date().toISOString() }),
+    status: () => runtimeSnapshot({ deploymentId: manifest.deploymentId, deploymentDigest: digest, autodispatch, configuredPause: paused, stopped, tickInFlight: current !== null, health: health.snapshot() }),
     tick,
     stop,
     close() {

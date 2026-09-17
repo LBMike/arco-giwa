@@ -395,14 +395,14 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     // independent assertions and the remaining abnormal-inclusion scenarios.
     const signerCount = async () => (await pool.query('SELECT COUNT(*)::text AS n FROM stocks_local_harness.signer_operations')).rows[0].n;
     const cursorVersion = async () => (await pool.query('SELECT version FROM arco_evm."StocksObserverCursor" WHERE "deploymentDigest"=$1', [digest])).rows[0]?.version;
-    async function managedApp(autodispatch) {
+    async function managedApp(autodispatch, paused = false, runtimeTransport = transport) {
       const runtimePool = new Pool({ connectionString: databaseUrl, max: 8 });
       let runtime;
       let managedUrl;
       const managed = await startManagedStocksServer({
         createRuntime: async () => {
           try {
-            runtime = await createStocksRuntime({ manifest, pool: runtimePool, transport, signer, autodispatch, paused: false, operators });
+            runtime = await createStocksRuntime({ manifest, pool: runtimePool, transport: runtimeTransport, signer, autodispatch, paused, operators });
             return runtime;
           } catch (error) {
             await runtimePool.end(); // Factory transfers ownership only after successful return.
@@ -411,7 +411,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
         },
         buildApp: configured => buildApp(appEnv, { ...legacy, stocks: {
           service: configured.service, ...resolvers, reconciliationCoverage: configured.reconciliationCoverage,
-        }, stocksExecution: { service: configured.execution, ...resolvers } }),
+        }, stocksExecution: { service: configured.execution, ...resolvers }, stocksRuntimeStatus: { getSnapshot: configured.status, ...resolvers } }),
         listen: async instance => { managedUrl = await instance.listen({ host: '127.0.0.1', port: 0 }); },
         closeDatabase: async () => {}, // The fixture's separate original pool is not owned by this app.
         autodispatch,
@@ -425,6 +425,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
         });
         const row = await response.json();
         assert.equal(response.status, status, JSON.stringify({ path, row }));
+        if (path === 'admin/stocks/runtime') assert.equal(response.headers.get('cache-control'), 'no-store');
         return row.data ?? row;
       };
       return { app: managed, pool: runtimePool, runtime, request };
@@ -434,6 +435,11 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     const idle = await managedApp(false);
     try {
       assert.equal(idle.runtime.status().newOrdersPaused, true);
+      const diagnostic = await idle.request('admin/stocks/runtime', undefined, 200, 'operator');
+      assert.deepEqual(diagnostic.pauseReasons, ['AUTODISPATCH_DISABLED', 'OBSERVER_NOT_CURRENT']);
+      assert.equal(diagnostic.lastCurrentAt, null);
+      assert.equal(diagnostic.executionAuthorization, false);
+      await idle.request('admin/stocks/runtime', undefined, 403, 'holder');
       assert.equal((await idle.request('stocks/execution/deployment')).status, 'VERIFIED');
       await idle.request('stocks/quotes', { symbol: 'NVDA', quantity: '0.125' }, 503);
       await idle.request('stocks/sell-quotes', { symbol: 'NVDA', quantity: '0.125' }, 503);
@@ -446,10 +452,48 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     await assert.rejects(() => idle.pool.query('SELECT 1'), /Cannot use a pool after calling end/);
     passed('Actual runtime autodispatch disabled keeps quotes paused and tick inert, then closes its owned pool');
 
+    // Paused runtime still observes. A queued RPC result after close must not
+    // revive health, renew observation timestamps, or restart dispatch.
+    let blockNext = false, releaseRead, enteredRead;
+    const blockedRead = new Promise(resolve => { releaseRead = resolve; });
+    const readEntered = new Promise(resolve => { enteredRead = resolve; });
+    const gatedTransport = async (method, params) => {
+      if (blockNext) { blockNext = false; enteredRead(); await blockedRead; }
+      return transport(method, params);
+    };
+    const pausedRuntime = await managedApp(true, true, gatedTransport);
+    try {
+      const diagnostic = await pausedRuntime.request('admin/stocks/runtime', undefined, 200, 'operator');
+      assert.equal(diagnostic.observerStatus, 'CURRENT');
+      assert.deepEqual(diagnostic.pauseReasons, ['CONFIGURED_PAUSE']);
+      const previousObservation = diagnostic.lastObservationAt;
+      await pausedRuntime.request('stocks/quotes', { symbol: 'NVDA', quantity: '0.125' }, 503);
+      blockNext = true;
+      const pendingTick = pausedRuntime.runtime.tick();
+      await readEntered;
+      const closing = pausedRuntime.runtime.close();
+      const stopping = pausedRuntime.runtime.status();
+      assert.equal(stopping.runtimeState, 'STOPPED');
+      assert.equal(stopping.observerStatus, 'STOPPED');
+      assert.equal(stopping.tickInFlight, true);
+      assert.equal(stopping.lastObservationAt, previousObservation);
+      releaseRead();
+      await Promise.all([closing, pendingTick]);
+      const closed = pausedRuntime.runtime.status();
+      assert.equal(closed.observerStatus, 'STOPPED');
+      assert.equal(closed.tickInFlight, false);
+      assert.equal(closed.lastObservationAt, previousObservation);
+    } finally { releaseRead(); await pausedRuntime.app.close(); }
+    passed('Authenticated runtime status distinguishes paused observation and preserves STOPPED across late real RPC completion');
+
     const automaticBefore = await signerCount();
     const automatic = await managedApp(true);
     try {
       assert.equal(automatic.runtime.status().newOrdersPaused, false);
+      const diagnostic = await automatic.request('admin/stocks/runtime', undefined, 200, 'operator');
+      assert.equal(diagnostic.observerStatus, 'CURRENT');
+      assert.deepEqual(diagnostic.pauseReasons, []);
+      assert.equal(diagnostic.executionAuthorization, false);
       const waitForOrder = async (path, label) => {
         const deadline = Date.now() + 60000;
         let state;
