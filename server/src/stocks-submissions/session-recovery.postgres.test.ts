@@ -46,7 +46,7 @@ async function facts(f: Fixture) {
   return result;
 }
 
-for (const side of ['BUY', 'SELL'] as const) test(`real PG ${side}: fresh signed owner recovers a known late hash after session/order expiry and pause without a new claim`, options, async t => {
+for (const side of ['BUY', 'SELL'] as const) for (const stage of ['APPROVAL', 'TRANSFER'] as const) test(`real PG ${side} ${stage}: fresh signed owner recovers a known late hash after session/order expiry and pause without a new claim`, options, async t => {
   const f = await fixture(); t.after(() => f.pool.end());
   // Fixture orders use exactly the actor identity emitted by the real signed-session resolver.
   f.actor.actorId = `evm:${f.actor.wallet.toLowerCase()}`;
@@ -70,7 +70,7 @@ for (const side of ['BUY', 'SELL'] as const) test(`real PG ${side}: fresh signed
   assert.notEqual(originalToken, freshToken, 'renewed credentials remain the same actor, not the original bearer token');
   const post = (suffix: string, payload: unknown, bearer = freshToken) => app.inject({ method: 'POST', url: `/api/v1/stocks/wallet-submissions/${suffix}`, headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' }, payload: typeof payload === 'string' ? payload : JSON.stringify(payload) });
   const inspect = (bearer = freshToken) => app.inject({ method: 'GET', url: path, headers: { authorization: `Bearer ${bearer}` } });
-  const claimResponse = await post('claims', f.request(order, side, 'APPROVAL'), originalToken);
+  const claimResponse = await post('claims', f.request(order, side, stage), originalToken);
   assert.equal(claimResponse.statusCode, 200); const claim = claimResponse.json().data;
   assert.equal(claim.status, 'REQUEST_MAY_START');
   const outcome = { ...claim, status: 'SUBMITTED', txHash: h(970) };
@@ -87,7 +87,7 @@ for (const side of ['BUY', 'SELL'] as const) test(`real PG ${side}: fresh signed
   assert.equal((await f.pool.query('SELECT $1::timestamptz<=clock_timestamp() AS expired', [order.quoteExpiresAt])).rows[0].expired, true);
   f.pause(true);
   const observedResponse = await inspect(); assert.equal(observedResponse.statusCode, 200);
-  const observed = observedResponse.json().data.approval;
+  const observed = observedResponse.json().data[stage === 'APPROVAL' ? 'approval' : 'transfer'];
   assert.equal(observed.claimId, claim.claimId); assert.equal(observed.status, 'REQUEST_MAY_START'); assert.equal(observed.txHash, undefined);
   assert.equal((await inspect(otherToken)).statusCode, 404);
   assert.equal((await post('outcomes', outcome, otherToken)).statusCode, 404);
@@ -106,7 +106,7 @@ for (const side of ['BUY', 'SELL'] as const) test(`real PG ${side}: fresh signed
 
   const pending = await post('reconcile', receipt); assert.equal(pending.statusCode, 200); assert.equal(pending.json().data.status, 'SUBMITTED');
   assert.equal((await f.pool.query('SELECT * FROM arco_evm."StocksWalletSubmissionProof" WHERE "claimId"=$1', [claim.claimId])).rowCount, 0);
-  addSubmission(chain, f.manifest, order, side, 'APPROVAL', h(970));
+  addSubmission(chain, f.manifest, order, side, stage, h(970));
   const confirmed = await post('reconcile', receipt); assert.equal(confirmed.statusCode, 200); assert.equal(confirmed.json().data.status, 'CONFIRMED');
   const terminalFacts = await facts(f);
   const lateUnknown = await post('outcomes', { ...claim, status: 'UNKNOWN' }); assert.equal(lateUnknown.statusCode, 200); assert.equal(lateUnknown.json().data.status, 'CONFIRMED');
@@ -118,10 +118,12 @@ for (const side of ['BUY', 'SELL'] as const) test(`real PG ${side}: fresh signed
   assert.equal(stored.state, side === 'BUY' ? 'AWAITING_FUNDING' : 'AWAITING_ESCROW');
   assert.equal(new Date(stored.quoteExpiresAt).getTime(), new Date(order.quoteExpiresAt).getTime());
 
-  const pausedClaim = await post('claims', f.request(order, side, 'TRANSFER')); assert.equal(pausedClaim.statusCode, 503); assert.equal(pausedClaim.json().error, 'STOCKS_PAUSED');
-  f.pause(false);
-  const expiredClaim = await post('claims', f.request(order, side, 'TRANSFER')); assert.equal(expiredClaim.statusCode, 409); assert.equal(expiredClaim.json().error, 'ORDER_EXPIRED');
-  const replay = await post('claims', f.request(order, side, 'APPROVAL')); assert.equal(replay.statusCode, 200); assert.equal(replay.json().data, null);
+  if (stage === 'APPROVAL') {
+    const pausedClaim = await post('claims', f.request(order, side, 'TRANSFER')); assert.equal(pausedClaim.statusCode, 503); assert.equal(pausedClaim.json().error, 'STOCKS_PAUSED');
+    f.pause(false);
+    const expiredClaim = await post('claims', f.request(order, side, 'TRANSFER')); assert.equal(expiredClaim.statusCode, 409); assert.equal(expiredClaim.json().error, 'ORDER_EXPIRED');
+  } else f.pause(false);
+  const replay = await post('claims', f.request(order, side, stage)); assert.equal(replay.statusCode, 200); assert.equal(replay.json().data, null);
   assert.equal((await f.pool.query('SELECT * FROM arco_evm."StocksWalletSubmission" WHERE "intentKey"=$1', [claim.intentKey])).rowCount, 1);
   assert.deepEqual(await facts(f), terminalFacts, 'recovery and rejected/replayed claim never create fresh wallet permission');
 });
