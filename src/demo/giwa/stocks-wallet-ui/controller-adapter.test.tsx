@@ -613,3 +613,52 @@ for (const side of ["BUY", "SELL"] as const) {
     }
   })
 }
+
+// 003B: an explicit check may first load review evidence through the host. Nothing else ever does.
+test("003B: prepare loads evidence first, then checks only if the fresh availability is READY; approve and submit never load evidence", async () => {
+  const log: string[] = []
+  let ready = false
+  let checkable = true
+  const snapshot = (status: string) => ({ status, orderId: "order-1", intentKey: "intent", stage: null, txHash: null, error: null, plan: { side: "BUY", order: { wallet: "0x1111111111111111111111111111111111111111" } } })
+  let shown = snapshot("IDLE")
+  const controller = {
+    select: () => undefined,
+    refreshContext: () => undefined,
+    subscribe: () => () => undefined,
+    getSnapshot: () => shown,
+    prepare: async () => { log.push("prepare") },
+    approve: async () => { log.push("approve") },
+    submit: async () => { log.push("submit") },
+  } as unknown as Parameters<typeof stocksWalletPanelActions>[0]
+  let refresh: () => Promise<unknown> = async () => { log.push("evidence"); ready = true }
+  const actions = stocksWalletPanelActions(controller, { orderId: "order-1", side: "BUY", account: "0x1111111111111111111111111111111111111111", ready: () => ready, checkable: () => checkable, refreshEvidence: () => refresh() })
+
+  await actions.prepare()
+  assert.deepEqual(log, ["evidence", "prepare"], "evidence first, then the read-only check")
+
+  log.length = 0
+  ready = false
+  refresh = async () => { log.push("evidence") }
+  await actions.prepare()
+  assert.deepEqual(log, ["evidence"], "evidence still missing after the read: no controller check")
+
+  log.length = 0
+  refresh = async () => { log.push("evidence"); throw new Error("offline") }
+  ready = true
+  await actions.prepare()
+  assert.deepEqual(log, ["evidence", "prepare"], "a failed evidence read does not block a check that is otherwise ready")
+
+  log.length = 0
+  checkable = false
+  await actions.prepare()
+  assert.deepEqual(log, [], "nothing runs when the check is not available at activation")
+
+  log.length = 0
+  checkable = true
+  ready = true
+  shown = snapshot("APPROVAL_REQUIRED")
+  await actions.approve()
+  shown = snapshot("READY_TRANSFER")
+  await actions.submit()
+  assert.deepEqual(log, ["approve", "submit"], "wallet-opening steps never load evidence")
+})

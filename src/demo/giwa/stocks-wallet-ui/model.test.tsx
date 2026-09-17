@@ -285,7 +285,7 @@ test("missing configuration or evidence disables execution without any port read
 })
 
 test("every stable code the wallet planner and controller can report has a specific reason", () => {
-  const sources = ["../stocks-wallet/controller.ts", "../stocks-wallet/planner.ts"].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n")
+  const sources = ["../stocks-wallet/controller.ts", "../stocks-wallet/planner.ts", "../stocks-wallet-source/ports.ts", "../stocks-wallet-source/capture.ts", "../stocks-wallet-source/types.ts", "../stocks-execution-host/registry.ts"].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n")
   const NOT_CODES = new Set(["APPROVAL_REQUIRED", "READY_TRANSFER", "APPROVAL_SUBMITTED", "REQUEST_MAY_START", "DEMO_TESTNET", "TEST_VALUE_ONLY", "MOCK_BROKER", "FIXED_MOCK_PRICE", "ARCO_TEST_USDC", "CHECK_PAUSE_AT_ORDER", "AWAITING_FUNDING", "AWAITING_ESCROW"])
   // Pure validation failures deliberately share the generic "failed validation" text.
   const VALIDATION = new Set(["INVALID_ADDRESS", "INVALID_HASH", "INVALID_AMOUNT", "INVALID_ID", "INVALID_API_BASE", "INVALID_SIDE", "ORDER_SIDE_MISMATCH", "INVALID_ORDER", "ORDER_KEY_MISMATCH", "ORDER_PRICE_MISMATCH", "TRANSACTION_MISMATCH", "INVALID_CONTEXT"])
@@ -569,4 +569,51 @@ test("003A-1: authority and policy stop codes keep the recorded attempt honest o
       assertNoCompletionClaim(`${text(model)} ${model.announcement}`, model.code ?? "")
     }
   }
+})
+
+test("003B: a host that loads review evidence keeps the read-only check available while only the evidence is missing", () => {
+  const s = setup()
+  const missing = { status: "UNAVAILABLE" as const, code: "DEPLOYMENT_NOT_REVIEWED" }
+  for (const code of ["DEPLOYMENT_NOT_REVIEWED", "DEPLOYMENT_EVIDENCE_EXPIRED"]) {
+    const without = s.model(IDLE_SNAPSHOT, { availability: { status: "UNAVAILABLE", code } })
+    assert.equal(without.kind, "UNAVAILABLE", `${code}: no host evidence read → unavailable as before`)
+    assert.equal(without.buttons[0]?.enabled, false)
+    const loads = s.model(IDLE_SNAPSHOT, { availability: { status: "UNAVAILABLE", code }, evidenceRefreshable: true })
+    assert.deepEqual([loads.kind, loads.title, loads.code], ["IDLE", "Not checked yet", null], code)
+    assert.deepEqual(loads.buttons.map((button) => [button.action, button.enabled, button.opensWallet]), [["prepare", true, false]])
+    assert.match(loads.paragraphs.join(" "), /first loads the current deployment review from the server/)
+    assert.match(loads.paragraphs.join(" "), /does not open your wallet or send anything/)
+  }
+  // Other configuration problems are never treated as "just load evidence".
+  const digest = s.model(IDLE_SNAPSHOT, { availability: { status: "UNAVAILABLE", code: "MANIFEST_DIGEST_MISMATCH" }, evidenceRefreshable: true })
+  assert.deepEqual([digest.kind, digest.buttons[0]?.enabled], ["UNAVAILABLE", false])
+
+  const failed = s.model(IDLE_SNAPSHOT, { availability: missing, evidenceRefreshable: true, evidenceFailure: "DEPLOYMENT_NOT_REVIEWED" })
+  assert.deepEqual([failed.title, failed.code, failed.tone, failed.buttons[0]?.enabled], ["Review evidence not loaded", "DEPLOYMENT_NOT_REVIEWED", "warning", true])
+  assert.equal(s.model(IDLE_SNAPSHOT, { availability: s.availability, evidenceFailure: "DEPLOYMENT_NOT_REVIEWED" }).title, "Not checked yet", "a failure is shown only while evidence is still missing")
+
+  // Recorded screens keep their read-only check; wallet-opening steps need current evidence.
+  const approval = s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "EXECUTION_AUTHORITY_CHANGED"), { availability: missing, evidenceRefreshable: true })
+  assert.deepEqual(approval.buttons.map((button) => [button.action, button.enabled]), [["prepare", true]])
+  assert.doesNotMatch(approval.paragraphs.join(" "), /Checking is unavailable/)
+  const unknown = s.model(s.snap("UNKNOWN", "TRANSFER", null, "WALLET_OUTCOME_UNKNOWN"), { availability: missing, evidenceRefreshable: true })
+  assert.equal(unknown.buttons[0]?.enabled, true)
+  for (const [status, action] of [["APPROVAL_REQUIRED", "approve"], ["READY_TRANSFER", "submit"]] as const) {
+    const signing = s.model(s.snap(status), { availability: missing, evidenceRefreshable: true })
+    assert.deepEqual(signing.buttons.map((button) => [button.action, button.enabled]), [[action, false]], `${status}: never enabled without current evidence`)
+    assert.match(signing.title, /needs a new check$/)
+    assert.doesNotMatch(signing.paragraphs.join(" "), /nothing was sent/i)
+  }
+})
+
+test("003B: host capability codes have specific reasons and pass through the signed-out screen", () => {
+  const s = setup()
+  const generic = describeCode("SOMETHING_NEW", "BUY")
+  for (const code of ["WALLET_SOURCE_UNSUPPORTED", "WALLET_SOURCE_MISSING", "WALLET_NOT_CONNECTED", "WALLET_NOT_ATTESTED", "ALLOWANCE_SCOPE_MISMATCH", "RECEIPT_PORT_INACTIVE", "API_BASE_NOT_CONFIGURED", "EXECUTION_CLOCK_UNAVAILABLE"]) {
+    assert.notDeepEqual(describeCode(code, "BUY"), generic, code)
+  }
+  const unsupported = derivePanelModel({ snapshot: IDLE_SNAPSHOT, selection: s.selection, account: null, availability: { status: "UNAVAILABLE", code: "WALLET_SOURCE_UNSUPPORTED" }, now: s.now })
+  assert.deepEqual([unsupported.kind, unsupported.code, unsupported.order, unsupported.side], ["UNAVAILABLE", "WALLET_SOURCE_UNSUPPORTED", null, null], "reason shown, order details hidden")
+  assert.match(unsupported.paragraphs.join(" "), /cannot send exactly one transaction request/)
+  assert.equal(unsupported.buttons.some((button) => button.enabled), false)
 })
