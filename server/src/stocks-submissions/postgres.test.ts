@@ -41,7 +41,7 @@ test('real PG: immutable binding and monotonic hash observations, client termina
  await assert.rejects(f.pool.query('UPDATE arco_evm."StocksWalletSubmission" SET "actorId"=\'changed\' WHERE "claimId"=$1',[c.claimId]),/SUBMISSION_BINDING_IMMUTABLE/);
  await assert.rejects(f.pool.query('DELETE FROM arco_evm."StocksWalletSubmission" WHERE "claimId"=$1',[c.claimId]),/SUBMISSION_DELETE_FORBIDDEN/);
  await assert.rejects(f.pool.query('UPDATE arco_evm."StocksWalletSubmission" SET status=\'REQUEST_MAY_START\',"txHash"=NULL WHERE "claimId"=$1',[c.claimId]),/SUBMISSION_STATUS_REGRESSION/);
- await assert.rejects(f.pool.query('TRUNCATE arco_evm."StocksWalletSubmission", arco_evm."StocksWalletSubmissionEnrollment"'),/SUBMISSION_DELETE_FORBIDDEN/);
+ await assert.rejects(f.pool.query('TRUNCATE arco_evm."StocksWalletSubmission", arco_evm."StocksWalletSubmissionEnrollment", arco_evm."StocksWalletSubmissionProof"'),/SUBMISSION_DELETE_FORBIDDEN/);
  assert.deepEqual((await f.service.inspect(f.actor,'BUY',o.id)).transfer,sent);
 });
 

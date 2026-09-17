@@ -1,0 +1,58 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { h, TestChain } from '../stocks/test-fixtures.js';
+import { StocksSubmissionsService } from './service.js';
+import { createSubmissionReceiptVerifier } from './receipts.js';
+import { addSubmission } from './receipts-fixtures.js';
+import { enabled, fixture } from './test-fixtures.js';
+const options={skip:!enabled};
+for(const side of ['BUY','SELL'] as const)test(`real PG ${side}: trusted approval unlocks separate transfer; terminal evidence is durable and monotonic`,options,async t=>{
+ const f=await fixture();t.after(()=>f.pool.end());const chain=new TestChain(f.manifest),service=new StocksSubmissionsService(f.stocks,createSubmissionReceiptVerifier(f.manifest,chain));const order=await f.order(side);
+ const claim=(await service.claim(f.actor,f.request(order,side,'APPROVAL')))!;assert.ok(claim);
+ const request={claimId:claim.claimId,intentKey:claim.intentKey,stage:claim.stage,transactionDigest:claim.transactionDigest,txHash:h(900)};
+ await assert.rejects(service.reconcile(f.actor,request),/SUBMISSION_HASH_NOT_RECORDED/);
+ await service.record(f.actor,{...claim,status:'SUBMITTED',txHash:request.txHash});
+ assert.equal((await service.reconcile(f.actor,request)).status,'SUBMITTED');
+ addSubmission(chain,f.manifest,order,side,'APPROVAL',request.txHash);
+ const results=await Promise.all(Array.from({length:4},()=>service.reconcile(f.actor,request)));assert.ok(results.every(r=>r.status==='CONFIRMED'));
+ assert.equal((await f.pool.query('SELECT * FROM arco_evm."StocksWalletSubmissionProof" WHERE "claimId"=$1',[claim.claimId])).rowCount,1);
+ assert.equal((await f.pool.query('SELECT * FROM arco_evm."StocksAudit" WHERE action=\'WALLET_SUBMISSION_VERIFIED\' AND subject=$1',[order.id])).rowCount,1);
+ assert.equal((await service.record(f.actor,{...claim,status:'UNKNOWN'})).status,'CONFIRMED');
+ assert.equal((await new StocksSubmissionsService(f.stocks).inspect(f.actor,side,order.id)).approval?.status,'CONFIRMED');
+ await assert.rejects(f.pool.query('UPDATE arco_evm."StocksWalletSubmission" SET status=\'SUBMITTED\' WHERE "claimId"=$1',[claim.claimId]),/SUBMISSION_STATUS_REGRESSION/);
+ await assert.rejects(f.pool.query('UPDATE arco_evm."StocksWalletSubmissionProof" SET evidence=\'{}\' WHERE "claimId"=$1',[claim.claimId]),/immutable fact/);
+ await assert.rejects(f.pool.query('DELETE FROM arco_evm."StocksWalletSubmissionProof" WHERE "claimId"=$1',[claim.claimId]),/immutable fact/);
+ await assert.rejects(f.pool.query('TRUNCATE arco_evm."StocksWalletSubmissionProof"'),/immutable fact/);
+ const transfer=(await service.claim(f.actor,f.request(order,side,'TRANSFER')))!;assert.equal(transfer.stage,'TRANSFER');
+ addSubmission(chain,f.manifest,order,side,'TRANSFER',h(901));await service.record(f.actor,{...transfer,status:'SUBMITTED',txHash:h(901)});
+ const confirmed=await service.reconcile(f.actor,{claimId:transfer.claimId,intentKey:transfer.intentKey,stage:transfer.stage,transactionDigest:transfer.transactionDigest,txHash:h(901)});assert.equal(confirmed.status,'CONFIRMED');
+ assert.equal(await service.claim(f.actor,f.request(order,side,'TRANSFER')),null);
+ const table=side==='BUY'?'StocksOrder':'StocksSellOrder';assert.equal((await f.pool.query(`SELECT state FROM arco_evm."${table}" WHERE id=$1`,[order.id])).rows[0].state,side==='BUY'?'AWAITING_FUNDING':'AWAITING_ESCROW');
+});
+test('real PG reverted approval never unlocks; proof missing cannot produce terminal state',options,async t=>{
+ const f=await fixture();t.after(()=>f.pool.end());const chain=new TestChain(f.manifest),service=new StocksSubmissionsService(f.stocks,createSubmissionReceiptVerifier(f.manifest,chain)),order=await f.order();
+ const c=(await service.claim(f.actor,f.request(order,'BUY','APPROVAL')))!;addSubmission(chain,f.manifest,order);chain.receipts.get(h(900))!.status='reverted';chain.receipts.get(h(900))!.logs=[];
+ await service.record(f.actor,{...c,status:'UNKNOWN',txHash:h(900)});
+ await assert.rejects(f.pool.query('INSERT INTO arco_evm."StocksWalletSubmission" SELECT \'invalid-terminal\',"intentKey",stage,"transactionDigest",transaction,"actorId",wallet,side,"orderId","deploymentDigest",\'CONFIRMED\',"txHash","createdAt","updatedAt" FROM arco_evm."StocksWalletSubmission" WHERE "claimId"=$1',[c.claimId]),/SUBMISSION_INITIAL_STATE_REQUIRED/);
+ const verified=(await createSubmissionReceiptVerifier(f.manifest,chain).verify({...addSubmission(chain,f.manifest,order),claimId:c.claimId}))!;
+ await assert.rejects(f.pool.query('INSERT INTO arco_evm."StocksWalletSubmissionProof" ("claimId","intentKey","transactionDigest","deploymentDigest","txHash",status,"blockNumber","blockHash","proofDigest",evidence) VALUES($1,$2,$3,$4,$5,\'CONFIRMED\',10,$6,$7,$8)',[c.claimId,'f'.repeat(64),c.transactionDigest,f.stocks.digest,h(900),h(10),'e'.repeat(64),JSON.stringify(verified)]),/SUBMISSION_PROOF_BINDING_MISMATCH/);
+ // Restore the reverted transport fixture after constructing the hostile proof insert.
+ chain.receipts.get(h(900))!.status='reverted';chain.receipts.get(h(900))!.logs=[];
+ await assert.rejects(f.pool.query('UPDATE arco_evm."StocksWalletSubmission" SET status=\'CONFIRMED\' WHERE "claimId"=$1',[c.claimId]),/SUBMISSION_TRUSTED_PROOF_REQUIRED/);
+ const r={claimId:c.claimId,intentKey:c.intentKey,stage:c.stage,transactionDigest:c.transactionDigest,txHash:h(900)};
+ assert.equal((await service.reconcile(f.actor,r)).status,'REVERTED');
+ assert.equal((await service.record(f.actor,{...c,status:'SUBMITTED',txHash:h(900)})).status,'REVERTED');
+ await assert.rejects(service.claim(f.actor,f.request(order,'BUY','TRANSFER')),/SUBMISSION_STAGE_BLOCKED/);
+});
+test('real PG reconciliation audit rollback, wrong owner and RPC timeout cannot write late proof',options,async t=>{
+ const f=await fixture();t.after(()=>f.pool.end());const chain=new TestChain(f.manifest),order=await f.order();let service=new StocksSubmissionsService(f.stocks,createSubmissionReceiptVerifier(f.manifest,chain));
+ const c=(await service.claim(f.actor,f.request(order,'BUY','APPROVAL')))!;addSubmission(chain,f.manifest,order);await service.record(f.actor,{...c,status:'SUBMITTED',txHash:h(900)});
+ const r={claimId:c.claimId,intentKey:c.intentKey,stage:c.stage,transactionDigest:c.transactionDigest,txHash:h(900)};
+ await assert.rejects(service.reconcile({...f.actor,actorId:'other'},r),/SUBMISSION_NOT_FOUND/);
+ const audit=f.repo.audit.bind(f.repo);f.repo.audit=async()=>{throw new Error('TEST_RECEIPT_ROLLBACK')};await assert.rejects(service.reconcile(f.actor,r),/TEST_RECEIPT_ROLLBACK/);f.repo.audit=audit;
+ assert.equal((await f.pool.query('SELECT * FROM arco_evm."StocksWalletSubmissionProof" WHERE "claimId"=$1',[c.claimId])).rowCount,0);
+ assert.equal((await service.inspect(f.actor,'BUY',order.id)).approval?.status,'SUBMITTED');
+ let release!:()=>void;const deferred=new Promise<void>(r=>{release=r});const network=chain.network.bind(chain);chain.network=async()=>{await deferred;return network()};service=new StocksSubmissionsService(f.stocks,createSubmissionReceiptVerifier(f.manifest,chain,{timeoutMs:10}));
+ await assert.rejects(service.reconcile(f.actor,r),/SUBMISSION_RECEIPT_TIMEOUT/);release();await new Promise(r=>setTimeout(r,30));
+ assert.equal((await f.pool.query('SELECT * FROM arco_evm."StocksWalletSubmissionProof" WHERE "claimId"=$1',[c.claimId])).rowCount,0);assert.equal((await service.inspect(f.actor,'BUY',order.id)).approval?.status,'SUBMITTED');
+});

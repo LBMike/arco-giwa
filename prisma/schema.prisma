@@ -479,6 +479,7 @@ model StocksWalletSubmissionEnrollment {
   @@schema("arco_evm")
 }
 model StocksWalletSubmission {
+  receiptProof StocksWalletSubmissionProof?
   enrollment StocksWalletSubmissionEnrollment @relation(fields: [side, orderId], references: [side, orderId], onDelete: Restrict, onUpdate: Restrict)
   claimId           String @id
   intentKey         String
@@ -495,5 +496,21 @@ model StocksWalletSubmission {
   createdAt         DateTime @default(now()) @db.Timestamptz
   updatedAt         DateTime @default(now()) @db.Timestamptz
   @@unique([intentKey, stage])
+  @@schema("arco_evm")
+}
+
+model StocksWalletSubmissionProof {
+  submission StocksWalletSubmission @relation(fields: [claimId], references: [claimId], onDelete: Restrict, onUpdate: Restrict)
+  claimId String @id
+  intentKey String
+  transactionDigest String
+  deploymentDigest String
+  txHash String
+  status String
+  blockNumber Decimal @db.Decimal
+  blockHash String
+  proofDigest String
+  evidence Json
+  createdAt DateTime @default(now()) @db.Timestamptz
   @@schema("arco_evm")
 }

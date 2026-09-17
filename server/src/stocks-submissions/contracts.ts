@@ -5,7 +5,7 @@ import type { Row } from '../stocks/repository.js';
 export type Side = 'BUY' | 'SELL';
 export type Stage = 'APPROVAL' | 'TRANSFER';
 export type Transaction = { chainId: 91342; from: string; to: string; data: Hex; value: '0' };
-export type AttemptRecord = { claimId: string; intentKey: string; stage: Stage; transactionDigest: string; status: 'REQUEST_MAY_START' | 'UNKNOWN' | 'SUBMITTED'; txHash?: string };
+export type AttemptRecord = { claimId: string; intentKey: string; stage: Stage; transactionDigest: string; status: 'REQUEST_MAY_START' | 'UNKNOWN' | 'SUBMITTED' | 'CONFIRMED' | 'REVERTED'; txHash?: string };
 export function digest(value: unknown): string { return createHash('sha256').update(canonicalJson(value)).digest('hex'); }
 export function label(value: unknown): string { ensure(typeof value === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(value), 'INVALID_SUBMISSION_INPUT'); return value; }
 export function hashDigest(value: unknown): string { ensure(typeof value === 'string' && /^[0-9a-f]{64}$/.test(value), 'INVALID_SUBMISSION_INPUT'); return value; }

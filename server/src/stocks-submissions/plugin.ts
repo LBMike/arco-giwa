@@ -19,5 +19,6 @@ export async function stocksSubmissionsPlugin(app: FastifyInstance, options: Sto
   const envelope = (data: unknown) => ({ ...PROFILE, observedAt: new Date().toISOString(), data });
   app.get<{ Params: { side: string; orderId: string } }>('/api/v1/stocks/wallet-submissions/:side/:orderId', async r => envelope(await options.service.inspect(actor(r), r.params.side, r.params.orderId)));
   app.post('/api/v1/stocks/wallet-submissions/claims', { bodyLimit: 8192 }, async r => envelope(await options.service.claim(actor(r), r.body)));
+  app.post('/api/v1/stocks/wallet-submissions/reconcile', { bodyLimit: 4096 }, async r => envelope(await options.service.reconcile(actor(r), r.body)));
   app.post('/api/v1/stocks/wallet-submissions/outcomes', { bodyLimit: 4096 }, async r => envelope(await options.service.record(actor(r), r.body)));
 }

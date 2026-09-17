@@ -1,3 +1,5 @@
+import { hash } from '../stocks/contracts.js';
+import type { SubmissionReceiptVerifier, SubmissionReceiptRequest } from './receipts.js';
 import { orderBinding } from './enrollment.js';
 import { randomUUID } from 'node:crypto';
 import { address, ensure, immutable, validateActor, type Actor, type SqlClient } from '../stocks/contracts.js';
@@ -6,7 +8,7 @@ import type { StocksService } from '../stocks/service.js';
 import { deriveOrder, digest, exact, hashDigest, label, output, side, stage, type Side, type AttemptRecord } from './contracts.js';
 
 export class StocksSubmissionsService {
-  constructor(readonly stocks: StocksService) {}
+  constructor(readonly stocks: StocksService, private readonly receipts?: SubmissionReceiptVerifier) {}
   private async order(db: SqlClient, actor: Actor, orderSide: Side, id: string): Promise<Row> {
     const table = orderSide === 'BUY' ? 'StocksOrder' : 'StocksSellOrder';
     const row = (await db.query(`SELECT *,"quoteExpiresAt">clock_timestamp() AS valid FROM arco_evm."${table}" WHERE id=$1 AND "deploymentDigest"=$2 FOR UPDATE`, [id, this.stocks.digest])).rows[0];
@@ -43,7 +45,12 @@ export class StocksSubmissionsService {
       const prior = (await db.query('SELECT * FROM arco_evm."StocksWalletSubmission" WHERE "intentKey"=$1 FOR UPDATE', [plan.intentKey])).rows;
       // A prior physical claim blocks even if an actor/deployment alias differs.
       if (prior.some(row => row.stage === requestedStage)) return null;
-      ensure(prior.length === 0, 'SUBMISSION_STAGE_BLOCKED', 409);
+      if (prior.length) {
+        const approval = prior.find(row => row.stage === 'APPROVAL');
+        ensure(requestedStage === 'TRANSFER' && prior.length === 1 && approval?.status === 'CONFIRMED', 'SUBMISSION_STAGE_BLOCKED', 409);
+        const proof = (await db.query('SELECT 1 FROM arco_evm."StocksWalletSubmissionProof" WHERE "claimId"=$1 AND status=\'CONFIRMED\' AND "txHash"=$2 AND "transactionDigest"=$3 AND "intentKey"=$4 AND "deploymentDigest"=$5', [approval.claimId, approval.txHash, approval.transactionDigest, plan.intentKey, this.stocks.digest])).rows[0];
+        ensure(proof, 'SUBMISSION_STAGE_BLOCKED', 409);
+      }
       ensure(!(await this.stocks.paused()), 'STOCKS_PAUSED', 503);
       ensure(order.state === (orderSide === 'BUY' ? 'AWAITING_FUNDING' : 'AWAITING_ESCROW'), 'ORDER_NOT_PAYABLE', 409);
       // Re-evaluate on the DB clock after waiting for all locks and pause checks.
@@ -53,6 +60,39 @@ export class StocksSubmissionsService {
       if (!row) return null;
       await this.stocks.repo.audit(db, id, 'WALLET_SUBMISSION_CLAIMED', { claimId: row.claimId, intentKey: plan.intentKey, stage: requestedStage, transactionDigest: row.transactionDigest });
       return output(row);
+    });
+  }
+  async reconcile(input: Actor, raw: unknown): Promise<AttemptRecord> {
+    const actor = this.actor(input), body = immutable(exact(raw, ['claimId','intentKey','stage','transactionDigest','txHash']));
+    label(body.claimId); hashDigest(body.intentKey); hashDigest(body.transactionDigest); stage(body.stage);
+    ensure(typeof body.txHash === 'string', 'INVALID_SUBMISSION_HASH'); const txHash = hash(body.txHash);
+    // Snapshot authority under the same lock ordering as claim/outcomes, then release before RPC.
+    const owned = async (db: SqlClient) => {
+      const found = (await db.query('SELECT * FROM arco_evm."StocksWalletSubmission" WHERE "claimId"=$1 AND "actorId"=$2 AND wallet=$3 AND "deploymentDigest"=$4', [body.claimId,actor.actorId,address(actor.wallet),this.stocks.digest])).rows[0];
+      ensure(found, 'SUBMISSION_NOT_FOUND',404);
+      const order = await this.order(db,actor,side(found.side),found.orderId);
+      const row = (await db.query('SELECT * FROM arco_evm."StocksWalletSubmission" WHERE "claimId"=$1 FOR UPDATE',[body.claimId])).rows[0];
+      this.binding(row,actor,order,side(found.side));
+      const plan = deriveOrder(this.stocks.manifest,order,side(found.side));
+      const transaction = row.stage === 'APPROVAL' ? plan.approval : plan.transfer;
+      ensure(row.intentKey === plan.intentKey && row.intentKey === body.intentKey && row.stage === body.stage && row.transactionDigest === body.transactionDigest && row.transactionDigest === digest(transaction) && digest(row.transaction) === digest(transaction), 'SUBMISSION_BINDING_MISMATCH',409);
+      ensure(row.txHash === txHash, 'SUBMISSION_HASH_NOT_RECORDED',409);
+      return row;
+    };
+    const snapshot = await this.stocks.repo.tx(owned);
+    if (snapshot.status === 'CONFIRMED' || snapshot.status === 'REVERTED') return output(snapshot);
+    ensure(this.receipts, 'SUBMISSION_RECEIPTS_UNCONFIGURED',503);
+    const request: SubmissionReceiptRequest = {claimId:snapshot.claimId,intentKey:snapshot.intentKey,transactionDigest:snapshot.transactionDigest,txHash,side:side(snapshot.side),stage:stage(snapshot.stage),transaction:snapshot.transaction};
+    const proof = await this.receipts.verify(immutable(request));
+    if (!proof) return this.stocks.repo.tx(async db => output(await owned(db)));
+    ensure(proof.version === 1 && proof.deploymentDigest === this.stocks.digest && proof.claimId === snapshot.claimId && proof.intentKey === snapshot.intentKey && proof.transactionDigest === snapshot.transactionDigest && proof.txHash === txHash && (proof.status === 'CONFIRMED' || proof.status === 'REVERTED'), 'SUBMISSION_RECEIPT_UNAVAILABLE',503);
+    return this.stocks.repo.tx(async db => {
+      const row = await owned(db);
+      if (row.status === 'CONFIRMED' || row.status === 'REVERTED') return output(row);
+      await db.query('INSERT INTO arco_evm."StocksWalletSubmissionProof" ("claimId","intentKey","transactionDigest","deploymentDigest","txHash",status,"blockNumber","blockHash","proofDigest",evidence) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [row.claimId,row.intentKey,row.transactionDigest,this.stocks.digest,txHash,proof.status,proof.blockNumber,proof.blockHash,digest(proof),JSON.stringify(proof)]);
+      const updated = (await db.query('UPDATE arco_evm."StocksWalletSubmission" SET status=$2,"updatedAt"=clock_timestamp() WHERE "claimId"=$1 RETURNING *',[row.claimId,proof.status])).rows[0];
+      await this.stocks.repo.audit(db,row.orderId,'WALLET_SUBMISSION_VERIFIED',{claimId:row.claimId,status:proof.status,proofDigest:digest(proof)});
+      return output(updated);
     });
   }
   async record(input: Actor, raw: unknown): Promise<AttemptRecord> {
@@ -73,6 +113,7 @@ export class StocksSubmissionsService {
       this.binding(row, actor, order, side(found.side));
       ensure(row.intentKey === plan.intentKey && row.intentKey === body.intentKey && row.stage === body.stage && row.transactionDigest === body.transactionDigest, 'SUBMISSION_BINDING_MISMATCH', 409);
       ensure(!row.txHash || !body.txHash || row.txHash === body.txHash, 'SUBMISSION_HASH_CONFLICT', 409);
+      if (row.status === 'CONFIRMED' || row.status === 'REVERTED') return output(row);
       const status = row.status === 'SUBMITTED' ? 'SUBMITTED' : body.status;
       const txHash = row.txHash ?? body.txHash ?? null;
       if (status === row.status && txHash === row.txHash) return output(row);
