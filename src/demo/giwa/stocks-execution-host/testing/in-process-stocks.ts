@@ -104,7 +104,15 @@ function bodyText(body: unknown): string | undefined {
  * Wall clock contract: `wall` must stay near real time when sessions are used, because the real JWT resolver
  * checks iat/exp against Date.now(). The monotonic clock is `wall` when injected, else performance.now().
  */
-export async function createInProcessStocks(options: { wall?: () => number; paused?: boolean } = {}): Promise<InProcessStocks> {
+export async function createInProcessStocks(options: {
+  wall?: () => number
+  paused?: boolean
+  /**
+   * The frontend origin whose host becomes the JWT domain the session resolver accepts. Default HARNESS_FRONTEND_ORIGIN.
+   * The offline verification page passes its loopback origin (http://127.0.0.1:<port>).
+   */
+  frontendOrigin?: string
+} = {}): Promise<InProcessStocks> {
   const s = await loadServer()
   const wall = () => Math.floor(options.wall ? options.wall() : Date.now())
   const monotonicNow = options.wall ? wall : () => performance.now()
@@ -120,7 +128,8 @@ export async function createInProcessStocks(options: { wall?: () => number; paus
   const evidence = s.createDeploymentEvidence(manifest, chain.rpc, { now: wall, monotonicNow, available: () => evidenceAvailable })
   const execution = new s.StocksExecutionService(stocks, evidence, { wallNow: wall, monotonicNow })
   const submissions = new s.StocksSubmissionsService(stocks, s.createSubmissionReceiptVerifier(manifest, s.createStocksRpcPort(chain.rpc, manifest)))
-  const frontendHost = new URL(HARNESS_FRONTEND_ORIGIN).host
+  const frontendOrigin = new URL(options.frontendOrigin ?? HARNESS_FRONTEND_ORIGIN).origin
+  const frontendHost = new URL(frontendOrigin).host
   const { resolveActor, resolveOperator } = s.stocksSessionResolvers(TEST_ONLY_JWT_SECRET, [frontendHost], [])
 
   const app = s.Fastify({ logger: false })
@@ -204,7 +213,7 @@ export async function createInProcessStocks(options: { wall?: () => number; paus
 
   return Object.freeze({
     apiBase: HARNESS_API_BASE,
-    frontendOrigin: HARNESS_FRONTEND_ORIGIN,
+    frontendOrigin,
     manifest,
     digest,
     chain,
