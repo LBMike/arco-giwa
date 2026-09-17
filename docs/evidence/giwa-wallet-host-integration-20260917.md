@@ -339,3 +339,169 @@ Locale golden: verified earlier on Node 24 (en-US/cs-CZ/sk-SK) and by Codex in C
 - Controller refinement for synchronous port refusals (finding 4).
 - A browser recovery step that carries a known late hash into a new valid session and uses the existing `inspect → outcomes → reconcile` API (finding 5). No new endpoint, deadline extension or claim reopening.
 - Real-wallet manual verification on a testnet only after those decisions; not claimed here.
+
+## 003B-1 — session-end notice and documentation corrections (2026-09-18)
+
+Builder-side follow-up to Codex's independent review of `eda0bc0` (`review-results/20260918/wallet-host-003b-review.md`). Codex accepted the core wiring and raised one P3 copy finding and P3 documentation corrections. This section is builder-side verification, not independent review.
+
+| Item | Value |
+| --- | --- |
+| Base | `/private/tmp/arco-giwa-wallet-host-integration-20260917` @ `eda0bc02bfa61fc72f4bb9305dbcf0255c4c3faa` (feature base `b27b259`) |
+| Work clone / branch | `/private/tmp/arco-giwa-wallet-host-copy-20260918`, `codex/giwa-wallet-host-copy-20260918` |
+| Evidence | `/private/tmp/arco-giwa-wallet-host-copy-evidence-20260918/` (`failure-first/`, `after/`, `mutation/`, `final/` for `a04f6d2`; `after-review/`, `mutation-round2/`, `final-2/` for `2e9c0cd`; `codex-host-probe/`) |
+| Commits | `9c84e14` plan · `a04f6d2` notice, scenarios, doc corrections · `2e9c0cd` builder-review fixes · this docs-only commit |
+
+**Changes:**
+- `StocksExecutionProvider.tsx`: session-end notice copy only. Final text (title, then three paragraphs):
+  > A wallet request from your last Stocks session may still be open or its answer unrecorded
+  >
+  > If your wallet answered after that session ended, the server may not have recorded that answer, even if the transaction was sent.
+  >
+  > Sign in to Stocks again with the same wallet, open the order and check it. The check only shows what the server has already recorded. It cannot add a wallet answer the server never received.
+  >
+  > Do not send the approval, deposit or escrow again from this or any other app or wallet. If the check shows the result as unknown, or the order can no longer be checked, contact operations to confirm what happened.
+
+  Still no order, amount, hash, link or button. Visibility and clearing rules are unchanged.
+- `page.dom.test.tsx`: new scenarios 11 (BUY) and 12 (SELL) on the real `/stocks` route, plus the new notice title constant.
+- Corrected statements:
+  - this file: findings 1, 4, 5 and 6, the Remaining list, flow item 7, two table rows and the page DOM inventory note;
+  - `stocks-execution-host/README.md`: the session-end, dispatch and test sections;
+  - `stocks-wallet-ui/README.md`: two session-expiry sentences that said a later check records a refused late hash. These come from 003A-1 text in a README changed in 003B; see the review below.
+  - The task doc gained the 003B-1 plan and results.
+
+**Unchanged:** server, DB, Solidity, deployments, dependencies, wallet send logic, controller, session authority, order deadlines. No recovery UI, automatic recording or retry; no Dynamic work.
+
+### Scenarios 11 (BUY) and 12 (SELL), `page.dom.test.tsx`
+
+Setup: the real `/stocks` route in StrictMode, with the real host, investor feature, execution provider, panel, controller, reads, submission gate and wallet-source ports. The server is the in-process real Stocks, execution and submission plugins over memory SQL, with a fake EIP-1193 wallet on the fake chain. Only the fixture verify response is shortened to a 30 s session. The host, execution clock and server fixture share one wall clock, shifted by the test.
+
+Only asserted facts are listed.
+
+| Step | Wallet sends (cumulative) | Asserted server and screen state |
+| --- | --- | --- |
+| mount | 0 | — |
+| sign in | 0 | — |
+| accept the order in the trade panel | 0 | panel shown |
+| Check → "Approval required" (armed after ≥700 ms) | 0 | — |
+| Approve with the prompt held → SIGNING | 1 | 1 claim, `REQUEST_MAY_START`, no hash |
+| clock +31 s, re-render | 1 | "Your Stocks session expired" shown; notice shown; panel and order card hidden |
+| release the wallet answer (the fake chain applies the transaction) | 1 | **0 outcomes**; claim still `REQUEST_MAY_START`, no hash; hash not painted; notice still attached; notice checks (below) |
+| clock back, "Retry Stocks sign-in" | 1 | notice hidden while signed in; panel back to "Not checked yet" (IDLE) |
+| Check | 1 | journal read issued; UNKNOWN, "Result unknown", "Do not repeat it from another app or wallet"; no hash; no Approve or Deposit/Escrow button |
+| 1 s later | 1 | **0 outcomes**, 1 claim, 0 reconcile; claim still without hash; no `wallet_sendTransaction` or `eth_sendRawTransaction` |
+| sign out | 1 | notice shown again for the same wallet, same meaning checks |
+
+Notice assertions (`assertSessionNoticeMeaning`, run on the notice re-queried after the refused answer and checked to be still attached, and again after the final sign-out):
+- **Excluded:**
+  - "until … check";
+  - "check (will/can/may/does) record/attach/restore/recover/add/save/match";
+  - "sign in again (will/to) record …";
+  - "will be recorded / is recorded when";
+  - the stems attach, restor, recover, retriev, resend, retry, resubmit.
+- **Required:**
+  - the server may not have recorded that answer, even if the transaction was sent;
+  - the check only shows what the server has already recorded and cannot add a wallet answer the server never received;
+  - an unconditional sentence: do not send the approval, deposit or escrow again from this or any other app or wallet;
+  - if the check shows the result as unknown, or the order can no longer be checked, contact operations.
+- **Absent:** no link or button, no digit, and no order ID, order key or hash.
+- **Exact text:** the whole notice equals the expected copy.
+
+Existing scenario 7 keeps the notice away from another wallet. Scenario 8 keeps the logout case, where the still-valid old gate records the late hash.
+
+### Failure first (`failure-first/`)
+
+The new scenarios ran against the unchanged `eda0bc0` copy (`state.txt`: HEAD `9c84e14` = `eda0bc0` + plan doc, working-tree diff = test file only).
+
+- **First attempt** (`page-dom-attempt1-test-bug.log`): my test waited for a "Sign in to Stocks" button after expiry, but the host shows "Retry Stocks sign-in". That was a test bug, not a product finding; the test was fixed.
+- **Second run** (`page-dom.log`): 13 tests, 10 pass, 3 fail (the parent and scenarios 11–12).
+  - Both failed in `assertSessionNoticeMeaning` on `/until (?:that|the|this|you) check/i`.
+  - Every behaviour assertion before it passed: 1 claim, 0 outcomes, claim without hash, hash not painted.
+- **After the copy change** (`after/page-dom.log`): 13/13.
+
+Codex's own probe (`host-dom.test.mjs`, only the repo and evidence paths changed; `codex-host-probe/port.diff`, original SHA-256 in `original.sha256`):
+
+| Run | Result |
+| --- | --- |
+| Codex, at `eda0bc0` | 2 pass / 2 fail (the notice assertion) |
+| Builder, at `a04f6d2` | **4/4** (`final/codex-host-probe.log`) |
+
+In both BUY and SELL, `host-dom-results.json` shows 0 outcomes, 1 wallet request and the claim `REQUEST_MAY_START` without hash.
+
+### Builder-side review of `a04f6d2` (not independent review)
+
+A read-only workflow ran two lenses, notice copy on every path that shows it and documentation accuracy, each with a skeptic verifier. No test or build ran during it. Result: 5 CONFIRMED, 1 PLAUSIBLE, 2 REFUTED, all P3.
+
+| Finding | Verdict | Resolution (`2e9c0cd`) |
+| --- | --- | --- |
+| NOTICE-1 / DOC-1: the notice said the server may not have recorded "the request" and a check "cannot add a request". Once the notice can show, the claim is already reserved; only the wallet answer can be missing, and the UNKNOWN panel calls it "the recorded request" | CONFIRMED | The copy and docs name the wallet answer |
+| NOTICE-2: do-not-resend was conditional on UNKNOWN. After the quote deadline the panel offers no check, and a SELL order the server has expired gets no panel in a new registry | PLAUSIBLE | Do-not-resend is unconditional; operations guidance covers "unknown, or the order can no longer be checked". No new scenario for the post-deadline path |
+| NOTICE-TEST-3: the negative patterns miss reworded promises ("lets the server attach…", "will match…"), and the notice was asserted on a node captured before the release | CONFIRMED | Exact notice text assertion; extra banned stems; notice re-queried and checked as still attached after the refused answer |
+| DOC-2: `stocks-wallet-ui/README.md` said a refused late hash is "recorded only by a later check under a valid session". The controller's check only reads the journal (`inspect`) and reconciles hashes the server has; `record` is only reached from dispatch | CONFIRMED | The two sentences corrected (documented host: expiry differs from logout; no check records it) |
+| DOC-3: the expired-session table row said "same screen shows the hash", which is only the full-stack controller snapshot with the host session kept | CONFIRMED | Row qualified: controller snapshot vs. real page (not painted) |
+| DOC-5: the page DOM inventory still said "11 = gate + 10" | CONFIRMED | Marked as the 003B count, with 11–12 referenced here |
+| DOC-4 (×2): stale inventory count / deadline probe unattributed | REFUTED | Probe attribution added anyway (fake SQL/fake chain, source path, not PostgreSQL) |
+
+### Mutation checks (disposable copy `/private/tmp/arco-giwa-wallet-host-copy-mutation-20260918`; each file restored and compared with the work clone)
+
+Round 1 (`mutation/summary.txt`, against `a04f6d2`):
+
+| Mutation | Result |
+| --- | --- |
+| MC1 restore the 003B notice copy | killed (scenarios 8, 11, 12) |
+| MC2 add "checking will record a late answer" | killed (11, 12) |
+| MC3 drop "Contact operations …" | killed (11, 12) |
+| MC4 replace the do-not-resend sentence with "check again later" | killed (11, 12) |
+| MC5 make "Contact operations" a link | killed (11, 12), see note |
+| MB1 submission gate accepts an expired session (both expiry checks removed) | killed (11, 12: outcomes 1, expected 0) |
+| MB2 provider never records the ended attempt (no notice) | killed (8, 11, 12) |
+
+MC5's first two runs failed at file level with no scenario result. The failing assertion compared a jsdom element with `null`, and building the error message crashed the run. The assertion now compares `querySelectorAll("a, button").length` with a plain message, and MC5 is killed by scenarios 11–12 (`MC5-notice-link-fixed-assertion.log`).
+
+Round 2 (`mutation-round2/summary.txt`, against `2e9c0cd`; the mutant files are kept next to their logs):
+
+| Mutation | Result |
+| --- | --- |
+| MC1 the 003B copy | killed (8, 11, 12; scenario 11 on `/until … check/`) |
+| MC1b the `a04f6d2` copy ("the request", conditional do-not-resend) | killed (8, 11, 12; scenario 11 on "may not have recorded that answer") |
+| MC2 add "Signing in again lets the server attach your late answer to the order." (missed by round 1's patterns) | killed (11, 12) |
+| MC2b add "Your next check will match the late answer to the order." (no banned stem) | killed (11, 12; `match` pattern, and the exact text) |
+| MC3 drop the operations sentence | killed (11, 12) |
+| MC4 make do-not-resend conditional on "unknown" again | killed (11, 12; unconditional-sentence pattern) |
+| MC5 make "contact operations" a link | killed (11, 12; "no link or button in the notice") |
+| MB1 gate accepts an expired session | killed (11, 12; "the expired session's gate refuses the late hash before any request") |
+| MB2 notice never set | killed (8, 11, 12) |
+
+### Checks (`final-2/`, HEAD `2e9c0cd`; the docs-only commit that follows adds this section)
+
+| Check | Exit | Result |
+| --- | --- | --- |
+| focused: registry, full-stack, page DOM, harness (DOM + artifacts) | 0 | 56/56 |
+| focused: `stocks-wallet-ui` and `stocks-wallet-source` suites | 0 | 111/111 |
+| page DOM repeated twice more | 0 / 0 | 13/13 each |
+| Codex host probe, ported | 0 | 4/4 |
+| `npm run typecheck` | 0 | no errors |
+| `npm run build` | 0 | built; existing chunk-size warning only |
+| `npm run test:frontend` with DOM runtime + ABI artifacts | 0 | **663/663** (003B: 661; +2 scenarios) |
+| `npm run test:frontend` CI-like (both gates unset) | 0 | 626 tests: 622 pass, 4 skip (3 DOM gates, 1 artifact gate), unchanged |
+| `npm run test:server` | 0 | 398 tests: **330 pass, 68 skip (DB)**, 0 fail |
+| `npm run test:security` | 0 | env exposure and evmVersion checks pass |
+| design tokens `--all` | 1 | the 7 known baseline findings only |
+| design stories `--all` | 0 | no hard violations |
+| `.mjs` DOM regressions (market routes, admin scope-render, investor delayed-sell) | 0 | 23/23 |
+| `git diff --check b27b259 HEAD` and `eda0bc0 HEAD` | 0 / 0 | clean |
+
+The same suite also ran at `a04f6d2` (`final/`), with the same counts. That run's `.mjs` step first passed the wrong environment variable (`GIWA_HOST_DOM_RUNTIME`), so the two jsdom-based files could not load jsdom (3 tests: 1 pass, 2 file-level fail; `mjs-dom-regressions-wrong-env.log`). A manual rerun with `GIWA_MARKET_DOM_RUNTIME` and `GIWA_ADMIN_DOM_RUNTIME` gave 23/23. `final-2/run.sh` uses the correct names.
+
+These are builder checks on the UI candidate only. Codex's PostgreSQL + signed-JWT backend verification (72/72 DB, `69bb9ec`) is a separate result on a separate branch and is not merged or re-run here.
+
+**Boundaries:**
+- `final-2/changed-vs-003b.txt`: 6 files, all docs, notice copy or DOM test.
+- `final-2/forbidden-paths-diff.txt`: lists only `stocks-wallet-ui/README.md` (documentation). No code changed under server, packages, deployments, dependencies, Vite, providers, config, the wallet, submission, http, source or UI modules, the host, contracts, wallet, registry or testing.
+- `final-2/untouched.txt`: the 003B checkout, Codex review clones, the backend recovery clone and the hardening base all have unchanged HEADs and clean status, and Codex's probe file has the same SHA-256.
+
+### Limits and remaining
+
+- **Browser recovery step not built.** The browser still cannot carry a known late hash into a new valid session. The backend's existing `inspect → outcomes → reconcile` API would be used, with no new endpoint, deadline extension or claim reopening. A hash the application never received cannot be restored.
+- **Post-deadline path not scenario-tested.** After the quote deadline, the new session's panel offers no check (verified in `model.ts` and noted by the review). The notice now sends that case to operations, but no DOM scenario signs in after the deadline.
+- **Other findings stand.** The session-end notice is still page state (gone after reload or remount). The quote-deadline/finality condition, the short evidence window, unsupported Dynamic mode and the synchronous-refusal UNKNOWN (WP-3) remain as documented above.
+- **Not verified:** real wallet, public network, public finality latency, real database (by this builder), Node 22.

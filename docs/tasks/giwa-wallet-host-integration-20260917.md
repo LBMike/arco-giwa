@@ -231,3 +231,14 @@ Follow-up to Codex's independent review of `eda0bc0` (`review-results/20260918/w
 - `test:server`, `test:security`, design tokens/stories, `git diff --check`.
 
 Baseline at `eda0bc0`: frontend 661, server 330 pass / 68 DB skip, 7 token findings.
+
+### 003B-1 results (recorded at completion)
+
+- **Notice copy.** It first said "the request" may be unrecorded, and that do-not-resend applies only to an unknown result (`a04f6d2`). The builder-side review found both wrong:
+  - the claim is always on the server once the notice can show;
+  - after the quote deadline the panel offers no check.
+
+  The final copy (`2e9c0cd`) names the wallet answer, never allows a repeat, and sends an unknown or no-longer-checkable result to operations. The plan above keeps its original wording as recorded.
+- **Tests.** Scenarios 11–12 assert the exact notice text on the live node, plus all the listed behaviour: 0 outcomes, claim without hash, UNKNOWN without hash after a new session's check, 1 send in total.
+- **Also corrected.** Two sentences in `stocks-wallet-ui/README.md` said a later check records a refused late hash. They date from 003A-1, in a README changed in 003B.
+- **Results.** Failure first, two mutation rounds (all killed), and the full checks at `2e9c0cd`: frontend 663/663 with DOM + artifacts, CI-like 622 + 4 skip, server 330 / 68 DB skip, 7 token findings. Details are in the 003B-1 section of `docs/evidence/giwa-wallet-host-integration-20260917.md`.
