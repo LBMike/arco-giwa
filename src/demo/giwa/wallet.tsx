@@ -6,6 +6,7 @@ import { GIWA_EXPLORER, GIWA_HEX_CHAIN_ID, GIWA_PUBLIC_RPC, GIWA_CHAIN_ID } from
 import { publicGiwaClient, setDynamicWalletClient, setInjectedWalletSource } from "./contracts"
 import type { HexAddress, UiPhase } from "./types"
 import { dynamicSigningReady, useWalletConnectionEpoch } from "./stocks-host/wallet-lifecycle"
+import type { ActiveWalletSource } from "./stocks-wallet-source/types"
 
 type WalletContextValue = {
   address: HexAddress | null
@@ -14,6 +15,8 @@ type WalletContextValue = {
   nativeBalance: string | null
   /** SIWE scope changes even for an A→B→A or same-address reconnection. */
   sessionEpoch: string
+  /** The captured source object (injected provider or Dynamic client) behind this epoch. */
+  source: ActiveWalletSource | null
   signingReady: boolean
   phase: UiPhase
   error: string | null
@@ -165,6 +168,8 @@ export function GiwaWalletProvider({ children }: { children: ReactNode }) {
     refreshBalance().catch(() => setNativeBalance(null))
   }, [refreshBalance])
 
+  const source = useMemo<ActiveWalletSource>(() => ({ mode: "injected", provider: injectedProvider ?? null }), [injectedProvider])
+
   const phase: UiPhase = !address
     ? "disconnected"
     : chainId !== GIWA_CHAIN_ID
@@ -180,6 +185,7 @@ export function GiwaWalletProvider({ children }: { children: ReactNode }) {
       chainId,
       nativeBalance,
       sessionEpoch: `injected:${sourceEpoch}`,
+      source,
       signingReady: Boolean(injectedProvider && address && chainId === GIWA_CHAIN_ID),
       phase,
       error,
@@ -188,7 +194,7 @@ export function GiwaWalletProvider({ children }: { children: ReactNode }) {
       switchToGiwa,
       refreshBalance,
     }),
-    [address, chainId, sourceEpoch, injectedProvider, connect, disconnect, error, nativeBalance, phase, refreshBalance, switchToGiwa],
+    [address, chainId, sourceEpoch, source, injectedProvider, connect, disconnect, error, nativeBalance, phase, refreshBalance, switchToGiwa],
   )
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
@@ -277,6 +283,8 @@ function DynamicGiwaWalletStateProvider({ children, dynamic, account, switchChai
     refreshBalance().catch(() => setNativeBalance(null))
   }, [refreshBalance])
 
+  const source = useMemo<ActiveWalletSource>(() => ({ mode: "dynamic", client: signingReady ? dynamicWalletClient ?? null : null }), [signingReady, dynamicWalletClient])
+
   const phase: UiPhase = !address
     ? "disconnected"
     : chainId !== GIWA_CHAIN_ID
@@ -292,6 +300,7 @@ function DynamicGiwaWalletStateProvider({ children, dynamic, account, switchChai
       chainId,
       nativeBalance,
       sessionEpoch: `dynamic:${connectionEpoch}`,
+      source,
       signingReady,
       phase,
       error,
@@ -300,7 +309,7 @@ function DynamicGiwaWalletStateProvider({ children, dynamic, account, switchChai
       switchToGiwa,
       refreshBalance,
     }),
-    [address, chainId, connectionEpoch, signingReady, connect, disconnect, error, nativeBalance, phase, refreshBalance, switchToGiwa],
+    [address, chainId, connectionEpoch, source, signingReady, connect, disconnect, error, nativeBalance, phase, refreshBalance, switchToGiwa],
   )
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>

@@ -15,6 +15,7 @@ import {
 import { GIWA_PUBLIC_RPC, giwaSepolia } from "./config"
 import { vaultAddressForOperation, type ProductOperation } from "./operation-routing"
 import type { GiwaCatalogItem, HexAddress, UnsignedAdminTransaction } from "./types"
+import type { ActiveWalletSource } from "./stocks-wallet-source/types"
 
 const faucetAbi = parseAbi(["function drip(address token)"])
 const faucetWithDripAllAbi = parseAbi(["function drip(address token)", "function dripAll()"])
@@ -72,6 +73,12 @@ export function setInjectedWalletSource() {
 
 export function setDynamicWalletClient(client: ActiveWalletClient | null) {
   walletSource = { mode: "dynamic", client }
+}
+
+/** Read-only view of the active source object. It creates no client and issues no request. */
+export function activeWalletSource(): ActiveWalletSource {
+  if (walletSource.mode === "dynamic") return { mode: "dynamic", client: walletSource.client }
+  return { mode: "injected", provider: typeof window === "undefined" ? null : window.ethereum ?? null }
 }
 
 function browserProvider() {
