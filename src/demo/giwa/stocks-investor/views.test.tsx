@@ -280,3 +280,39 @@ test("quantity errors and disclosures use readable text tokens; muted is placeho
   const mutedUses = html.match(/[^\s"]*color-arco-muted[^\s"]*/g) ?? []
   assert.ok(mutedUses.every((use) => use.startsWith("placeholder:")), mutedUses.join(","))
 })
+
+// 003B: a host slot supplies the wallet steps. The card then points to them instead of saying they do not exist.
+test("003B: with a host execution slot the accepted order card shows the slot and wallet-step copy for BUY and SELL", async () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    const h = createHarness()
+    if (side === "SELL") h.controls.setHolding(WALLET_A, "3000000000")
+    await h.enter(WALLET_A)
+    await h.quote("2.5", side)
+    await h.controller.placeOrder()
+    const seen: { id: string; state: string; refreshing: boolean }[] = []
+    const html = renderToStaticMarkup(
+      <GiwaStocksFeatureView
+        state={h.controller.getState()}
+        actions={actionsFor(h.controller)}
+        tab="stocks"
+        onTabChange={() => undefined}
+        detailOpen
+        onDetailChange={() => undefined}
+        renderOrderExecution={({ order, refreshing }) => {
+          seen.push({ id: order.id, state: order.state, refreshing })
+          return <div data-testid="host-slot">host wallet steps</div>
+        }}
+      />,
+    )
+    const shown = text(html)
+    const order = h.controller.getState().attempt?.order
+    assert.ok(order)
+    assert.deepEqual(seen, [{ id: order.id, state: side === "BUY" ? "AWAITING_FUNDING" : "AWAITING_ESCROW", refreshing: false }], `${side}: slot receives the displayed row`)
+    assert.match(html, /data-testid="host-slot"/)
+    assert.match(shown, side === "BUY" ? /Funding required This order is matched only by a depositForOrder call/ : /Escrow required This order is matched only by an escrowForOrder call/)
+    assert.match(shown, side === "BUY" ? /Use the wallet steps below: check the order, approve exactly this amount, then deposit it as a separate step\./ : /Use the wallet steps below: check the order, approve exactly these units, then escrow them as a separate step\./)
+    assert.doesNotMatch(shown, /not available in this app yet|does not sign or send anything/)
+    // Without a slot nothing changes.
+    assert.match(text(render(h.controller, "stocks", true)), side === "BUY" ? /Funding required — not available in this app yet/ : /Escrow required — not available in this app yet/)
+  }
+})
