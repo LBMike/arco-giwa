@@ -60,10 +60,13 @@ export function StocksExecutionProvider({ apiBase, fetch, clock, activeSource = 
     })
     setHeld({ key, fetch, clock, activeSource, registry })
     const wallet = live.current.wallet.address
+    const signedIn = live.current.session !== null
     return () => {
       // A wallet request that was open, answered or uncertain when this identity ended keeps a generic
       // notice for the same wallet (no order, amount or hash), so nobody repeats it after signing in again.
+      // A later session that ends without one replaces it: that session could check the order.
       if (registry.recordedAttempt()) setEnded({ wallet })
+      else if (signedIn) setEnded(null)
       registry.dispose()
     }
     // live and invalidate are refs; view changes are encoded by key.
@@ -129,7 +132,7 @@ export function StocksOrderExecution({ order, observedAt, refreshing, onRefresh 
   const registry = host?.registry ?? null
   // A moved-on order gets no panel unless this identity already has an owner for it (a pinned attempt to show).
   const payable = order.state === (order.side === "SELL" ? "AWAITING_ESCROW" : "AWAITING_FUNDING")
-  const lookup = registry && (payable || registry.hasOwner(order.side, order.id)) ? registry.ownerFor(order.side, order) : null
+  const lookup = registry && (payable || registry.hasPinned(order.side, order.id)) ? registry.ownerFor(order.side, order) : null
   const owner = lookup?.owner ?? null
   useOwnerVersion(owner)
   const [, setRestarts] = useState(0)

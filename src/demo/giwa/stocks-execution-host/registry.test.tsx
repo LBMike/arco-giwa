@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import type { HostSession } from "../stocks-host/session"
-import { API, clocks, envelope, evidence, fakeFetch, flush, json, orderRow, START, TOKEN, WALLET } from "../stocks-wallet-http/test-support"
+import { digest } from "../stocks-wallet/planner"
+import { API, clocks, envelope, evidence, fakeFetch, flush, json, manifest, orderRow, START, TOKEN, WALLET } from "../stocks-wallet-http/test-support"
 import type { ActiveWalletSource, WalletSourceView } from "../stocks-wallet-source"
 import { fakeProvider, touchSpy, windowEthereumSpy } from "../stocks-wallet-source/test-support"
 import { createExecutionRegistry, executionIdentityKey, type ExecutionHostView } from "./registry"
@@ -72,7 +73,7 @@ test("capability codes: API base, session, wallet mismatch, missing source and D
   }
 })
 
-test("identity keys separate session, address, epoch, API base and a replaced source object at the same address", () => {
+test("identity keys separate session, address, chain, epoch, API base and a replaced source object at the same address", () => {
   const w = world()
   const base = executionIdentityKey(w.view)
   const variants: Partial<ExecutionHostView>[] = [
@@ -82,6 +83,7 @@ test("identity keys separate session, address, epoch, API base and a replaced so
     { wallet: { ...w.view.wallet, address: "0x2222222222222222222222222222222222222222" } },
     { wallet: { ...w.view.wallet, source: { mode: "injected", provider: fakeProvider() } } },
     { apiBase: "https://other-stocks-api.test" },
+    { wallet: { ...w.view.wallet, chainId: 1 } },
   ]
   for (const change of variants) assert.notEqual(executionIdentityKey({ ...w.view, ...change }), base, JSON.stringify(Object.keys(change)))
   assert.equal(executionIdentityKey({ ...w.view, wallet: { ...w.view.wallet, address: WALLET.toUpperCase().replace("0X", "0x") } }), base, "address case is not identity")
@@ -194,6 +196,8 @@ test("a broken clock is reported, and only an explicit restart creates a new own
   const renewed = w.registry.ownerFor("BUY", orderRow("BUY", { version: 7 })).owner!
   assert.notEqual(renewed, owner)
   assert.deepEqual(renewed.selection.order, row, "the pinned first row survives a restart")
+  w.registry.restart(renewed)
+  assert.deepEqual([w.registry.hasOwner("BUY", row.id), w.registry.hasPinned("BUY", row.id)], [false, true], "review HL-2: a restarted order keeps its panel eligibility")
   assert.equal(w.http.calls.length + w.provider.calls.length, 0)
 })
 
@@ -214,4 +218,42 @@ test("an owner never reads evidence with a newer session's token, even if it is 
   w.setView({ session: null })
   await owner.refreshEvidence()
   assert.equal(w.http.calls.length, 0)
+})
+
+test("review 003B: a Dynamic source is unsupported before sign-in too (nobody is told to sign in for it)", () => {
+  const dynamic = world({ source: "dynamic", session: null })
+  assert.deepEqual(dynamic.registry.capability, { status: "UNAVAILABLE", code: "WALLET_SOURCE_UNSUPPORTED" })
+  assert.deepEqual(dynamic.dynamic.touched, [])
+})
+
+test("review 003B: a failed evidence read drops the earlier lease; evidence for another manifest is never accepted", async () => {
+  const w = world()
+  const owner = w.registry.ownerFor("BUY", orderRow("BUY")).owner!
+  await owner.refreshEvidence()
+  assert.ok(owner.ports.context().deployment)
+  w.answer(() => json({ error: "EXECUTION_DEPLOYMENT_UNVERIFIED" }, 503))
+  await owner.refreshEvidence()
+  assert.equal(owner.evidenceFailure(), "DEPLOYMENT_NOT_REVIEWED")
+  assert.equal(owner.ports.context().deployment, null, "the server no longer confirms the review: no earlier lease is used")
+
+  const other = world()
+  const otherOwner = other.registry.ownerFor("BUY", orderRow("BUY")).owner!
+  const foreign = { ...manifest(), deploymentId: "other-deployment-2" }
+  other.answer(() => json(envelope(evidence({ manifest: foreign, manifestDigest: digest(foreign) }))))
+  await otherOwner.refreshEvidence()
+  assert.equal(otherOwner.ports.context().deployment, null)
+  assert.ok(otherOwner.evidenceFailure(), "a digest mismatch is a failure, not a lease")
+})
+
+test("review 003B TD-1: a late 401 after the host moved to a newer session invalidates only the captured session", async () => {
+  const w = world()
+  const owner = w.registry.ownerFor("BUY", orderRow("BUY")).owner!
+  let release!: () => void
+  w.answer(() => new Promise<Response>((resolve) => { release = () => resolve(json({ error: "UNAUTHORIZED" }, 401)) }))
+  const pending = owner.refreshEvidence()
+  await flush()
+  w.setView({ session: { ...SESSION, id: "session-b", accessToken: "other-header.other-payload.other-signature" } })
+  release()
+  await pending
+  assert.deepEqual(w.invalidated, ["session-a"])
 })

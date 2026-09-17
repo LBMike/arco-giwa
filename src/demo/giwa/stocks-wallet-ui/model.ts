@@ -364,9 +364,11 @@ export function derivePanelModel(input: PanelInput): PanelModel {
   /** Code shown when the controller reported none: why the offered check is disabled. */
   const fallbackCode = snapshot.error ?? (expired ? "ORDER_EXPIRED" : (unavailable?.code ?? null))
   const noLongerCheckable = "The quote deadline has passed, so this screen can no longer check it. Contact operations if it stays unresolved."
-  /** Why a read-only check is disabled although the screen offers it. */
+  /** The host's last evidence read failed while the check loads evidence: said on every screen that offers the check. */
+  const evidenceNote = loadsEvidence && input.evidenceFailure ? `The deployment review could not be loaded for the last check. ${describeCode(input.evidenceFailure, side).reason} Try the check again later; nothing is sent again.` : null
+  /** Why a read-only check is disabled although the screen offers it, or why the last check could not run. */
   const withCheckNote = (paragraphs: string[], shownCode: string | null) =>
-    unavailable && unavailable.code !== shownCode ? [...paragraphs, `Checking is unavailable right now. ${unavailable.reason} ${unavailable.next}`] : paragraphs
+    unavailable && unavailable.code !== shownCode ? [...paragraphs, `Checking is unavailable right now. ${unavailable.reason} ${unavailable.next}`] : evidenceNote ? [...paragraphs, evidenceNote] : paragraphs
   /** A wallet step that must not be taken now: the reason replaces the call to action. */
   const signingStop = (verb: string, noun: string): { title: string; lead: string[]; code: string } | null => {
     if (expired) return { title: `Quote deadline passed — do not ${verb}`, lead: [expiredNote], code: "ORDER_EXPIRED" }

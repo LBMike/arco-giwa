@@ -41,7 +41,7 @@ Connects the existing `/stocks` page to wallet execution for an accepted GIWA St
 - **Shape of the read:** one in-flight read, with the session captured at start. It never retries, polls or runs on a timer, so it cannot cancel a running check in a loop.
 - **Acceptance:** an answer is ignored when the owner was disposed, or the host session or API base changed.
 - **Same evidence:** when the server returns the same cached evidence, the current lease object is kept, so its window is neither extended nor restarted.
-- **Failure:** a failed read leaves a stable code (`evidenceFailure()`) shown next to the check. A 401 invalidates only the captured session ID.
+- **Failure:** a failed read drops the earlier lease, so nothing keeps using evidence the server no longer confirms. It leaves a stable code (`evidenceFailure()`) shown on "Not checked yet" and on every screen that offers the read-only check. Evidence for another manifest digest is refused. A 401 invalidates only the session ID captured when the read started, even if the host has moved on.
 - **Wallet steps:** approval, deposit and escrow need current evidence at their click. When the evidence ends, unrecorded ready screens return to "Not checked yet" (003A-1 controller rule), and recorded screens stay.
 
 ## Capability
@@ -52,15 +52,17 @@ Connects the existing `/stocks` page to wallet execution for an accepted GIWA St
 | --- | --- |
 | `API_BASE_NOT_CONFIGURED` | The page API base failed the common check (`../api-base.ts`) |
 | `SESSION_REQUIRED` | No Stocks session |
-| `WALLET_SOURCE_UNSUPPORTED` | Dynamic mode. Its wagmi connector client has no single-attempt raw request (nested viem transports retry), so no execution is offered and `window.ethereum` is never used in its place. Also an injected provider without events |
+| `WALLET_SOURCE_UNSUPPORTED` | Dynamic mode (reported before sign-in too). Its wagmi connector client has no single-attempt raw request (nested viem transports retry), so no execution is offered and `window.ethereum` is never used in its place. Also an injected provider without events |
 | `WALLET_SOURCE_MISSING`, `WALLET_NOT_CONNECTED` | No provider or address |
 | `WALLET_MISMATCH` | The connected wallet is not the session wallet |
 
-When the capability is not READY, the investor order card keeps its "not available in this app yet" wording (`useStocksOrderExecutionSlot` returns null). Moved-on orders get no panel unless this identity already owns one, which keeps showing its recorded attempt next to the server status.
+When the capability is not READY, the investor order card keeps its "not available in this app yet" wording (`useStocksOrderExecutionSlot` returns null). Moved-on orders get no panel unless this identity has already seen the order (an owner exists or was restarted), which keeps showing its recorded attempt next to the server status.
 
 ## Session end
 
-When the identity ends with an open, answered or uncertain wallet request (logout, session expiry, reload of the host), the registry is disposed. `StocksExecutionSessionNotice` then shows, while signed out with the same wallet, a notice without order, amount or hash. It says to sign in again, check the order, and not repeat anything from another app.
+When a signed-in identity ends with an open, answered or uncertain wallet request (logout or session expiry while the page stays mounted), the registry is disposed. `StocksExecutionSessionNotice` then shows, while signed out with the same wallet, a notice without order, amount or hash. It says to sign in again, check the order, and not repeat anything from another app. A later session for the same wallet that ends without such a request clears it.
+
+The notice lives in page state: after a reload or remount it is gone. Recovery then comes only from the next check, which shows the reserved claim as recovery-only (UNKNOWN, do not repeat) or the recorded hash.
 
 Known limit: the original gate refuses to record a late hash once its session has expired by time. The server journal then keeps only the reserved claim. The next session's check shows it as recovery-only (UNKNOWN, do not repeat), not as the hash; see `full-stack.test.tsx`. Nothing re-issues the old request with a new session, and no automatic retry exists.
 
@@ -77,17 +79,21 @@ Known limit: the original gate refuses to record a late hash once its session ha
 
 ```sh
 TMPDIR=/private/tmp node --import tsx --test src/demo/giwa/stocks-execution-host/*.test.tsx src/demo/giwa/stocks-execution-host/testing/harness.test.tsx
+# the page DOM test needs an existing jsdom (skipped without it)
+GIWA_HOST_DOM_RUNTIME=/path/to/node_modules/jsdom/package.json TMPDIR=/private/tmp node --import tsx --test src/demo/giwa/stocks-execution-host/page.dom.test.tsx
 ```
 
 - `registry.test.tsx`:
   - no I/O on creation
-  - capability codes (Dynamic: no client access, no `window.ethereum` read)
-  - identity keys
-  - pinned rows
+  - capability codes (Dynamic before and after sign-in: no client access, no `window.ethereum` read)
+  - identity keys, including chain
+  - pinned rows, and eligibility after a restart
   - live context
-  - evidence read sharing, keep/replace, stale scope, failure and 401
+  - evidence read sharing, keep/replace, stale scope, failure dropping the lease, another manifest, 401
+  - a late 401 after the host moved to a newer session
   - dispose abort
   - clock failure and explicit restart
+  - no newer-session token
   - source guards
 - `full-stack.test.tsx`: real registry, controller, reads, gate and ports against the real server plugins (`testing/`), with a fake wallet on the same fake chain.
   - BUY/SELL exact wallet and server requests
@@ -96,5 +102,16 @@ TMPDIR=/private/tmp node --import tsx --test src/demo/giwa/stocks-execution-host
   - account change inside a SIGNING subscriber
   - a 4 s policy with a 6 s check inside the final wallet read and 15 s evidence → 0 sends, plus a negative control with a port that awaits
   - open prompt across evidence expiry, logout/reload, expired-session limit, late 401, cancel
-  - 4001/-32603, revert, pending finality
+  - 4001/-32603/invalid hash, revert, pending finality
+- `page.dom.test.tsx` (real `/stocks` routes in StrictMode, real host, investor feature, provider, panel, controller, reads, gate and ports over the in-process server):
+  - mount and sign-in with zero wallet or execution requests
+  - BUY accept → check → approve → server reconcile → deposit, with exact params
+  - SELL through the Orders tab
+  - server status refresh keeps the pinned hash
+  - double click and repeated keyboard activation
+  - clock jump during an open prompt
+  - account switch and sign-out during a held send
+  - Dynamic source
+  - remount during a held send
 - `testing/`: a TEST-ONLY in-process server (real Stocks, execution and submission plugins over memory SQL, the real evidence and receipt verifier over a fake chain, fake EIP-1193 wallet). Never imported by product code.
+- `verification/`: an offline loopback page for a browser check of the same real page code (see its README). Not part of the app build.

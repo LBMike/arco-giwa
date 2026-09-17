@@ -310,7 +310,8 @@ test("003B: with a host execution slot the accepted order card shows the slot an
     assert.deepEqual(seen, [{ id: order.id, state: side === "BUY" ? "AWAITING_FUNDING" : "AWAITING_ESCROW", refreshing: false }], `${side}: slot receives the displayed row`)
     assert.match(html, /data-testid="host-slot"/)
     assert.match(shown, side === "BUY" ? /Funding required This order is matched only by a depositForOrder call/ : /Escrow required This order is matched only by an escrowForOrder call/)
-    assert.match(shown, side === "BUY" ? /Use the wallet steps below: check the order, approve exactly this amount, then deposit it as a separate step\./ : /Use the wallet steps below: check the order, approve exactly these units, then escrow them as a separate step\./)
+    assert.match(shown, side === "BUY" ? /The wallet steps below check this order and show any approval or deposit already requested for it; never send one again from another app or wallet\./ : /The wallet steps below check this order and show any approval or escrow already requested for it; never send one again from another app or wallet\./)
+    assert.doesNotMatch(shown, /then deposit it|then escrow them/, "the card never tells a user to send the transfer: the panel knows whether one was already sent")
     assert.doesNotMatch(shown, /not available in this app yet|does not sign or send anything/)
     // Without a slot nothing changes.
     assert.match(text(render(h.controller, "stocks", true)), side === "BUY" ? /Funding required — not available in this app yet/ : /Escrow required — not available in this app yet/)

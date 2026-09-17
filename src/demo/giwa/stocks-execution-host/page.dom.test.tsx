@@ -572,7 +572,8 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       const traps = ["get", "set", "has", "ownKeys", "getOwnPropertyDescriptor", "defineProperty", "deleteProperty", "getPrototypeOf", "setPrototypeOf", "isExtensible", "preventExtensions", "apply", "construct"]
       const client = new Proxy(wallet, Object.fromEntries(traps.map((trap) => [trap, record(trap)])))
       const page = await mount(harness, { wallet: null, address: WALLET_A, epoch: "dynamic:a:9", source: { mode: "dynamic", client } })
-      assert.ok(page.capability().startsWith(SESSION_COPY) || page.capability().includes("확인하는 중"), page.capability())
+      // Review HL-4: a Dynamic source is unsupported before sign-in too, so nobody is told to sign in for it.
+      await page.waitFor(() => page.capability().startsWith(UNSUPPORTED_COPY), "unsupported copy before sign-in")
       await page.signIn()
       await page.waitFor(() => page.capability().startsWith(UNSUPPORTED_COPY), "unsupported capability copy")
       const card = await page.placeOrder("BUY")

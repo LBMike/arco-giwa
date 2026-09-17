@@ -37,6 +37,8 @@ function isZeroAddress(value: string) {
 export function createWalletSourcePorts(input: { source: CapturedWalletSource; deployment: () => ReviewedDeployment | null }): SourcePorts {
   const { source } = input
   let attestation: Attestation | null = null
+  /** Only the latest readWallet may set or clear the attestation: an older read that finishes late changes nothing. */
+  let latestRead = 0
 
   function current() {
     ensure(source.isCurrent(), "WALLET_CHANGED")
@@ -86,20 +88,24 @@ export function createWalletSourcePorts(input: { source: CapturedWalletSource; d
     ensure(input.deployment()?.manifestDigest === deployment.manifestDigest, "CONTEXT_CHANGED")
   }
 
-  async function attest(): Promise<WalletIdentity> {
+  async function attest(read: number): Promise<WalletIdentity> {
     const deployment = reviewed(input.deployment())
     current()
     const checkpointHash = await checkNetwork(deployment)
     await checkChain()
     await checkAccount()
     unchanged(deployment)
+    ensure(read === latestRead, "CONTEXT_CHANGED")
     attestation = Object.freeze({ source, manifestDigest: deployment.manifestDigest, address: source.address })
     return { address: source.address, chainId: 91342, connectionEpoch: source.epoch, deploymentDigest: deployment.manifestDigest, networkInstance: deployment.manifest.networkInstance, checkpointHash }
   }
 
   async function readWallet() {
-    try { return await attest() } catch (error) {
-      attestation = null
+    const read = ++latestRead
+    // A read in progress is not an attestation: a send before it succeeds is refused.
+    attestation = null
+    try { return await attest(read) } catch (error) {
+      if (read === latestRead) attestation = null
       throw error instanceof StocksWalletError ? error : new StocksWalletError("INVALID_RESPONSE")
     }
   }
@@ -117,6 +123,8 @@ export function createWalletSourcePorts(input: { source: CapturedWalletSource; d
     ensure(typeof token === "string" && typeof spender === "string" && allowancePair(deployment, token, spender), "ALLOWANCE_SCOPE_MISMATCH")
     ensure(!signal.aborted, "CONTEXT_CHANGED")
     await checkNetwork(deployment)
+    // A cancelled read stops before it asks the wallet anything else.
+    ensure(!signal.aborted, "CONTEXT_CHANGED")
     const data = encodeFunctionData({ abi: erc20Abi, functionName: "allowance", args: [getAddress(owner), getAddress(spender)] })
     const result = await call("eth_call", [{ to: token, data }, "latest"])
     ensure(typeof result === "string" && WORD.test(result), "INVALID_RESPONSE")

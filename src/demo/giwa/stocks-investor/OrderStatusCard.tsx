@@ -60,7 +60,7 @@ export function OrderStatusCard({ order, observedAt, cashSymbol, refreshing, err
           </p>
           <p className="mt-2">
             {walletSteps
-              ? "Use the wallet steps below: check the order, approve exactly this amount, then deposit it as a separate step. A plain token transfer is not matched to the order. The order moves on only after the server records a finalized deposit."
+              ? "The wallet steps below check this order and show any approval or deposit already requested for it; never send one again from another app or wallet. A plain token transfer is not matched to the order. The order moves on only after the server records a finalized deposit."
               : "This screen does not sign or send anything. A plain token transfer is not matched to the order. The order moves on only after the server records a finalized deposit."}
           </p>
         </Notice>
@@ -75,7 +75,7 @@ export function OrderStatusCard({ order, observedAt, cashSymbol, refreshing, err
           </p>
           <p className="mt-2">
             {walletSteps
-              ? "Use the wallet steps below: check the order, approve exactly these units, then escrow them as a separate step. A plain token transfer is not matched to the order. The order moves on only after the server records a finalized escrow."
+              ? "The wallet steps below check this order and show any approval or escrow already requested for it; never send one again from another app or wallet. A plain token transfer is not matched to the order. The order moves on only after the server records a finalized escrow."
               : "This screen does not sign or send anything. A plain token transfer is not matched to the order. The order moves on only after the server records a finalized escrow."}
           </p>
         </Notice>

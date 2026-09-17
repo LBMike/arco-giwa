@@ -58,6 +58,8 @@ export type ExecutionRegistry = Readonly<{
   disposed(): boolean
   ownerFor(side: Side, row: unknown): OwnerLookup
   hasOwner(side: Side, orderId: string): boolean
+  /** This identity has seen the order (an owner exists or existed): its panel stays, also after an explicit restart. */
+  hasPinned(side: Side, orderId: string): boolean
   /** Explicit restart after a clock failure: the order's owner is disposed and the next lookup creates a new one. */
   restart(owner: ExecutionOwner): void
   /** A disposed or live owner of this registry had an open, answered or uncertain wallet request. */
@@ -101,6 +103,8 @@ function sameEvidence(a: ReviewedDeployment, b: ReviewedDeployment): boolean {
 
 function capabilityOf(view: ExecutionHostView, capture: ReturnType<typeof captureWalletSource> | null): ExecutionCapability {
   if (view.apiBase === null) return unavailable("API_BASE_NOT_CONFIGURED")
+  // Known before sign-in: a Dynamic source can never execute, so nobody is told to sign in for it.
+  if (view.wallet.source?.mode === "dynamic") return unavailable("WALLET_SOURCE_UNSUPPORTED")
   if (view.session === null) return unavailable("SESSION_REQUIRED")
   if (capture === null) return unavailable("WALLET_SOURCE_MISSING")
   if (capture.status !== "READY") return unavailable(capture.code)
@@ -221,7 +225,11 @@ export function createExecutionRegistry(options: ExecutionRegistryOptions): Exec
           // The same cached evidence changes nothing: the current lease (and its window) is kept.
           if (current === null || !sameEvidence(current, next.deployment)) lease = next
         } catch (error) {
-          if (!ownerDisposed && !abort.signal.aborted) evidenceFailure = error instanceof StocksWalletError ? error.code : "REQUEST_FAILED"
+          if (!ownerDisposed && !abort.signal.aborted) {
+            evidenceFailure = error instanceof StocksWalletError ? error.code : "REQUEST_FAILED"
+            // The server no longer confirms the review: earlier evidence is not used for anything else.
+            lease = null
+          }
         } finally {
           aborts.delete(abort)
           inflight = null
@@ -282,6 +290,7 @@ export function createExecutionRegistry(options: ExecutionRegistryOptions): Exec
       return created
     },
     hasOwner: (side: Side, orderId: string) => !disposed && owners.has(`${side}:${orderId}`),
+    hasPinned: (side: Side, orderId: string) => !disposed && pinned.has(`${side}:${orderId}`),
     restart(owner: ExecutionOwner) {
       const existing = owners.get(owner.key)
       if (disposed || existing !== owner) return

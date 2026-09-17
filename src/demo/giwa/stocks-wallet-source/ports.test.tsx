@@ -315,3 +315,36 @@ test("waitApprovalReceipt is inactive and touches nothing", async () => {
   assert.equal(s.provider.listenerCount(), listeners)
   assert.equal(s.source.isCurrent(), true)
 })
+
+test("review 003B WP-1: an older readWallet that finishes after a newer failed read cannot restore the attestation", async () => {
+  let release!: () => void
+  const s = setup({
+    eth_getBlockByNumber: (_params: unknown, index: number) =>
+      index === 0 ? new Promise((resolve) => { release = () => resolve(block({})) }) : block({ hash: `0x${"b".repeat(64)}` }),
+  })
+  const older = s.ports.readWallet()
+  await flush()
+  await rejectsCode(s.ports.readWallet(), "WALLET_NETWORK_INSTANCE_MISMATCH")
+  release()
+  await rejectsCode(older, "CONTEXT_CHANGED")
+  throwsCode(() => s.ports.requestTransaction(approval()), "WALLET_NOT_ATTESTED")
+  assert.equal(sends(s.provider).length, 0)
+  // A read in progress is not an attestation either.
+  const fresh = await attested()
+  const pending = fresh.ports.readWallet()
+  throwsCode(() => fresh.ports.requestTransaction(approval()), "WALLET_NOT_ATTESTED")
+  await pending
+  assert.equal(sends(fresh.provider).length, 0)
+})
+
+test("review 003B WP-2: an allowance read aborted during the checkpoint read never issues eth_call", async () => {
+  let release!: () => void
+  const s = setup({ eth_getBlockByNumber: () => new Promise((resolve) => { release = () => resolve(block({})) }) })
+  const abort = new AbortController()
+  const reading = s.ports.readAllowance(allowanceRequest({ signal: abort.signal }))
+  await flush()
+  abort.abort()
+  release()
+  await rejectsCode(reading, "CONTEXT_CHANGED")
+  assert.equal(s.provider.calls.filter((call) => call.method === "eth_call").length, 0)
+})

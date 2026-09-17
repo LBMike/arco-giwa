@@ -617,3 +617,21 @@ test("003B: host capability codes have specific reasons and pass through the sig
   assert.match(unsupported.paragraphs.join(" "), /cannot send exactly one transaction request/)
   assert.equal(unsupported.buttons.some((button) => button.enabled), false)
 })
+
+test("review 003B PANEL-2: a failed evidence read is explained on every screen that offers the read-only check", () => {
+  const s = setup()
+  const missing = { status: "UNAVAILABLE" as const, code: "DEPLOYMENT_NOT_REVIEWED" }
+  const screens = [
+    s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "EXECUTION_AUTHORITY_CHANGED"),
+    s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH),
+    s.snap("UNKNOWN", "TRANSFER", null, "WALLET_OUTCOME_UNKNOWN"),
+  ]
+  for (const snapshot of screens) {
+    const failed = s.model(snapshot, { availability: missing, evidenceRefreshable: true, evidenceFailure: "REQUEST_FAILED" })
+    assert.match(failed.paragraphs.join(" "), /The deployment review could not be loaded for the last check\./, snapshot.status)
+    assert.match(failed.paragraphs.join(" "), /nothing is sent again/, snapshot.status)
+    assert.doesNotMatch(failed.paragraphs.join(" "), /nothing was sent/i, snapshot.status)
+    const quiet = s.model(snapshot, { availability: missing, evidenceRefreshable: true })
+    assert.doesNotMatch(quiet.paragraphs.join(" "), /could not be loaded/, `${snapshot.status}: no failure, no note`)
+  }
+})

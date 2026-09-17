@@ -394,7 +394,7 @@ test("a late 401 invalidates only the captured session; cancel keeps the late ha
   })
 })
 
-test("a rejected (4001) or failing (-32603) request is UNKNOWN and recovery-only; a reverted approval blocks the transfer; a pending receipt waits", async () => {
+test("a rejected (4001), failing (-32603) or invalid-hash answer is UNKNOWN and recovery-only; a reverted approval blocks the transfer; a pending receipt waits", async () => {
   for (const [error, label] of [[providerError(4001, "User rejected"), "4001"], [providerError(-32603, "Internal"), "-32603"]] as const) {
     await run("BUY", {}, async (w) => {
       const owner = w.owner()
@@ -409,6 +409,19 @@ test("a rejected (4001) or failing (-32603) request is UNKNOWN and recovery-only
       assert.equal(w.sends().length, 1)
     })
   }
+  await run("SELL", {}, async (w) => {
+    const owner = w.owner()
+    assert.equal((await w.check()).status, "APPROVAL_REQUIRED")
+    const held = w.wallet.holdNext("eth_sendTransaction")
+    const approving = owner.controller.approve()
+    await held.arrived
+    held.release("0xnot-a-hash")
+    await approving
+    assert.deepEqual([w.snapshot().status, w.snapshot().error, w.snapshot().txHash], ["UNKNOWN", "WALLET_OUTCOME_UNKNOWN", null], "an invalid hash is an uncertain outcome")
+    assert.equal((await w.journal()).approval.status, "UNKNOWN")
+    assert.equal((await w.check()).status, "UNKNOWN", "recovery-only")
+    assert.equal(w.sends().length, 1)
+  })
   await run("SELL", {}, async (w) => {
     const owner = w.owner()
     assert.equal((await w.check()).status, "APPROVAL_REQUIRED")

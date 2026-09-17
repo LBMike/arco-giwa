@@ -34,7 +34,7 @@ The same attestation as the server RPC port (`server/src/stocks/rpc.ts`): `netwo
 3. `eth_getBlockByNumber ["0x<checkpointNumber>", false]`: `null` → `WALLET_NETWORK_INSTANCE_MISMATCH`; `number` must be the requested quantity and `hash` a lowercase non-zero 32-byte hash (else `INVALID_RESPONSE`); a different hash (same chain ID, other network) → `WALLET_NETWORK_INSTANCE_MISMATCH`.
 4. `eth_chainId` and `eth_accounts` again, then `isCurrent()` (`WALLET_CHANGED`) and the same deployment digest (`CONTEXT_CHANGED`).
 
-`isCurrent()` is also checked before every request. Success returns `{ address, chainId: 91342, connectionEpoch: epoch, deploymentDigest, networkInstance, checkpointHash }` and records an attestation for this capture, digest and address; a failed read clears it.
+`isCurrent()` is also checked before every request. Success returns `{ address, chainId: 91342, connectionEpoch: epoch, deploymentDigest, networkInstance, checkpointHash }` and records an attestation for this capture, digest and address. Only the latest `readWallet` may set or clear it: a new read clears it when it starts, and an older read that finishes late is refused (`CONTEXT_CHANGED`) instead of restoring it.
 
 ### `readAllowance`
 
@@ -42,7 +42,7 @@ Only the reviewed pairs (cashToken → fundingVault, stockToken → redemptionEs
 
 ### Dispatch rule (`requestTransaction`)
 
-Not `async`. Synchronously: exact keys `chainId,data,from,to,value`, chain 91342, `value "0"`, hex data, `to` among cashToken/stockToken/fundingVault/redemptionEscrow (`TRANSACTION_MISMATCH`), `isCurrent()` (`WALLET_CHANGED`), a `readWallet` attestation for this capture and the current digest (`WALLET_NOT_ATTESTED`), `from` equal to the captured and attested address (`WALLET_CHANGED`). Refusals are thrown synchronously and send nothing.
+Not `async`. Synchronously: exact keys `chainId,data,from,to,value`, chain 91342, `value "0"`, hex data, `to` among cashToken/stockToken/fundingVault/redemptionEscrow (`TRANSACTION_MISMATCH`), `isCurrent()` (`WALLET_CHANGED`), a `readWallet` attestation for this capture and the current digest (`WALLET_NOT_ATTESTED`), `from` equal to the captured and attested address (`WALLET_CHANGED`). Refusals are thrown synchronously and send nothing to the wallet. The controller calls this port inside its dispatch `try`, so such a refusal is still recorded against the reserved claim as `UNKNOWN / WALLET_OUTCOME_UNKNOWN` (recovery-only, fail-closed).
 
 Then, with **no await in between**, exactly one `eth_sendTransaction [{ from, to, data, value: "0x0" }]` and the provider's promise is returned unchanged: no retry, no `eth_chainId`, gas, nonce, `wallet_sendTransaction` or `eth_sendRawTransaction`, and no post-check that could discard a late hash. The controller records the answer through its original submission gate. The controller's last await before dispatch is its final `readWallet`.
 
