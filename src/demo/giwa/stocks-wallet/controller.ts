@@ -2,44 +2,109 @@ import { address, assertTransaction, canonical, digest, ensure, freeze, hash, in
 import type { AttemptRecord, AuthenticatedRead, ExecutionContext, Plan, Selection, Stage, SubmissionGate, WalletPorts, WalletSnapshot } from "./types"
 
 const IDLE: WalletSnapshot = Object.freeze({ status: "IDLE", orderId: null, intentKey: null, stage: null, txHash: null, error: null, plan: null })
-type Attempt = { generation: number; scope: string; context: ExecutionContext; selection: Selection; plan: Plan; abort: AbortController; submissions: SubmissionGate; promise?: Promise<void> }
+type Attempt = {
+  generation: number; scope: string; context: ExecutionContext; selection: Selection; plan: Plan; abort: AbortController; submissions: SubmissionGate; promise?: Promise<void>
+  /** Digest of the execution context (session, wallet, evidence lease) this attempt was authorized under. */
+  authority: string
+  /** Set immediately before the wallet request: from then on the attempt must record and show its answer. */
+  dispatched: boolean
+  /** The authority changed or expired after dispatch: record and show the answer, but take no further step. */
+  authorityLost: boolean
+}
+/** An accepted execution policy: the server's validUntil plus a monotonic bound counted from before the request was sent. */
+type PolicyLease = Readonly<{ validUntil: number; startedWall: number; startedMonotonic: number; monotonicUntil: number }>
+/** Statuses that show a wallet request (open, answered or uncertain); they are never cleared by an authority change. */
+const RECORDED: readonly WalletSnapshot["status"][] = ["SIGNING", "APPROVAL_SUBMITTED", "SUBMITTED", "UNKNOWN"]
 
 /** Explicit actions only. No transport, wallet or persistence implementation is selected implicitly. */
 export function createStocksWalletController(ports: WalletPorts) {
   const now = ports.now ?? Date.now
+  const monotonicNow = ports.monotonicNow ?? (() => performance.now())
   let selected: Selection | null = null
   let generation = 0, disposed = false
   let scope = ""
   let snapshot = IDLE
+  /** Authority under which the displayed (unrecorded) snapshot was produced. */
+  let snapshotAuthority = ""
+  let identity = ""
+  let retainedDeployment: string | null = null
   let active: Attempt | null = null
   const listeners = new Set<() => void>()
   // Never erase uncertain/submitted results just because the displayed scope changed.
   const attempted = new Map<string, AttemptRecord>()
   function notify() { listeners.forEach(fn => fn()) }
   function publish(value: WalletSnapshot) { snapshot = freeze(value); notify() }
-  function key(context: ExecutionContext) { return digest([context, selected]) }
+  const lower = (value: unknown) => typeof value === "string" ? value.toLowerCase() : value ?? null
+  /**
+   * What is on screen: session, wallet (address, chain, source epoch), API base, the accepted order and the reviewed
+   * deployment identity (manifest digest). Short evidence and policy leases are deliberately not part of it. While
+   * evidence is momentarily absent the last manifest digest seen for the same identity is kept; another manifest,
+   * like any other identity change, is another scope.
+   */
+  function displayScope(context: ExecutionContext | null) {
+    const session = context?.session
+    const next = digest([session ? [session.id, lower(session.walletAddress), session.chainId] : null, context ? [lower(context.walletAddress), context.chainId, context.walletEpoch, context.apiBase] : null, selected])
+    if (next !== identity) { identity = next; retainedDeployment = null }
+    const manifestDigest = context?.deployment?.manifestDigest
+    if (typeof manifestDigest === "string") retainedDeployment = manifestDigest
+    return digest([identity, retainedDeployment])
+  }
+  /** Execution authority: the exact current context, only while it is valid now. Never display identity. */
+  function authorityOf(context: ExecutionContext | null) {
+    if (!context) return null
+    try { validateContext(context, now()); return digest(context) } catch { return null }
+  }
+  const recorded = (value: WalletSnapshot) => value.txHash !== null || RECORDED.includes(value.status) || (value.status === "BLOCKED" && value.stage !== null)
+  function knownState(plan: Plan, known: AttemptRecord, error: string): WalletSnapshot {
+    const status = known.status === "REVERTED" ? "BLOCKED" : known.txHash ? known.stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED" : "UNKNOWN"
+    return { ...IDLE, status, plan, orderId: plan.order.id, intentKey: plan.intentKey, stage: known.stage, txHash: known.txHash ?? null, error }
+  }
   function synchronize() {
+    let context: ExecutionContext | null
+    try { context = ports.context() } catch { context = null }
     let next: string
-    try { next = key(ports.context()) } catch { next = "invalid-context" }
+    try { next = displayScope(context) } catch { next = "invalid-context" }
     if (next !== scope) {
-      scope = next; generation++; active?.abort.abort(); active = null; snapshot = IDLE
+      scope = next; generation++; active?.abort.abort(); active = null; snapshot = IDLE; snapshotAuthority = ""
       queueMicrotask(() => { if (!disposed) notify() })
+      return snapshot
     }
-    if (snapshot.plan) {
-      try { validateContext(ports.context(), now()) }
-      catch { generation++; active?.abort.abort(); active = null; snapshot = Object.freeze({ ...IDLE, status: "BLOCKED", error: "CONTEXT_EXPIRED" }); queueMicrotask(() => { if (!disposed) notify() }) }
+    if (!active && !snapshot.plan) return snapshot
+    // Same identity on screen: check execution authority separately.
+    const authority = authorityOf(context)
+    let changed = false
+    if (active && authority !== active.authority) {
+      if (active.dispatched) active.authorityLost = true // The wallet already has the request: keep it visible.
+      else {
+        // Work before a new signature stops. A claim it already reserved stays visible and recovery-only.
+        const stopped = active
+        generation++; stopped.abort.abort(); active = null; changed = true
+        const known = attempted.get(`${stopped.plan.intentKey}:TRANSFER`) ?? attempted.get(`${stopped.plan.intentKey}:APPROVAL`)
+        if (known) snapshot = freeze(knownState(stopped.plan, known, "EXECUTION_AUTHORITY_CHANGED"))
+        else if (!recorded(snapshot)) snapshot = IDLE
+      }
+    } else if (!active && snapshot.plan && !recorded(snapshot) && authority !== snapshotAuthority) {
+      // A ready or checking screen is never permission under another or an expired authority.
+      snapshot = IDLE; changed = true
     }
+    if (changed) queueMicrotask(() => { if (!disposed) notify() })
     return snapshot
   }
   function current(a: Attempt) { synchronize(); return !disposed && active === a && a.generation === generation && a.scope === scope && !a.abort.signal.aborted }
   function guard(a: Attempt) {
     ensure(current(a), "CONTEXT_CHANGED")
+    ensure(!a.authorityLost, "EXECUTION_AUTHORITY_CHANGED")
     validateContext(ports.context(), now())
     ensure(now() < a.plan.deadline, "ORDER_EXPIRED")
   }
+  function policyLive(lease: PolicyLease) {
+    const wall = now(), mono = monotonicNow()
+    ensure(Number.isFinite(wall) && Number.isFinite(mono) && wall >= lease.startedWall && mono >= lease.startedMonotonic && wall < lease.validUntil && mono < lease.monotonicUntil, "EXECUTION_POLICY_EXPIRED")
+  }
   async function bounded<T>(a: Attempt, work: () => Promise<T>): Promise<T> {
     guard(a)
-    const start = now(), startedMono = performance.now(); let timer: ReturnType<typeof setTimeout> | undefined
+    const start = now(), startedMono = monotonicNow(); let timer: ReturnType<typeof setTimeout> | undefined
+    ensure(Number.isFinite(start) && Number.isFinite(startedMono), "READ_TIMEOUT")
     let onAbort = () => {}
     const stop = new Promise<never>((_, reject) => {
       onAbort = () => reject(new StocksWalletError("CONTEXT_CHANGED"))
@@ -48,7 +113,9 @@ export function createStocksWalletController(ports: WalletPorts) {
     })
     try {
       const value = await Promise.race([Promise.resolve().then(() => { guard(a); return work() }), stop])
-      guard(a); ensure(now() >= start && now() - start < 15_000 && performance.now() - startedMono >= 0 && performance.now() - startedMono < 15_000, "READ_TIMEOUT"); return value
+      guard(a)
+      const endWall = now(), endMono = monotonicNow()
+      ensure(Number.isFinite(endWall) && Number.isFinite(endMono) && endWall >= start && endWall - start < 15_000 && endMono >= startedMono && endMono - startedMono < 15_000, "READ_TIMEOUT"); return value
     } finally { if (timer) clearTimeout(timer); a.abort.signal.removeEventListener("abort", onAbort) }
   }
   async function wallet(a: Attempt) {
@@ -66,7 +133,7 @@ export function createStocksWalletController(ports: WalletPorts) {
     return { apiBase: a.context.apiBase, token: a.context.session!.accessToken, sessionId: a.context.session!.id, side: a.plan.side, orderId: a.plan.order.id, deploymentDigest: a.plan.manifestDigest, signal: a.abort.signal }
   }
   function state(a: Attempt, status: WalletSnapshot["status"], extra: Partial<WalletSnapshot> = {}) {
-    if (current(a)) publish({ ...IDLE, status, plan: a.plan, orderId: a.plan.order.id, intentKey: a.plan.intentKey, ...extra })
+    if (current(a)) { snapshotAuthority = a.authority; publish({ ...IDLE, status, plan: a.plan, orderId: a.plan.order.id, intentKey: a.plan.intentKey, ...extra }) }
   }
   function validateRecord(value: AttemptRecord, a: Attempt, stage: Stage) {
     ensure(value.intentKey === a.plan.intentKey && value.stage === stage && value.transactionDigest === digest(stage === "APPROVAL" ? a.plan.approval : a.plan.transfer) && typeof value.claimId === "string" && value.claimId.length > 0, "SUBMISSION_RECORD_MISMATCH")
@@ -131,7 +198,7 @@ export function createStocksWalletController(ports: WalletPorts) {
     const observed = typeof value.observedAt === "string" ? Date.parse(value.observedAt) : NaN
     ensure(Number.isFinite(observed) && observed <= now() && now() - observed < 15_000, "STALE_RESPONSE")
   }
-  async function preflight(a: Attempt, recoverApproval = false): Promise<{ allowance: bigint; policyUntil: number }> {
+  async function preflight(a: Attempt, recoverApproval = false): Promise<{ allowance: bigint; policy: PolicyLease }> {
     await wallet(a)
     const req = request(a)
     const response = record(await read(a, () => ports.readOrder(req)))
@@ -146,15 +213,21 @@ export function createStocksWalletController(ports: WalletPorts) {
     const instruments = catalog.instruments.map(record)
     ensure(instruments.length === 1 && instruments[0]!.symbol === "NVDA" && instruments[0]!.quantityScale === 9 && instruments[0]!.price === "120.000000" && instruments[0]!.priceSource === "FIXED_MOCK_PRICE" && instruments[0]!.orderCapability === "CHECK_PAUSE_AT_ORDER", "CAPABILITY_UNAVAILABLE")
     ensure(typeof ports.readExecutionPolicy === "function", "CURRENT_POLICY_REQUIRED")
+    // The policy's lifetime is counted from before its request was sent, so neither request delay nor a stalled or
+    // stepped-back wall clock re-grants the server's TTL at receipt.
+    const startedWall = now(), startedMonotonic = monotonicNow()
+    ensure(Number.isFinite(startedWall) && Number.isFinite(startedMonotonic), "EXECUTION_POLICY_EXPIRED")
     const policy = await read(a, () => ports.readExecutionPolicy(req))
     ensure(policy?.allowed === true && policy.deploymentDigest === a.plan.manifestDigest && policy.orderId === a.plan.order.id && policy.side === a.plan.side && Number.isFinite(policy.observedAt) && Number.isFinite(policy.validUntil) && policy.observedAt <= now() && now() < policy.validUntil && policy.validUntil - policy.observedAt <= 15_000, "EXECUTION_NOT_ALLOWED")
+    const lease: PolicyLease = Object.freeze({ validUntil: policy.validUntil, startedWall, startedMonotonic, monotonicUntil: startedMonotonic + Math.min(policy.validUntil - policy.observedAt, policy.validUntil - startedWall) })
+    policyLive(lease)
     const journal = await inspect(a, recoverApproval)
     ensure(journal !== "blocked", "RECOVERY_REQUIRED")
     if (journal === "reconciled") return preflight(a) // New verification requires entirely fresh authorization reads.
     const allowance = integer(await read(a, () => ports.readAllowance({ token: a.plan.token, owner: a.plan.order.wallet, spender: a.plan.spender, chainId: 91342, signal: a.abort.signal })), true)
-    ensure(now() < policy.validUntil, "EXECUTION_POLICY_EXPIRED")
+    policyLive(lease)
     ensure(allowance >= BigInt(a.plan.amount) || !attempted.has(`${a.plan.intentKey}:APPROVAL`), "ALLOWANCE_RECOVERY_REQUIRED")
-    return { allowance, policyUntil: policy.validUntil }
+    return { allowance, policy: lease }
   }
   async function persist(a: Attempt, value: AttemptRecord) {
     // Durable outcome updates ALWAYS refer to the original claimed intent, even after scope changes.
@@ -173,27 +246,32 @@ export function createStocksWalletController(ports: WalletPorts) {
   function reconcilable(a: Attempt, stage: Stage) {
     if (stage === "APPROVAL") ensure(typeof a.submissions.reconcile === "function", "TRUSTED_RECONCILIATION_REQUIRED")
   }
-  async function send(a: Attempt, stage: Stage, policyUntil: number) {
+  async function send(a: Attempt, stage: Stage, policy: PolicyLease) {
     const tx = stage === "APPROVAL" ? a.plan.approval : a.plan.transfer
     assertTransaction(tx, stage === "APPROVAL" ? planOrder(a.selection, a.context, now()).approval : planOrder(a.selection, a.context, now()).transfer)
     await wallet(a)
-    const claim = await read(a, () => { reconcilable(a, stage); return a.submissions.claim({ intentKey: a.plan.intentKey, stage, transactionDigest: digest(tx), transaction: tx, orderId: a.plan.order.id, deploymentDigest: a.plan.manifestDigest }) })
-    ensure(claim, "SUBMISSION_ALREADY_CLAIMED"); validateRecord(claim, a, stage)
-    ensure(claim.status === "REQUEST_MAY_START" && !claim.txHash, "SUBMISSION_ALREADY_CLAIMED")
-    attempted.set(`${a.plan.intentKey}:${stage}`, freeze(claim))
+    const claim = await read(a, async () => {
+      reconcilable(a, stage); policyLive(policy)
+      const won = await a.submissions.claim({ intentKey: a.plan.intentKey, stage, transactionDigest: digest(tx), transaction: tx, orderId: a.plan.order.id, deploymentDigest: a.plan.manifestDigest })
+      ensure(won, "SUBMISSION_ALREADY_CLAIMED"); validateRecord(won, a, stage)
+      ensure(won.status === "REQUEST_MAY_START" && !won.txHash, "SUBMISSION_ALREADY_CLAIMED")
+      // Remember the reserved claim as soon as it is won, even if the check that follows is stopped.
+      attempted.set(`${a.plan.intentKey}:${stage}`, freeze(won))
+      return won
+    })
     // Claim/allowance reads can take time. Re-authorize the accepted order immediately before signing.
     const finalResponse = record(await read(a, () => ports.readOrder(request(a))))
     ensure(finalResponse.profile === "DEMO_TESTNET" && finalResponse.valuePolicy === "TEST_VALUE_ONLY" && finalResponse.brokerMode === "MOCK_BROKER" && finalResponse.chainId === 91342 && finalResponse.priceSource === "FIXED_MOCK_PRICE", "ORDER_PROFILE_MISMATCH")
     freshResponse(finalResponse)
     ensure(canonical(parseOrder({ side: a.plan.side, order: finalResponse.data })) === canonical(a.plan.order), "ORDER_CHANGED")
-    guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED"); reconcilable(a, stage)
+    guard(a); policyLive(policy); reconcilable(a, stage)
     state(a, "SIGNING", { stage })
     // SIGNING subscribers run synchronously and may remove ports. This refusal happens before any wallet
     // request, so it keeps the claim as REQUEST_MAY_START instead of recording an uncertain outcome.
     reconcilable(a, stage)
     let result: unknown
-    // SIGNING subscribers may also consume the policy's remaining lifetime.
-    try { guard(a); ensure(now() < policyUntil, "EXECUTION_POLICY_EXPIRED"); result = await ports.requestTransaction(tx) }
+    // SIGNING subscribers may also consume the policy's remaining lifetime (wall and monotonic).
+    try { guard(a); policyLive(policy); a.dispatched = true; result = await ports.requestTransaction(tx) }
     catch {
       const unknown = { ...claim, status: "UNKNOWN" as const }
       try { await persist(a, unknown) } catch { /* The pre-request claim still blocks re-signing. */ }
@@ -210,6 +288,8 @@ export function createStocksWalletController(ports: WalletPorts) {
     }
     // No further wallet request can follow an unchecked late result. Never paint it into a new scope.
     if (!current(a)) return
+    // Authority changed or expired while the wallet had the request: show the answer, continue nothing.
+    if (a.authorityLost) { state(a, stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED", { stage, txHash, error: "EXECUTION_AUTHORITY_CHANGED" }); return }
     state(a, stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED", { stage, txHash })
     try { await wallet(a) } catch { return }
     if (stage === "TRANSFER") return // Receipt/hash is not Stocks order completion.
@@ -225,10 +305,10 @@ export function createStocksWalletController(ports: WalletPorts) {
       if (action === "prepare") { state(a, fresh.allowance >= BigInt(a.plan.amount) ? "READY_TRANSFER" : "APPROVAL_REQUIRED"); return }
       if (action === "approve") {
         if (fresh.allowance >= BigInt(a.plan.amount)) { state(a, "READY_TRANSFER"); return }
-        await send(a, "APPROVAL", fresh.policyUntil)
+        await send(a, "APPROVAL", fresh.policy)
       } else {
         ensure(fresh.allowance >= BigInt(a.plan.amount), "ALLOWANCE_CHANGED")
-        await send(a, "TRANSFER", fresh.policyUntil)
+        await send(a, "TRANSFER", fresh.policy)
       }
     } catch (error) {
       const status = error && typeof error === "object" ? (error as { status?: unknown }).status : null
@@ -236,7 +316,7 @@ export function createStocksWalletController(ports: WalletPorts) {
       if (current(a)) {
         // Keep a known hash/uncertain state; an ordinary error must not turn it into a retry button.
         const known = attempted.get(`${a.plan.intentKey}:TRANSFER`) ?? attempted.get(`${a.plan.intentKey}:APPROVAL`)
-        if (known) state(a, known.status === "REVERTED" ? "BLOCKED" : known.txHash ? known.stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED" : "UNKNOWN", { stage: known.stage, txHash: known.txHash ?? null, error: error instanceof StocksWalletError ? error.code : "REQUEST_FAILED" })
+        if (known) { const shown = knownState(a.plan, known, error instanceof StocksWalletError ? error.code : "REQUEST_FAILED"); state(a, shown.status, shown) }
         else if (snapshot.error !== "RECOVERY_REQUIRED") state(a, "BLOCKED", { error: error instanceof StocksWalletError ? error.code : status === 401 ? "SESSION_REJECTED" : "REQUEST_FAILED" })
       }
     } finally { if (active === a) active = null }
@@ -250,7 +330,7 @@ export function createStocksWalletController(ports: WalletPorts) {
       if (action === "approve") ensure(snapshot.status === "APPROVAL_REQUIRED", "PREPARE_REQUIRED")
       if (action === "submit") ensure(snapshot.status === "READY_TRANSFER", "PREPARE_REQUIRED")
       const context = freeze(ports.context())
-      const a: Attempt = { context, selection: selected, plan: planOrder(selected, context, now()), scope, generation, abort: new AbortController(), submissions: ports.submissions }
+      const a: Attempt = { context, selection: selected, plan: planOrder(selected, context, now()), scope, generation, abort: new AbortController(), submissions: ports.submissions, authority: digest(context), dispatched: false, authorityLost: false }
       active = a
       a.promise = Promise.resolve().then(() => run(a, action))
       return a.promise
@@ -270,7 +350,7 @@ export function createStocksWalletController(ports: WalletPorts) {
       if (!active && (snapshot.txHash || ["SUBMITTED", "APPROVAL_SUBMITTED", "UNKNOWN"].includes(snapshot.status))) return
       const previous = active; generation++; active?.abort.abort(); active = null
       const known = previous && (attempted.get(`${previous.plan.intentKey}:TRANSFER`) ?? attempted.get(`${previous.plan.intentKey}:APPROVAL`))
-      publish(known ? { ...snapshot, status: known.status === "REVERTED" ? "BLOCKED" : known.txHash ? known.stage === "APPROVAL" ? "APPROVAL_SUBMITTED" : "SUBMITTED" : "UNKNOWN", stage: known.stage, txHash: known.txHash ?? null, error: "RECOVERY_REQUIRED" } : IDLE)
+      publish(previous && known ? knownState(previous.plan, known, "RECOVERY_REQUIRED") : IDLE)
     },
     dispose() { disposed = true; generation++; active?.abort.abort(); active = null; snapshot = IDLE; listeners.clear() },
   }

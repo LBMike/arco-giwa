@@ -12,8 +12,13 @@ export function integer(value: unknown, allowZero = false): bigint {
   const n = BigInt(value); ensure(n <= (1n << 256n) - 1n && (allowZero || n > 0n), "INVALID_AMOUNT"); return n
 }
 function label(value: unknown): string { ensure(typeof value === "string" && /^[a-zA-Z0-9:_-]{1,128}$/.test(value), "INVALID_ID"); return value }
+/**
+ * Same canonical JSON as the backend (docs/contracts/stocks-canonical-locale-v1.md): keys sorted with an explicit
+ * en-US collation, so a browser whose default locale is, for example, Czech or Slovak produces the historical en-US
+ * digests. This depends on the runtime's ICU collation data; it is not a version-independent canonical format.
+ */
 export function canonical(value: unknown): string {
-  const order = (node: unknown): unknown => Array.isArray(node) ? node.map(order) : node !== null && typeof node === "object" ? Object.fromEntries(Object.entries(node).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, order(child)])) : node
+  const order = (node: unknown): unknown => Array.isArray(node) ? node.map(order) : node !== null && typeof node === "object" ? Object.fromEntries(Object.entries(node).sort(([a], [b]) => a.localeCompare(b, "en-US")).map(([key, child]) => [key, order(child)])) : node
   return JSON.stringify(order(value))
 }
 export function digest(value: unknown): string { return sha256(toHex(canonical(value))).slice(2) }
@@ -43,7 +48,8 @@ export function validateContext(context: ExecutionContext, now: number) {
   ensure(typeof context.walletEpoch === "string" && context.walletEpoch.length > 0, "WALLET_EPOCH_REQUIRED")
   ensure(address(context.walletAddress).toLowerCase() === address(session.walletAddress).toLowerCase(), "WALLET_MISMATCH")
   const url = new URL(context.apiBase)
-  ensure(["http:", "https:"].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash, "INVALID_API_BASE")
+  // An empty "?" or "#" leaves url.search/url.hash empty but would turn every API path into a query or fragment.
+  ensure(["http:", "https:"].includes(url.protocol) && !url.username && !url.password && !url.href.includes("?") && !url.href.includes("#"), "INVALID_API_BASE")
   return { session, deployment: validateDeployment(context.deployment, now) }
 }
 export function parseOrder(selection: Selection): Order {

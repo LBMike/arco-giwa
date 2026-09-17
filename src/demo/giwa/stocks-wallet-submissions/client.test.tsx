@@ -192,3 +192,14 @@ test("unsupported reconcile endpoint, timeout and late401 fail closed without te
   f.setFetch(async () => response(SUBMITTED)); assert.equal((await f.gate.reconcile!(RECONCILE)).status, "SUBMITTED")
   f.setFetch(async () => new Response("", { status: 401 })); await reject(() => f.gate.reconcile!(RECONCILE), "SUBMISSION_AUTH_REJECTED"); assert.deepEqual(invalidated, [SESSION.id])
 })
+
+test("API base with a query/fragment delimiter (even empty), credentials or another scheme fails before transport", async () => {
+  for (const apiBase of ["https://api.fixture?", "https://api.fixture/?", "https://api.fixture#", "https://api.fixture/prefix?", "https://api.fixture/?q=1", "https://api.fixture/#h", "https://user:pw@api.fixture", "ftp://api.fixture", "not a url"]) {
+    let calls = 0
+    assert.throws(() => createSubmissionGate({ session: { ...SESSION }, side: "BUY", orderId: "order-1", deploymentDigest: DEPLOYMENT, apiBase, now: () => 2000, fetch: async () => { calls++; return response(empty) } }), (error: unknown) => (error as { code?: string }).code === "SUBMISSION_INVALID_API_BASE", apiBase)
+    assert.equal(calls, 0, apiBase)
+  }
+  for (const [apiBase, expected] of [["https://api.fixture", "https://api.fixture/api/v1/"], ["https://api.fixture/prefix/", "https://api.fixture/prefix/api/v1/"]] as const) {
+    const f = fixture({ apiBase }); await f.gate.inspect(KEY); assert.ok(f.calls[0]!.url.startsWith(expected), f.calls[0]!.url)
+  }
+})

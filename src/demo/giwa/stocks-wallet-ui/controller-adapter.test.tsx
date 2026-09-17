@@ -573,3 +573,43 @@ for (const side of ["BUY", "SELL"] as const) {
     }
   })
 }
+
+// 003A-1: removing or renewing the deployment review while the wallet prompt is open keeps the same order's attempt
+// on screen; the late hash is shown; nothing continues without fresh evidence and an explicit check.
+for (const side of ["BUY", "SELL"] as const) {
+  test(`${side}: review evidence removed while the wallet prompt is open keeps "Confirm in your wallet", then shows the late hash`, async () => {
+    const h = harness(side)
+    const view = reviewed(h, side)
+    try {
+      h.f.controls.setWalletMode("hold")
+      await h.actions().prepare()
+      void h.controller.approve()
+      for (let i = 0; i < 20 && h.f.state().held === 0; i++) await flush()
+      assert.equal(view().kind, "SIGNING")
+      h.f.controls.setReviewed(false)
+      const open = view()
+      assert.equal(open.kind, "SIGNING", "the open prompt is not replaced by an unavailable or unchecked screen")
+      assert.match(open.paragraphs.join(" "), /open in your wallet/)
+      assert.ok(open.buttons.every((button) => !button.enabled))
+      h.f.controls.releaseHeld()
+      await flush()
+      const answered = view()
+      assert.equal(answered.kind, "APPROVAL_SUBMITTED")
+      assert.equal(answered.txHash, FIRST_HASH)
+      assert.equal(answered.code, "EXECUTION_AUTHORITY_CHANGED")
+      assert.ok(answered.buttons.every((button) => !button.opensWallet))
+      assert.doesNotMatch(answered.paragraphs.join(" "), /nothing was sent|was not sent/i)
+      assert.equal(h.f.reads.reconcile, 0, "no verification continues without evidence")
+      assert.equal(h.f.requests.length, 1)
+      // With review evidence back, an explicit check recovers the recorded approval without sending anything.
+      h.f.controls.setReviewed(true)
+      await h.actions().prepare()
+      await flush()
+      assert.equal(view().kind, "READY_TRANSFER")
+      assert.equal(h.f.requests.length, 1)
+    } finally {
+      h.f.controls.releaseHeld()
+      h.controller.dispose()
+    }
+  })
+}

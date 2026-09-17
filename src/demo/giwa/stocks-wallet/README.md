@@ -25,7 +25,24 @@ The planner requires chain 91342, NVDA, ARCO_TEST_USDC, manifest v2, exact curre
 - `cancel()` / `dispose()`: stop further host work. They cannot dismiss or cancel an external wallet transaction request already in progress. Its late hash/error remains associated with the original durable claim.
 - `getSnapshot()` / `subscribe()`: stable status updates. No JWT is included in the snapshot or plan. There is no COMPLETED state, holding update, settlement simulation or success fallback.
 
-Same-scope double clicks share one promise. Account, chain, wallet source/connection epoch, SIWE session, API, deployment evidence and selection changes retire work. The host's epoch MUST advance on A→B→A, even if React batches the events. Every awaited preflight read is followed by a current-wallet read and scope/deadline verification. Reads have a 15-second deadline and acceptance-time clock check. Order/catalog observedAt must be less than 15 seconds old; current policy validity is also bounded to 15 seconds. Accurate host/server clocks and trusted transport are required.
+Same-scope double clicks share one promise. Account, chain, wallet source/connection epoch, SIWE session, API, manifest digest and selection changes are **display scope** changes: they retire work and reset the snapshot (a late wallet answer is recorded through the original gate but never painted into the new scope). The host's epoch MUST advance on A→B→A, even if React batches the events.
+
+Deployment evidence (ID, dates, expiry) and session validity are **execution authority**, checked separately (003A-1):
+- If authority changes or expires, work that has not reached the wallet stops. A claim it reserved stays visible as UNKNOWN / `EXECUTION_AUTHORITY_CHANGED`.
+- An attempt whose wallet request is already open stays on screen. Its answer is recorded and shown with `EXECUTION_AUTHORITY_CHANGED`, and no later step (verification, READY_TRANSFER, transfer) runs automatically.
+- Recorded screens are kept; unrecorded ready screens return to IDLE, so a kept screen is never permission.
+
+Every awaited preflight read is followed by a current-wallet read and scope/deadline verification. Reads have a 15-second deadline checked on both the wall clock and `ports.monotonicNow` (default `performance.now()`). Order/catalog observedAt must be less than 15 seconds old.
+
+The execution policy is bounded twice:
+- by its server `validUntil` on the wall clock
+- by `monotonicStart + min(validUntil − observedAt, validUntil − wallStart)`, where both starts are sampled before the policy request is sent, so request delay, stalled or stepped-back wall clocks cannot re-grant its TTL
+
+Both bounds are checked after the allowance read, before a new claim, before SIGNING and immediately before the wallet request (after SIGNING subscribers). A non-finite or regressing clock reading refuses the request. Accurate host/server clocks and trusted transport are required.
+
+Canonical JSON digests (`planner.canonical` / `digest`) sort keys with an explicit `en-US` collation, identical to the backend (`docs/contracts/stocks-canonical-locale-v1.md`). A browser in, for example, a Czech or Slovak default locale produces the historical en-US manifest, transaction and intent digests. This still depends on the runtime ICU collation data; it is not a version-independent canonical format.
+
+`validateContext` refuses an API base with credentials, a non-http(s) scheme, or any `?` or `#` in its normalized href (even empty), before any read.
 
 ## Required host adapters
 

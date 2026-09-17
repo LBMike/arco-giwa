@@ -509,17 +509,66 @@ test("createExecutionClock never runs behind monotonic time since creation and f
   clock.advanceMonotonic(6_000)
   clock.setWall(START - 4_000)
   assert.equal(now(), START + 7_000)
-  // A forward correction is followed.
+  // A forward correction is followed and becomes the new floor.
   clock.setWall(START + 60_000)
   assert.equal(now(), START + 60_000)
   // Fractional monotonic readings still give integer milliseconds.
   clock.setWall(START)
   clock.advanceMonotonic(0.75)
   assert.ok(Number.isInteger(now()))
-  // A reading that becomes unusable fails closed as NaN; an unusable clock cannot be created at all.
-  let wall = START
-  const breaking = createExecutionClock({ now: () => wall, monotonicNow: () => 0 })
-  wall = Number.NaN
-  assert.ok(Number.isNaN(breaking()))
   assert.throws(() => createExecutionClock({ now: () => Number.NaN, monotonicNow: () => 0 }), StocksExecutionReadError)
+})
+
+test("createExecutionClock remembers every forward correction with the time elapsed since, through repeated corrections", () => {
+  // Created 60 s slow (independent review R1), then corrected before any lease is read.
+  const clock = clocks(START - 60_000)
+  const now = createExecutionClock({ now: clock.now, monotonicNow: clock.monotonicNow })
+  const readings: number[] = []
+  const read = () => {
+    const value = now()
+    readings.push(value)
+    return value
+  }
+  assert.equal(read(), START - 60_000)
+  clock.setWall(START)
+  assert.equal(read(), START, "the forward correction is observed")
+  // 6 s pass while the wall clock is stepped back to +1 s: the floor keeps the corrected time plus elapsed time.
+  clock.advanceMonotonic(6_000)
+  clock.setWall(START + 1_000)
+  assert.equal(read(), START + 6_000)
+  // The wall clock stalls: time keeps advancing with monotonic time, it does not freeze at the last value.
+  clock.advanceMonotonic(2_000)
+  assert.equal(read(), START + 8_000)
+  // A second forward correction beyond the floor is remembered too, and survives a second rollback.
+  clock.setWall(START + 30_000)
+  assert.equal(read(), START + 30_000)
+  clock.advanceMonotonic(1_000)
+  clock.setWall(START - 90_000)
+  assert.equal(read(), START + 31_000)
+  // Normal progress after the rollback is followed once the wall clock is ahead again.
+  clock.advanceMonotonic(500)
+  clock.setWall(START + 40_000)
+  assert.equal(read(), START + 40_000)
+  for (let i = 1; i < readings.length; i++) assert.ok(readings[i]! >= readings[i - 1]!, "readings never decrease")
+})
+
+test("createExecutionClock fails closed for good after a non-finite or regressing reading", () => {
+  for (const fault of ["wall-nan", "wall-infinity", "wall-negative-infinity", "monotonic-nan", "monotonic-infinity", "monotonic-regression"] as const) {
+    const clock = clocks()
+    const now = createExecutionClock({ now: clock.now, monotonicNow: clock.monotonicNow })
+    clock.advance(1_000)
+    assert.equal(now(), START + 1_000, fault)
+    if (fault === "wall-nan") clock.setWall(Number.NaN)
+    if (fault === "wall-infinity") clock.setWall(Number.POSITIVE_INFINITY)
+    if (fault === "wall-negative-infinity") clock.setWall(Number.NEGATIVE_INFINITY)
+    if (fault === "monotonic-nan") clock.setMonotonic(Number.NaN)
+    if (fault === "monotonic-infinity") clock.setMonotonic(Number.POSITIVE_INFINITY)
+    if (fault === "monotonic-regression") clock.setMonotonic(clock.monotonicNow() - 1)
+    assert.ok(Number.isNaN(now()), `${fault}: abnormal reading`)
+    // Even after the readings look normal again, no new lifetime can be derived from this clock.
+    clock.setWall(START + 2_000)
+    clock.setMonotonic(1_000_000)
+    assert.ok(Number.isNaN(now()), `${fault}: latched`)
+    assert.equal(START + 2_000 < Number.NaN, false, "every lifetime check against NaN fails")
+  }
 })

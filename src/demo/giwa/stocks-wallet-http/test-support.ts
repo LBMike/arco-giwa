@@ -114,6 +114,9 @@ export function clocks(start = START) {
     advanceMonotonic(ms: number) {
       monotonic += ms
     },
+    setMonotonic(value: number) {
+      monotonic = value
+    },
   }
 }
 

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { decodeFunctionData, encodeFunctionData, parseAbi, sha256, toHex, type Abi, type Address, type Hex } from "viem"
 import { APPROVAL_ABI, STOCKS_ABI, STOCKS_ABI_DIGEST } from "./abi"
-import { assertTransaction, digest, freeze, planOrder } from "./planner"
+import { assertTransaction, digest, freeze, planOrder, validateContext } from "./planner"
 import { createStocksWalletController } from "./controller"
 import type { AttemptRecord, ExecutionContext, ManifestV2, Order, Selection, Side, SubmissionGate, Transaction, WalletPorts } from "./types"
 
@@ -48,11 +48,13 @@ function fixture(side: Side = "BUY", shared = gate()) {
   let context: ExecutionContext = { session: { id: "session-a-1", walletAddress: A, chainId: 91342, accessToken: "fake-test-token", createdAt: START, expiresAt: START + 900000 }, walletAddress: A, chainId: 91342, walletEpoch: "injected:1", apiBase: "https://api.example", deployment: { status: "VERIFIED", evidenceId: "review-1", manifestDigest: digest(manifest), manifest, verifiedAt: START, validUntil: START + 900000 } }
   const order: Order = { id: "order-1", orderKey: sha256(toHex(`${side === "SELL" ? "sell:" : ""}${manifest.networkInstance}:order-1`)), quoteId: "quote-1", actorId: "actor-a", wallet: A, symbol: "NVDA", quantity: "1000000000", cashAmount: "120000000", deploymentId: manifest.deploymentId, deploymentDigest: digest(manifest), quoteExpiresAt: new Date(START + 60000).toISOString(), state: side === "BUY" ? "AWAITING_FUNDING" : "AWAITING_ESCROW", version: 0, idempotencyKey: "request-1" }
   const selected: Selection = { side, order }
-  let time = START, allowance = "0"
+  let time = START, allowance = "0", monotonicOffset = 0
   const walletCalls: Transaction[] = [], orderReads: unknown[] = []
   const ports: WalletPorts = {
     context: () => context,
     now: () => time,
+    // The fake monotonic clock moves with the fake wall clock unless a test moves one alone.
+    monotonicNow: () => time + monotonicOffset,
     async readWallet() { return { address: context.walletAddress!, chainId: context.chainId!, connectionEpoch: context.walletEpoch, deploymentDigest: context.deployment!.manifestDigest, networkInstance: context.deployment!.manifest.networkInstance, checkpointHash: context.deployment!.manifest.checkpointHash } },
     async readOrder(request) { orderReads.push(request); assert.equal(request.token, context.session!.accessToken); return { ...PROFILE, observedAt: new Date(time).toISOString(), data: order } },
     async readCatalog() { return { ...PROFILE, observedAt: new Date(time).toISOString(), deploymentId: manifest.deploymentId, cashSymbol: "ARCO_TEST_USDC", instruments: [{ symbol: "NVDA", quantityScale: 9, price: "120.000000", priceSource: "FIXED_MOCK_PRICE", orderCapability: "CHECK_PAUSE_AT_ORDER" }] } },
@@ -70,6 +72,7 @@ function fixture(side: Side = "BUY", shared = gate()) {
   return { ports, controller, selected, order, manifest, walletCalls, orderReads, shared,
     context: () => context, setContext(value: ExecutionContext) { context = value; controller.refreshContext() },
     setTime(value: number) { time = value }, setAllowance(value: string) { allowance = value },
+    advanceMonotonic(ms: number) { monotonicOffset += ms },
   }
 }
 
@@ -558,4 +561,40 @@ test("the precondition uses the gate captured by the attempt, not a replacement 
   assert.equal(f.walletCalls.length, 0); assert.equal(counted.claims, 0)
   assert.equal(f.controller.getSnapshot().error, "TRUSTED_RECONCILIATION_REQUIRED")
   f.controller.dispose()
+})
+
+test("API base with a query/fragment delimiter (even empty), credentials or another scheme is refused before any read", async () => {
+  const refused = ["https://api.example?", "https://api.example/?", "https://api.example#", "https://api.example/prefix?", "https://api.example/prefix?x=1", "https://api.example/#frag", "https://user:pw@api.example", "ftp://api.example", "javascript:void(0)"]
+  for (const apiBase of refused) {
+    const f = fixture()
+    assert.throws(() => validateContext({ ...f.context(), apiBase }, START), /INVALID_API_BASE/, apiBase)
+    f.setContext({ ...f.context(), apiBase })
+    await f.controller.prepare()
+    assert.deepEqual([f.controller.getSnapshot().status, f.controller.getSnapshot().error], ["BLOCKED", "INVALID_API_BASE"], apiBase)
+    assert.equal(f.orderReads.length, 0, `${apiBase}: no authenticated read`)
+    assert.equal(f.walletCalls.length, 0)
+    f.controller.dispose()
+  }
+  const f = fixture()
+  for (const apiBase of ["https://api.example", "https://api.example/", "https://api.example/prefix", "https://api.example/prefix/", "http://127.0.0.1:8788"]) assert.doesNotThrow(() => validateContext({ ...f.context(), apiBase }, START), apiBase)
+  f.controller.dispose()
+})
+
+test("every bounded read uses the same monotonic port: 15 s of monotonic time, a NaN or a regressing reading is a timeout", async () => {
+  for (const fault of ["slow", "nan", "regression"] as const) {
+    const f = fixture()
+    const readCatalog = f.ports.readCatalog
+    f.ports.readCatalog = async request => {
+      // The wall clock moves only 1 s.
+      f.setTime(START + 1_000)
+      if (fault === "slow") f.advanceMonotonic(15_000)
+      if (fault === "nan") f.advanceMonotonic(Number.NaN)
+      if (fault === "regression") f.advanceMonotonic(-5_000)
+      return readCatalog(request)
+    }
+    await f.controller.prepare()
+    assert.deepEqual([f.controller.getSnapshot().status, f.controller.getSnapshot().error], ["BLOCKED", "READ_TIMEOUT"], fault)
+    assert.equal(f.walletCalls.length, 0)
+    f.controller.dispose()
+  }
 })

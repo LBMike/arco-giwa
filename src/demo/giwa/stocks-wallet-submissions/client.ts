@@ -32,7 +32,8 @@ export function createSubmissionGate(options: SubmissionClientOptions): Submissi
   ensure(typeof session.accessToken === "string" && /^[A-Za-z0-9._~-]{1,4096}$/.test(session.accessToken), "SUBMISSION_AUTH_REQUIRED")
   let url: URL
   try { url = new URL(options.apiBase) } catch { throw new SubmissionError("SUBMISSION_INVALID_API_BASE") }
-  ensure(["https:", "http:"].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash, "SUBMISSION_INVALID_API_BASE")
+  // Any "?" or "#" (even empty, which leaves url.search/url.hash empty) would move the API path into a query or fragment.
+  ensure(["https:", "http:"].includes(url.protocol) && !url.username && !url.password && !url.href.includes("?") && !url.href.includes("#"), "SUBMISSION_INVALID_API_BASE")
   const base = url.href.replace(/\/+$/, "")
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis)
   const now = options.now ?? Date.now

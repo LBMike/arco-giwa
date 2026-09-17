@@ -74,6 +74,11 @@ export type WalletPorts = {
   submissions: SubmissionGate
   invalidateSession?(capturedSessionId: string): void
   now?: () => number
+  /**
+   * Monotonic milliseconds (default `performance.now()`). Bounds each read and each execution policy's lifetime
+   * independently of the wall clock, so a stalled or stepped-back wall clock cannot keep an expired policy alive.
+   */
+  monotonicNow?: () => number
 }
 export type WalletSnapshot = Readonly<{
   status: "IDLE" | "CHECKING" | "APPROVAL_REQUIRED" | "READY_TRANSFER" | "SIGNING" | "APPROVAL_SUBMITTED" | "SUBMITTED" | "UNKNOWN" | "BLOCKED"

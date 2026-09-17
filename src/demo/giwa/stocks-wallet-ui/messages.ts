@@ -65,6 +65,13 @@ export function describeCode(code: string, side: Side | null): CodeDescription {
       return { reason: `This order no longer waits for ${s === "SELL" ? "an escrow" : "a deposit"}.`, next: "Its status comes from the server; see the order result below.", step: "SERVER_STATUS" }
     case "EXECUTION_NOT_ALLOWED":
       return { reason: "Execution is not allowed for this order right now, for example because trading is paused.", next: "Check again later.", step: "CHECK_AGAIN" }
+    case "EXECUTION_AUTHORITY_CHANGED":
+      // Published only for an attempt this controller already reserved or sent: never "nothing was sent".
+      return {
+        reason: "The deployment review or the sign-in session expired or was renewed while this step was in progress, so it did not continue.",
+        next: "Check again with current review evidence. What is already recorded for this order is kept and nothing is sent again.",
+        step: "CHECK_AGAIN",
+      }
     case "CONTEXT_CHANGED":
       return { reason: "The wallet, network, session or order changed during the check.", next: "Check again.", step: "CHECK_AGAIN" }
     case "ORDER_CHANGED":
