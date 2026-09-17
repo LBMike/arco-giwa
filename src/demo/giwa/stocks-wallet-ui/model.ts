@@ -74,7 +74,17 @@ export type PanelInput = {
   /** Same wall clock as the controller (ports.now). */
   now: number
   serverOrder?: StocksServerOrderStatus | null
+  /**
+   * The host loads current deployment review evidence as the first part of an explicit check. Missing or
+   * ended evidence then leaves read-only checks available; wallet-opening steps still need current evidence.
+   */
+  evidenceRefreshable?: boolean
+  /** Stable code of the host's last failed evidence read, shown with the check it belongs to. */
+  evidenceFailure?: string | null
 }
+
+/** Availability codes that an explicit check can resolve by loading current review evidence. */
+export const EVIDENCE_CODES: ReadonlySet<string> = new Set(["DEPLOYMENT_NOT_REVIEWED", "DEPLOYMENT_EVIDENCE_EXPIRED"])
 
 export const IDLE_SNAPSHOT: WalletSnapshot = Object.freeze({ status: "IDLE", orderId: null, intentKey: null, stage: null, txHash: null, error: null, plan: null })
 
@@ -329,12 +339,15 @@ export function derivePanelModel(input: PanelInput): PanelModel {
   const server = serverStatus(input.serverOrder, order, side)
   const expired = summary.expired || serverDeadlinePassed(input.serverOrder, order, side)
   const movedOn = !serverOrderAwaitsTransfer(input.serverOrder, order.id, side)
+  /** Only the review evidence is missing and the host loads it as part of the explicit check. */
+  const evidenceCode = input.evidenceRefreshable === true && availability.status === "UNAVAILABLE" && EVIDENCE_CODES.has(availability.code) ? availability.code : null
+  const loadsEvidence = evidenceCode !== null
   /** Read-only checks. */
-  const ready = availability.status === "READY" && !expired
-  /** Wallet-opening actions additionally require that the server has not moved the order on. */
-  const readyToSign = ready && !movedOn
+  const ready = (availability.status === "READY" || loadsEvidence) && !expired
+  /** Wallet-opening actions need current evidence and a server that has not moved the order on. */
+  const readyToSign = availability.status === "READY" && !expired && !movedOn
   const plan = snapshot.plan ?? (availability.status === "READY" ? availability.plan : null)
-  const unavailableCode = !expired && availability.status === "UNAVAILABLE" ? availability.code : null
+  const unavailableCode = !expired && availability.status === "UNAVAILABLE" && !loadsEvidence ? availability.code : null
   const block: StepBlock = expired ? "expired" : movedOn ? "movedOn" : unavailableCode !== null ? "unavailable" : null
   const context: Context = { side, order: expired === summary.expired ? summary : { ...summary, expired: true, remaining: null }, plan, snapshot, server, block }
 
@@ -359,20 +372,28 @@ export function derivePanelModel(input: PanelInput): PanelModel {
     if (expired) return { title: `Quote deadline passed — do not ${verb}`, lead: [expiredNote], code: "ORDER_EXPIRED" }
     if (movedOn) return { title: `Order moved on — do not ${verb}`, lead: [movedOnText.reason, movedOnText.next], code: "ORDER_NOT_PAYABLE" }
     if (unavailable) return { title: `${noun} unavailable`, lead: [unavailable.reason, unavailable.next], code: unavailable.code }
+    if (evidenceCode !== null) return { title: `${noun} needs a new check`, lead: ["The deployment review evidence for this step ended.", "Check the order again to load current review evidence before this step is offered."], code: evidenceCode }
     return null
   }
 
   switch (snapshot.status) {
     case "IDLE": {
       if (expired) return finish(unavailableBody("ORDER_EXPIRED", side), context)
-      if (availability.status === "UNAVAILABLE") return finish(unavailableBody(availability.code, side), context)
+      if (availability.status === "UNAVAILABLE" && !loadsEvidence) return finish(unavailableBody(availability.code, side), context)
+      const failure = loadsEvidence && input.evidenceFailure ? describeCode(input.evidenceFailure, side) : null
       return finish(
         {
           kind: "IDLE",
-          tone: "info",
-          title: "Not checked yet",
-          paragraphs: ["Checking reads the accepted order, the current execution policy, your wallet's network and its allowance.", "It does not open your wallet or send anything."],
-          code: null,
+          tone: failure ? "warning" : "info",
+          title: failure ? "Review evidence not loaded" : "Not checked yet",
+          paragraphs: [
+            ...(failure ? [failure.reason, "Try the check again later."] : []),
+            loadsEvidence
+              ? "Checking first loads the current deployment review from the server, then reads the accepted order, the current execution policy, your wallet's network and its allowance."
+              : "Checking reads the accepted order, the current execution policy, your wallet's network and its allowance.",
+            "It does not open your wallet or send anything.",
+          ],
+          code: failure ? input.evidenceFailure ?? null : null,
           buttons: [{ action: "prepare", label: "Check order", enabled: true, opensWallet: false }],
           txLabel: null,
         },

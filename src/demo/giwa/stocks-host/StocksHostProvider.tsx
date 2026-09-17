@@ -1,4 +1,5 @@
 import { createContext, useContext, useLayoutEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import type { ActiveWalletSource, WalletSourceView } from "../stocks-wallet-source/types"
 import { adminSession, investorSession } from "./adapters"
 import { createStocksHostSession, type HostContext, type HostDependencies, type HostSnapshot, type StocksHostController } from "./session"
 
@@ -14,6 +15,8 @@ export type StocksHostValue = {
   admin: ReturnType<typeof adminSession>
   canSignIn: boolean
   walletStatus: "disconnected" | "wrong-network" | "unavailable" | "ready"
+  /** The host's active wallet view: address, chain, connection epoch and the provider tree's active source object. */
+  wallet: WalletSourceView
   signIn(): Promise<void>
   logout(): void
   /** Capture the request's session ID before sending it. Never read a new ID after a 401. */
@@ -22,10 +25,12 @@ export type StocksHostValue = {
 const StocksHostContext = createContext<StocksHostValue | null>(null)
 
 /** One owner above route navigation. Each committed scope gets a fresh in-memory controller. */
-export function StocksHostProvider({ context, dependencies, signingReady = true, children }: {
+export function StocksHostProvider({ context, dependencies, signingReady = true, walletSource = null, children }: {
   context: HostContext
   dependencies: HostDependencies
   signingReady?: boolean
+  /** The wallet provider tree's active source (injected provider or Dynamic client). Never used to sign in here. */
+  walletSource?: ActiveWalletSource | null
   children: ReactNode
 }) {
   const key = JSON.stringify([context.walletAddress?.toLowerCase() ?? null, context.chainId, context.frontendOrigin, context.apiBase, context.walletEpoch ?? "", signingReady])
@@ -56,16 +61,21 @@ export function StocksHostProvider({ context, dependencies, signingReady = true,
 
   const walletStatus = !context.walletAddress ? "disconnected" : context.chainId !== 91342 ? "wrong-network" : !signingReady ? "unavailable" : "ready"
   const visible = current && !controller ? UNAVAILABLE : snapshot
+  const walletAddress = context.walletAddress
+  const chainId = context.chainId
+  const walletEpoch = context.walletEpoch ?? ""
+  const wallet = useMemo<WalletSourceView>(() => Object.freeze({ source: walletSource, address: walletAddress, chainId, epoch: walletEpoch }), [walletSource, walletAddress, chainId, walletEpoch])
   const value = useMemo<StocksHostValue>(() => ({
     snapshot: visible,
     investor: investorSession(visible),
     admin: adminSession(visible),
     canSignIn: Boolean(controller && walletStatus === "ready" && visible.status !== "signing-in"),
     walletStatus,
+    wallet,
     async signIn() { if (walletStatus === "ready") await controller?.signIn() },
     logout() { controller?.logout() },
     invalidate(sessionId) { controller?.invalidate(sessionId) },
-  }), [controller, visible, walletStatus])
+  }), [controller, visible, walletStatus, wallet])
   return <StocksHostContext.Provider value={value}>{children}</StocksHostContext.Provider>
 }
 

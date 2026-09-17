@@ -42,6 +42,25 @@ export function describeCode(code: string, side: Side | null): CodeDescription {
     case "OVERLAPPING_CONTRACTS":
     case "MANIFEST_DIGEST_MISMATCH":
       return { reason: "There is no current review evidence for this Stocks deployment.", next: "Execution stays disabled until a reviewed deployment is configured.", step: "CONFIGURATION" }
+    case "WALLET_SOURCE_UNSUPPORTED":
+      return {
+        reason: "The connected wallet type cannot send exactly one transaction request from this app: its connection retries failed requests on its own.",
+        next: "Deposits and escrows are not offered for this wallet type. The order status stays readable here.",
+        step: "CONFIGURATION",
+      }
+    case "WALLET_SOURCE_MISSING":
+    case "WALLET_NOT_CONNECTED":
+      return { reason: "No browser wallet is connected for this Stocks session.", next: "Connect the wallet that placed this order, then sign in to Stocks with it.", step: "SWITCH_WALLET" }
+    case "WALLET_NOT_ATTESTED":
+      return { reason: "The wallet's network was not checked right before this step.", next: "Check the order again.", step: "CHECK_AGAIN" }
+    case "ALLOWANCE_SCOPE_MISMATCH":
+      return { reason: "The allowance check did not match the reviewed token and contract for this order.", next: "Execution stays disabled for this order.", step: "CONFIGURATION" }
+    case "RECEIPT_PORT_INACTIVE":
+      return { reason: "Wallet receipts are not used to confirm transactions in this app.", next: "Only the server's check confirms an approval.", step: "CONFIGURATION" }
+    case "API_BASE_NOT_CONFIGURED":
+      return { reason: "The Stocks API address is not configured correctly for this app.", next: "Nothing can be checked or signed from this screen until it is configured.", step: "CONFIGURATION" }
+    case "EXECUTION_CLOCK_UNAVAILABLE":
+      return { reason: "This page's clock reported an impossible time, so time limits can no longer be checked.", next: "Start a new check. Nothing is sent again automatically.", step: "CHECK_AGAIN" }
     case "SESSION_REQUIRED":
     case "SESSION_REJECTED":
     case "WALLET_EPOCH_REQUIRED":

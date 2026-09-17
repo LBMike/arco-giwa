@@ -11,6 +11,7 @@ import { actionsFor, type StocksInvestorActions } from "./actions"
 import type { GiwaStocksClient } from "./client"
 import { createStocksInvestorController, orderIsTerminal, type StocksInvestorState } from "./controller"
 import { shortAddress, signedOutMessage } from "./display"
+import { OrderExecutionSlotContext, type OrderExecutionSlot } from "./execution-slot"
 import { OrdersView, PortfolioView, StockDetailView, StocksListView } from "./StocksViews"
 import type { GiwaStocksHostWallet, GiwaStocksSession, GiwaStocksTab } from "./types"
 import { FOCUS_RING, Notice, UserInteractionContext } from "./ui"
@@ -31,6 +32,8 @@ export type GiwaStocksFeatureProps = {
   now?: () => number
   /** Order request key factory (tests). Must match ^[a-zA-Z0-9:_-]{8,128}$. */
   newIdempotencyKey?: () => string
+  /** Host wallet steps shown with an accepted order (for example the /stocks execution panel). Absent: status only. */
+  renderOrderExecution?: OrderExecutionSlot | null
 }
 
 const TABS: { id: GiwaStocksTab; label: string }[] = [
@@ -50,9 +53,10 @@ export type GiwaStocksFeatureViewProps = {
   onDetailChange: (open: boolean) => void
   /** True while the host's new context is being applied: nothing from the previous session is painted. */
   switching?: boolean
+  renderOrderExecution?: OrderExecutionSlot | null
 }
 
-export function GiwaStocksFeatureView({ state, actions, tab, onTabChange, detailOpen, onDetailChange, switching = false }: GiwaStocksFeatureViewProps) {
+export function GiwaStocksFeatureView({ state, actions, tab, onTabChange, detailOpen, onDetailChange, switching = false, renderOrderExecution = null }: GiwaStocksFeatureViewProps) {
   const interacted = useRef(false)
   const tabRefs = useRef<Record<GiwaStocksTab, HTMLButtonElement | null>>({ stocks: null, orders: null, portfolio: null })
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -65,6 +69,7 @@ export function GiwaStocksFeatureView({ state, actions, tab, onTabChange, detail
   }
 
   return (
+    <OrderExecutionSlotContext.Provider value={renderOrderExecution}>
     <UserInteractionContext.Provider value={interacted}>
     <section
       className="arco-demo w-full bg-[var(--color-arco-surface)] text-[var(--color-arco-ink)]"
@@ -144,11 +149,12 @@ export function GiwaStocksFeatureView({ state, actions, tab, onTabChange, detail
       </div>
     </section>
     </UserInteractionContext.Provider>
+    </OrderExecutionSlotContext.Provider>
   )
 }
 
 export function GiwaStocksFeature(props: GiwaStocksFeatureProps) {
-  const { client, session, hostWallet, onSessionRejected, statusPollMs = 10_000, initialTab = "stocks", now, newIdempotencyKey } = props
+  const { client, session, hostWallet, onSessionRejected, statusPollMs = 10_000, initialTab = "stocks", now, newIdempotencyKey, renderOrderExecution = null } = props
   const [controller] = useState(() => createStocksInvestorController({ now, newIdempotencyKey }))
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState)
   const actions = useMemo(() => actionsFor(controller), [controller])
@@ -206,6 +212,7 @@ export function GiwaStocksFeature(props: GiwaStocksFeatureProps) {
       detailOpen={detailOpen}
       onDetailChange={setDetailOpen}
       switching={switching}
+      renderOrderExecution={renderOrderExecution}
     />
   )
 }

@@ -9,8 +9,8 @@ import { StatusRegion, StocksWalletPanel, useStatusAnnouncement, type StocksWall
 export type StocksWalletExecutionPanelProps = UseStocksWalletPanelOptions &
   Pick<StocksWalletPanelProps, "onRefreshServerOrder" | "serverOrderRefreshing" | "headingLevel" | "armDelayMs">
 
-export function StocksWalletExecutionPanel({ controller, ports, selection, serverOrder = null, tickMs, ...display }: StocksWalletExecutionPanelProps) {
-  const { scopeKey, ...binding } = useStocksWalletPanel({ controller, ports, selection, serverOrder, tickMs })
+export function StocksWalletExecutionPanel({ controller, ports, selection, serverOrder = null, tickMs, refreshEvidence, evidenceFailure, unavailableCode, ...display }: StocksWalletExecutionPanelProps) {
+  const { scopeKey, ...binding } = useStocksWalletPanel({ controller, ports, selection, serverOrder, tickMs, refreshEvidence, evidenceFailure, unavailableCode })
   const status = useStatusAnnouncement(derivePanelModel({ ...binding, serverOrder }).announcement)
   return (
     <div className="flex w-full flex-col">

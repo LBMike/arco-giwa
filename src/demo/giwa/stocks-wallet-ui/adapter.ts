@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 
 import type { ExecutionContext, Selection, Side, WalletPorts, WalletSnapshot } from "../stocks-wallet/types"
 import { executionAvailability } from "./availability"
-import { IDLE_SNAPSHOT, serverOrderAwaitsTransfer } from "./model"
+import { EVIDENCE_CODES, IDLE_SNAPSHOT, serverOrderAwaitsTransfer } from "./model"
 import type { StocksServerOrderStatus, StocksWalletAvailability, StocksWalletControllerApi, StocksWalletNetwork, StocksWalletPanelActions } from "./types"
 
 export type ExpectedScope = {
@@ -24,6 +24,13 @@ export type ExpectedScope = {
    * approve/submit then do nothing (a moved-on order must not be paid twice). Default: always true.
    */
   signable?: () => boolean
+  /**
+   * Host read of current deployment review evidence. When given, an explicit check runs it first (it never
+   * opens the wallet), and the check may start while only the evidence is missing (see `checkable`).
+   */
+  refreshEvidence?: (() => Promise<unknown>) | null
+  /** Fresh at activation: availability is READY, or only the review evidence is missing. Default: `ready`. */
+  checkable?: () => boolean
 }
 
 /**
@@ -42,6 +49,10 @@ export function stocksWalletPanelActions(controller: StocksWalletControllerApi, 
   }
   const available = () => check(expected.ready, false)
   const signable = () => available() && check(expected.signable, true)
+  const checkable = () => (expected.checkable ? check(expected.checkable, false) : available())
+  const loadEvidence = expected.refreshEvidence
+  /** The one read-only controller check. Evidence is loaded first when the host provides it; the check still needs READY afterwards. */
+  const runCheck = () => (available() ? controller.prepare() : undefined)
   const displayed = (status: WalletSnapshot["status"]) => {
     const snapshot = controller.getSnapshot()
     const plan = snapshot.plan
@@ -56,7 +67,14 @@ export function stocksWalletPanelActions(controller: StocksWalletControllerApi, 
     )
   }
   return {
-    prepare: () => (available() ? controller.prepare() : undefined),
+    prepare: () => {
+      if (!loadEvidence) return runCheck()
+      if (!checkable()) return undefined
+      return Promise.resolve()
+        .then(loadEvidence)
+        .catch(() => undefined)
+        .then(runCheck)
+    },
     approve: () => (signable() && displayed("APPROVAL_REQUIRED") ? controller.approve() : undefined),
     submit: () => (signable() && displayed("READY_TRANSFER") ? controller.submit() : undefined),
   }
@@ -73,6 +91,12 @@ export type UseStocksWalletPanelOptions = {
   serverOrder?: StocksServerOrderStatus | null
   /** Re-render interval for the deadline display only. 0 disables. Default 1000 ms. */
   tickMs?: number
+  /** Host read of current deployment review evidence, run only as the first part of an explicit check. */
+  refreshEvidence?: (() => Promise<unknown>) | null
+  /** Stable code of the host's last failed evidence read. */
+  evidenceFailure?: string | null
+  /** Why the host has no controller for this scope (for example an unsupported wallet type). Used only when `controller` is null. */
+  unavailableCode?: string | null
 }
 
 export type StocksWalletPanelBinding = {
@@ -85,6 +109,8 @@ export type StocksWalletPanelBinding = {
   now: number
   network: StocksWalletNetwork | null
   actions: StocksWalletPanelActions | null
+  evidenceRefreshable: boolean
+  evidenceFailure: string | null
 }
 
 function readContext(ports: WalletPorts | null): ExecutionContext | null {
@@ -109,7 +135,7 @@ function orderIdOf(selection: Selection | null): string | null {
   return order !== null && typeof order === "object" && typeof (order as { id?: unknown }).id === "string" ? (order as { id: string }).id : null
 }
 
-export function useStocksWalletPanel({ controller, ports, selection, serverOrder = null, tickMs = 1000 }: UseStocksWalletPanelOptions): StocksWalletPanelBinding {
+export function useStocksWalletPanel({ controller, ports, selection, serverOrder = null, tickMs = 1000, refreshEvidence = null, evidenceFailure = null, unavailableCode = null }: UseStocksWalletPanelOptions): StocksWalletPanelBinding {
   const context = readContext(ports)
 
   // Synchronize the displayed order before the snapshot is read. select() is idempotent for an equal
@@ -140,7 +166,9 @@ export function useStocksWalletPanel({ controller, ports, selection, serverOrder
   const session = context?.session ?? null
   const wallet = context?.walletAddress ?? null
   const account = session !== null && typeof wallet === "string" && typeof session.walletAddress === "string" && session.walletAddress.toLowerCase() === wallet.toLowerCase() ? wallet : null
-  const availability = executionAvailability({ configured: synchronized, ports, context, selection, now })
+  const computed = executionAvailability({ configured: synchronized, ports, context, selection, now })
+  const availability: StocksWalletAvailability = controller === null && unavailableCode ? Object.freeze({ status: "UNAVAILABLE", code: unavailableCode }) : computed
+  const evidenceRefreshable = controller !== null && typeof refreshEvidence === "function"
   const orderId = orderIdOf(selection)
   const side = selection?.side === "BUY" || selection?.side === "SELL" ? selection.side : null
   const actions = useMemo(
@@ -153,13 +181,18 @@ export function useStocksWalletPanel({ controller, ports, selection, serverOrder
             // Re-evaluated at activation with the host's then-current context and clock.
             ready: () => executionAvailability({ configured: true, ports, context: readContext(ports), selection, now: clockOf(ports) }).status === "READY",
             signable: () => serverOrderAwaitsTransfer(serverOrder, orderId, side),
+            refreshEvidence: evidenceRefreshable ? refreshEvidence : null,
+            checkable: () => {
+              const fresh = executionAvailability({ configured: true, ports, context: readContext(ports), selection, now: clockOf(ports) })
+              return fresh.status === "READY" || (evidenceRefreshable && EVIDENCE_CODES.has(fresh.code))
+            },
           })
         : null,
-    [controller, synchronized, ports, selection, serverOrder, orderId, side, account],
+    [controller, synchronized, ports, selection, serverOrder, orderId, side, account, evidenceRefreshable, refreshEvidence],
   )
   const manifest = availability.status === "READY" ? context?.deployment?.manifest : null
   const network = manifest ? { networkInstance: manifest.networkInstance, deploymentId: manifest.deploymentId } : null
   const scopeKey = JSON.stringify([account?.toLowerCase() ?? null, context?.walletEpoch ?? null, session?.id ?? null, context?.apiBase ?? null, side, orderId])
 
-  return { scopeKey, snapshot, selection, account, availability, now, network, actions }
+  return { scopeKey, snapshot, selection, account, availability, now, network, actions, evidenceRefreshable, evidenceFailure: evidenceRefreshable ? evidenceFailure : null }
 }

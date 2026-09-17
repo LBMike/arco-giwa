@@ -13,6 +13,7 @@ export function GiwaStocksHost({ children }: { children: ReactNode }) {
     <StocksHostProvider
       context={{ walletAddress: wallet.connected ? wallet.address : null, chainId: wallet.chainId, frontendOrigin: window.location.origin, apiBase: ARCO_API_BASE, walletEpoch: wallet.sessionEpoch }}
       signingReady={wallet.signingReady}
+      walletSource={wallet.source}
       dependencies={dependencies}
     >{children}</StocksHostProvider>
   )
