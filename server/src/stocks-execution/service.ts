@@ -44,10 +44,19 @@ export class StocksExecutionService {
   private async eligible(actor:Actor,orderSide:'BUY'|'SELL',id:string):Promise<number> {
     // Read-only SQL and short server-side timeouts bound waits. No ready()/binding INSERT.
     let closed=false,timer:ReturnType<typeof setTimeout>;
+    const phaseStarted=this.clock.monotonicNow();
+    const checkPhase=()=>{
+      const elapsed=this.clock.monotonicNow()-phaseStarted;
+      if(!Number.isFinite(elapsed)||elapsed<0||elapsed>=DB_BUDGET)closed=true;
+      ensure(!closed,'EXECUTION_DATABASE_TIMEOUT',503);
+    };
     const work=async()=>{
+      checkPhase();
       const acquired=await this.stocks.repo.pool.connect();
-      if(closed){acquired.release();throw new StocksError('EXECUTION_DATABASE_TIMEOUT',503);}
-      const query=async(text:string,values?:unknown[])=>{ensure(!closed,'EXECUTION_DATABASE_TIMEOUT',503);return acquired.query(text,values);};
+      try{checkPhase();}catch(error){acquired.release();throw error;}
+      const query=async(text:string,values?:unknown[])=>{
+        checkPhase();const result=await acquired.query(text,values);checkPhase();return result;
+      };
       try {
         await query('BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY');
         await query("SET LOCAL statement_timeout='2000ms'");await query("SET LOCAL lock_timeout='2000ms'");await query("SET LOCAL idle_in_transaction_session_timeout='3000ms'");
@@ -63,7 +72,7 @@ export class StocksExecutionService {
         const sampledAt=this.clock.wallNow();
         const timing=(await query('SELECT EXTRACT(EPOCH FROM ($1::timestamptz-clock_timestamp()))*1000 AS "remainingMs"',[order.quoteExpiresAt])).rows[0];
         const remaining=Number(timing?.remainingMs);ensure(Number.isFinite(remaining)&&remaining>0,'ORDER_EXPIRED',409);
-        await query('COMMIT');ensure(!closed,'EXECUTION_DATABASE_TIMEOUT',503);
+        await query('COMMIT');checkPhase();
         return sampledAt+Math.floor(remaining);
       }catch(error){try{await acquired.query('ROLLBACK');}catch{/* preserve fixed failure */}throw error;}
       finally{acquired.release();}

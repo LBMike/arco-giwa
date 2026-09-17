@@ -48,3 +48,24 @@ test('independent clocks never extend the lease and do not require exact alignme
  const f=setup();f.setProofHook(async()=>{f.advance(1000);f.setWall(1000990)});const policy=await f.service.policy(ACTOR,'BUY','test-order');assert.equal(policy.validUntil,1014990);
  const g=setup();g.setProofHook(async()=>g.setWall(1015001));await assert.rejects(g.service.policy(ACTOR,'BUY','test-order'),/EXECUTION_POLICY_EXPIRED/);
 });
+
+for(const point of ['first SELECT','COMMIT'] as const)test(`DB phase rejects a delayed timer at ${point} and schedules cleanup only`,async()=>{
+ const f=setup();let stalled=false,after:string[]=[];
+ f.setQueryHook(async sql=>{
+  if(stalled)after.push(sql);
+  if(!stalled&&((point==='first SELECT'&&sql.startsWith('SELECT'))||sql===point)){stalled=true;f.advance(2500)}
+ });
+ await assert.rejects(f.service.policy(ACTOR,'BUY','test-order'),/EXECUTION_DATABASE_TIMEOUT/);
+ assert.equal(f.proofCalls(),0);assert.deepEqual(after,['ROLLBACK']);
+});
+test('DB phase releases a late acquired client before any SQL and rejects a backward clock',async()=>{
+ const f=setup(),connect=f.stocks.repo.pool.connect.bind(f.stocks.repo.pool);let released=0;
+ f.stocks.repo.pool.connect=async()=>{const client=await connect();f.advance(2500);return {...client,release:()=>{released++;client.release()}}};
+ await assert.rejects(f.service.policy(ACTOR,'BUY','test-order'),/EXECUTION_DATABASE_TIMEOUT/);assert.equal(released,1);assert.deepEqual(f.queries,[]);assert.equal(f.proofCalls(),0);
+ const g=setup();g.setQueryHook(async sql=>{if(sql.startsWith('SELECT'))g.setMono(-1)});
+ await assert.rejects(g.service.policy(ACTOR,'BUY','test-order'),/EXECUTION_DATABASE_TIMEOUT/);assert.equal(g.proofCalls(),0);
+});
+test('each read phase has its own monotonic budget while policy retains original lease',async()=>{
+ const f=setup();let phases=0;f.setQueryHook(async sql=>{if(sql.includes('remainingMs')){phases++;f.advance(2000)}});f.setProofHook(async()=>f.advance(2000));
+ const result=await f.service.policy(ACTOR,'BUY','test-order');assert.equal(phases,2);assert.equal(result.observedAt,1000000);assert.equal(result.validUntil,1015000);
+});
