@@ -463,3 +463,37 @@ model StocksLiquidityBinding {
  createdAt DateTime @default(now()) @db.Timestamptz
  @@schema("arco_evm")
 }
+
+// Enrolled only atomically with newly created orders; no historical backfill.
+model StocksWalletSubmissionEnrollment {
+  submissions StocksWalletSubmission[]
+  side             String
+  orderId          String
+  intentKey        String @unique
+  actorId          String
+  wallet           String
+  deploymentDigest String
+  orderBinding     String
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  @@id([side, orderId])
+  @@schema("arco_evm")
+}
+model StocksWalletSubmission {
+  enrollment StocksWalletSubmissionEnrollment @relation(fields: [side, orderId], references: [side, orderId], onDelete: Restrict, onUpdate: Restrict)
+  claimId           String @id
+  intentKey         String
+  stage             String
+  transactionDigest String
+  transaction       Json
+  actorId           String
+  wallet            String
+  side              String
+  orderId           String
+  deploymentDigest  String
+  status            String
+  txHash            String?
+  createdAt         DateTime @default(now()) @db.Timestamptz
+  updatedAt         DateTime @default(now()) @db.Timestamptz
+  @@unique([intentKey, stage])
+  @@schema("arco_evm")
+}

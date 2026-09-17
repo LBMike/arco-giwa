@@ -1,0 +1,118 @@
+The files belonging to this database system will be owned by user "whdqkf88".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "C".
+The default text search configuration will be set to "english".
+
+Data page checksums are enabled.
+
+creating directory /private/tmp/stocks-submissions-pg-cRHhcB/data ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... posix
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Asia/Seoul
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    '/opt/homebrew/Cellar/postgresql@18/18.6/bin/pg_ctl' -D /private/tmp/stocks-submissions-pg-cRHhcB/data -l logfile start
+
+waiting for server to start.... done
+server started
+CREATE SCHEMA
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+CREATE INDEX
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TABLE
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TABLE
+CREATE TABLE
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+CREATE TRIGGER
+✔ real PG: simultaneous same-physical claims grant exactly once and recreated service never re-grants lost response (27.938084ms)
+✔ real PG: APPROVAL and TRANSFER share one physical lock and neither can bypass the other (19.301333ms)
+✔ real PG: immutable binding and monotonic hash observations, client terminal reports never unlock (14.627916ms)
+✔ real PG: owner wallet side deployment and exact calldata cannot be forged (6.571708ms)
+✔ real PG: new orders enroll atomically; historical rows and existing-row idempotent retry never enroll (5.126958ms)
+✔ real PG: audit failure rolls claim and new-order enrollment back atomically (6.782209ms)
+✔ real PG: pause/expiry reject first claim but preserve inspect and outcome recovery (1217.733041ms)
+✔ real PG: SELL enrollment and real plugin responses; auth precedes malformed JSON (59.582083ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1562.953709
+waiting for server to shut down.... done
+server stopped
+waiting for server to start.... done
+server started
+PROCESS_AND_POSTGRES_RESTART_PERSISTENCE_PASS
+waiting for server to shut down.... done
+server stopped
+OWNED_PG_EVIDENCE /private/tmp/stocks-submissions-pg-cRHhcB/harness-evidence.json

@@ -1,3 +1,4 @@
+import { enrollWalletSubmission } from '../stocks-submissions/enrollment.js';
 import { StocksSellService, type EscrowReturnPolicy } from './sell-service.js';
 import { randomUUID } from 'node:crypto';
 import { address, ensure, immutable, liquidityScope, manifestDigest, operationKey, PROFILE, units, validateActor, freezeManifest, type Activation, type Actor, type Manifest, type PausePolicy, type SqlClient } from './contracts.js';
@@ -67,6 +68,7 @@ export class StocksService {
             ensure(!used, 'QUOTE_ALREADY_USED', 409);
             const id = randomUUID();
             const row = (await db.query('INSERT INTO arco_evm."StocksOrder" (id,"orderKey","quoteId","actorId",wallet,symbol,quantity,"cashAmount","idempotencyKey","deploymentId","deploymentDigest","quoteExpiresAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *', [id, operationKey(`${this.manifest.networkInstance}:${id}`), q.id, q.actorId, q.wallet, q.symbol, q.quantity, q.cashAmount, idempotencyKey, this.manifest.deploymentId, this.digest, q.expiresAt])).rows[0];
+            await enrollWalletSubmission(db, this.manifest, row, 'BUY');
             await this.repo.audit(db, id, 'ORDER_CREATED', { actorId: actor.actorId, deploymentDigest: this.digest });
             return row;
         });

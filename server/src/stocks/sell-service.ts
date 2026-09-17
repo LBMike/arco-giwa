@@ -1,3 +1,4 @@
+import { enrollWalletSubmission } from '../stocks-submissions/enrollment.js';
 import { randomUUID } from 'node:crypto';
 import type { Hex } from 'viem';
 import { address, callDigest, ensure, hash, immutable, liquidityScope, operationKey, units, validateActor, type Actor, type BrokerPort, type SqlClient, type SignerPort } from './contracts.js';
@@ -57,6 +58,7 @@ export class StocksSellService {
             ensure(BigInt(position.availableQuantity) >= BigInt(q.quantity), 'INSUFFICIENT_AVAILABLE_STOCK', 409);
             const id = randomUUID();
             const row = (await db.query(`INSERT INTO arco_evm."StocksSellOrder" (id,"orderKey","quoteId","actorId",wallet,symbol,quantity,"cashAmount","idempotencyKey","deploymentId","deploymentDigest","quoteExpiresAt") VALUES($1,$2,$3,$4,$5,'NVDA',$6,$7,$8,$9,$10,$11) RETURNING *`, [id, operationKey(`sell:${s.manifest.networkInstance}:${id}`), q.id, actor.actorId, q.wallet, q.quantity, q.cashAmount, key, s.manifest.deploymentId, s.digest, q.expiresAt])).rows[0];
+            await enrollWalletSubmission(db, s.manifest, row, 'SELL');
             await db.query(`INSERT INTO arco_evm."StocksQuantityReservation" ("orderId","deploymentDigest",wallet,quantity,status) VALUES($1,$2,$3,$4,'ACTIVE')`, [id, s.digest, q.wallet, q.quantity]);
             await s.repo.audit(db, id, 'SELL_RESERVED', { quantity: q.quantity, wallet: q.wallet });
             return { ...row, side: 'SELL' };
