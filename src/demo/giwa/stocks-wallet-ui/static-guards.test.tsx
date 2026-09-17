@@ -74,6 +74,35 @@ test("controller actions are invoked only by the adapter mapping, never from eff
   assert.match(panel, /onClick=\{\(\) => activate\(button\)\}/)
   assert.equal((panel.match(/startActivation\(/g) ?? []).length, 1)
   assert.doesNotMatch(panel, /\bactions\[|\bactions\.(prepare|approve|submit)|\.call\(|\.apply\(/, "no direct action calls in the component")
+  // Controller action calls exist only inside stocksWalletPanelActions.
+  const adapter = code(join(ROOT, "adapter.ts"))
+  const start = adapter.indexOf("export function stocksWalletPanelActions(")
+  const bodyStart = adapter.indexOf("{", adapter.indexOf(")", adapter.indexOf("expected: ExpectedScope", start)))
+  let depth = 0
+  let bodyEnd = bodyStart
+  for (; bodyEnd < adapter.length; bodyEnd++) {
+    if (adapter[bodyEnd] === "{") depth++
+    else if (adapter[bodyEnd] === "}" && --depth === 0) break
+  }
+  const mapping = adapter.slice(bodyStart, bodyEnd)
+  const calls = (source: string) => (source.match(/\.(prepare|approve|submit)\(\)/g) ?? []).length
+  assert.equal(calls(mapping), 3)
+  assert.equal(calls(adapter), 3, "no controller action call outside the mapping")
+  assert.doesNotMatch(adapter, /\bas any\b|controller\)?\s*\[|\[\s*["'`][a-z]*["'`]\s*\+/, "no computed access to controller methods")
+  // Feature code never synthesizes activation.
+  for (const path of feature) assert.doesNotMatch(code(path), /\.click\(\)|dispatchEvent\(|requestSubmit\(/, relative(ROOT, path))
+  // Timers and effects are few and reviewed: a new one must update this guard deliberately.
+  const panelSource = code(join(ROOT, "StocksWalletPanel.tsx"))
+  assert.equal((panelSource.match(/\bsetTimeout\(/g) ?? []).length, 1, "only the arming timer")
+  assert.match(panelSource, /setTimeout\(\(\) => setArmed\(armKey\), Math\.max\(0, armDelayMs\)\)/, "arming happens only inside the delayed timer")
+  assert.equal((panelSource.match(/setArmed\(armKey\)/g) ?? []).length, 1)
+  assert.equal((panelSource.match(/\buseEffect\(/g) ?? []).length, 3, "mounted flag, focus tracking, arming")
+  assert.equal((panelSource.match(/\buseIsomorphicLayoutEffect\(/g) ?? []).length, 1, "focus rescue")
+  assert.equal((adapter.match(/\bsetInterval\(/g) ?? []).length, 1, "only the display tick")
+  assert.equal((adapter.match(/\buseEffect\(/g) ?? []).length, 1, "only the display tick")
+  for (const path of feature.filter((file) => !/StocksWalletPanel\.tsx$|adapter\.ts$/.test(file))) {
+    assert.doesNotMatch(code(path), /\b(setTimeout|setInterval|useEffect|useLayoutEffect|requestAnimationFrame)\(/, `${relative(ROOT, path)}: no timers or effects`)
+  }
   for (const path of feature) {
     for (const body of callBodies(code(path), ["useEffect", "useLayoutEffect", "useIsomorphicLayoutEffect", "setTimeout", "setInterval", "queueMicrotask"])) {
       assert.doesNotMatch(body, /\b(actions|activate|startActivation|gate|onActionSettled|checkFinished|prepare|approve|submit|walletButton)\b/, `${relative(ROOT, path)}: ${body.slice(0, 60)}`)

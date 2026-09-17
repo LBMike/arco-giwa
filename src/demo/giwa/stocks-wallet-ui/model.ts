@@ -179,14 +179,19 @@ function approvalAwaitingConfirmation(snapshot: WalletSnapshot): boolean {
   return snapshot.status === "APPROVAL_SUBMITTED" && (snapshot.error === null || snapshot.error === "RECEIPT_PENDING" || snapshot.error === "RECOVERY_REQUIRED")
 }
 
-function steps(snapshot: WalletSnapshot, side: Side | null, server: PanelServerStatus | null): PanelStep[] {
+/** Why a displayed wallet step cannot be taken now. */
+type StepBlock = "expired" | "movedOn" | "unavailable" | null
+
+const BLOCK_DETAIL: Record<Exclude<StepBlock, null>, string> = { expired: "Deadline passed", movedOn: "Not needed — order moved on", unavailable: "Unavailable" }
+
+function steps(snapshot: WalletSnapshot, side: Side | null, server: PanelServerStatus | null, block: StepBlock): PanelStep[] {
   const { status, stage } = snapshot
   const reverted = revertedStage(snapshot)
   const transferWord = side === "SELL" ? "Escrow" : "Deposit"
   const allowanceInPlace = status === "READY_TRANSFER" || reverted === "TRANSFER" || (stage === "TRANSFER" && (status === "SIGNING" || status === "SUBMITTED" || status === "UNKNOWN"))
 
   let approval: PanelStep
-  if (status === "APPROVAL_REQUIRED") approval = { label: "Approve exact amount", status: "current", detail: "Required" }
+  if (status === "APPROVAL_REQUIRED") approval = block ? { label: "Approve exact amount", status: "problem", detail: BLOCK_DETAIL[block] } : { label: "Approve exact amount", status: "current", detail: "Required" }
   else if (status === "SIGNING" && stage === "APPROVAL") approval = { label: "Approve exact amount", status: "current", detail: "Waiting for wallet" }
   else if (status === "APPROVAL_SUBMITTED") approval = { label: "Approve exact amount", status: "current", detail: approvalAwaitingConfirmation(snapshot) ? "Confirming" : "Approval sent" }
   else if (status === "UNKNOWN" && stage === "APPROVAL") approval = { label: "Approve exact amount", status: "problem", detail: "Result unknown" }
@@ -195,7 +200,7 @@ function steps(snapshot: WalletSnapshot, side: Side | null, server: PanelServerS
   else approval = { label: "Approve exact amount", status: "todo", detail: "Not checked" }
 
   let transfer: PanelStep
-  if (status === "READY_TRANSFER") transfer = { label: transferWord, status: "current", detail: "Ready — needs your click" }
+  if (status === "READY_TRANSFER") transfer = block ? { label: transferWord, status: "problem", detail: BLOCK_DETAIL[block] } : { label: transferWord, status: "current", detail: "Ready — needs your click" }
   else if (status === "SIGNING" && stage === "TRANSFER") transfer = { label: transferWord, status: "current", detail: "Waiting for wallet" }
   else if (status === "SUBMITTED") transfer = { label: transferWord, status: "done", detail: "Submitted — not the order result" }
   else if (status === "UNKNOWN" && stage === "TRANSFER") transfer = { label: transferWord, status: "problem", detail: "Result unknown" }
@@ -213,7 +218,7 @@ function steps(snapshot: WalletSnapshot, side: Side | null, server: PanelServerS
 }
 
 type Body = { kind: PanelKind; tone: PanelTone; title: string; paragraphs: string[]; code: string | null; buttons: PanelButton[]; txLabel: string | null }
-type Context = { side: Side | null; order: PanelOrder | null; plan: Plan | null; snapshot: WalletSnapshot; server: PanelServerStatus | null }
+type Context = { side: Side | null; order: PanelOrder | null; plan: Plan | null; snapshot: WalletSnapshot; server: PanelServerStatus | null; block: StepBlock }
 
 function sentence(text: string): string {
   const trimmed = text.trim()
@@ -229,7 +234,7 @@ function announce(body: Body, server: PanelServerStatus | null): string {
   return server ? `${text} Order result from the server: ${sentence(server.label)}` : text
 }
 
-function finish(body: Body, context: Context): PanelModel {
+function finish(body: Body, { block, ...context }: Context): PanelModel {
   const showTx = context.snapshot.txHash !== null
   return Object.freeze({
     ...body,
@@ -239,7 +244,7 @@ function finish(body: Body, context: Context): PanelModel {
     stage: context.snapshot.stage,
     txHash: showTx ? context.snapshot.txHash : null,
     txLabel: showTx ? body.txLabel : null,
-    steps: Object.freeze(steps(context.snapshot, context.side, context.server)),
+    steps: Object.freeze(steps(context.snapshot, context.side, context.server, block)),
     announcement: announce(body, context.server),
   })
 }
@@ -285,7 +290,7 @@ export function derivePanelModel(input: PanelInput): PanelModel {
     }
   }
   // Hidden screens carry no side either: not even Buy/Sell of an order this viewer may not see.
-  const hidden = (code: string) => finish(unavailableBody(code, side), { side: null, order: null, plan: null, snapshot: IDLE_SNAPSHOT, server: null })
+  const hidden = (code: string) => finish(unavailableBody(code, side), { side: null, order: null, plan: null, snapshot: IDLE_SNAPSHOT, server: null, block: null })
   if (!selection) return hidden("ORDER_REQUIRED")
   if (!order || !summary || !side) return hidden("INVALID_ORDER")
   // Order details are shown only to the signed-in wallet that placed the order.
@@ -308,7 +313,9 @@ export function derivePanelModel(input: PanelInput): PanelModel {
   /** Wallet-opening actions additionally require that the server has not moved the order on. */
   const readyToSign = ready && !movedOn
   const plan = snapshot.plan ?? (availability.status === "READY" ? availability.plan : null)
-  const context: Context = { side, order: expired === summary.expired ? summary : { ...summary, expired: true, remaining: null }, plan, snapshot, server }
+  const unavailableCode = !expired && availability.status === "UNAVAILABLE" ? availability.code : null
+  const block: StepBlock = expired ? "expired" : movedOn ? "movedOn" : unavailableCode !== null ? "unavailable" : null
+  const context: Context = { side, order: expired === summary.expired ? summary : { ...summary, expired: true, remaining: null }, plan, snapshot, server, block }
 
   const exact = summary.transfer.text
   const word = side === "SELL" ? "escrow" : "deposit"
@@ -319,7 +326,10 @@ export function derivePanelModel(input: PanelInput): PanelModel {
       ? "The quote deadline has passed. Do not escrow units for this order: a late escrow is held for review, not sold."
       : "The quote deadline has passed. Do not send test cash for this order: a late payment buys nothing and is held for review."
   const movedOnText = describeCode("ORDER_NOT_PAYABLE", side)
-  const unavailable = !expired && availability.status === "UNAVAILABLE" ? { code: availability.code, ...describeCode(availability.code, side) } : null
+  const unavailable = unavailableCode !== null ? { code: unavailableCode, ...describeCode(unavailableCode, side) } : null
+  /** Code shown when the controller reported none: why the offered check is disabled. */
+  const fallbackCode = snapshot.error ?? (expired ? "ORDER_EXPIRED" : (unavailable?.code ?? null))
+  const noLongerCheckable = "The quote deadline has passed, so this screen can no longer check it. Contact operations if it stays unresolved."
   /** Why a read-only check is disabled although the screen offers it. */
   const withCheckNote = (paragraphs: string[], shownCode: string | null) =>
     unavailable && unavailable.code !== shownCode ? [...paragraphs, `Checking is unavailable right now. ${unavailable.reason} ${unavailable.next}`] : paragraphs
@@ -406,16 +416,18 @@ export function derivePanelModel(input: PanelInput): PanelModel {
       const confirming = approvalAwaitingConfirmation(snapshot)
       const paragraphs = [`The approval transaction was sent. The server verifies it on chain before the ${word} is offered; the ${word} is never sent automatically.`]
       let tone: PanelTone = "info"
-      if (snapshot.error === "RECEIPT_PENDING" || snapshot.error === "RECOVERY_REQUIRED") paragraphs.push("The server has not confirmed the approval yet. Check again in a moment; the approval is not sent again.")
+      if (snapshot.error === "RECEIPT_PENDING" || snapshot.error === "RECOVERY_REQUIRED")
+        paragraphs.push(ready ? "The server has not confirmed the approval yet. Check again in a moment; the approval is not sent again." : "The server has not confirmed the approval yet; the approval is not sent again.")
       else if (snapshot.error === "ORDER_CHANGED" || snapshot.error === "ORDER_NOT_PAYABLE") paragraphs.push("The order has moved on at the server; see the order result below. The approval is not sent again.")
       else if (snapshot.error !== null) {
         const described = describeCode(snapshot.error, side)
-        paragraphs.push(described.reason, `${sentence(described.next)} The approval is not sent again.`)
+        // A retryable check never says what was or was not sent: the approval hash is already recorded.
+        paragraphs.push(described.reason, described.step === "CHECK_AGAIN" ? "The approval hash is kept and the approval is not sent again." : `${sentence(described.next)} The approval is not sent again.`)
         tone = described.step === "RECOVERY" ? "error" : "warning"
       }
-      if (expired) paragraphs.push(`The quote deadline has passed, so no ${word} will be offered for this order. An allowance left by this approval is not revoked automatically.`)
+      if (expired) paragraphs.push(`The quote deadline has passed, so no ${word} will be offered for this order and this screen can no longer check the approval. An allowance left by this approval is not revoked automatically.`)
       else if (movedOn && snapshot.error !== "ORDER_CHANGED" && snapshot.error !== "ORDER_NOT_PAYABLE") paragraphs.push(`${movedOnText.reason} An allowance left by this approval is not revoked automatically.`)
-      const code = snapshot.error ?? unavailable?.code ?? null
+      const code = fallbackCode
       return finish(
         {
           kind: "APPROVAL_SUBMITTED",
@@ -459,11 +471,11 @@ export function derivePanelModel(input: PanelInput): PanelModel {
       else if (snapshot.error === "RECOVERY_REQUIRED") paragraphs.push("The server has not reported a final result for this transaction yet.")
       else if (snapshot.error !== null) {
         const described = describeCode(snapshot.error, side)
-        paragraphs.push(described.reason, described.next)
+        paragraphs.push(described.reason, described.step === "CHECK_AGAIN" ? "The transaction hash is kept and nothing is sent again." : described.next)
         tone = described.step === "RECOVERY" ? "error" : "warning"
       }
-      if (expired) paragraphs.push("If the transaction was included after the quote deadline, the server holds it for review.")
-      const code = snapshot.error ?? unavailable?.code ?? null
+      if (expired) paragraphs.push("If the transaction was included after the quote deadline, the server holds it for review.", noLongerCheckable)
+      const code = fallbackCode
       return finish(
         {
           kind: "SUBMITTED",
@@ -486,7 +498,7 @@ export function derivePanelModel(input: PanelInput): PanelModel {
       ]
       if (transfer && side === "BUY") paragraphs.push("A second deposit would not be refunded automatically.")
       if (expired) paragraphs.push("The quote deadline has passed, so this screen can no longer check the recorded request. Contact operations if it stays unresolved.")
-      const code = snapshot.error ?? unavailable?.code ?? null
+      const code = fallbackCode
       return finish(
         {
           kind: "UNKNOWN",
@@ -511,6 +523,7 @@ export function derivePanelModel(input: PanelInput): PanelModel {
       // A read-only check is the way out once a transient, network or recovery condition clears. It never
       // signs: the controller re-reads the journal first. Reverted attempts get no button at all.
       const checkable = reverted === null && CHECKABLE_STEPS.has(described.step)
+      if (checkable && expired && code !== "ORDER_EXPIRED") paragraphs.push("Checking from this screen is no longer possible after the quote deadline.")
       return finish(
         {
           kind: "BLOCKED",

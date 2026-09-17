@@ -12,9 +12,13 @@ import { createScriptedWallet } from "./fixtures/scripted-wallet"
 import { derivePanelModel, IDLE_SNAPSHOT, type PanelButton } from "./model"
 import type { StocksWalletPanelActions } from "./types"
 
-function setup() {
+function setupSell() {
+  return setup("fixture-order-a-sell-1")
+}
+
+function setup(orderId = "fixture-order-a-buy-1") {
   const f = createScriptedWallet()
-  const selection = f.selection("fixture-order-a-buy-1")
+  const selection = f.selection(orderId)
   const context = f.context()
   const plan = planOrder(selection, context, f.now())
   const availability = executionAvailability({ configured: true, ports: f.ports, context, selection, now: f.now() })
@@ -106,6 +110,13 @@ test("arm keys: distinct per step, none while pending, without actions or withou
   assert.equal(armKeyFor(approval, null, false), null)
   assert.equal(armKeyFor(s.model(IDLE_SNAPSHOT), null, true), null, "a check never arms")
   assert.equal(armKeyFor(s.model(s.snap("SIGNING")), null, true), null)
+  // Same step and action on another order or side: a different key, so arming never carries over.
+  const sell = setupSell()
+  const sellReadyKey = armKeyFor(sell.model(sell.snap("READY_TRANSFER")), null, true)
+  assert.ok(sellReadyKey)
+  assert.notEqual(sellReadyKey, readyKey)
+  const sellApprovalKey = armKeyFor(sell.model(sell.snap("APPROVAL_REQUIRED")), null, true)
+  assert.notEqual(sellApprovalKey, approvalKey)
   // The approval's arming does not let the deposit button through.
   const { calls, actions } = recorder()
   const submit = ready.buttons[0]!

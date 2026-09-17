@@ -344,6 +344,14 @@ test("a server status showing the order moved on disables approval and deposit/e
   }
   const awaiting = s.model(s.snap("READY_TRANSFER"), { serverOrder: { orderId: s.plan.order.id, side: "BUY", state: "AWAITING_FUNDING", observedAt: null } })
   assert.equal(awaiting.buttons[0]?.enabled, true)
+  assert.equal(awaiting.steps[1]?.detail, "Ready — needs your click")
+  const moved = s.model(s.snap("READY_TRANSFER"), { serverOrder: { orderId: s.plan.order.id, side: "BUY", state: "BROKER_PENDING", observedAt: null } })
+  assert.deepEqual([moved.steps[1]?.status, moved.steps[1]?.detail], ["problem", "Not needed — order moved on"])
+  const sell = setup("fixture-order-a-sell-1")
+  const sellAwaiting = sell.model(sell.snap("READY_TRANSFER"), { serverOrder: { orderId: sell.plan.order.id, side: "SELL", state: "AWAITING_ESCROW", observedAt: null } })
+  assert.equal(sellAwaiting.buttons[0]?.enabled, true, "SELL AWAITING_ESCROW still escrows")
+  assert.equal(serverOrderAwaitsTransfer({ orderId: sell.plan.order.id, side: "SELL", state: "AWAITING_ESCROW", observedAt: null }, sell.plan.order.id, "SELL"), true)
+  assert.equal(serverOrderAwaitsTransfer({ orderId: sell.plan.order.id, side: "SELL", state: "AWAITING_FUNDING", observedAt: null }, sell.plan.order.id, "SELL"), false)
   const other = s.model(s.snap("READY_TRANSFER"), { serverOrder: { orderId: "fixture-order-other-buy", side: "BUY", state: "BROKER_PENDING", observedAt: null } })
   assert.equal(other.buttons[0]?.enabled, true, "another order's status is ignored")
   assert.equal(serverOrderAwaitsTransfer(null, s.plan.order.id, "BUY"), true)
@@ -378,6 +386,14 @@ test("disabled wallet steps and checks explain why", () => {
   const submitted = s.model(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), { availability: { status: "UNAVAILABLE", code: "DEPLOYMENT_EVIDENCE_EXPIRED" } })
   assert.equal(submitted.code, "DEPLOYMENT_EVIDENCE_EXPIRED")
   assert.match(submitted.paragraphs.join(" "), /Checking is unavailable right now/)
+  const missing = { status: "UNAVAILABLE" as const, code: "SESSION_REQUIRED" }
+  for (const snapshot of [s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "RECEIPT_PENDING"), Object.freeze({ ...IDLE_SNAPSHOT, status: "BLOCKED" as const, error: "READ_TIMEOUT" })]) {
+    const model = s.model(snapshot, { availability: missing })
+    assert.equal(model.buttons[0]?.enabled, false, `${snapshot.status}: disabled while availability is missing`)
+    assert.match(model.paragraphs.join(" "), /Checking is unavailable right now/)
+  }
+  assert.equal(ready.steps[1]?.detail, "Unavailable")
+  assert.doesNotMatch(s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "RECEIPT_PENDING"), { availability: missing }).paragraphs.join(" "), /Check again in a moment/)
 })
 
 test("the announcement changes whenever the outcome text or the server result changes", () => {
@@ -395,4 +411,39 @@ test("the announcement changes whenever the outcome text or the server result ch
   assert.equal(completed.title, "Deposit submitted — server status: Completed")
   assert.match(completed.announcement, /Order result from the server: Completed\.$/)
   assert.equal(new Set([waiting.announcement, processing.announcement, completed.announcement]).size, 3)
+})
+
+test("after a transaction was sent, a failed check never says nothing was sent", () => {
+  const s = setup()
+  for (const code of ["REQUEST_FAILED", "READ_TIMEOUT", "STALE_RESPONSE", "ALLOWANCE_CHANGED", "CONTEXT_CHANGED"]) {
+    for (const snapshot of [s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH, code), s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, code)]) {
+      const model = s.model(snapshot)
+      const shown = `${model.paragraphs.join(" ")} ${model.announcement}`
+      assert.doesNotMatch(shown, /nothing was sent|was not sent|no (deposit|escrow|approval) was sent/i, `${snapshot.status}/${code}`)
+      assert.match(shown, /hash is kept/, `${snapshot.status}/${code}`)
+      assert.equal(model.txHash, snapshot.txHash)
+    }
+  }
+  for (const code of ["REQUEST_FAILED", "READ_TIMEOUT", "ALLOWANCE_CHANGED"]) assert.doesNotMatch(describeCode(code, "BUY").next, /nothing was sent/i)
+})
+
+test("after the deadline, submitted and pending screens say they can no longer be checked", () => {
+  const s = setup()
+  const later = Date.parse(s.plan.order.quoteExpiresAt) + 1_000
+  const expiredAvailability = executionAvailability({ configured: true, ports: s.f.ports, context: s.context, selection: s.selection, now: later })
+  const submitted = s.model(s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), { now: later, availability: expiredAvailability })
+  assert.equal(submitted.buttons[0]?.enabled, false)
+  assert.equal(submitted.code, "ORDER_EXPIRED")
+  assert.match(submitted.paragraphs.join(" "), /can no longer check it/)
+  const pending = s.model(s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, "RECEIPT_PENDING"), { now: later, availability: expiredAvailability })
+  assert.equal(pending.buttons[0]?.enabled, false)
+  assert.doesNotMatch(pending.paragraphs.join(" "), /Check again in a moment/)
+  assert.match(pending.paragraphs.join(" "), /can no longer check the approval/)
+  const blocked = s.model(Object.freeze({ ...IDLE_SNAPSHOT, status: "BLOCKED" as const, error: "READ_TIMEOUT" }), { now: later, availability: expiredAvailability })
+  assert.equal(blocked.buttons[0]?.enabled, false)
+  assert.match(blocked.paragraphs.join(" "), /no longer possible after the quote deadline/)
+  const ready = s.model(s.snap("READY_TRANSFER"), { now: later, availability: expiredAvailability })
+  assert.deepEqual([ready.steps[1]?.status, ready.steps[1]?.detail], ["problem", "Deadline passed"])
+  const approval = s.model(s.snap("APPROVAL_REQUIRED"), { now: later, availability: expiredAvailability })
+  assert.deepEqual([approval.steps[0]?.status, approval.steps[0]?.detail], ["problem", "Deadline passed"])
 })

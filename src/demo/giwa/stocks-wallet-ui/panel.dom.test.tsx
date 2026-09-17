@@ -42,14 +42,14 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
   }
 
   /** Mounts a panel whose cleanup is registered on the subtest, so a failing assertion never leaves an interval running. */
-  async function mount(context: TestContext, options: { configured?: boolean; tickMs?: number } = {}) {
+  async function mount(context: TestContext, options: { configured?: boolean; tickMs?: number; orderId?: string } = {}) {
     const f = createScriptedWallet()
     const controller = createStocksWalletController(f.ports)
     const counted = countControllerActions(controller)
     const element = document.createElement("div")
     document.body.append(element)
     const root = createRoot(element)
-    let orderId = A_BUY
+    let orderId = options.orderId ?? A_BUY
     let serverOrder: StocksServerOrderStatus | null = null
     let refreshing = false
     let refreshes = 0
@@ -82,6 +82,8 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
     async function unmount() {
       if (!mounted) return
       mounted = false
+      // Real timers again before cleanup, so intervals are cleared even when a mock-timer subtest failed.
+      context.mock.timers.reset()
       await act(async () => root.unmount())
       element.remove()
       controller.dispose()
@@ -178,42 +180,48 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
     }
   })
 
-  await t.test("no approval or deposit without a click, even after minutes of timers and ticks (mock timers)", async (st) => {
-    const m = await mount(st, { tickMs: 1_000 })
-    st.mock.timers.enable({ apis: ["setTimeout", "setInterval"] })
-    const advance = async (ms: number) => {
-      for (let passed = 0; passed < ms; passed += 5_000) {
-        await act(async () => {
-          st.mock.timers.tick(5_000)
-          await flushMicrotasks()
-        })
+  for (const orderId of [A_BUY, A_SELL]) {
+    await t.test(`${orderId === A_SELL ? "SELL" : "BUY"}: no approval, deposit or escrow without a click, even after minutes of timers, ticks and wall-clock time (mock timers from mount)`, async (st) => {
+      // Enabled before mount: mount-time intervals and Date-based thresholds are mocked as well.
+      st.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: Date.now() })
+      try {
+        const m = await mount(st, { tickMs: 1_000, orderId })
+        const advance = async (ms: number) => {
+          for (let passed = 0; passed < ms; passed += 5_000) {
+            await act(async () => {
+              st.mock.timers.tick(5_000)
+              await flushMicrotasks()
+            })
+          }
+        }
+        const clickNow = async (action: string) => {
+          const target = m.button(action)
+          assert.ok(target && !target.disabled, `${action} enabled`)
+          await act(async () => {
+            target.click()
+            await flushMicrotasks()
+          })
+          await act(flushMicrotasks)
+        }
+        await clickNow("prepare")
+        assert.equal(m.status(), "APPROVAL_REQUIRED")
+        await advance(180_000)
+        assert.deepEqual(m.calls, { prepare: 1, approve: 0, submit: 0 }, "three minutes on the approval step: no approval")
+        assert.equal(m.f.requests.length, 0)
+        assert.equal(m.status(), "APPROVAL_REQUIRED")
+        await clickNow("approve")
+        for (let i = 0; i < 5 && m.status() !== "READY_TRANSFER"; i++) await act(flushMicrotasks)
+        assert.equal(m.status(), "READY_TRANSFER")
+        assert.equal(m.f.requests.length, 1)
+        await advance(180_000)
+        assert.equal(m.calls.submit, 0, "three minutes after the approval: no deposit or escrow")
+        assert.equal(m.f.requests.length, 1)
+        assert.equal(m.status(), "READY_TRANSFER")
+      } finally {
+        st.mock.timers.reset()
       }
-    }
-    const clickNow = async (action: string) => {
-      const target = m.button(action)
-      assert.ok(target && !target.disabled, `${action} enabled`)
-      await act(async () => {
-        target.click()
-        await flushMicrotasks()
-      })
-      await act(flushMicrotasks)
-    }
-    await clickNow("prepare")
-    assert.equal(m.status(), "APPROVAL_REQUIRED")
-    await advance(180_000)
-    assert.deepEqual(m.calls, { prepare: 1, approve: 0, submit: 0 }, "three minutes on the approval step: no approval")
-    assert.equal(m.f.requests.length, 0)
-    assert.equal(m.status(), "APPROVAL_REQUIRED")
-    await clickNow("approve")
-    for (let i = 0; i < 5 && m.status() !== "READY_TRANSFER"; i++) await act(flushMicrotasks)
-    assert.equal(m.status(), "READY_TRANSFER")
-    assert.equal(m.f.requests.length, 1)
-    await advance(180_000)
-    assert.equal(m.calls.submit, 0, "three minutes after the approval: no deposit")
-    assert.equal(m.f.requests.length, 1)
-    assert.equal(m.status(), "READY_TRANSFER")
-    st.mock.timers.reset()
-  })
+    })
+  }
 
   await t.test("explicit clicks: check, approve, NO automatic deposit, then a separate deposit — each exactly once", async (st) => {
     const m = await mount(st)
@@ -291,6 +299,7 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
     m.setOrder(B_BUY)
     await m.render()
     assert.equal(m.status(), "IDLE")
+    assert.equal(m.button("prepare")?.disabled, false, "B's panel is not locked by A's open wallet prompt")
     m.f.controls.releaseHeld()
     await m.settle(30)
     await m.render()
@@ -324,6 +333,7 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
     await m.render()
     for (const text of m.commits.slice(from)) assert.doesNotMatch(text, /Buy NVDA|300 ARCO_TEST_USDC|fixture-order-a-buy-1|Checking execution conditions/)
     assert.match(m.panel().textContent ?? "", /Sell NVDA: approve and escrow/)
+    assert.doesNotMatch(m.region().textContent ?? "", /^Check finished/, "the previous order's check is not announced for the new one")
     assert.equal(m.status(), "IDLE", "the late check result is not painted into the new order")
 
     m.f.controls.setHoldReads(true)
@@ -391,7 +401,7 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
     })
     await m.until(() => m.status() === "APPROVAL_REQUIRED", "APPROVAL_REQUIRED")
     const heading = m.element.querySelector('[data-testid="stocks-wallet-state"] > h3')
-    assert.equal(document.activeElement, heading, "focus moved to the state heading")
+    assert.ok(document.activeElement === heading, "focus moved to the state heading")
     assert.notEqual((document.activeElement as HTMLElement | null)?.getAttribute("data-action"), "approve")
     const live = m.element.querySelectorAll('[role="status"][aria-live="polite"]')
     assert.equal(live.length, 1, "one status region")
@@ -408,12 +418,12 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
     m.f.controls.setAccount("B")
     m.setOrder(B_BUY)
     await m.render()
-    assert.equal(m.region(), region, "the same element survives the account change")
+    assert.ok(m.region() === region, "the same element survives the account change")
     assert.match(region.textContent ?? "", /^Not checked yet\./)
     m.f.controls.setAccount("A")
     m.setOrder(A_BUY)
     await m.render()
-    assert.equal(m.region(), region)
+    assert.ok(m.region() === region, "the same element after returning to A")
 
     m.f.controls.setReconcileMode("pending")
     await toApprovalRequired(m)
@@ -426,10 +436,20 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
     assert.equal(m.status(), "APPROVAL_SUBMITTED")
     assert.notEqual(region.textContent, beforeCheck, "a check that ends on the same screen is still announced")
     assert.match(region.textContent ?? "", /^Check finished\. Approval submitted — confirming\./)
-    const firstRepeat = region.textContent
-    await m.click(m.button("prepare"))
-    await m.settle(30)
-    assert.notEqual(region.textContent, firstRepeat, "an identical repeated result is announced again")
+    // Text moves away and back without a new check: no second "Check finished."
+    m.setServerOrder(m.f.serverOrder(A_BUY))
+    await m.render()
+    assert.doesNotMatch(region.textContent ?? "", /^Check finished/)
+    m.setServerOrder(null)
+    await m.render()
+    assert.doesNotMatch(region.textContent ?? "", /^Check finished/, "returning to the checked text is not a new check")
+    for (let repeat = 0; repeat < 3; repeat++) {
+      const before = region.textContent
+      await m.click(m.button("prepare"))
+      await m.settle(30)
+      assert.match(region.textContent ?? "", /^Check finished\. Approval submitted — confirming\./)
+      assert.notEqual(region.textContent, before, `repeat ${repeat}: an identical result is announced again`)
+    }
 
     m.f.controls.setReconcileMode("confirm")
     await m.click(m.button("prepare"))
@@ -457,11 +477,11 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
       outside.focus()
       outside.blur()
     })
-    assert.equal(document.activeElement, document.body)
+    assert.ok(document.activeElement === document.body, "the user left the panel")
     m.f.controls.releaseHeld()
     await m.until(() => m.status() === "READY_TRANSFER", "READY_TRANSFER")
     await m.settle(ARM_MS * 3)
-    assert.equal(document.activeElement, document.body, "focus is not taken after the user left the panel")
+    assert.ok(document.activeElement === document.body, "focus is not taken after the user left the panel")
     outside.remove()
 
     m.setServerOrder(m.f.serverOrder(A_BUY))
@@ -472,10 +492,61 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
     await m.render()
     assert.equal(refresh.getAttribute("aria-disabled"), "true")
     assert.equal(refresh.disabled, false)
-    assert.equal(document.activeElement, refresh, "keyboard focus stays on the refresh button")
+    assert.ok(document.activeElement === refresh, "keyboard focus stays on the refresh button")
     const before = m.refreshes()
     await act(async () => refresh.click())
     assert.equal(m.refreshes(), before, "a busy refresh ignores activation")
+  })
+
+  await t.test("a wallet button that is disabled and re-enabled must arm again before it accepts activation", async (st) => {
+    const m = await mount(st)
+    m.f.controls.setAllowance(A_BUY, "300000000")
+    await m.click(m.button("prepare"))
+    await m.until(() => m.status() === "READY_TRANSFER", "READY_TRANSFER")
+    await m.until(() => m.button("submit")?.disabled === false, "deposit armed")
+    m.setServerOrder({ ...m.f.serverOrder(A_BUY), state: "BROKER_PENDING" })
+    await m.render()
+    assert.equal(m.button("submit")?.disabled, true, "moved on: disabled")
+    assert.match(m.panel().textContent ?? "", /Order moved on — do not deposit/)
+    assert.match(m.element.querySelector('[data-testid="stocks-wallet-steps"]')?.textContent ?? "", /Not needed — order moved on/)
+    m.setServerOrder(null)
+    await m.render()
+    assert.equal(m.button("submit")?.disabled, true, "re-enabled step starts unarmed")
+    await m.click(m.button("submit"))
+    assert.equal(m.calls.submit, 0)
+    await m.until(() => m.button("submit")?.disabled === false, "armed again")
+    assert.equal(m.f.requests.length, 0)
+  })
+
+  await t.test("activation re-checks availability: a deadline passed since the last render refuses the approval", async (st) => {
+    const m = await mount(st, { tickMs: 0 })
+    await toApprovalRequired(m)
+    m.f.controls.advance(600_000) // no re-render: the button on screen is still enabled
+    assert.equal(m.button("approve")?.disabled, false)
+    await m.click(m.button("approve"))
+    await m.settle(20)
+    assert.equal(m.calls.approve, 0, "the adapter refuses before the controller")
+    assert.equal(m.f.requests.length, 0)
+  })
+
+  await t.test("focus rescue also covers a check button disabled by the deadline without a title change", async (st) => {
+    const m = await mount(st)
+    m.f.controls.setReconcileMode("pending")
+    await toApprovalRequired(m)
+    await m.click(m.button("approve"))
+    await m.until(() => m.status() === "APPROVAL_SUBMITTED", "APPROVAL_SUBMITTED")
+    await m.settle(20)
+    const check = m.button("prepare")!
+    await act(async () => {
+      check.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }))
+      check.focus()
+    })
+    assert.ok(document.activeElement === check)
+    m.f.controls.advance(600_000)
+    await m.render()
+    assert.equal(m.button("prepare")?.disabled, true)
+    assert.ok(document.activeElement === m.element.querySelector('[data-testid="stocks-wallet-state"] > h3'), "focus moved off the disabled button")
+    assert.match(m.panel().textContent ?? "", /can no longer check the approval/)
   })
 
   await t.test("without a controller and ports the panel shows disabled execution", async (st) => {

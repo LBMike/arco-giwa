@@ -77,10 +77,11 @@ export function describeCode(code: string, side: Side | null): CodeDescription {
     case "REQUEST_FAILED":
     case "INVALID_RESPONSE":
     case "EXECUTION_POLICY_EXPIRED":
-      return { reason: "A required check could not be completed in time.", next: "Nothing was sent. Check again.", step: "CHECK_AGAIN" }
+      // No "nothing was sent" claim: the same code can follow an earlier, already recorded wallet request.
+      return { reason: "A required check could not be completed in time.", next: "Check again.", step: "CHECK_AGAIN" }
     case "ALLOWANCE_CHANGED":
     case "ALLOWANCE_NOT_CONFIRMED":
-      return { reason: "The token allowance changed after it was checked.", next: `Nothing was sent for the ${transfer(s)}. Check again.`, step: "CHECK_AGAIN" }
+      return { reason: "The token allowance changed after it was checked.", next: "Check again.", step: "CHECK_AGAIN" }
     case "ORDER_REQUIRED":
     case "PREPARE_REQUIRED":
       return { reason: "This step needs a current check first.", next: "Check the order.", step: "CHECK_AGAIN" }

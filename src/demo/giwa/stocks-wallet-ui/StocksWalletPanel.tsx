@@ -211,6 +211,9 @@ export function useStatusAnnouncement(announcement: string): { text: string; che
   const latest = useRef(announcement)
   latest.current = announcement
   const [notice, setNotice] = useState<{ base: string; count: number } | null>(null)
+  // Once the text moves away from the checked result the notice is gone for good; returning to the same
+  // text later (without a new check) must not announce "Check finished." again.
+  if (notice !== null && notice.base !== announcement) setNotice(null)
   const checkFinished = useCallback(() => setNotice((previous) => ({ base: latest.current, count: (previous?.count ?? 0) + 1 })), [])
   const text = notice !== null && notice.base === announcement ? `Check finished. ${announcement}${notice.count % 2 === 0 ? " " : ""}` : announcement
   return { text, checkFinished }
@@ -280,7 +283,7 @@ export function StocksWalletPanel(props: StocksWalletPanelProps) {
     const lost = active === null || active === document.body
     const stranded = active !== null && rootRef.current !== null && rootRef.current.contains(active) && active.tagName === "BUTTON" && active.disabled === true
     if (lost || stranded) stateHeadingRef.current?.focus({ preventScroll: true })
-  }, [model.kind, model.stage, model.title, pending, armed])
+  })
 
   const activate = (button: PanelButton) => {
     const running = startActivation(gate, button, { key: armKey, armed }, actions)
