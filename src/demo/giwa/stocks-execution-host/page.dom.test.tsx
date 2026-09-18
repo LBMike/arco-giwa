@@ -40,10 +40,10 @@ const SESSION_NOTICE_TEXT = [
 ].join("")
 
 /** 003D: the session-end notice when this tab kept a hash the original wallet request returned. */
-const KEPT_NOTICE = "Your wallet answered after your last Stocks session ended"
+const KEPT_NOTICE = "This tab kept a transaction hash the server may not have recorded"
 const KEPT_NOTICE_TEXT = [
   KEPT_NOTICE,
-  "This tab kept the transaction hash your wallet returned. The server may not have recorded it yet, even if the transaction was sent.",
+  "Your wallet returned a transaction hash that an earlier Stocks session could not record, so this tab kept it. The server may not have it yet, even though the transaction was sent.",
   "Sign in to Stocks again with the same wallet in this tab and open the order. You can record the kept hash there; nothing is recorded or sent automatically. The hash is kept only in this tab's memory: reloading or closing the page loses it.",
   "Do not send the approval, deposit or escrow again from this or any other app or wallet. If the order shows the result as unknown, or the hash cannot be recorded, contact operations to confirm what happened.",
 ].join("")

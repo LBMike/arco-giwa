@@ -80,8 +80,13 @@ export function knownHashOwnerScope(view: ExecutionHostView, origin: string | nu
   return Object.freeze({ wallet: session.walletAddress.toLowerCase(), chainId: KNOWN_HASH_CHAIN_ID, apiBase: view.apiBase, origin })
 }
 
+/**
+ * The signed-out wallet's scope for the session-end notice only. Kept hashes are always on chain 91342; the notice names
+ * no order or hash, so the wallet's current network does not hide it (another network must not switch it to the
+ * no-hash wording while this tab still keeps a hash).
+ */
 function walletScopeOf(view: ExecutionHostView, origin: string | null): KnownHashScope | null {
-  if (origin === null || view.apiBase === null || view.wallet.address === null || view.wallet.chainId !== KNOWN_HASH_CHAIN_ID) return null
+  if (origin === null || view.apiBase === null || view.wallet.address === null) return null
   return Object.freeze({ wallet: view.wallet.address.toLowerCase(), chainId: KNOWN_HASH_CHAIN_ID, apiBase: view.apiBase, origin })
 }
 
@@ -195,8 +200,8 @@ export function StocksExecutionSessionNotice() {
   if (!endedHere && kept === 0) return null
   if (kept > 0) {
     return (
-      <Notice tone="warning" title="Your wallet answered after your last Stocks session ended">
-        <p>This tab kept the transaction hash your wallet returned. The server may not have recorded it yet, even if the transaction was sent.</p>
+      <Notice tone="warning" title="This tab kept a transaction hash the server may not have recorded">
+        <p>Your wallet returned a transaction hash that an earlier Stocks session could not record, so this tab kept it. The server may not have it yet, even though the transaction was sent.</p>
         <p className="mt-2">Sign in to Stocks again with the same wallet in this tab and open the order. You can record the kept hash there; nothing is recorded or sent automatically. The hash is kept only in this tab's memory: reloading or closing the page loses it.</p>
         <p className="mt-2">Do not send the approval, deposit or escrow again from this or any other app or wallet. If the order shows the result as unknown, or the hash cannot be recorded, contact operations to confirm what happened.</p>
       </Notice>

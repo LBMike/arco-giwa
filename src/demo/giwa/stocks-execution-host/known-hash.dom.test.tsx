@@ -13,6 +13,7 @@ type AnyModule = Record<string, any> // eslint-disable-line @typescript-eslint/n
 
 const runtime = process.env.GIWA_HOST_DOM_RUNTIME
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+const KEPT_NOTICE = "This tab kept a transaction hash the server may not have recorded"
 
 test("kept hashes are shown only to their owner on their order, from the first commit (set GIWA_HOST_DOM_RUNTIME)", { skip: !runtime }, async (t) => {
   const { createInProcessStocks, HARNESS_FRONTEND_ORIGIN } = (await import("./testing/in-process-stocks")) as typeof import("./testing/in-process-stocks")
@@ -51,6 +52,13 @@ test("kept hashes are shown only to their owner on their order, from the first c
     const walletB = createFakeEip1193Wallet(harness.chain, { account: B })
     let view = { address: A as string, chainId: 91342, epoch: "injected:a:1", source: { mode: "injected", provider: walletA } as AnyModule, apiBase: harness.apiBase as string, origin: HARNESS_FRONTEND_ORIGIN, row: { ...order, side: "BUY", state: "BROKER_PENDING" } as AnyModule }
     const clock = { now: () => Date.now(), monotonicNow: () => performance.now() }
+    // Holds the recovery's inspect when asked, to act while it is in flight.
+    const inspectGate: { hold: Promise<void> | null } = { hold: null }
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (inspectGate.hold && (init?.method ?? "GET") === "GET" && /\/wallet-submissions\//.test(String(input))) await inspectGate.hold
+      return harness.fetch(input, init)
+    }) as typeof globalThis.fetch
+    let showSlot = true
     const dependencies = harness.signInDependencies()
     let host: AnyModule | null = null
     let phase = "initial"
@@ -66,12 +74,12 @@ test("kept hashes are shown only to their owner on their order, from the first c
       useLayoutEffect(() => {
         commits.push({ phase, text: element.textContent ?? "" })
       })
-      return h("div", null, h(Capture), h(StocksExecutionSessionNotice), h(StocksOrderExecution, { order: view.row, observedAt: new Date().toISOString(), refreshing: false, onRefresh: () => undefined }))
+      return h("div", null, h(Capture), h(StocksExecutionSessionNotice), showSlot ? h(StocksOrderExecution, { order: view.row, observedAt: new Date().toISOString(), refreshing: false, onRefresh: () => undefined }) : null)
     }
     const tree = () =>
       h(StrictMode, null,
         h(StocksHostProvider, { context: { walletAddress: view.address, chainId: view.chainId, frontendOrigin: harness.frontendOrigin, apiBase: harness.apiBase, walletEpoch: view.epoch }, dependencies, walletSource: view.source },
-          h(StocksExecutionProvider, { apiBase: view.apiBase, fetch: harness.fetch, clock, activeSource: () => view.source, knownHashes: store, origin: view.origin }, h(Content))))
+          h(StocksExecutionProvider, { apiBase: view.apiBase, fetch, clock, activeSource: () => view.source, knownHashes: store, origin: view.origin }, h(Content))))
     const render = async (next: Partial<typeof view>, label: string) => {
       view = { ...view, ...next }
       phase = label
@@ -98,7 +106,7 @@ test("kept hashes are shown only to their owner on their order, from the first c
     await t.test("signed out: the owner's wallet sees the kept-hash notice (no order or hash); nothing else", async () => {
       await render({}, "signed-out-A")
       const text = element.textContent ?? ""
-      assert.ok(text.includes("Your wallet answered after your last Stocks session ended"), text)
+      assert.ok(text.includes(KEPT_NOTICE), text)
       assert.ok(!text.includes(HASH) && !text.includes(order.id) && !text.includes(OTHER_HASH))
       assert.ok(card() === null && panel() === null)
     })
@@ -112,8 +120,35 @@ test("kept hashes are shown only to their owner on their order, from the first c
       assert.ok(text.includes(HASH), "the owner's own kept hash")
       assert.ok(!text.includes(OTHER_HASH), "another order's kept hash never shows here")
       assert.ok(panel() === null, "not payable and not pinned: no execution panel")
-      assert.ok(!text.includes("Your wallet answered after your last Stocks session ended"), "no signed-out notice while signed in")
+      assert.ok(!text.includes(KEPT_NOTICE), "no signed-out notice while signed in")
       assert.equal(walletA.calls.length, 0, "rendering sends and reads nothing from the wallet")
+    })
+
+    await t.test("a card that unmounts while its recovery is in flight neither reports nor stores the answer", async () => {
+      let release!: () => void
+      inspectGate.hold = new Promise<void>((resolve) => { release = resolve })
+      const requests = harness.requests.length
+      const button = card()!.querySelector<HTMLButtonElement>('button[data-action="record-known-hash"]')!
+      await act(async () => {
+        button.click()
+        await sleep(0)
+      })
+      assert.equal(store.get("kept-1")?.busy, true)
+      showSlot = false
+      await render({}, "slot-hidden")
+      await act(async () => {
+        release()
+        inspectGate.hold = null
+        await sleep(50)
+      })
+      for (let i = 0; i < 100 && store.get("kept-1")?.busy; i++) await act(async () => sleep(10))
+      // The server answer (no claim for this test-only binding) would block the hash; after the unmount nothing is stored.
+      assert.deepEqual([store.get("kept-1")?.state.kind, store.get("kept-1")?.busy], ["KEPT", false])
+      assert.equal(harness.requests.filter((request) => request.method === "POST").length, harness.requests.slice(0, requests).filter((request) => request.method === "POST").length, "no outcome or reconcile")
+      showSlot = true
+      await render({}, "slot-back")
+      assert.ok(card() !== null)
+      assert.equal(card()!.getAttribute("data-state"), "KEPT")
     })
 
     const hidden = async (label: string, next: Partial<typeof view>) => {
@@ -135,14 +170,17 @@ test("kept hashes are shown only to their owner on their order, from the first c
       await render({ apiBase: harness.apiBase }, "api-back")
       assert.ok(card() !== null)
       await hidden("other chain", { chainId: 1 })
+      const otherChain = element.textContent ?? ""
+      assert.ok(otherChain.includes(KEPT_NOTICE), "another network keeps the kept-hash notice (not the no-hash wording)")
+      assert.ok(!otherChain.includes("A wallet request from your last Stocks session"))
       await hidden("wallet B", { chainId: 91342, address: B, epoch: "injected:b:1", source: { mode: "injected", provider: walletB } })
       const text = element.textContent ?? ""
-      assert.ok(!text.includes("Your wallet answered after your last Stocks session ended"), "B is not told about A's kept hash")
+      assert.ok(!text.includes(KEPT_NOTICE), "B is not told about A's kept hash")
       assert.equal(walletB.calls.length, 0)
       // Back to A (signed out after the wallet change): the notice again, still without order or hash.
       await render({ address: A, epoch: "injected:a:2", source: { mode: "injected", provider: walletA } }, "back-to-A")
       const back = element.textContent ?? ""
-      assert.ok(back.includes("Your wallet answered after your last Stocks session ended"), back)
+      assert.ok(back.includes(KEPT_NOTICE), back)
       assert.ok(!back.includes(HASH))
     })
 
@@ -151,7 +189,7 @@ test("kept hashes are shown only to their owner on their order, from the first c
       assert.ok(store.settle("kept-other-order", OTHER_HASH, { kind: "VERIFIED", status: "CONFIRMED" }))
       await render({}, "all-verified")
       const text = element.textContent ?? ""
-      assert.ok(!text.includes("Your wallet answered after your last Stocks session ended"), text)
+      assert.ok(!text.includes(KEPT_NOTICE), text)
     })
 
     await act(async () => root.unmount())

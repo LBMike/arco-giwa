@@ -14,6 +14,7 @@ Connects the existing `/stocks` page to wallet execution for an accepted GIWA St
 | Active wallet source capture and wallet ports | `../stocks-wallet-source` |
 | Panel | `../stocks-wallet-ui` (`StocksWalletExecutionPanel`) |
 | Session | `../stocks-host` (`useGiwaStocksHost`) |
+| Kept late hashes and their explicit recovery (003D) | `../stocks-known-hash-recovery` |
 
 ## Lifetime (`registry.ts`, `StocksExecutionProvider.tsx`)
 
@@ -24,7 +25,7 @@ Connects the existing `/stocks` page to wallet execution for an accepted GIWA St
 - **One owner per accepted order (`side:orderId`).** The owner holds for its whole life:
   - one `createExecutionClock()` and one monotonic source, shared by the reads, the gate and the controller
   - the read adapter
-  - the submission gate, bound to session, side, order, deployment digest, API base and wallet
+  - the submission gate, bound to session, side, order, deployment digest, API base and wallet. It is wrapped by `captureKnownHashes`: every call and failure passes through unchanged, and a hash the wallet returned is kept in this tab only when this original gate could not record it
   - the wallet ports, the `WalletPorts` object and its controller
   - Nothing is recreated on render, on the panel's display tick, on an order status refresh or on an evidence renewal.
 - **Pinned selection.** The first row this identity sees for an order becomes the controller's selection. Later rows (the investor feature replaces the order object on every refresh) reach the panel as `serverOrder` only. Selecting another order uses another owner.
@@ -60,23 +61,34 @@ When the capability is not READY, the investor order card keeps its "not availab
 
 ## Session end
 
-When a signed-in identity ends with an open, answered or uncertain wallet request (logout or session expiry while the page stays mounted), the registry is disposed. `StocksExecutionSessionNotice` then shows, while signed out with the same wallet, a notice. It names no order, amount or hash, and has no link or button. It says:
+When a signed-in identity ends with an open, answered or uncertain wallet request (logout or session expiry while the page stays mounted), the registry is disposed. `StocksExecutionSessionNotice` then shows a notice while signed out with the same wallet. It names no order, amount or hash, and has no link or button. It has two variants.
 
-- the request itself is on the server (its claim was reserved before the wallet opened), but a wallet answer that arrived after the session ended may not have been recorded, even if the transaction was sent;
-- sign in again with the same wallet and check the order. The check only shows what the server has already recorded, and cannot add a wallet answer the server never received;
-- never send the approval, deposit or escrow again from any app or wallet. If the check shows the result as unknown, or the order can no longer be checked (for example after the quote deadline), contact operations.
+**No hash kept (the 003B-1 copy):**
+- The request itself is on the server (its claim was reserved before the wallet opened). A wallet answer that arrived after the session ended may not have been recorded, even if the transaction was sent.
+- Sign in again with the same wallet and check the order. The check only shows what the server has already recorded, and cannot add a wallet answer the server never received.
+- Never send the approval, deposit or escrow again from any app or wallet. If the check shows the result as unknown, or the order can no longer be checked (for example after the quote deadline), contact operations.
 
-A later session for the same wallet that ends without such a request clears it.
+**A hash was kept in this tab (003D):** the original gate could not record the hash the wallet returned (see `../stocks-known-hash-recovery`). It is also shown while this tab keeps an unrecorded hash for the wallet without an ended attempt, on whatever network the wallet is on. Its title ("This tab kept a transaction hash the server may not have recorded") asserts no timing. It says:
+- this tab kept the returned hash, and the server may not have it;
+- sign in again with the same wallet in this tab and open the order to record it there. Nothing is recorded or sent automatically;
+- the hash is kept only in this tab's memory, and reloading or closing the page loses it;
+- never send again; operations if the order shows unknown or the hash cannot be recorded.
 
-The notice lives in page state: after a reload or remount it is gone. While the order can still be checked, the next check shows the reserved claim as recovery-only (UNKNOWN, do not repeat) or the recorded hash. After the quote deadline the panel offers no check.
+A later session for the same wallet that ends without such a request clears the ended-attempt part. A still-kept hash keeps its variant.
 
-Known limit (browser): once the session has expired by time, the original gate refuses a late hash before any request.
-- The server journal keeps only the reserved claim (`REQUEST_MAY_START`, no hash).
-- The next session's check reads that record and shows UNKNOWN without the hash. It posts no outcome and sends nothing (`full-stack.test.tsx`; `page.dom.test.tsx` scenarios 11–12).
-- The backend already lets a new valid session of the same owner record and reconcile a known hash on the original immutable claim (`inspect → outcomes → reconcile`). This also works after quote expiry or pause and grants no new send or claim. Codex verified it independently; this module's tests do not exercise it.
-- What is missing is the browser link: carrying the originally known hash into an explicit recovery step in the new session. It is not built.
-- A hash the application never received cannot be restored by a check or a claim.
-- Nothing re-issues the old request, and nothing records or retries automatically.
+The notice lives in page state, and kept hashes live in this tab's memory: after a reload both are gone. While the order can still be checked, the next check shows the reserved claim as recovery-only (UNKNOWN, do not repeat) or the recorded hash. After the quote deadline the panel offers no check.
+
+**Kept-hash recovery (003D).**
+- **Where the card appears:** in the order slot, for the signed-in owner (session wallet = shown wallet, chain 91342, same API base and origin) on the exact order and deployment. This is filtered during render, so another wallet, chain, API base, origin, order or deployment never sees it, from the first commit on.
+- **Moved-on orders:** it also renders for a moved-on order that this session has not pinned, and that case gets no execution panel.
+- **The click:** runs `recoverKnownHash` with a new gate pinned to the current session: inspect the original binding, record only the original hash, reconcile. It stops without painting or storing when the identity key changes or the card unmounts.
+- **401:** invalidates only the pinned session.
+- **Never:** a claim, a wallet request, a policy read, a deadline check or a retry.
+
+**Still missing (browser):**
+- recovery after a reload, in another tab or on another device (memory only);
+- a hash the application never received (no manual entry, wallet search or guess);
+- the answer of a request whose wallet returned no hash (UNKNOWN stays recovery-only).
 
 ## Wallet request rules (from `../stocks-wallet-source`)
 
@@ -117,6 +129,8 @@ GIWA_HOST_DOM_RUNTIME=/path/to/node_modules/jsdom/package.json TMPDIR=/private/t
   - a 4 s policy with a 6 s check inside the final wallet read and 15 s evidence → 0 sends, plus a negative control with a port that awaits
   - open prompt across evidence expiry, logout/reload, expired-session limit, late 401, cancel
   - 4001/-32603/invalid hash, revert, pending finality
+- `known-hash.dom.test.tsx` (gated like the page DOM test): first-commit visibility of kept hashes across deployment, origin, API base, chain and wallet changes and A→B→A. A moved-on, unpinned order shows only the recovery card. A card that unmounts while its recovery is in flight stores nothing. Notice variants, including another network.
+- `scope.test.tsx` (no DOM): the kept-hash owner scope requires the session wallet to be the shown wallet on chain 91342.
 - `page.dom.test.tsx` (real `/stocks` routes in StrictMode, real host, investor feature, provider, panel, controller, reads, gate and ports over the in-process server):
   - mount and sign-in with zero wallet or execution requests
   - BUY accept → check → approve → server reconcile → deposit, with exact params
@@ -127,6 +141,18 @@ GIWA_HOST_DOM_RUNTIME=/path/to/node_modules/jsdom/package.json TMPDIR=/private/t
   - account switch and sign-out during a held send
   - Dynamic source
   - remount during a held send
-  - BUY and SELL: session expiry by time during a held approval. The late hash stays unrecorded (0 outcomes, claim without hash, not painted). The notice promises no recovery by checking. A new session's check shows UNKNOWN without the hash, with 0 outcomes and 1 send in total
+  - 11–12, BUY and SELL: session expiry by time during a held approval, and the wallet then answers with an error.
+    - No hash is kept: 0 outcomes, claim without hash, no recovery card.
+    - The notice promises no recovery by checking.
+    - A new session's check shows UNKNOWN without a hash, with 0 outcomes and 1 send in total.
+  - 13–16, BUY/SELL × APPROVAL/TRANSFER: late hash after expiry → kept-hash notice (exact copy, no order or hash) → same-owner sign-in → "Record this hash" (activated twice).
+    - Each run makes 1 inspect, 1 outcome with the original binding and hash, and 1 reconcile. The result is CONFIRMED on the server, with 0 claims and 0 wallet requests.
+    - 13: A→B→A (B never paints A's hash, order, notice or card), then after the quote deadline, with no new deposit offered.
+    - 14: after the deadline with trading paused.
+    - 15: a moved-on order.
+    - 16: before the deadline; the panel's own check then shows the recorded escrow.
+  - 17: a slow recovery answer across a sign-out paints and stores nothing; after the next sign-in the hash is recorded once.
+  - 18: a 401 invalidates only the pinned session, and the hash stays kept.
+  - 19: a reload loses the kept hash; the new page's check stays recovery-only.
 - `testing/`: a TEST-ONLY in-process server (real Stocks, execution and submission plugins over memory SQL, the real evidence and receipt verifier over a fake chain, fake EIP-1193 wallet). Never imported by product code.
 - `verification/`: an offline loopback page for a browser check of the same real page code (see its README). Not part of the app build.

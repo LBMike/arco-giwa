@@ -20,6 +20,8 @@ function stepWord(entry: KnownHashEntry): string {
 const capitalized = (value: string) => value.charAt(0).toUpperCase() + value.slice(1)
 
 const OPERATIONS = "Do not send the approval, deposit or escrow again from this or any other app or wallet. Contact operations to confirm what happened."
+/** The transaction behind a kept hash was already sent by the wallet: never again, whatever this card shows. */
+const NEVER_AGAIN = "The transaction behind this hash was already sent. Do not send the approval, deposit or escrow again from this or any other app or wallet."
 
 type Copy = Readonly<{ tone: "action" | "warning" | "info" | "success" | "error"; paragraphs: readonly string[]; action: string | null }>
 
@@ -27,13 +29,13 @@ function copyFor(entry: KnownHashEntry, last: RecoveryResult | null): Copy {
   const step = stepWord(entry)
   const state = entry.state
   if (state.kind === "VERIFIED") {
-    if (state.status === "REVERTED") return { tone: "error", action: null, paragraphs: [`The server found that this ${step} transaction reverted. Nothing was sent again.`, "Do not repeat it from another app or wallet. Contact operations if the order stays unresolved."] }
+    if (state.status === "REVERTED") return { tone: "error", action: null, paragraphs: [`The server found that this ${step} transaction reverted. This page did not send it again.`, "Do not repeat it from another app or wallet. Contact operations if the order stays unresolved."] }
     return {
       tone: "success",
       action: null,
       paragraphs: entry.stage === "APPROVAL"
         ? ["The server verified this approval's receipt for the order's request.", "An approval does not fund or complete the order. The order status shows the result, and the separate deposit or escrow step still follows the order's own rules and deadline."]
-        : [`The server verified this ${step}'s receipt for the order's request.`, "This is not the order result. The order status shows whether the order is complete."],
+        : [`The server verified this ${step}'s receipt for the order's request.`, "This is not the order result. Only the order status shows the result."],
     }
   }
   if (state.kind === "BLOCKED") {
@@ -44,8 +46,10 @@ function copyFor(entry: KnownHashEntry, last: RecoveryResult | null): Copy {
   const paragraphs: string[] = []
   if (state.kind === "RECORDED") paragraphs.push(`The server has recorded this ${step} hash for the order's request. Its receipt is not verified yet, so the transaction is not confirmed.`)
   else paragraphs.push(`Your wallet returned this ${step} transaction hash, but it could not be recorded on the server at the time (for example because the Stocks session had ended), so the server may not have it.`, "Recording it sends nothing from your wallet. It adds this hash to the request the server already has for this order, then asks the server to check its receipt.")
-  if (last?.kind === "FAILED") paragraphs.push("The server did not confirm this step. Nothing was sent from your wallet. Check again to see what the server has.")
+  // About this recovery action only: it never opens the wallet. The transaction behind the hash WAS sent.
+  if (last?.kind === "FAILED") paragraphs.push("This check could not be completed. It did not open your wallet or send anything. Check again to see what the server has.")
   if (last?.kind === "SESSION_REQUIRED" || last?.kind === "SESSION_REJECTED") paragraphs.push("Your Stocks session can no longer be used for this. Sign in again with the same wallet to continue.")
+  paragraphs.push(NEVER_AGAIN)
   paragraphs.push("This hash is kept only in this tab's memory. Reloading or closing the page loses it.")
   const sessionEnded = last?.kind === "SESSION_REQUIRED" || last?.kind === "SESSION_REJECTED"
   const action = sessionEnded ? null : state.kind === "RECORDED" ? "Check the receipt again" : last?.kind === "FAILED" ? "Check again" : "Record this hash"
