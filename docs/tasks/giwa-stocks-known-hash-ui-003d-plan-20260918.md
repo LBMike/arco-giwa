@@ -103,5 +103,6 @@ Full checks: typecheck, build, frontend with DOM + artifacts and CI-like, server
   - 7 known token findings;
   - typecheck, build, security, stories and diff all pass.
 
-  Mutation rounds 1–3: 33 mutations, 30 killed outright; M16 and M18 were killed in round 2 after tests were added; M05 is an equivalent mutant (the gate enforces the same binding before any request).
+  Mutation rounds 1–3: 31 distinct mutations (19 + 4 + 8), 30 killed. M16 and M18 survived round 1 and were killed in round 2 after tests were added. M05 is an equivalent mutant (the gate enforces the same binding before any request).
+- **Deviation from the plan:** `StocksPages.tsx` did change, by one `knownHashes` page-environment seam passed to the provider (tests inject a store, including an empty one to simulate a reload). The product default stays the tab's module store.
 - **Details:** `docs/evidence/giwa-stocks-known-hash-ui-003d-builder-20260918.md`.
