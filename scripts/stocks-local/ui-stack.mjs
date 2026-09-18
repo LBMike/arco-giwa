@@ -15,12 +15,14 @@ import { httpStocksRpc, externalStocksSigner } from '../../server/dist/stocks-ru
 import { StocksSubmissionsService } from '../../server/dist/stocks-submissions/service.js';
 import { StocksSubmissionDiagnosticsService } from '../../server/dist/stocks-submission-diagnostics/service.js';
 import { localSigner } from './local-signer.mjs';
+import { createShortSessionFixture } from './short-session.mjs';
 
 const { Pool } = createRequire(import.meta.url)('pg');
 const faucetAbi = parseAbi(['function faucet(address,uint256)']);
 
-export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test' }) {
+export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test', knownHashRecovery = false }) {
   assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1');
+  assert.equal(typeof knownHashRecovery, 'boolean');
   assert.equal(bundle.execution, 'LOCAL_EVM_TEST_HARNESS_ONLY');
   const target = new URL(rpcUrl), database = new URL(databaseUrl), origin = new URL(frontendOrigin);
   assert.equal(target.protocol, 'http:'); assert.equal(target.hostname, '127.0.0.1');
@@ -93,6 +95,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
   let closed = false, processing = false, port = 0, apiBase;
   const signerToken = `TEST_HARNESS_ONLY_${randomUUID()}`;
   const authSecret = `TEST_HARNESS_ONLY_SESSION_${randomUUID()}`;
+  const shortSession = knownHashRecovery ? createShortSessionFixture({ secret: authSecret, holder: accounts.holder }) : null;
   const operators = [{ wallet: accounts.operator, operatorId: 'local-operator', permissions: ['stocks:read'] }];
   const resolvers = stocksSessionResolvers(authSecret, [domain], operators);
   const nonceStore = new Map();
@@ -137,6 +140,8 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
       stocksRuntimeStatus: { getSnapshot: runtime.status, ...resolvers },
       stocksSubmissionDiagnostics: { service: new StocksSubmissionDiagnosticsService(runtime.service), ...resolvers },
     });
+    if (shortSession) next.addHook('onSend', async (request, reply, payload) =>
+      shortSession.restrict(request.url, reply.statusCode, payload));
     next.addHook('onResponse', async (request, reply) => {
       // No credentials, signatures, query strings, or arbitrary bodies in evidence.
       const path = request.url.split('?')[0];
@@ -220,6 +225,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
         signer: { ...signerServer.controls, operations } };
     }
     return { apiBase, frontendOrigin, accounts, manifest, digest, rpc, chain, pool, service: runtime.service, repo,
+      armShortSession: shortSession ? () => { assert.ok(!closed); shortSession.arm(); } : undefined,
       observer: { coverage: runtime.reconciliationCoverage }, requests, rpcTrace, startProcessing, stopProcessing, restartApi, snapshot, close };
   } catch (error) { await close().catch(() => {}); throw error; }
 }

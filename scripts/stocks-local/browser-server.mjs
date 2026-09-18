@@ -75,6 +75,7 @@ export async function createLocalBrowserHost({ root, resourceDir }) {
       throw failure(415, 'LOCAL_JSON_REQUIRED');
   }
   const config = () => ({ apiBase: stack.apiBase, frontendOrigin: origin,
+    knownHashRecovery: typeof stack.armShortSession === 'function',
     accounts: { holder: stack.accounts.holder, otherHolder: stack.accounts.otherHolder }, account: wallet.account,
     manifest: structuredClone(stack.manifest), capability });
   async function state() {
@@ -113,6 +114,9 @@ export async function createLocalBrowserHost({ root, resourceDir }) {
       case 'stopProcessing': await stack.stopProcessing(); return;
       case 'startProcessing': await stack.startProcessing(); return;
       case 'restartApi': await stack.restartApi(); return;
+      case 'armShortSession':
+        if (typeof stack.armShortSession !== 'function') throw failure(403, 'LOCAL_RECOVERY_FIXTURE_DISABLED');
+        stack.armShortSession(); return;
       default: throw failure(400, 'LOCAL_CONTROL_INVALID');
     }
   }

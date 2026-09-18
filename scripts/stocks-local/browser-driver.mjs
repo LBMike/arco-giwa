@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export async function runBrowserScenario({ host, stack, wallet, browser, evidence, probe }) {
+export async function runBrowserScenario({ host, stack, wallet, browser, evidence, probe, scenario = '' }) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
   page.setDefaultTimeout(15000);
@@ -133,6 +133,14 @@ export async function runBrowserScenario({ host, stack, wallet, browser, evidenc
     passed('Viewport has no horizontal overflow', dimensions);
   }
   try {
+    if (scenario === 'known-hash') {
+      // Fixed test module. Its recovery requests exercise the real HTTP adapter,
+      // not a production recovery screen (which remains a separate UI task).
+      const { runKnownHashScenario } = await import('./known-hash-driver.mjs');
+      return await runKnownHashScenario({ host, stack, wallet, page, report, passed, wait,
+        control, signIn, place, select, check, status, panel, action, hash, approve, transfer,
+        complete, holdings, heldAction, screenshot });
+    }
     await page.goto(host.url); await page.getByTestId('local-test-controls').waitFor();
     await signIn(); assert.equal(wallet.sends.length, 0);
     passed('Chrome native cross-origin API + real SIWE login; mount/login sends zero transactions');

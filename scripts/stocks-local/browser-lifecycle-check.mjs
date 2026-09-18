@@ -34,7 +34,7 @@ for (const mode of ['ready-SIGINT', 'held-SIGTERM', 'failure']) {
   const probe = mode === 'failure' ? 'failure' : mode === 'held-SIGTERM' ? 'held' : 'ready';
   const child = spawn(process.execPath, ['scripts/stocks-local/run.mjs'], {
     cwd: root,
-    env: { ...process.env, STOCKS_LOCAL_BROWSER: '1', STOCKS_LOCAL_BROWSER_PROBE: probe,
+    env: { ...process.env, STOCKS_LOCAL_BROWSER: '1', STOCKS_LOCAL_BROWSER_PROBE: probe, STOCKS_LOCAL_BROWSER_CASE: '',
       STOCKS_LOCAL_UI: '', STOCKS_LOCAL_UI_FAILURE_PROBE: '', STOCKS_LOCAL_STACK_CASE_PROBE: '', STOCKS_LOCAL_STACK_SIGNAL_PROBE: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

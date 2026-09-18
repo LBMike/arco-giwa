@@ -19,13 +19,16 @@ export async function runStack(options) {
   assert.ok(evidence && isAbsolute(evidence), 'Explicit local evidence directory required');
   const probe = process.env.STOCKS_LOCAL_BROWSER_PROBE ?? '';
   assert.ok(['', 'ready', 'held', 'failure'].includes(probe));
+  const scenario = process.env.STOCKS_LOCAL_BROWSER_CASE ?? '';
+  assert.ok(['', 'known-hash'].includes(scenario), 'Choose a fixed browser case');
+  assert.ok(!scenario || !probe, 'Recovery and lifecycle probes are separate cases');
   const { chromium } = createRequire(runtime)('playwright');
   let host, stack, wallet, browserServer, browser, closePromise, closed = false;
   const check = () => assert.ok(!closed, 'LOCAL_BROWSER_CLOSED_DURING_STARTUP');
   const setup = (async () => {
     await mkdir(evidence, { recursive: true }); check();
     host = await createLocalBrowserHost({ root: resolve(import.meta.dirname, '../..'), resourceDir: options.resourceDir }); check();
-    stack = await createLocalUiStack({ ...options, frontendOrigin: host.origin }); check();
+    stack = await createLocalUiStack({ ...options, frontendOrigin: host.origin, knownHashRecovery: scenario === 'known-hash' }); check();
     wallet = await createLocalWallet({ ...options, ...stack }); check();
     host.attach({ stack, wallet });
     browserServer = await chromium.launchServer({ executablePath, headless: true, host: '127.0.0.1',
@@ -63,7 +66,7 @@ export async function runStack(options) {
       rpcUrl: options.rpcUrl, origin: host.origin, chromePid: browserServer.process().pid }));
     if (probe === 'failure') throw Error('LOCAL_BROWSER_EXPECTED_FAILURE');
     if (probe === 'ready') await new Promise(() => {});
-    const report = await runBrowserScenario({ host, stack, wallet, browser, evidence, probe });
+    const report = await runBrowserScenario({ host, stack, wallet, browser, evidence, probe, scenario });
     report.dispatchEvidence = await verifyUiEvidence(stack, wallet);
     report.result = 'PASS';
     await writeFile(resolve(evidence, 'result.json'), JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });

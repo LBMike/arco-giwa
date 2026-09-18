@@ -10,7 +10,7 @@ import { createLocalBrowserHost } from './browser-server.mjs';
 
 const repository = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const A = `0x${'1'.repeat(40)}`, B = `0x${'2'.repeat(40)}`;
-async function fixture(t) {
+async function fixture(t, recovery = false) {
   const previousFlag = process.env.STOCKS_LOCAL_STACK_ONLY;
   process.env.STOCKS_LOCAL_STACK_ONLY = '1';
   const directory = await mkdtemp(join(tmpdir(), 'stocks-browser-unit-'));
@@ -57,6 +57,7 @@ async function fixture(t) {
     close() { closed = true; hold?.drop(); },
   };
   const stack = { apiBase: 'http://127.0.0.1:12345', frontendOrigin: host.origin, accounts: { holder: A, otherHolder: B }, manifest: { fixture: true },
+    armShortSession: recovery ? () => controls.push('short-session') : undefined,
     async snapshot() { return { buyOrders: [], sellOrders: [], claims: [], proofs: [], chain: { holderStock: '0', holderCash: '2' } }; },
     async stopProcessing() { controls.push('stop'); }, async startProcessing() { controls.push('start'); }, async restartApi() { controls.push('restart'); },
   };
@@ -83,6 +84,23 @@ test('bootstrap and all static assets reject foreign Host; config has same-origi
   const reload = await fetch(f.host.origin + '/stocks/NVDA', { headers: { accept: 'text/html' } });
   assert.equal(reload.status, 200); assert.match(await reload.text(), /STOCKS ENTRY/);
   assert.equal((await fetch(f.host.origin + '/not-stocks', { headers: { accept: 'text/html' } })).status, 404);
+});
+
+test('short-session control is absent by default and available only in the explicit recovery fixture', async t => {
+  const originalFlag = process.env.STOCKS_LOCAL_STACK_ONLY;
+  const disabled = await fixture(t);
+  assert.equal(disabled.config.knownHashRecovery, false);
+  assert.equal((await disabled.post('/__local/control', { action: 'armShortSession' })).status, 403);
+  assert.deepEqual(disabled.controls, []);
+  const enabled = await fixture(t, true);
+  // Both fixture cleanups run before this final restoration.
+  t.after(() => { if (originalFlag === undefined) delete process.env.STOCKS_LOCAL_STACK_ONLY; else process.env.STOCKS_LOCAL_STACK_ONLY = originalFlag; });
+  assert.equal(enabled.config.knownHashRecovery, true);
+  assert.equal((await enabled.post('/__local/control', { action: 'armShortSession', seconds: 900 })).status, 400);
+  assert.equal((await enabled.post('/__local/control', { action: 'armShortSession' }, { origin: 'http://foreign.test' })).status, 403);
+  assert.deepEqual(enabled.controls, []);
+  assert.equal((await enabled.post('/__local/control', { action: 'armShortSession' })).status, 200);
+  assert.deepEqual(enabled.controls, ['short-session']);
 });
 
 test('wallet/control require exact origin, fetch site, JSON and capability before invoking ports', async t => {

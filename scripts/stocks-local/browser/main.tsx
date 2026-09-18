@@ -13,9 +13,9 @@ import type { ActiveWalletSource } from '../../../src/demo/giwa/stocks-wallet-so
 import '../../../src/index.css';
 import '../../../src/demo/theme.css';
 
-type Config = { apiBase: string; frontendOrigin: string; accounts: { holder: string; otherHolder: string }; account: string | null; capability: string };
+type Config = { apiBase: string; frontendOrigin: string; accounts: { holder: string; otherHolder: string }; account: string | null; capability: string; knownHashRecovery: boolean };
 type State = { account: string | null; holdWaiting: boolean; holdArmed: boolean; calls: number; sends: { outcome: string }[] };
-type Control = { action: 'account'; account: 'A' | 'B' } | { action: 'holdNextSend' | 'releaseHeld' | 'dropHeld' | 'stopProcessing' | 'startProcessing' | 'restartApi' };
+type Control = { action: 'account'; account: 'A' | 'B' } | { action: 'holdNextSend' | 'releaseHeld' | 'dropHeld' | 'stopProcessing' | 'startProcessing' | 'restartApi' | 'armShortSession' };
 type Request = { method: string; params?: unknown[] };
 type Listener = (...args: unknown[]) => void;
 const address = /^0x[0-9a-fA-F]{40}$/;
@@ -31,7 +31,7 @@ function configOf(value: unknown): Config {
   if (api.protocol !== 'http:' || api.hostname !== '127.0.0.1' || !api.port || api.origin !== row.apiBase || api.origin === location.origin) throw Error('LOCAL_API_INVALID');
   if (typeof accounts.holder !== 'string' || !address.test(accounts.holder) || typeof accounts.otherHolder !== 'string' || !address.test(accounts.otherHolder)) throw Error('LOCAL_ACCOUNTS_INVALID');
   if (row.account !== null && (typeof row.account !== 'string' || ![accounts.holder.toLowerCase(), accounts.otherHolder.toLowerCase()].includes(row.account.toLowerCase()))) throw Error('LOCAL_ACCOUNT_INVALID');
-  return { apiBase: row.apiBase, frontendOrigin: row.frontendOrigin, capability: row.capability, accounts: { holder: accounts.holder, otherHolder: accounts.otherHolder }, account: row.account as string | null };
+  return { apiBase: row.apiBase, frontendOrigin: row.frontendOrigin, capability: row.capability, accounts: { holder: accounts.holder, otherHolder: accounts.otherHolder }, account: row.account as string | null, knownHashRecovery: row.knownHashRecovery === true };
 }
 function stateOf(value: unknown, config: Config): State {
   const row = object(value);
@@ -126,6 +126,7 @@ async function start() {
       { label: 'Drop held response', body: { action: 'dropHeld' } }, { label: 'Pause processing', body: { action: 'stopProcessing' } },
       { label: 'Resume processing', body: { action: 'startProcessing' } }, { label: 'Restart API', body: { action: 'restartApi' } },
     ];
+    if (config.knownHashRecovery) buttons.push({ label: 'Next login: 30s JWT (test only)', body: { action: 'armShortSession' } });
     return <div className="arco-demo" style={{ width: '100%', maxWidth: 1280, minHeight: '100vh', margin: '0 auto', padding: '16px', boxSizing: 'border-box', overflowWrap: 'anywhere', background: 'var(--color-arco-page)', color: 'var(--color-arco-ink)' }}>
       <aside aria-label="Local test controls" data-testid="local-test-controls" style={{ width: '100%', padding: 16, marginBottom: 24, border: '1px solid var(--color-arco-border)', borderRadius: 16, background: 'var(--color-arco-surface-muted)' }}>
         <h1 style={{ fontSize: 16, fontWeight: 600 }}>LOCAL TEST ONLY · PostgreSQL + local EVM</h1>
