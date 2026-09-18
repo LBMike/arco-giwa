@@ -6,13 +6,14 @@ import { GIWA_ADMIN_STOCKS_ROUTE, GIWA_STOCKS_ROUTE } from "../routes"
 import { GiwaStocksAdminFeature } from "../stocks-admin"
 import { StocksExecutionProvider, StocksExecutionSessionNotice, useStocksExecutionCapability, useStocksOrderExecutionSlot, type ExecutionClockSeam } from "../stocks-execution-host"
 import { StocksSignIn, useGiwaStocksHost } from "../stocks-host"
+import type { KnownHashStore } from "../stocks-known-hash-recovery"
 import { GiwaStocksFeature, createGiwaStocksHttpClient, type GiwaStocksFeatureProps } from "../stocks-investor"
 import type { ActiveWalletSource } from "../stocks-wallet-source"
 import { createMarketClient } from "./client"
 import type { MarketFetch } from "./contracts"
 import { StocksMarketFeature } from "./StocksMarketFeature"
 /** Explicit offline verification seam; normal runtime uses ARCO_API_BASE, browser fetch, real clocks and the wallet module's active source. */
-export const StocksPageEnvironment = createContext<{ apiBase: string | null; fetch?: MarketFetch; executionClock?: ExecutionClockSeam; activeWalletSource?: () => ActiveWalletSource | null }>({ apiBase: ARCO_API_BASE })
+export const StocksPageEnvironment = createContext<{ apiBase: string | null; fetch?: MarketFetch; executionClock?: ExecutionClockSeam; activeWalletSource?: () => ActiveWalletSource | null; knownHashes?: KnownHashStore }>({ apiBase: ARCO_API_BASE })
 const link = "rounded-lg border border-[var(--color-arco-border)] px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-arco-ink)]"
 function StocksNavigation() { return <nav aria-label="Stocks navigation" className="flex flex-wrap gap-2"><Link className={link} to={GIWA_STOCKS_ROUTE}>Stocks 시장정보·모의 거래</Link><Link className={link} to={GIWA_ADMIN_STOCKS_ROUTE}>Stocks 관리자 조회</Link></nav> }
 /** One validated API base for market, investor, admin and wallet execution, so a malformed setting fails the same way on every Stocks surface. */
@@ -53,7 +54,7 @@ export function StocksPage() {
   // The ID is captured in this render's callback. A late rejection cannot invalidate a newer session.
   const rejected = useCallback(() => { if (sessionId) invalidate(sessionId) }, [sessionId, invalidate])
   const session = host.snapshot.session
-  return <StocksExecutionProvider apiBase={apiBase} fetch={environment.fetch as typeof globalThis.fetch | undefined} clock={environment.executionClock} activeSource={environment.activeWalletSource}>
+  return <StocksExecutionProvider apiBase={apiBase} fetch={environment.fetch as typeof globalThis.fetch | undefined} clock={environment.executionClock} activeSource={environment.activeWalletSource} knownHashes={environment.knownHashes}>
     <div className="w-full min-w-0 space-y-6"><StocksNavigation /><StocksMarketFeature client={clients.market} /><StocksSignIn /><StocksExecutionSessionNotice />
       <section aria-label="NVDA testnet mock trading" className="w-full min-w-0 rounded-2xl border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)]">
         <div className="border-b border-[var(--color-arco-border)] p-4 sm:p-6"><h2 className="text-lg font-medium">NVDA · 테스트넷 모의 거래</h2><p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">테스트넷 모의 체결가: 서버 발급 견적 기준. 현재 고정 모의 가격 120이며 위 USD 시장시세와 별개입니다. 시장정보 종목 선택은 이 NVDA 주문에 적용되지 않습니다.</p><ExecutionCapabilityNote /></div>

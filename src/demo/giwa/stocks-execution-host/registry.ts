@@ -10,9 +10,11 @@
 import type { HostSession } from "../stocks-host/session"
 import { createStocksWalletController } from "../stocks-wallet/controller"
 import { StocksWalletError } from "../stocks-wallet/planner"
-import type { ExecutionContext, ReviewedDeployment, Selection, Side, WalletPorts, WalletSnapshot } from "../stocks-wallet/types"
+import type { ExecutionContext, ReviewedDeployment, Selection, Side, SubmissionGate, WalletPorts, WalletSnapshot } from "../stocks-wallet/types"
 import { createExecutionClock, createStocksExecutionReads, type DeploymentEvidenceLease } from "../stocks-wallet-http"
 import { createSubmissionGate } from "../stocks-wallet-submissions/client"
+import { captureKnownHashes } from "../stocks-known-hash-recovery/capture"
+import { KNOWN_HASH_CHAIN_ID, type KnownHashStore } from "../stocks-known-hash-recovery/store"
 import { captureWalletSource, createWalletSourcePorts, type ActiveWalletSource, type CapturedWalletSource, type WalletSourceView } from "../stocks-wallet-source"
 
 /** What the host shows right now. Read synchronously by every context() call, so a scope change is seen before any effect runs. */
@@ -29,6 +31,13 @@ export type ExecutionRegistryOptions = {
   monotonicNow?: () => number
   /** The wallet module's current active source; a capture stops being current when it changes. */
   activeSource?: () => ActiveWalletSource | null
+  /**
+   * Where a hash the original wallet request returned is kept when the owner's original gate cannot record it
+   * (for example after its session expired). Without it, or without an origin, nothing is kept.
+   */
+  knownHashes?: KnownHashStore
+  /** The frontend origin, part of a kept hash's owner scope. */
+  origin?: string | null
 }
 
 export type ExecutionCapability = Readonly<{ status: "READY" }> | Readonly<{ status: "UNAVAILABLE"; code: string }>
@@ -141,7 +150,7 @@ export function createExecutionRegistry(options: ExecutionRegistryOptions): Exec
     const monotonicNow = options.monotonicNow ?? (() => performance.now())
     let clock: () => number
     let reads: ReturnType<typeof createStocksExecutionReads>
-    let gate: ReturnType<typeof createSubmissionGate>
+    let gate: SubmissionGate
     try {
       clock = createExecutionClock({ now: options.now, monotonicNow })
     } catch {
@@ -149,7 +158,12 @@ export function createExecutionRegistry(options: ExecutionRegistryOptions): Exec
     }
     try {
       reads = createStocksExecutionReads({ apiBase, fetch: options.fetch, now: clock, monotonicNow, onSessionRejected: invalidate })
-      gate = createSubmissionGate({ session, side, orderId, deploymentDigest: String(deploymentDigest), apiBase, walletAddress: captured.address, fetch: options.fetch, now: clock, monotonicNow, onSessionRejected: invalidate })
+      const original = createSubmissionGate({ session, side, orderId, deploymentDigest: String(deploymentDigest), apiBase, walletAddress: captured.address, fetch: options.fetch, now: clock, monotonicNow, onSessionRejected: invalidate })
+      // The controller keeps using this original gate (same session, same refusals); the wrapper only keeps a hash
+      // the original wallet request returned when this gate could not record it.
+      gate = options.knownHashes && options.origin
+        ? captureKnownHashes(original, { side, orderId, deploymentDigest: String(deploymentDigest), wallet: captured.address, chainId: KNOWN_HASH_CHAIN_ID, apiBase, origin: options.origin }, options.knownHashes)
+        : original
     } catch (error) {
       return { owner: null, code: error instanceof StocksWalletError ? error.code : "INVALID_ORDER" }
     }
