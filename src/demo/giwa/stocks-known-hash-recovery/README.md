@@ -82,7 +82,10 @@ Failures:
   - nothing once verified or blocked
 
   The verified copy says a receipt is not the order result: an approval does not fund the order, and only the order status shows the result.
-- **Card copy:** every state that offers an action says the transaction behind the hash was already sent and must not be sent again from any app or wallet. A failed check says only that the check itself did not open the wallet or send anything, never that "nothing was sent".
+- **Card copy:**
+  - Every state that offers an action says the transaction behind the hash was already sent and that this step (only this card's approval, deposit or escrow) must not be sent again. An approval card never tells the user not to send the deposit or escrow the order may still need.
+  - A kept card says the order's own check may show the result as unknown until the hash is recorded.
+  - A failure says the server may or may not have recorded the hash and that the action did not open the wallet. It never says "nothing was sent".
 - **Session-end notice (signed out, same wallet):**
   - When a kept hash exists, it says the hash is kept only in this tab's memory, that a reload loses it, and that it is recorded only by the user's action after signing in again. Its title ("This tab kept a transaction hash the server may not have recorded") asserts no timing, because a hash is also kept after a network failure inside a valid session. It shows whatever network the wallet is on; it names nothing.
   - Otherwise it keeps the no-hash copy: check, never repeat, operations.
@@ -95,7 +98,7 @@ Failures:
 | --- | --- |
 | `store.test.tsx` | Validation, scoping, first hash kept, final verified state, no expiry, busy lock, bounds; static check: memory only, no credentials, recovery never claims, opens the wallet or reads policy |
 | `capture.test.tsx` | Identical promise and error; candidate only after the original record failed; UNKNOWN, hashless, unclaimed or other bindings never kept |
-| `recover.test.tsx` | Real registry, controller, gate and ports against the real server plugins: BUY/SELL × APPROVAL/TRANSFER recovery with exact requests (0 claims, 0 wallet calls, 1 outcome, 1 reconcile, 1 inspect); quote expiry + pause (and the server still refuses a new TRANSFER claim: 503 paused, 409 expired); original lost answer; completed original record; wallet error; conflict; no claim; binding mismatch; other owner; expired and rejected (401) sessions; server error; lost recovery answer; pending then confirmed; reverted; owner change during a slow answer; busy |
+| `recover.test.tsx` | Real registry, controller, gate and ports against the real server plugins. Cases: BUY/SELL × APPROVAL/TRANSFER recovery with exact requests (inspect, outcome and reconcile only, all with the new session's token; 0 claims; 0 wallet calls of any kind); the original callback arriving after the same owner signed in again or while wallet B is signed in (no request with any token; kept for A only); quote expiry + pause (the server still refuses a new TRANSFER claim: 503 paused, 409 expired); original lost answer; completed original record; wallet error; a server row already CONFIRMED or REVERTED (1 inspect, 0 outcomes, 0 reconciles); conflict; no claim; binding mismatch; other owner; expired and rejected (401) sessions; server error; lost recovery answer; pending then confirmed; reverted; owner change during the inspect, the record and the reconcile answers; busy |
 | `KnownHashRecoveryCard.test.tsx` | Copy and actions of every state (static markup): never "nothing was sent", the never-again line while an action is offered, no completion claim, one action or none, busy |
 | `../stocks-execution-host/scope.test.tsx` | Owner scope: the session wallet must be the shown wallet on chain 91342 with an API base and origin |
 | `../stocks-execution-host/known-hash.dom.test.tsx` | First-commit visibility across deployment, origin, API base, chain and wallet changes and A→B→A; moved-on unpinned order shows only the card; a card unmounted mid-recovery stores nothing; notice variants (including another network) |

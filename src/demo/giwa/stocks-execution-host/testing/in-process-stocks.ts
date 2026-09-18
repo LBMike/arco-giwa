@@ -7,7 +7,7 @@
 // app.inject: no socket, database, public network, key or signature. The auth nonce/verify routes are a labelled
 // fixture that does NOT verify SIWE signatures.
 
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { fileURLToPath } from "node:url"
 
 import { getAddress, isAddress } from "viem"
@@ -60,7 +60,15 @@ async function loadServer() {
   }
 }
 
-export type RecordedRequest = Readonly<{ method: string; path: string; status: number | null; authorization: boolean; body: string | undefined }>
+/**
+ * `bearer` is a fingerprint (first 16 hex of SHA-256) of the Bearer token, never the token itself: tests compare it with
+ * bearerFingerprint(session.accessToken) to tell which session made a request.
+ */
+export type RecordedRequest = Readonly<{ method: string; path: string; status: number | null; authorization: boolean; bearer: string | null; body: string | undefined }>
+
+export function bearerFingerprint(token: string): string {
+  return createHash("sha256").update(token).digest("hex").slice(0, 16)
+}
 export type HarnessFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 export type AcceptedOrder = Readonly<{ order: Record<string, unknown>; envelope: Record<string, unknown> }>
 export type SignInDependencies = Required<Pick<HostDependencies, "fetch" | "signMessage" | "now">> & { readonly messages: readonly MessageRequest[] }
@@ -180,7 +188,8 @@ export async function createInProcessStocks(options: {
     const body = bodyText(init.body)
     if (body !== undefined && headers["content-type"] === undefined) headers["content-type"] = "text/plain;charset=UTF-8"
     const path = `${target.pathname}${target.search}`
-    const entry = { method, path, status: null as number | null, authorization: headers.authorization !== undefined, body }
+    const bearer = typeof headers.authorization === "string" && headers.authorization.startsWith("Bearer ") ? bearerFingerprint(headers.authorization.slice(7)) : null
+    const entry = { method, path, status: null as number | null, authorization: headers.authorization !== undefined, bearer, body }
     requests.push(entry)
     const injected = app.inject({ method, url: path, headers, ...(body === undefined ? {} : { payload: body }) })
     let onAbort = () => {}

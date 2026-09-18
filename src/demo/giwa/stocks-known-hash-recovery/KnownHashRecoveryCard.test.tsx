@@ -21,7 +21,8 @@ function render(value: KnownHashEntry, last: RecoveryResult | null = null) {
   const buttons = [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((match) => ({ label: match[1], disabled: /disabled=""/.test(match[0]) }))
   return { html, text, buttons }
 }
-const NEVER_AGAIN = "The transaction behind this hash was already sent. Do not send the approval, deposit or escrow again from this or any other app or wallet."
+const neverAgain = (step: string) => `The ${step} transaction behind this hash was already sent. Do not send this ${step} again from this or any other app or wallet.`
+const stepOf = (value: KnownHashEntry) => (value.stage === "APPROVAL" ? "approval" : value.side === "SELL" ? "escrow" : "deposit")
 
 const cases: { name: string; value: KnownHashEntry; last?: RecoveryResult; action: string | null; neverAgain: boolean }[] = [
   { name: "kept", value: entry({ kind: "KEPT" }), action: "Record this hash", neverAgain: true },
@@ -43,7 +44,9 @@ test("each state says the truth about the wallet, offers one explicit action or 
     assert.doesNotMatch(text, /order (is|was|has been) (complete|completed|filled|settled)|order completed/i, item.name)
     assert.ok(text.includes(HASH), `${item.name}: the owner's own hash`)
     assert.ok(!text.includes("order-42"), `${item.name}: the card names no order ID (the order card does)`)
-    assert.equal(text.includes(NEVER_AGAIN), item.neverAgain, `${item.name}: never-again line`)
+    assert.equal(text.includes(neverAgain(stepOf(item.value))), item.neverAgain, `${item.name}: never-again line`)
+    // An approval card never tells the user not to send the deposit or escrow the order may still need.
+    if (item.value.stage === "APPROVAL") assert.doesNotMatch(text, /(deposit|escrow)[^.]*again|again[^.]*(deposit|escrow)/i, `${item.name}: approval card and the next step`)
     if (!item.neverAgain) assert.match(text, /Do not (send|repeat)|does not fund|not the order result/, `${item.name}: guidance`)
     assert.deepEqual(buttons.map((button) => button.label), item.action ? [item.action] : [], item.name)
     if (item.value.state.kind === "KEPT" || item.value.state.kind === "RECORDED") assert.ok(text.includes("kept only in this tab's memory"), `${item.name}: reload limit`)
@@ -53,7 +56,15 @@ test("each state says the truth about the wallet, offers one explicit action or 
   assert.ok(render(entry({ kind: "KEPT" }, { stage: "TRANSFER", side: "SELL" })).text.startsWith("Escrow hash kept in this tab"))
   assert.ok(render(entry({ kind: "KEPT" }, { stage: "TRANSFER", side: "BUY" })).text.startsWith("Deposit hash kept in this tab"))
   const failed = render(entry({ kind: "KEPT" }), { kind: "FAILED", code: "SUBMISSION_TIMEOUT" }).text
-  assert.ok(failed.includes("This check could not be completed. It did not open your wallet or send anything."), failed)
+  assert.ok(failed.includes("so it may or may not have recorded the hash. This did not open your wallet."), failed)
+  assert.doesNotMatch(failed, /send anything/, "the record request may have reached the server")
+  assert.ok(render(entry({ kind: "KEPT" })).text.includes("Until this hash is recorded, the order's own check may show the result as unknown."))
+  assert.ok(!render(entry({ kind: "RECORDED" })).text.includes("Until this hash is recorded"))
+  for (const [stage, side, step] of [["TRANSFER", "BUY", "deposit"], ["TRANSFER", "SELL", "escrow"]] as const) {
+    const text = render(entry({ kind: "KEPT" }, { stage, side })).text
+    assert.ok(text.includes(neverAgain(step)), `${side} ${stage}`)
+    assert.ok(render(entry({ kind: "BLOCKED", reason: "CONFLICT" }, { stage, side })).text.includes(`Do not send this ${step} again`))
+  }
 })
 
 test("a running action shows a disabled, busy button", () => {

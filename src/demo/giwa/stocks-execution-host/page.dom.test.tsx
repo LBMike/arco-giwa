@@ -45,7 +45,7 @@ const KEPT_NOTICE_TEXT = [
   KEPT_NOTICE,
   "Your wallet returned a transaction hash that an earlier Stocks session could not record, so this tab kept it. The server may not have it yet, even though the transaction was sent.",
   "Sign in to Stocks again with the same wallet in this tab and open the order. You can record the kept hash there; nothing is recorded or sent automatically. The hash is kept only in this tab's memory: reloading or closing the page loses it.",
-  "Do not send the approval, deposit or escrow again from this or any other app or wallet. If the order shows the result as unknown, or the hash cannot be recorded, contact operations to confirm what happened.",
+  "Do not send the approval, deposit or escrow again from this or any other app or wallet. If the kept hash cannot be recorded, or the order still shows the result as unknown after you record it, contact operations to confirm what happened.",
 ].join("")
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -906,6 +906,8 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       const button = card.querySelector<HTMLButtonElement>('button[data-action="record-known-hash"]')
       assert.ok(button && button.textContent === "Record this hash")
       const sendsBefore = sends(wallet)
+      const callsBefore = wallet.calls.length
+      const requestsBefore = harness.requests.length
       const claims = bodies(harness, /wallet-submissions\/claims$/).length
       const outcomes = bodies(harness, /wallet-submissions\/outcomes$/).length
       const reconciles = bodies(harness, /wallet-submissions\/reconcile$/).length
@@ -919,6 +921,12 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       await page.waitFor(() => recoveryCard(page)?.dataset.state === "VERIFIED_CONFIRMED", "server-verified receipt", 10_000)
       await page.settle(300)
       assert.equal(sends(wallet), sendsBefore, "recovery never opens the wallet")
+      assert.equal(wallet.calls.length, callsBefore, "no wallet call of any kind")
+      // The recovery's inspect, outcome and reconcile all carry one token: the current session's, never the original claim's.
+      const recovery = harness.requests.slice(requestsBefore).filter((request) => /\/wallet-submissions\/(BUY|SELL)\/|\/outcomes$|\/reconcile$/.test(request.path))
+      const originalClaim = harness.requests.find((request) => request.method === "POST" && request.path.endsWith("/claims") && JSON.parse(request.body ?? "{}").stage === stage)
+      assert.ok(recovery.length >= 3 && new Set(recovery.map((request) => request.bearer)).size === 1, "one session for the whole recovery")
+      assert.ok(originalClaim && recovery[0]!.bearer !== originalClaim.bearer, "not the original session's token")
       assert.equal(forbiddenSends(wallet), 0)
       assert.equal(bodies(harness, /wallet-submissions\/claims$/).length, claims, "recovery never claims")
       const recorded = bodies(harness, /wallet-submissions\/outcomes$/).slice(outcomes)
@@ -955,7 +963,8 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       await page.click(page.button("Sign out of Stocks"), "Sign out of Stocks (B)")
       await page.settle(200)
       observer.disconnect()
-      assert.deepEqual(leaks, [], "B's page never painted A's hash, order, notice or card")
+      // Final DOM after every mutation; first-commit checks with A's order row are in known-hash.dom.test.tsx.
+      assert.deepEqual(leaks, [], "B's page shows none of A's hash, order, notice or card")
       assert.equal(walletB.calls.filter((call) => call.method === "eth_sendTransaction").length, 0)
       await page.rerender({ address: WALLET_A, epoch: "injected:a:13:back", source: { mode: "injected", provider: ctx.wallet } })
       assertKeptNotice(await page.waitFor(() => keptNotice(page), "A's kept-hash notice again"), [order.id, hash])
@@ -1042,14 +1051,15 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       await recoverOnPage(ctx, "APPROVAL")
     })
 
-    await scenario("18. a 401 during recovery invalidates only the pinned session; the hash stays kept; signing in again records it once", async () => {
-      const once = { reject: false }
+    await scenario("18. a 401 for the pinned session arriving after the owner signed in again invalidates only that session; the new one stays; the hash is recorded once", async () => {
+      const control: { reject: boolean; hold: Promise<void> | null; release: () => void } = { reject: false, hold: null, release: () => undefined }
       const ctx = await lateHashOnPage({
         side: "SELL",
         stage: "APPROVAL",
         fetch: (harness) => (async (input: RequestInfo | URL, init?: RequestInit) => {
-          if (once.reject && /\/wallet-submissions\/outcomes$/.test(String(input))) {
-            once.reject = false
+          if (control.reject && /\/wallet-submissions\/outcomes$/.test(String(input))) {
+            control.reject = false
+            if (control.hold) await control.hold
             return new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401, headers: { "content-type": "application/json" } })
           }
           return harness.fetch(input, init)
@@ -1057,18 +1067,71 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       })
       const { page, harness, store } = ctx
       ctx.clockState.offset = 0
-      await signInAgain(page)
+      await signInAgain(page) // S1: the session the recovery pins.
       const card = await page.waitFor(() => recoveryCard(page), "recovery card")
-      once.reject = true
+      control.reject = true
+      control.hold = new Promise<void>((resolve) => { control.release = resolve })
       await page.click(card.querySelector<HTMLButtonElement>('button[data-action="record-known-hash"]'), "Record this hash")
-      await page.waitFor(() => page.text().includes("Your Stocks session is no longer valid. Sign in again."), "pinned session rejected")
-      assert.ok(recoveryCard(page) === null, "signed out: no card")
-      await page.waitFor(() => keptNotice(page), "kept-hash notice")
+      await page.waitFor(() => recoveryCard(page)?.querySelector("button")?.disabled, "busy while the server is asked")
+      // The owner signs out and in again (S2) while S1's request is outstanding; then S1's answer is a 401.
+      await page.click(page.button("Sign out of Stocks"), "Sign out of Stocks")
+      await signInAgain(page)
+      await act(async () => {
+        control.release()
+        control.hold = null
+        await sleep(0)
+      })
+      await page.settle(800)
+      assert.ok(page.text().includes("Signed in to Stocks."), "the 401 of S1 does not sign S2 out")
+      assert.ok(!page.text().includes("Your Stocks session is no longer valid"))
       const [entry] = store.entries({ wallet: WALLET_A, chainId: 91342, apiBase: harness.apiBase, origin: harness.frontendOrigin })
       assert.deepEqual([entry?.state.kind, entry?.busy], ["KEPT", false])
       assert.equal(bodies(harness, /wallet-submissions\/outcomes$/).length, 0, "the rejected request never reached the server")
-      await signInAgain(page)
       await recoverOnPage(ctx, "APPROVAL")
+    })
+
+    await scenario("20. the original answer arrives after the same owner signed in again: no request with either token; the card appears and records it only on the click", async () => {
+      const clockState = { offset: 0 }
+      const wall = () => Date.now() + clockState.offset
+      const clock: ExecutionClockSeam = { now: wall, monotonicNow: () => performance.now() + clockState.offset }
+      const harness = await createInProcessStocks({ wall })
+      cleanups.push(() => harness.close())
+      const wallet = createFakeEip1193Wallet(harness.chain, { account: getAddress(WALLET_A) })
+      harness.seedCash(WALLET_A, 1_000_000_000n)
+      const store = createKnownHashStore()
+      const page = await mount(harness, { wallet, address: WALLET_A, epoch: "injected:a:20", clock, sessionSeconds: 30, knownHashes: store })
+      await page.signIn()
+      await page.placeOrder("BUY")
+      const order = orderRow(harness, "BUY", WALLET_A)
+      await page.waitFor(() => page.action("prepare"), "panel")
+      await page.checkToApproval()
+      const hold = wallet.holdNext("eth_sendTransaction")
+      await page.click(page.action("approve"), "Approve")
+      await act(async () => {
+        await hold.arrived
+      })
+      await page.waitStatus("SIGNING")
+      clockState.offset += 31_000
+      await page.rerender({})
+      await page.waitFor(() => page.text().includes("Your Stocks session expired. Sign in again."), "expired session")
+      await signInAgain(page) // A newer valid session exists before the wallet answers.
+      await page.waitFor(() => page.panelStatus() === "IDLE", "the new session's panel")
+      assert.ok(recoveryCard(page) === null, "nothing kept yet")
+      const requests = harness.requests.length
+      await act(async () => {
+        hold.release()
+        await sleep(0)
+      })
+      const card = await page.waitFor(() => recoveryCard(page), "the card appears for the signed-in owner")
+      await page.settle(300)
+      assert.equal(harness.requests.slice(requests).filter((request) => request.method === "POST").length, 0, "the old callback wrote nothing, with either token")
+      const hash = harness.chain.transactions[harness.chain.transactions.length - 1]!.hash
+      assert.equal(card.dataset.state, "KEPT")
+      assert.ok(card.textContent!.includes(hash))
+      const rows = () =>
+        ((harness.sql.snapshot() as unknown as Record<string, Row[]>).StocksWalletSubmission ?? []).filter((row) => row.stage === "APPROVAL" && String(row.wallet).toLowerCase() === WALLET_A.toLowerCase()).map((row) => [row.status, row.txHash ?? null])
+      assert.deepEqual(rows(), [["REQUEST_MAY_START", null]], "nothing recorded until the click")
+      await recoverOnPage({ page, harness, wallet, store, order, hash, rows, clockState }, "APPROVAL")
     })
 
     await scenario("19. a reload loses the kept hash: the new page offers no recovery, and its check stays recovery-only without sending again", async () => {

@@ -152,7 +152,9 @@ GIWA_HOST_DOM_RUNTIME=/path/to/node_modules/jsdom/package.json TMPDIR=/private/t
     - 15: a moved-on order.
     - 16: before the deadline; the panel's own check then shows the recorded escrow.
   - 17: a slow recovery answer across a sign-out paints and stores nothing; after the next sign-in the hash is recorded once.
-  - 18: a 401 invalidates only the pinned session, and the hash stays kept.
+  - 18: S1's recovery request is outstanding when the owner signs out and in again (S2). S1's 401 then leaves S2 signed in, and the hash stays kept and is recorded once.
   - 19: a reload loses the kept hash; the new page's check stays recovery-only.
+  - 20: the original answer arrives after the same owner signed in again. The old callback writes nothing with either token; the card appears live and records the hash only on the click.
+  - Recovery requests in 13–18 and 20 carry one token, never the original claim's. No wallet call of any kind happens during recovery.
 - `testing/`: a TEST-ONLY in-process server (real Stocks, execution and submission plugins over memory SQL, the real evidence and receipt verifier over a fake chain, fake EIP-1193 wallet). Never imported by product code.
 - `verification/`: an offline loopback page for a browser check of the same real page code (see its README). Not part of the app build.

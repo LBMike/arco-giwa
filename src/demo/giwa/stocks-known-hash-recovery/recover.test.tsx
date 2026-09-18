@@ -16,7 +16,7 @@ import { createSubmissionGate } from "../stocks-wallet-submissions/client"
 import type { ActiveWalletSource } from "../stocks-wallet-source"
 import { createExecutionRegistry, type ExecutionHostView, type ExecutionOwner, type ExecutionRegistry } from "../stocks-execution-host/registry"
 import { createFakeEip1193Wallet, providerError } from "../stocks-execution-host/testing/fake-wallet"
-import { createInProcessStocks, HARNESS_FRONTEND_ORIGIN } from "../stocks-execution-host/testing/in-process-stocks"
+import { bearerFingerprint, createInProcessStocks, HARNESS_FRONTEND_ORIGIN } from "../stocks-execution-host/testing/in-process-stocks"
 import { recoverKnownHash, type RecoverKnownHashOptions } from "./recover"
 import { createKnownHashStore, type KnownHashEntry, type KnownHashStore } from "./store"
 
@@ -82,6 +82,14 @@ async function world(side: Side, options: { finalizeImmediately?: boolean } = {}
     signInAgain(lifetimeMs = 900_000) {
       session = h.session(A, { lifetimeMs })
       view = { ...view, session }
+      registry.dispose()
+      registry = newRegistry()
+      return session
+    },
+    /** Another wallet is shown and signed in on the same page (A→B): a new registry for B's identity. */
+    showOther(address: string) {
+      session = h.session(address)
+      view = { ...view, session, wallet: { ...view.wallet, address, epoch: "injected:other" } }
       registry.dispose()
       registry = newRegistry()
       return session
@@ -155,20 +163,24 @@ for (const side of ["BUY", "SELL"] as const) {
         assert.ok(!JSON.stringify(entry).includes(originalSession.accessToken) && !JSON.stringify(entry).includes(fresh.accessToken))
         assert.deepEqual([before.status, before.txHash], ["REQUEST_MAY_START", undefined])
 
-        const sends = w.sends(), claims = w.server("POST", "/claims").length, outcomes = w.bodies("/outcomes").length, reconciles = w.bodies("/reconcile").length
+        const sends = w.sends(), calls = w.wallet.calls.length, claims = w.server("POST", "/claims").length, outcomes = w.bodies("/outcomes").length, reconciles = w.bodies("/reconcile").length
+        const requestsBefore = w.h.requests.length
         const reads = w.server("GET", `/wallet-submissions/${side}/${w.order.id}`).length
         const result = await w.recover(entry)
         assert.deepEqual(result, { kind: "CONFIRMED" })
         assert.equal(w.sends(), sends, "no wallet request")
+        assert.equal(w.wallet.calls.length, calls, "no wallet call of any kind")
         assert.equal(w.forbiddenSends(), 0)
         assert.equal(w.server("POST", "/claims").length, claims, "no claim")
         const newOutcomes = w.bodies("/outcomes").slice(outcomes)
         assert.deepEqual(newOutcomes, [{ claimId: entry.claimId, intentKey: entry.intentKey, stage, transactionDigest: entry.transactionDigest, status: "SUBMITTED", txHash: hash }])
         assert.deepEqual(w.bodies("/reconcile").slice(reconciles), [{ claimId: entry.claimId, intentKey: entry.intentKey, stage, transactionDigest: entry.transactionDigest, txHash: hash }])
         assert.equal(w.server("GET", `/wallet-submissions/${side}/${w.order.id}`).length, reads + 1, "one inspect")
-        // The recovery requests carried the new session only.
-        const recoveryRequests = w.h.requests.slice(-3)
-        assert.ok(recoveryRequests.every((request) => request.authorization))
+        // Exactly inspect, outcomes and reconcile, all with the new session's token (never the original one).
+        const recoveryRequests = w.h.requests.slice(requestsBefore)
+        assert.deepEqual(recoveryRequests.map((request) => request.method), ["GET", "POST", "POST"])
+        assert.ok(recoveryRequests.every((request) => request.bearer === bearerFingerprint(fresh.accessToken)))
+        assert.ok(recoveryRequests.every((request) => request.bearer !== bearerFingerprint(originalSession.accessToken)))
         const after = stageRow(await w.journal(), stage)
         assert.deepEqual([after.claimId, after.status, after.txHash], [entry.claimId, "CONFIRMED", hash])
         assert.deepEqual(w.store.get(entry.claimId)?.state, { kind: "VERIFIED", status: "CONFIRMED" })
@@ -392,6 +404,111 @@ test("an owner change during a slow answer stops the run: nothing is reported or
     assert.deepEqual(w.store.get(entry.claimId)?.state, { kind: "KEPT" })
     assert.equal(w.store.get(entry.claimId)?.busy, false)
   })
+})
+
+test("the original callback arriving after the same owner signed in again, or while another wallet is shown, adopts no new token: no request, the hash is kept", async () => {
+  await run("BUY", {}, async (w) => {
+    const owner = w.owner()
+    assert.equal((await w.check(owner)).status, "APPROVAL_REQUIRED")
+    const held = w.wallet.holdNext("eth_sendTransaction")
+    const pending = owner.controller.approve()
+    await held.arrived
+    const original = w.session
+    w.offsets.wall += SHORT_SESSION_MS + 1_000
+    const fresh = w.signInAgain() // A newer, valid session of the same owner exists BEFORE the old answer arrives.
+    assert.notEqual(fresh.accessToken, original.accessToken)
+    const requests = w.h.requests.length
+    held.release()
+    await pending
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(w.h.requests.length, requests, "the old callback made no request at all (neither token)")
+    const [entry] = w.store.entries({ wallet: A, chainId: 91342, apiBase: w.h.apiBase, origin: HARNESS_FRONTEND_ORIGIN })
+    assert.ok(entry && entry.state.kind === "KEPT")
+    assert.equal((await w.journal()).approval.status, "REQUEST_MAY_START", "nothing recorded until the explicit action")
+    const before = w.h.requests.length
+    assert.deepEqual(await w.recover(entry), { kind: "CONFIRMED" })
+    assert.ok(w.h.requests.slice(before).every((request) => request.bearer === bearerFingerprint(fresh.accessToken)))
+    const writes = w.h.requests.filter((request) => request.path.endsWith("/outcomes") || request.path.endsWith("/reconcile"))
+    assert.ok(writes.length > 0 && writes.every((request) => request.bearer === bearerFingerprint(fresh.accessToken)), "every outcome and reconcile used the new session, none the original token")
+  })
+  await run("SELL", {}, async (w) => {
+    const owner = w.owner()
+    assert.equal((await w.check(owner)).status, "APPROVAL_REQUIRED")
+    const held = w.wallet.holdNext("eth_sendTransaction")
+    const pending = owner.controller.approve()
+    await held.arrived
+    w.offsets.wall += SHORT_SESSION_MS + 1_000
+    const other = w.showOther(B) // B is shown and signed in when A's answer arrives.
+    const requests = w.h.requests.length
+    held.release()
+    await pending
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(w.h.requests.length, requests, "no request, and none with B's token")
+    assert.ok(w.h.requests.every((request) => request.bearer !== bearerFingerprint(other.accessToken)))
+    assert.equal(w.store.entries({ wallet: B, chainId: 91342, apiBase: w.h.apiBase, origin: HARNESS_FRONTEND_ORIGIN }).length, 0, "nothing for B")
+    assert.equal(w.store.entries({ wallet: A, chainId: 91342, apiBase: w.h.apiBase, origin: HARNESS_FRONTEND_ORIGIN }).length, 1, "kept for A only")
+  })
+})
+
+test("an owner change while the record or the reconcile answer is outstanding stops the run: nothing stored or reported", async () => {
+  await run("BUY", {}, async (w) => {
+    const { entry, hash } = await lateHash(w, "APPROVAL")
+    w.signInAgain()
+    let alive = true
+    let release!: () => void
+    let held = new Promise<void>((resolve) => { release = resolve })
+    let holdSuffix = "/outcomes"
+    w.setRewrite(async (path, method, response) => {
+      if (method === "POST" && path.endsWith(holdSuffix)) await held
+      return response
+    })
+    // 1. The record reaches the server; its answer arrives after the owner changed.
+    const first = w.recover(entry, { alive: () => alive })
+    for (let i = 0; i < 200 && w.bodies("/outcomes").length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+    alive = false
+    release()
+    assert.deepEqual(await first, { kind: "STOPPED" })
+    assert.deepEqual([w.store.get(entry.claimId)?.state.kind, w.store.get(entry.claimId)?.busy], ["KEPT", false], "not RECORDED after the owner left")
+    assert.equal(w.bodies("/reconcile").length, 0, "no reconcile after the owner changed")
+    assert.equal((await w.journal()).approval.txHash, hash, "the server did store it")
+    // 2. The reconcile answer arrives after the owner changed.
+    alive = true
+    holdSuffix = "/reconcile"
+    held = new Promise<void>((resolve) => { release = resolve })
+    const outcomes = w.bodies("/outcomes").length
+    const second = w.recover(w.store.get(entry.claimId)!, { alive: () => alive })
+    for (let i = 0; i < 200 && w.bodies("/reconcile").length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+    alive = false
+    release()
+    assert.deepEqual(await second, { kind: "STOPPED" })
+    assert.equal(w.bodies("/outcomes").length, outcomes, "the same hash is not recorded again")
+    assert.deepEqual([w.store.get(entry.claimId)?.state.kind, w.store.get(entry.claimId)?.busy], ["KEPT", false], "not VERIFIED after the owner left")
+    w.setRewrite(null)
+    assert.deepEqual(await w.recover(w.store.get(entry.claimId)!), { kind: "CONFIRMED" })
+  })
+})
+
+test("a server row already CONFIRMED or REVERTED with the kept hash: one inspect, no outcome, no reconcile", async () => {
+  for (const revert of [false, true]) {
+    await run(revert ? "SELL" : "BUY", {}, async (w) => {
+      if (revert) w.h.chain.revertNextTransaction()
+      const { entry, hash } = await lateHash(w, "APPROVAL")
+      w.signInAgain()
+      // Someone (another tab, operations tooling) already recorded and verified the same hash.
+      const gate = createSubmissionGate({ session: w.session, side: w.side, orderId: w.order.id, deploymentDigest: w.order.deploymentDigest, apiBase: w.h.apiBase, fetch: w.fetch, now: () => Date.now() + w.offsets.wall, monotonicNow: () => performance.now() + w.offsets.wall })
+      const row = (await gate.inspect(entry.intentKey)).approval!
+      const binding = { claimId: row.claimId, intentKey: row.intentKey, stage: row.stage, transactionDigest: row.transactionDigest }
+      await gate.record({ ...binding, status: "SUBMITTED", txHash: hash as `0x${string}` })
+      assert.equal((await gate.reconcile!({ ...binding, txHash: hash as `0x${string}` })).status, revert ? "REVERTED" : "CONFIRMED")
+      const outcomes = w.bodies("/outcomes").length, reconciles = w.bodies("/reconcile").length
+      const inspects = w.server("GET", `/wallet-submissions/${w.side}/${w.order.id}`).length
+      assert.deepEqual(await w.recover(entry), { kind: revert ? "REVERTED" : "CONFIRMED" })
+      assert.equal(w.bodies("/outcomes").length, outcomes)
+      assert.equal(w.bodies("/reconcile").length, reconciles)
+      assert.equal(w.server("GET", `/wallet-submissions/${w.side}/${w.order.id}`).length, inspects + 1)
+      assert.deepEqual(w.store.get(entry.claimId)?.state, { kind: "VERIFIED", status: revert ? "REVERTED" : "CONFIRMED" })
+    })
+  }
 })
 
 test("the capture wrapper keeps the controller's exact gate behaviour (identical promise and error)", async () => {

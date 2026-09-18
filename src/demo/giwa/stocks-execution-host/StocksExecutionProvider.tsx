@@ -203,7 +203,7 @@ export function StocksExecutionSessionNotice() {
       <Notice tone="warning" title="This tab kept a transaction hash the server may not have recorded">
         <p>Your wallet returned a transaction hash that an earlier Stocks session could not record, so this tab kept it. The server may not have it yet, even though the transaction was sent.</p>
         <p className="mt-2">Sign in to Stocks again with the same wallet in this tab and open the order. You can record the kept hash there; nothing is recorded or sent automatically. The hash is kept only in this tab's memory: reloading or closing the page loses it.</p>
-        <p className="mt-2">Do not send the approval, deposit or escrow again from this or any other app or wallet. If the order shows the result as unknown, or the hash cannot be recorded, contact operations to confirm what happened.</p>
+        <p className="mt-2">Do not send the approval, deposit or escrow again from this or any other app or wallet. If the kept hash cannot be recorded, or the order still shows the result as unknown after you record it, contact operations to confirm what happened.</p>
       </Notice>
     )
   }

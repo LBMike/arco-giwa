@@ -174,8 +174,17 @@ test("kept hashes are shown only to their owner on their order, from the first c
       assert.ok(otherChain.includes(KEPT_NOTICE), "another network keeps the kept-hash notice (not the no-hash wording)")
       assert.ok(!otherChain.includes("A wallet request from your last Stocks session"))
       await hidden("wallet B", { chainId: 91342, address: B, epoch: "injected:b:1", source: { mode: "injected", provider: walletB } })
+      assert.ok(!firstCommit("wallet B").includes(KEPT_NOTICE), "B is not told about A's kept hash, from the first commit")
       const text = element.textContent ?? ""
       assert.ok(!text.includes(KEPT_NOTICE), "B is not told about A's kept hash")
+      // B signed in (a live session for another owner) with A's order row on screen: still nothing of A's.
+      await signIn()
+      await hidden("B signed in with A's order row", {})
+      assert.ok(!firstCommit("B signed in with A's order row").includes(KEPT_NOTICE))
+      await act(async () => {
+        host!.logout()
+        await sleep(0)
+      })
       assert.equal(walletB.calls.length, 0)
       // Back to A (signed out after the wallet change): the notice again, still without order or hash.
       await render({ address: A, epoch: "injected:a:2", source: { mode: "injected", provider: walletA } }, "back-to-A")
