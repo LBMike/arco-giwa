@@ -1,6 +1,6 @@
 # Disposable Stocks local verification
 
-Both modes own a fresh Unix-socket PostgreSQL database, apply existing migrations, create an unforked loopback Hardhat chain, and deploy only the local test contracts. They do not load `.env`, production registries, keystores, existing databases or public RPCs. The numeric chain ID is 91342, but the deployment/checkpoint identifies a new disposable local chain.
+The backend-only, jsdom UI, and Chrome browser modes each own a fresh Unix-socket PostgreSQL database, apply existing migrations, create an unforked loopback Hardhat chain, and deploy only the local test contracts. They do not load `.env`, production registries, keystores, existing databases or public RPCs. The numeric chain ID is 91342, but the deployment/checkpoint identifies a new disposable local chain.
 
 Existing backend-only mode remains:
 
@@ -9,7 +9,7 @@ npm run build:server
 STOCKS_LOCAL_STACK_ONLY=1 STOCKS_PG_BIN=/absolute/postgresql/bin node scripts/stocks-local/run.mjs
 ```
 
-The new UI mode mounts the production `/stocks` React routes, host, controller, wallet ports and submission gate under StrictMode in **jsdom**. The page uses native HTTP, real SIWE signatures from local unlocked test accounts, the real API/runtime, PostgreSQL and EVM receipts. It does not open Chrome, use a wallet extension, or provide a persistent browser demo server.
+The original 003C jsdom UI mode mounts the production `/stocks` React routes, host, controller, wallet ports and submission gate under StrictMode in **jsdom**. The page uses native HTTP, real SIWE signatures from local unlocked test accounts, the real API/runtime, PostgreSQL and EVM receipts. It does not open Chrome, use a wallet extension, or provide a persistent browser demo server.
 
 ```sh
 npm run build:server
@@ -23,7 +23,7 @@ node --import tsx scripts/stocks-local/run.mjs
 
 Use installed root npm and contract Yarn 4 dependencies plus the existing Solidity compiler. `STOCKS_LOCAL_UI_DOM_RUNTIME` explicitly selects an already installed jsdom runtime; no package is downloaded by this harness. Node24.14.0 was used for current evidence. A separate Node22 run has not been performed.
 
-## What the UI scenario proves
+## Original 003C jsdom scenario
 
 1. Real nonce/SIWE login, UI quote/order creation, exact approval, separate deposit, native observer/worker processing and issuance for BUY 2 NVDA.
 2. Double activation sends once; stopping processing, restarting the API on the same port and remounting the page recovers the same journal hash without another wallet request. This is an HTTP application restart, not a PostgreSQL or Node-process restart.
@@ -34,26 +34,74 @@ Use installed root npm and contract Yarn 4 dependencies plus the existing Solidi
 7. Every holder RPC send is matched to the exact committed claim transaction and a successful claim response with an earlier trace sequence. Actual node transactions supply chain ID, calldata, account and distinct nonces. Faucet/operator sends are separate from the eight UI wallet attempts.
 8. Final holder stock/supply 1.25, escrow zero, holder test cash 1,850 and vault test cash 150 agree with server reconciliation at its common cutoff. Deliberately unpaid BUY orders remain unpaid; the test does not manufacture completed states.
 
-The standard broker remains a durable mock at fixed NVDA price 120 ARCO_TEST_USDC. Market-data endpoints are not configured, and their explicit unavailable UI is expected. This run does not certify real shares, public-network timing, Dynamic, a physical wallet, browser CORS enforcement or layout/accessibility.
+The standard broker remains a durable mock at fixed NVDA price 120 ARCO_TEST_USDC. Market-data endpoints are not configured, and their explicit unavailable UI is expected. The jsdom run does not certify real shares, public-network timing, Dynamic, a physical wallet, browser CORS enforcement or layout/accessibility. Its expiry case and eight wallet attempts belong to this jsdom scenario; they are not results from the Chrome scenario below.
+
+## 003C-2 Chrome browser mode
+
+This mode opens an already installed Chrome executable through an already installed Playwright runtime. A disposable Vite development server serves the test entry at `scripts/stocks-local/browser/index.html`; that entry mounts the actual Stocks routes, host and controller under StrictMode. API requests use the browser's native HTTP/CORS behavior, with real local SIWE, the same buildApp/runtime, PostgreSQL, Hardhat, observer and worker. This is a test-only prototype development server, not a production frontend server or deployment setup.
+
+Select the existing runtimes and a dedicated evidence directory explicitly; replace all absolute-path placeholders. The harness does not install Playwright, download a browser or attach to an existing user browser. Keep `STOCKS_LOCAL_UI`, `STOCKS_LOCAL_STACK_CASE_PROBE`, `STOCKS_LOCAL_STACK_SIGNAL_PROBE`, and `STOCKS_LOCAL_BROWSER_PROBE` unset for a normal browser run. Choose only one runner mode.
+
+```sh
+npm run build:server
+TMPDIR=/private/tmp \
+STOCKS_LOCAL_STACK_ONLY=1 \
+STOCKS_LOCAL_BROWSER=1 \
+STOCKS_PG_BIN=/absolute/postgresql/bin \
+STOCKS_LOCAL_BROWSER_RUNTIME=/absolute/existing/playwright/package.json \
+STOCKS_LOCAL_CHROME=/absolute/installed/chrome-executable \
+STOCKS_LOCAL_BROWSER_EVIDENCE=/private/tmp/stocks-browser-evidence \
+node scripts/stocks-local/run.mjs
+```
+
+The browser scenario is structured as 19 assertion groups and seven holder wallet attempts. It exercises BUY and SELL through the actual page, separate approval/transfer clicks, UI disabled-state checks, API restart plus real page reload, account A→B isolation with a late A result, and a lost wallet response whose transaction the real observer independently processes. It reads final database/chain reconciliation and captures desktop/mobile screenshots with a horizontal-overflow check. These describe the scenario coverage, not an assertion that a particular run or all lifecycle probes passed. Screenshots and overflow checks are not a complete visual/accessibility audit.
+
+The accepted 2026-09-18 exact-code run and lifecycle results are recorded in [003C-2 evidence](../../docs/evidence/giwa-stocks-local-browser-003c2-20260918.md).
+
+A second owned browser origin attempts API reads, bootstrap reads and wallet writes, including a wallet request with the correct bridge capability. This checks local browser CORS and bridge rejection; it does not certify deployed-domain CORS. The real-time evidence/session/quote-expiry scenario from jsdom is **not rerun in Chrome**. The original 60-second quote and 15-second execution-evidence limits remain unchanged. Dynamic, wallet extensions, physical wallets, public RPCs and public-network finality/timing remain unverified. The broker is still the fixed-price durable mock, not a real securities venue.
+
+Browser evidence is written to the explicitly selected directory: `result.json`, `portfolio-desktop.png`, `portfolio-mobile.png`, and `failure.png` when failure capture is possible. The browser result alone is insufficient: require successful resource-cleanup records and the expected process exit as well.
+
+## Browser bridge boundary (test only)
+
+Unlike the in-process jsdom wallet, Chrome uses a narrow local HTTP bridge. All assets and bridge routes require the exact `127.0.0.1:port` Host. The bootstrap config requires same-origin browser fetch metadata and returns a random in-memory capability with no-store/nosniff headers. Vite's broad CORS is disabled, its product config is not loaded, and its env directory is an empty owned directory. Wallet/control/finish POSTs require the exact Origin, same-origin fetch metadata, the capability header and JSON content type; bodies are size-limited and checked for exact fields. The capability is never put in a URL or log. A state read requires the capability and same-origin checks and returns only test counters/account and a read-only summary, not sessions or signatures.
+
+The wallet route permits only the existing local-wallet methods: account/chain/checkpoint reads, the reviewed allowance read, SIWE signing, and exact reviewed approval/deposit/escrow transactions. The local wallet still enforces the active A/B account, contracts, calldata and single-send/no-retry behavior. It cannot expose arbitrary RPC, operator signing, key export or a production signer. Controls are limited to A/B selection, holding/releasing/dropping one response, pausing/resuming processing and restarting the API; they cannot change order state, expiry or chain time. Finish only reports test completion. Bodies, authentication headers, signatures and tokens are not logged.
+
+Closing first fences new dispatch and closes the wallet, releasing held HTTP work before bounded draining and development-server shutdown. The bridge is an additional test-only surface, not a supported product API.
 
 ## Safety and lifetime
 
-The in-process test wallet accepts only two local holder accounts, exact transaction keys, the reviewed contracts/ABI and this SIWE origin. It exposes no HTTP signing endpoint. It uses one raw `eth_sendTransaction` with no async preflight, extra gas/nonce fields, fallback or retry. A held/lost response occurs after the local node has accepted the original transaction.
+The in-process test wallet accepts only two local holder accounts, exact transaction keys, the reviewed contracts/ABI and this SIWE origin. The jsdom UI calls this wallet in process without an HTTP wallet bridge; the backend-only scenario drives its test transactions directly. Those modes still use the separate local settlement-signer HTTP fixture. Chrome adds the guarded holder-wallet bridge described above. It uses one raw `eth_sendTransaction` with no async preflight, extra gas/nonce fields, fallback or retry. A held/lost response occurs after the local node has accepted the original transaction.
 
 Only the executable owns signal handlers. UI callbacks/wallet, API, runtime and signer close before the owned database/EVM. `runtime.stop()` precedes draining an active tick so close cannot start later worker iterations. An intentional processing pause is reversible and is distinct from closing the stack.
 
 On success the runner removes its temporary directory. On failure or signal it retains diagnostics and prints the owned directory; existing user services are never discovered or stopped. `LOCAL_UI_OWNED_SERVICES_STOPPED` reports owned process-group/socket/PID-file cleanup after completion. Default Hardhat private-key output is disabled.
 
-Run the bounded checks:
+Run the wallet/bridge unit checks and the original jsdom lifecycle checker:
 
 ```sh
-node --test scripts/stocks-local/local-wallet.test.mjs
+node --test scripts/stocks-local/browser-server.test.mjs scripts/stocks-local/local-wallet.test.mjs
 TMPDIR=/private/tmp STOCKS_LOCAL_STACK_ONLY=1 \
 STOCKS_PG_BIN=/absolute/postgresql/bin \
 STOCKS_LOCAL_UI_DOM_RUNTIME=/absolute/existing/jsdom/package.json \
 node scripts/stocks-local/ui-lifecycle-check.mjs
 ```
 
-The lifecycle checker starts its own child runners and verifies ready-phase SIGINT, active-phase SIGTERM and intentional failure: expected exit code, closed API/RPC ports, absent EVM process group, stopped PostgreSQL and removed socket. Its failure probe is an explicit test-only path; it never changes production behavior.
+The jsdom lifecycle checker starts its own child runners and verifies ready-phase SIGINT, active-phase SIGTERM and intentional failure: expected exit code, closed API/RPC ports, absent EVM process group, stopped PostgreSQL and removed socket. Its failure probe is an explicit test-only path; it never changes production behavior.
 
 Each `STOCKS_LOCAL_UI_STEP` line is a completed assertion group. The final JSON contains the evidence and `result: PASS`; the subsequent cleanup record and exit0 must also be present to consider the normal run successful. A PASS report printed before failed cleanup is not an accepted run.
+
+The Chrome lifecycle checker defines three separate disposable cases: ready-phase SIGINT, held-response SIGTERM, and intentional startup/scenario failure. It verifies the expected exit and closed Chrome/bridge/API/RPC, EVM process group and PostgreSQL resources. Lifecycle verification must be accepted from its own final logs; a successful interactive scenario does not imply these checks passed. Use a separate evidence directory so lifecycle runs do not overwrite the normal browser evidence:
+
+```sh
+TMPDIR=/private/tmp \
+STOCKS_LOCAL_STACK_ONLY=1 \
+STOCKS_PG_BIN=/absolute/postgresql/bin \
+STOCKS_LOCAL_BROWSER_RUNTIME=/absolute/existing/playwright/package.json \
+STOCKS_LOCAL_CHROME=/absolute/installed/chrome-executable \
+STOCKS_LOCAL_BROWSER_EVIDENCE=/private/tmp/stocks-browser-lifecycle-evidence \
+node scripts/stocks-local/browser-lifecycle-check.mjs
+```
+
+The checker selects its fixed probe/mode internally and writes per-case lifecycle logs/JSON. It does not stop unrelated Chrome, database or node processes. The Chrome runner additionally reports `LOCAL_BROWSER_RESOURCES_STOPPED`; the shared runner reports the owned database/EVM cleanup separately.
