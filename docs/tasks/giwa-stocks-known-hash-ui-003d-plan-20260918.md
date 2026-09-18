@@ -83,3 +83,25 @@ Task prompt: `docs/tasks/giwa-stocks-known-hash-ui-003d-20260918.md`. Backend co
 Full checks: typecheck, build, frontend with DOM + artifacts and CI-like, server, security, design tokens (7 known) and stories, `git diff --check`.
 
 **Not in scope:** reload or cross-tab persistence, manual hash entry, wallet transaction search, token storage, automatic recovery or retry, Dynamic mode, server/DB/Solidity/registry/auth/deadline changes, real PostgreSQL/EVM/Chrome integration (Codex follow-up).
+
+## Results (recorded at completion)
+
+- **Implemented as planned**, with one design choice made explicit: a hash is kept only when the original gate's `record` **fails**. A record that the original session completes leaves nothing to recover, so the notice never flickers to the kept variant.
+- **Builder-side review.** Two review rounds changed copy only (no authority change):
+  - an approval card names only its own step;
+  - failure copy hedges on the server;
+  - the notice title asserts no timing and shows on any network;
+  - operations follow a failed recording, not the expected pre-recovery unknown.
+
+  They also added tests: an old callback after a new same-owner session or with B signed in; ownership after the record and reconcile answers; a 401 after S2; an already terminal server row; bearer fingerprints; first commits with B signed in.
+- **Test scope.**
+  - Page scenario 15 checks a moved-on order after a status refresh. The non-payable, unpinned render path is covered by `known-hash.dom.test.tsx`: a new session's accepted card first renders the stale payable row and pins the order.
+  - The quote-deadline refusal of a new transfer is checked at the server (503 paused, 409 expired). The fixture's shifted clock makes panel evidence stale.
+- **Final checks** at `2e1b8f4`:
+  - frontend 707/707 with DOM + artifacts; CI-like 652 + 5 skips;
+  - server 330 / 72 DB skips;
+  - 7 known token findings;
+  - typecheck, build, security, stories and diff all pass.
+
+  Mutation rounds 1–3: 33 mutations, 30 killed outright; M16 and M18 were killed in round 2 after tests were added; M05 is an equivalent mutant (the gate enforces the same binding before any request).
+- **Details:** `docs/evidence/giwa-stocks-known-hash-ui-003d-builder-20260918.md`.
