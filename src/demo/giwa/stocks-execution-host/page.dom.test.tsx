@@ -822,6 +822,10 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
 
     /** Signs in again after expiry (the host then offers "Retry Stocks sign-in") or after a sign-out. */
     async function signInAgain(page: Page) {
+      // The fixture signs JWTs deterministically from the wallet and the issue second: wait for the next second so the new
+      // session's token really differs from the previous one (the recovery token checks rely on it).
+      const second = Math.floor(Date.now() / 1000)
+      while (Math.floor(Date.now() / 1000) === second) await sleep(25)
       const label = page.button("Retry Stocks sign-in") ? "Retry Stocks sign-in" : "Sign in to Stocks"
       await page.waitFor(() => page.button(label) && !page.button(label)!.disabled, `${label} button`)
       await page.click(page.button(label), label)
