@@ -8,7 +8,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1', 'Explicit STOCKS_LOCAL_STACK_ONLY=1 is required');
 const uiMode = process.env.STOCKS_LOCAL_UI === '1';
-assert.ok(!uiMode || (!process.env.STOCKS_LOCAL_STACK_CASE_PROBE && !process.env.STOCKS_LOCAL_STACK_SIGNAL_PROBE), 'Choose one fixed local scenario');
+const browserMode = process.env.STOCKS_LOCAL_BROWSER === '1';
+assert.ok(Number(uiMode) + Number(browserMode) + Number(process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1') + Number(process.env.STOCKS_LOCAL_STACK_SIGNAL_PROBE === '1') <= 1, 'Choose one fixed local scenario');
 const root = resolve(import.meta.dirname, '../..');
 const contractsRoot = join(root, 'packages/contracts');
 assert.ok(existsSync(join(root, 'server/dist/stocks-runtime/observer.js')), 'Build the assembled backend/runtime first');
@@ -69,7 +70,7 @@ function cleanup() {
     }
     closeSync(fd);
     if (cleanupFailure) throw new Error(`${cleanupFailure.message}; retained ${temp}`);
-    if (uiMode) console.log(JSON.stringify({ kind: 'LOCAL_UI_OWNED_SERVICES_STOPPED',
+    if (uiMode || browserMode) console.log(JSON.stringify({ kind: browserMode ? 'LOCAL_BROWSER_OWNED_SERVICES_STOPPED' : 'LOCAL_UI_OWNED_SERVICES_STOPPED',
       ownerPid: process.pid, nodeGroup: node?.pid, postgresPid, temp, postgresData: data, socket,
       postgresPidFileAbsent: !existsSync(join(data, 'postmaster.pid')),
       postgresSocketAbsent: !existsSync(join(socket, '.s.PGSQL.5432')), nodeGroupAbsent: !node?.pid || !groupAlive(node.pid) }));
@@ -129,10 +130,10 @@ try {
     await new Promise(() => {}); // Signal-check child deliberately awaits its owned cleanup.
   }
   // Fixed local regression selection only; never accept an arbitrary module path.
-  const { runStack } = await import(uiMode ? './ui-run.mjs' : process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1' ? './address-case.mjs' : './stack.mjs');
+  const { runStack } = await import(browserMode ? './browser-run.mjs' : uiMode ? './ui-run.mjs' : process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1' ? './address-case.mjs' : './stack.mjs');
   checkRunning();
   const report = await runStack({ rpcUrl, bundle: JSON.parse(readFileSync(bundlePath, 'utf8')),
-    databaseUrl: `postgresql://stocks_local@localhost/stocks_local_test?host=${encodeURIComponent(socket)}`, registerCleanup });
+    databaseUrl: `postgresql://stocks_local@localhost/stocks_local_test?host=${encodeURIComponent(socket)}`, resourceDir: temp, registerCleanup });
   console.log(JSON.stringify(report, null, 2));
   successful = true;
 } finally {
