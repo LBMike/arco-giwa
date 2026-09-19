@@ -20,9 +20,10 @@ import { createShortSessionFixture } from './short-session.mjs';
 const { Pool } = createRequire(import.meta.url)('pg');
 const faucetAbi = parseAbi(['function faucet(address,uint256)']);
 
-export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test', knownHashRecovery = false }) {
+export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test', knownHashRecovery = false, operatorDiagnostics = false }) {
   assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1');
   assert.equal(typeof knownHashRecovery, 'boolean');
+  assert.equal(typeof operatorDiagnostics, 'boolean');
   assert.equal(bundle.execution, 'LOCAL_EVM_TEST_HARNESS_ONLY');
   const target = new URL(rpcUrl), database = new URL(databaseUrl), origin = new URL(frontendOrigin);
   assert.equal(target.protocol, 'http:'); assert.equal(target.hostname, '127.0.0.1');
@@ -225,6 +226,8 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
         signer: { ...signerServer.controls, operations } };
     }
     return { apiBase, frontendOrigin, accounts, manifest, digest, rpc, chain, pool, service: runtime.service, repo,
+      operatorDiagnostics,
+      stopRuntime: operatorDiagnostics ? async () => { await stopProcessing(); runtime.stop(); } : undefined,
       armShortSession: shortSession ? () => { assert.ok(!closed); shortSession.arm(); } : undefined,
       observer: { coverage: runtime.reconciliationCoverage }, requests, rpcTrace, startProcessing, stopProcessing, restartApi, snapshot, close };
   } catch (error) { await close().catch(() => {}); throw error; }

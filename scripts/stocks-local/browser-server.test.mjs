@@ -10,7 +10,7 @@ import { createLocalBrowserHost } from './browser-server.mjs';
 
 const repository = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const A = `0x${'1'.repeat(40)}`, B = `0x${'2'.repeat(40)}`;
-async function fixture(t, recovery = false) {
+async function fixture(t, recovery = false, operatorDiagnostics = false) {
   const previousFlag = process.env.STOCKS_LOCAL_STACK_ONLY;
   process.env.STOCKS_LOCAL_STACK_ONLY = '1';
   const directory = await mkdtemp(join(tmpdir(), 'stocks-browser-unit-'));
@@ -56,7 +56,8 @@ async function fixture(t, recovery = false) {
     } },
     close() { closed = true; hold?.drop(); },
   };
-  const stack = { apiBase: 'http://127.0.0.1:12345', frontendOrigin: host.origin, accounts: { holder: A, otherHolder: B }, manifest: { fixture: true },
+  const stack = { apiBase: 'http://127.0.0.1:12345', frontendOrigin: host.origin, accounts: { holder: A, otherHolder: B, operator: `0x${'4'.repeat(40)}` }, manifest: { fixture: true },
+    operatorDiagnostics,
     armShortSession: recovery ? () => controls.push('short-session') : undefined,
     async snapshot() { return { buyOrders: [], sellOrders: [], claims: [], proofs: [], chain: { holderStock: '0', holderCash: '2' } }; },
     async stopProcessing() { controls.push('stop'); }, async startProcessing() { controls.push('start'); }, async restartApi() { controls.push('restart'); },
@@ -165,4 +166,22 @@ test('READY is rechecked after streaming body; close prevents a late wallet invo
   await delay(30);
   const closing = f.host.close(); request.end('"params":[]}');
   assert.equal(await response, 503); await closing; assert.equal(f.calls.length, 0);
+});
+test('operator account control is opt-in and still requires capability, same-origin and exact body', async t => {
+  const originalFlag = process.env.STOCKS_LOCAL_STACK_ONLY;
+  const disabled = await fixture(t);
+  assert.equal(disabled.config.operatorDiagnostics, false);
+  assert.equal(disabled.config.accounts.operator, undefined);
+  assert.equal((await disabled.post('/__local/control', { action: 'account', account: 'operator' })).status, 400);
+  const enabled = await fixture(t, false, true);
+  t.after(() => { if (originalFlag === undefined) delete process.env.STOCKS_LOCAL_STACK_ONLY; else process.env.STOCKS_LOCAL_STACK_ONLY = originalFlag; });
+  assert.equal(enabled.config.operatorDiagnostics, true);
+  const input = { action: 'account', account: 'operator' };
+  assert.equal((await enabled.post('/__local/control', input, { 'x-stocks-local-capability': '' })).status, 403);
+  assert.equal((await enabled.post('/__local/control', input, { origin: 'http://foreign.test' })).status, 403);
+  assert.equal((await enabled.post('/__local/control', { ...input, permission: 'write' })).status, 400);
+  assert.equal((await enabled.state()).account, A);
+  assert.equal((await enabled.post('/__local/control', input)).status, 200);
+  assert.equal((await enabled.state()).account, enabled.config.accounts.operator);
+  assert.deepEqual(enabled.calls, []); assert.deepEqual(enabled.sends, []);
 });

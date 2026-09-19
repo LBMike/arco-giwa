@@ -131,3 +131,43 @@ node scripts/stocks-local/browser-lifecycle-check.mjs
 ```
 
 The checker selects its fixed probe/mode internally and writes per-case lifecycle logs/JSON. It does not stop unrelated Chrome, database or node processes. The Chrome runner additionally reports `LOCAL_BROWSER_RESOURCES_STOPPED`; the shared runner reports the owned database/EVM cleanup separately.
+
+## Operator submission diagnostics (003E)
+
+Use `STOCKS_LOCAL_BROWSER_CASE=operator-diagnostics` with the existing explicit
+Chrome command and a new evidence directory. The ordinary investor browser flow
+runs first, including its seven original wallet sends and claim-before-send proof.
+Only then does the additional `/admin/stocks` scenario prepare local diagnostic
+records and sign in through real SIWE as the configured `stocks:read` operator.
+
+The test-only operator account appears in the local control bar only for this
+case. The wallet bridge permits its account/chain reads and origin-bound SIWE
+message, and rejects its transaction or contract-call requests. It grants no
+product permission: the unchanged server operator resolver decides access.
+
+The 24 diagnostic examples include BUY/SELL, both journal stages, empty stages,
+all five submission statuses, trusted CONFIRMED/REVERTED receipts, and expired
+NOT_ENROLLED orders. Original completed orders come from the preceding investor
+buttons. New fixture orders and journal records use production services; ten
+additional local transactions create actual receipt evidence, including mined
+out-of-gas failures. Those ten setup transactions are not investor UI sends.
+Historical unenrolled and foreign-deployment orders are explicit new isolated DB
+fixtures, not fabricated business completions or rewritten existing orders.
+
+The actual admin buttons display the real API/service/PostgreSQL snapshots. The
+scenario checks native Enter/Space refresh, three viewport widths, a real foreign
+order 404, interrupted reads, cancellation on order selection, and regular-user
+admin denial. It compares every Stocks table, signer operations, chain head,
+balances and nonces before and after the read interval. Both browser wallet
+request attempts and forwarded wallet calls/sends must stay zero, and API reads
+must carry no body and make no mutation request. The mandatory SIWE login happens
+before that interval and is counted separately.
+
+The final runtime stop test proves reads remain available while new execution is
+blocked by STOPPED, including expired orders. It does not claim a live
+`configuredPause: true` transition. The held-request test proves cancellation on
+selection, while delayed-response overwrite protection is tested separately by
+DOM/store regressions. Error404 retained-snapshot wording is recorded as an
+explicit known P3 finding until the Claude copy follow-up is accepted. A passing
+functional run with that finding reports `PASS_WITH_KNOWN_P3` for diagnostics.
+This is local Chrome/PG/EVM evidence, not public-network or physical-wallet proof.

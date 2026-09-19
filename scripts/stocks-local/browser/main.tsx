@@ -13,9 +13,9 @@ import type { ActiveWalletSource } from '../../../src/demo/giwa/stocks-wallet-so
 import '../../../src/index.css';
 import '../../../src/demo/theme.css';
 
-type Config = { apiBase: string; frontendOrigin: string; accounts: { holder: string; otherHolder: string }; account: string | null; capability: string; knownHashRecovery: boolean };
+type Config = { apiBase: string; frontendOrigin: string; accounts: { holder: string; otherHolder: string; operator?: string }; account: string | null; capability: string; knownHashRecovery: boolean; operatorDiagnostics: boolean };
 type State = { account: string | null; holdWaiting: boolean; holdArmed: boolean; calls: number; sends: { outcome: string }[] };
-type Control = { action: 'account'; account: 'A' | 'B' } | { action: 'holdNextSend' | 'releaseHeld' | 'dropHeld' | 'stopProcessing' | 'startProcessing' | 'restartApi' | 'armShortSession' };
+type Control = { action: 'account'; account: 'A' | 'B' | 'operator' } | { action: 'holdNextSend' | 'releaseHeld' | 'dropHeld' | 'stopProcessing' | 'startProcessing' | 'restartApi' | 'armShortSession' };
 type Request = { method: string; params?: unknown[] };
 type Listener = (...args: unknown[]) => void;
 const address = /^0x[0-9a-fA-F]{40}$/;
@@ -30,12 +30,14 @@ function configOf(value: unknown): Config {
   const api = new URL(row.apiBase);
   if (api.protocol !== 'http:' || api.hostname !== '127.0.0.1' || !api.port || api.origin !== row.apiBase || api.origin === location.origin) throw Error('LOCAL_API_INVALID');
   if (typeof accounts.holder !== 'string' || !address.test(accounts.holder) || typeof accounts.otherHolder !== 'string' || !address.test(accounts.otherHolder)) throw Error('LOCAL_ACCOUNTS_INVALID');
-  if (row.account !== null && (typeof row.account !== 'string' || ![accounts.holder.toLowerCase(), accounts.otherHolder.toLowerCase()].includes(row.account.toLowerCase()))) throw Error('LOCAL_ACCOUNT_INVALID');
-  return { apiBase: row.apiBase, frontendOrigin: row.frontendOrigin, capability: row.capability, accounts: { holder: accounts.holder, otherHolder: accounts.otherHolder }, account: row.account as string | null, knownHashRecovery: row.knownHashRecovery === true };
+  const operator = row.operatorDiagnostics === true && typeof accounts.operator === 'string' && address.test(accounts.operator) ? accounts.operator : undefined;
+  if (row.operatorDiagnostics === true && !operator) throw Error('LOCAL_OPERATOR_INVALID');
+  if (row.account !== null && (typeof row.account !== 'string' || ![accounts.holder.toLowerCase(), accounts.otherHolder.toLowerCase(), operator?.toLowerCase()].includes(row.account.toLowerCase()))) throw Error('LOCAL_ACCOUNT_INVALID');
+  return { apiBase: row.apiBase, frontendOrigin: row.frontendOrigin, capability: row.capability, accounts: { holder: accounts.holder, otherHolder: accounts.otherHolder, operator }, account: row.account as string | null, knownHashRecovery: row.knownHashRecovery === true, operatorDiagnostics: row.operatorDiagnostics === true };
 }
 function stateOf(value: unknown, config: Config): State {
   const row = object(value);
-  if (row.account !== null && (typeof row.account !== 'string' || ![config.accounts.holder.toLowerCase(), config.accounts.otherHolder.toLowerCase()].includes(row.account.toLowerCase()))) throw Error('LOCAL_STATE_INVALID');
+  if (row.account !== null && (typeof row.account !== 'string' || ![config.accounts.holder.toLowerCase(), config.accounts.otherHolder.toLowerCase(), config.accounts.operator?.toLowerCase()].includes(row.account.toLowerCase()))) throw Error('LOCAL_STATE_INVALID');
   if (typeof row.holdWaiting !== 'boolean' || typeof row.holdArmed !== 'boolean' || !Number.isSafeInteger(row.calls) || Number(row.calls) < 0 || !Array.isArray(row.sends)) throw Error('LOCAL_STATE_INVALID');
   const sends = row.sends.map(value => {
     const send = object(value);
@@ -126,6 +128,7 @@ async function start() {
       { label: 'Drop held response', body: { action: 'dropHeld' } }, { label: 'Pause processing', body: { action: 'stopProcessing' } },
       { label: 'Resume processing', body: { action: 'startProcessing' } }, { label: 'Restart API', body: { action: 'restartApi' } },
     ];
+    if (config.operatorDiagnostics) buttons.push({ label: 'Operator (sign-in only)', body: { action: 'account', account: 'operator' } });
     if (config.knownHashRecovery) buttons.push({ label: 'Next login: 30s JWT (test only)', body: { action: 'armShortSession' } });
     return <div className="arco-demo" style={{ width: '100%', maxWidth: 1280, minHeight: '100vh', margin: '0 auto', padding: '16px', boxSizing: 'border-box', overflowWrap: 'anywhere', background: 'var(--color-arco-page)', color: 'var(--color-arco-ink)' }}>
       <aside aria-label="Local test controls" data-testid="local-test-controls" style={{ width: '100%', padding: 16, marginBottom: 24, border: '1px solid var(--color-arco-border)', borderRadius: 16, background: 'var(--color-arco-surface-muted)' }}>
@@ -136,7 +139,7 @@ async function start() {
           <button type="button" style={buttonStyle} disabled={busy} data-local-action="refresh" onClick={() => { void refresh(); }}>Refresh test state</button>
         </div>
         <p data-testid="local-test-state" style={{ marginTop: 10, fontSize: 13 }}>
-          Account {same(state.account, config.accounts.holder) ? 'A' : same(state.account, config.accounts.otherHolder) ? 'B' : 'disconnected'}
+          Account {same(state.account, config.accounts.holder) ? 'A' : same(state.account, config.accounts.otherHolder) ? 'B' : config.accounts.operator && same(state.account, config.accounts.operator) ? 'Operator' : 'disconnected'}
           {' · '}Wallet calls: <span data-testid="local-wallet-calls">{state.calls}</span>
           {' · '}Sends: <span data-testid="local-wallet-sends">{state.sends.length}</span>
           {' · '}Held: <span data-testid="local-wallet-held">{state.holdWaiting ? 'waiting' : state.holdArmed ? 'armed' : 'none'}</span>

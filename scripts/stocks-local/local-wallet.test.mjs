@@ -75,3 +75,17 @@ test('startup refuses public/ambiguous RPC and a different checkpoint; close sto
   assert.throws(() => wallet.provider.request({ method: 'eth_sendTransaction', params: [tx] }), /REFUSED/);
   assert.equal(calls.length, 0);
 });
+test('explicit operator login permits scoped SIWE but no transaction or contract call', async () => {
+  const { wallet, calls } = await fixture({ operatorLogin: true });
+  try {
+    wallet.setAccount(operator);
+    assert.deepEqual(await wallet.provider.request({ method: 'eth_accounts', params: [] }), [operator]);
+    const message = new SiweMessage({ domain: 'stocks-local.test', address: operator, uri: 'http://stocks-local.test', chainId: 91342,
+      version: '1', nonce: 'operator123', issuedAt: new Date().toISOString() }).prepareMessage();
+    await wallet.provider.request({ method: 'personal_sign', params: [message, operator] });
+    const before = calls.length;
+    for (const method of ['eth_sendTransaction', 'eth_call', 'eth_getBlockByNumber'])
+      assert.throws(() => wallet.provider.request({ method, params: [{ ...tx, from: operator }] }), /REFUSED/);
+    assert.equal(calls.length, before); assert.equal(wallet.sends.length, 0);
+  } finally { wallet.close(); }
+});

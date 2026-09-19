@@ -13,7 +13,7 @@ const abi = parseAbi([
 const fail = () => { throw Object.assign(new Error('LOCAL_WALLET_REQUEST_REFUSED'), { code: -32602 }); };
 const same = (a, b) => typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
 
-export async function createLocalWallet({ rpc, rpcUrl, manifest, accounts, frontendOrigin }) {
+export async function createLocalWallet({ rpc, rpcUrl, manifest, accounts, frontendOrigin, operatorLogin = false }) {
   assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1');
   const url = new URL(rpcUrl);
   assert.ok(url.protocol === 'http:' && url.hostname === '127.0.0.1' && url.port && url.pathname === '/'
@@ -21,7 +21,8 @@ export async function createLocalWallet({ rpc, rpcUrl, manifest, accounts, front
   const origin = new URL(frontendOrigin);
   assert.equal(origin.origin, frontendOrigin);
   const m = Object.freeze(structuredClone(manifest));
-  const allowedAccounts = [accounts.holder, accounts.otherHolder].map(value => value.toLowerCase());
+  assert.equal(typeof operatorLogin, 'boolean');
+  const allowedAccounts = [accounts.holder, accounts.otherHolder, ...(operatorLogin ? [accounts.operator] : [])].map(value => value.toLowerCase());
   assert.equal(await rpc('eth_chainId', []), '0x164ce');
   const metadata = await rpc('hardhat_metadata', []);
   assert.ok(metadata.instanceId && !metadata.forkedNetwork);
@@ -53,6 +54,9 @@ export async function createLocalWallet({ rpc, rpcUrl, manifest, accounts, front
   }
   function request({ method, params = [] }) {
     if (closed || !Array.isArray(params)) fail();
+    // The optional operator is for real SIWE login and read-only UI verification.
+    // Never grant it transaction or contract-call capability through this bridge.
+    if (operatorLogin && same(account, accounts.operator) && !['eth_accounts', 'eth_chainId', 'personal_sign'].includes(method)) fail();
     const at = Date.now();
     if (method === 'eth_accounts') {
       if (params.length) fail();

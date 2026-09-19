@@ -76,7 +76,9 @@ export async function createLocalBrowserHost({ root, resourceDir }) {
   }
   const config = () => ({ apiBase: stack.apiBase, frontendOrigin: origin,
     knownHashRecovery: typeof stack.armShortSession === 'function',
-    accounts: { holder: stack.accounts.holder, otherHolder: stack.accounts.otherHolder }, account: wallet.account,
+    accounts: { holder: stack.accounts.holder, otherHolder: stack.accounts.otherHolder,
+      ...(stack.operatorDiagnostics ? { operator: stack.accounts.operator } : {}) }, account: wallet.account,
+    operatorDiagnostics: stack.operatorDiagnostics === true,
     manifest: structuredClone(stack.manifest), capability });
   async function state() {
     requireReady();
@@ -91,8 +93,8 @@ export async function createLocalBrowserHost({ root, resourceDir }) {
   async function control(input) {
     if (!input || typeof input.action !== 'string') throw failure(400, 'LOCAL_CONTROL_INVALID');
     if (input.action === 'account') {
-      if (!exact(input, ['action', 'account']) || !['A', 'B'].includes(input.account)) throw failure(400, 'LOCAL_CONTROL_INVALID');
-      wallet.setAccount(input.account === 'A' ? stack.accounts.holder : stack.accounts.otherHolder);
+      if (!exact(input, ['action', 'account']) || !['A', 'B', ...(stack.operatorDiagnostics ? ['operator'] : [])].includes(input.account)) throw failure(400, 'LOCAL_CONTROL_INVALID');
+      wallet.setAccount(input.account === 'A' ? stack.accounts.holder : input.account === 'B' ? stack.accounts.otherHolder : stack.accounts.operator);
       return;
     }
     if (!exact(input, ['action'])) throw failure(400, 'LOCAL_CONTROL_INVALID');
