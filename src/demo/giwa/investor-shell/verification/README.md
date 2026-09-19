@@ -7,7 +7,7 @@ This page mounts the real investor shell and pages in a browser, so you can clic
 
 - the sidebar and the menu drawer,
 - Home, Funds, product detail, Savings and Portfolio,
-- the 40-row Stocks table and its detail view.
+- the 40-row Stocks list and the security detail page that replaces it (`#/stocks?symbol=…`).
 
 A static bar above the app, labelled `PREVIEW · fixture data · not the app`, has three parts:
 
@@ -113,11 +113,15 @@ A blocked `localhost:8080` read that the pages make without a wallet would be a 
   - a row opens product detail, and **Back to products** returns to `#/funds`.
 - **Savings:** the account selector, then the invest panel, Performance, Transparency and More info.
 - **Stocks:**
-  - the **All assets / Stocks / ETF** filters, search and sort,
-  - clicking a row opens its detail, and **목록으로** returns to the table,
+  - `#/stocks` is the list: the **All assets / Stocks / ETF** filters, search and sort,
+  - clicking a row opens that security's detail in place of the list, with its heading focused near the top: the price card with the 1D–1Y chart, About and Statistics on the left, and the NVDA mock-trading section, sign-in and session notice on the right (one column below 1024 px),
+  - **← Stocks & ETFs** (목록으로) returns to the list with the same filter, search and sort, scrolled to and focused on the row you opened,
+  - a symbol other than NVDA shows a view-only card in the right column; **View NVDA** in the trading section opens the NVDA detail,
+  - `#/stocks?symbol=ZZZZ` (not in the list) shows a not-found state,
   - the fixture has SCHD and NBIS unavailable, SGOV stale and QQQ unchanged.
 - **Navigation:**
   - Use browser back and forward.
+  - Each open and close is a history entry. Back and Forward switch between the list and a detail without moving focus.
   - Reload on any hash URL, for example `#/stocks?symbol=TSLA`. The same page and selection come back.
 - **Market data switch:**
   - **40-symbol fixture** (the default),

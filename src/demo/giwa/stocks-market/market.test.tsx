@@ -59,11 +59,11 @@ test("bounded transport terminates ignored-abort fetches, bad HTTP and oversized
   await assert.rejects(denied.catalog(new AbortController().signal), /MARKET_HTTP_UNAVAILABLE/)
 })
 test("keyless/empty/one/partial/stale charts have explicit distinct presentation without invented observations", () => {
-  const keyless = renderToStaticMarkup(<MarketChart response={{ status: "UNCONFIGURED", reason: "NOT_CONFIGURED", fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: null }} quote={null} />)
+  const keyless = renderToStaticMarkup(<MarketChart response={{ status: "UNCONFIGURED", reason: "NOT_CONFIGURED", fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: null }} />)
   assert.match(keyless, /시세 연결 준비 중/); assert.doesNotMatch(keyless, /recharts|\$0/)
   for (const kind of ["empty", "one", "partial", "stale"]) {
     const chart = fixtureChart(); if (kind === "empty") { chart.bars = []; chart.history = "EMPTY" }; if (kind === "one") chart.bars = chart.bars.slice(0, 1); if (kind === "partial") { chart.history = "TRUNCATED"; chart.complete = false }
-    const html = renderToStaticMarkup(<MarketChart response={{ status: kind === "stale" ? "STALE" : "AVAILABLE", reason: null, fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: chart }} quote={fixtureQuote()} />)
+    const html = renderToStaticMarkup(<MarketChart response={{ status: kind === "stale" ? "STALE" : "AVAILABLE", reason: null, fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: chart }} />)
     assert.match(html, new RegExp(kind === "empty" ? "반환된 차트 관측값이 없습니다" : kind === "one" ? "관측값 1개" : kind === "partial" ? "일부 이력만 반환됨" : "마지막 확인 시세 · 오래된 데이터"))
   }
 })

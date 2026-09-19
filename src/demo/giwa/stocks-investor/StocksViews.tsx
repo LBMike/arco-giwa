@@ -1,16 +1,19 @@
 // Catalog list, instrument detail, orders and portfolio. Pure views over controller state.
 
-import { useContext, useEffect, useLayoutEffect, useRef } from "react"
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from "react"
 
+import { BottomSheet } from "../BottomSheet"
+import { INVEST_PANEL_CARD } from "../invest-panel-ui"
 import { StockLogo } from "../stocks-market/StockLogo"
+import { useStocksAccess } from "./access"
 import type { CatalogState, SideOrders, StocksInvestorState } from "./controller"
 import type { StocksInvestorActions } from "./actions"
 import { cashLabel, errorMessage, formatCash, formatPrice, formatQuantity, formatSignedQuantity, formatUtc, signedOutMessage } from "./display"
 import { OrderStatusCard } from "./OrderStatusCard"
 import { CATEGORY_TONE, orderStatusMeaning } from "./status"
-import { TradePanel } from "./TradePanel"
-import type { StocksCatalog, StocksOrder } from "./types"
-import { BUTTON_PRIMARY, BUTTON_SECONDARY, Chip, Field, Heading, Notice, PANEL, UserInteractionContext, useRescueFocus } from "./ui"
+import { statusAnnouncement, TradePanel, tradeStep, type TradeStep } from "./TradePanel"
+import type { StocksCatalog, StocksInstrument, StocksOrder, StocksSide } from "./types"
+import { BUTTON_PRIMARY, BUTTON_SECONDARY, Chip, FOCUS_RING, Field, Heading, Notice, PANEL, UserInteractionContext, useIsDesktop, useRescueFocus } from "./ui"
 
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect
 
@@ -67,20 +70,20 @@ export function StocksListView({ state, actions, onOpen }: { state: StocksInvest
               {catalog.instruments.map((instrument) => (
                 <li
                   key={instrument.symbol}
-                  className="grid w-full grid-cols-1 items-center gap-3 rounded-[var(--radius-row)] border border-[var(--color-arco-border)] p-4 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]"
+                  className="flex w-full flex-wrap items-center gap-x-4 gap-y-3 rounded-[var(--radius-row)] border border-[var(--color-arco-border)] p-4"
                 >
-                  <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex min-w-[10rem] flex-1 items-center gap-3">
                     <StockLogo symbol={instrument.symbol} />
                     <div className="min-w-0">
                       <p className="font-mono text-sm font-medium text-[var(--color-arco-ink)]">{instrument.symbol}</p>
                       <p className="text-xs text-[var(--color-arco-text-soft)]">Test units · {instrument.quantityScale} decimals</p>
                     </div>
                   </div>
-                  <div className="text-sm tabular-nums text-[var(--color-arco-ink)] md:text-right">
+                  <div className="text-sm tabular-nums text-[var(--color-arco-ink)]">
                     {formatPrice(instrument.price)} {catalog.cashSymbol}
                     <p className="text-xs text-[var(--color-arco-text-soft)]">Fixed mock price</p>
                   </div>
-                  <div>
+                  <div className="whitespace-nowrap">
                     <Chip tone={instrument.orderCapability === "CHECK_PAUSE_AT_ORDER" ? "neutral" : "attention"}>
                       {instrument.orderCapability === "CHECK_PAUSE_AT_ORDER" ? "Orders open unless paused" : "Not activated"}
                     </Chip>
@@ -101,55 +104,205 @@ export function StocksListView({ state, actions, onOpen }: { state: StocksInvest
   )
 }
 
-export function StockDetailView({ state, actions, onBack }: { state: StocksInvestorState; actions: StocksInvestorActions; onBack: () => void }) {
+/** The detail's title id: View NVDA → Enter lands here (the desktop trade card or the mobile summary; one is mounted). */
+const DETAIL_TITLE_ID = "giwa-stocks-detail-title"
+// calc(env(...)) needs real spaces, so apply via inline style (Tailwind arbitrary values escape them).
+const SAFE_AREA_PB = "calc(env(safe-area-inset-bottom) + 0.75rem)"
+const DOCK_PRIMARY = `flex-1 min-h-11 rounded-[var(--radius-card)] bg-[var(--color-arco-ink)] py-3 text-sm font-medium text-[var(--color-arco-on-dark)] ${FOCUS_RING}`
+const DOCK_SECONDARY = `flex-1 min-h-11 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] py-3 text-sm font-medium text-[var(--color-arco-ink)] ${FOCUS_RING}`
+/** Room the fixed dock takes at the bottom of the viewport (about 4.5rem plus the safe area), kept clear for focus scrolling. */
+const DOCK_SCROLL_PADDING = "7rem"
+
+/** The sheet's open state, owned above the session-switch boundary (GiwaStocksFeatureView) so a sign-in keeps it open. */
+export type TradeSheetState = { open: boolean; onOpenChange: (open: boolean) => void }
+
+/** Reports whether the sheet's content (the trade panel and its status line) is mounted, including the slide-out. */
+function SheetPresence({ onPresence }: { onPresence: (present: boolean) => void }) {
+  useIsomorphicLayoutEffect(() => {
+    onPresence(true)
+    return () => onPresence(false)
+  }, [onPresence])
+  return null
+}
+
+/**
+ * Where the NVDA trade stands, for the mobile summary card: the order on screen, or the one next step of the panel.
+ * Server amounts only (the quote's cash amount), never an estimate.
+ */
+function summaryStatus(state: StocksInvestorState, step: TradeStep, cash: string): string {
+  const attempt = state.attempt
+  if (step.kind === "attempt" && attempt !== null) {
+    return attempt.status === "ACCEPTED" && attempt.order ? `${step.label} · ${orderStatusMeaning(attempt.order, attempt.orderObservedAt).label}` : step.label
+  }
+  if (attempt?.status === "REJECTED") return "Order not placed"
+  if (step.kind === "place" && state.quote.status === "ready") return `Quote ready: ${formatCash(state.quote.quote.cashAmount)} ${cash} for ${formatQuantity(state.quote.quote.quantity)} NVDA`
+  if (step.kind === "requote") return "Quote expired. No order was placed."
+  return step.label
+}
+
+/**
+ * Below lg: a compact summary card, a fixed Buy / Sell dock, and a bottom sheet holding THE trade panel (mounted only
+ * while the sheet is open, so there is never a second panel, input or side toggle). The dock buttons carry no data-side:
+ * they preset the side through the panel's own action and open the sheet.
+ */
+function MobileTrade({
+  state,
+  actions,
+  catalog,
+  instrument,
+  headingRef,
+  sheet,
+}: {
+  state: StocksInvestorState
+  actions: StocksInvestorActions
+  catalog: StocksCatalog
+  instrument: StocksInstrument
+  headingRef: RefObject<HTMLHeadingElement>
+  sheet: TradeSheetState
+}) {
+  const access = useStocksAccess()
+  const { open, onOpenChange: setOpen } = sheet
+  // While the sheet's trade panel is mounted it carries the status line; otherwise the summary does (never both).
+  const [panelMounted, setPanelMounted] = useState(open)
+  const onPresence = useCallback((present: boolean) => setPanelMounted(present), [])
+  const sheetId = useId()
+  const openerRef = useRef<HTMLButtonElement | null>(null)
+  const dockRef = useRef<HTMLDivElement>(null)
+  const step = tradeStep(state, access)
+  // An unresolved or accepted order: the panel shows it and the side cannot change, so the dock only opens it.
+  const orderShown = step.kind === "attempt"
+  const openWith = (side: StocksSide | null) => (event: MouseEvent<HTMLButtonElement>) => {
+    openerRef.current = event.currentTarget
+    if (side !== null && !orderShown) actions.setSide(side)
+    setOpen(true)
+  }
+  const close = () => {
+    // The opener may have been replaced meanwhile (Buy / Sell → View order): return to the dock's current first button.
+    if (!openerRef.current?.isConnected) openerRef.current = dockRef.current?.querySelector("button") ?? null
+    setOpen(false)
+  }
+  const expanded = { "aria-expanded": open, "aria-controls": sheetId }
+  // The fixed dock covers the bottom of the viewport: keep a focused control scrolled clear of it while it is mounted.
+  useEffect(() => {
+    const style = document.documentElement.style
+    const previous = style.getPropertyValue("scroll-padding-bottom")
+    style.setProperty("scroll-padding-bottom", DOCK_SCROLL_PADDING)
+    return () => {
+      if (previous) style.setProperty("scroll-padding-bottom", previous)
+      else style.removeProperty("scroll-padding-bottom")
+    }
+  }, [])
+  return (
+    <>
+      <section className={`w-full ${INVEST_PANEL_CARD}`} aria-labelledby={DETAIL_TITLE_ID}>
+        <div className="flex items-center gap-3">
+          <StockLogo symbol="NVDA" />
+          <div className="min-w-0">
+            <h2 id={DETAIL_TITLE_ID} ref={headingRef} tabIndex={-1} className={`scroll-mt-24 text-lg font-medium text-[var(--color-arco-ink)] ${FOCUS_RING}`}>
+              Trade NVDA
+            </h2>
+            <p className="text-xs text-[var(--color-arco-text-soft)]">
+              Fixed mock price {formatPrice(instrument.price)} {catalog.cashSymbol} / NVDA · test value only
+            </p>
+          </div>
+        </div>
+        <dl className="mt-3 w-full">
+          <Field label="Order capability">{instrument.orderCapability === "CHECK_PAUSE_AT_ORDER" ? "Open unless paused (checked per order)" : "Not activated"}</Field>
+          <Field label={orderShown ? "Order" : "Next step"}>{summaryStatus(state, step, catalog.cashSymbol)}</Field>
+        </dl>
+        {/* The sheet's panel announces while it is mounted; with the sheet closed, quote expiry and order results are said here. */}
+        {panelMounted ? null : (
+          <p className="sr-only" aria-live="polite" data-testid="stocks-trade-summary-status">
+            {statusAnnouncement(state)}
+          </p>
+        )}
+      </section>
+      <div ref={dockRef} className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-arco-border)] bg-[var(--color-arco-page-80)] px-4 pt-3 backdrop-blur lg:hidden" style={{ paddingBottom: SAFE_AREA_PB }}>
+        <div className="mx-auto flex w-full max-w-[var(--container-page)] gap-3">
+          {orderShown ? (
+            <button type="button" className={DOCK_PRIMARY} onClick={openWith(null)} {...expanded}>
+              View order
+            </button>
+          ) : (
+            <>
+              <button type="button" className={DOCK_PRIMARY} onClick={openWith("BUY")} {...expanded}>
+                Buy
+              </button>
+              <button type="button" className={DOCK_SECONDARY} onClick={openWith("SELL")} {...expanded}>
+                Sell
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      <BottomSheet open={open} onClose={close} label="Trade NVDA" returnFocusTo={openerRef} id={sheetId}>
+        <div className="pb-2">
+          <SheetPresence onPresence={onPresence} />
+          <TradePanel state={state} actions={actions} />
+        </div>
+      </BottomSheet>
+    </>
+  )
+}
+
+/**
+ * The NVDA trade view (Stocks tab, detail open). At lg and above the trade panel is inline; below lg a summary card and
+ * a dock open it in a bottom sheet. A media query picks the ONE place the panel is mounted (CSS would keep a hidden copy).
+ * `onBack` is null when the host page owns list/detail (it renders its own way back).
+ */
+export function StockDetailView({
+  state,
+  actions,
+  onBack,
+  sheet,
+}: {
+  state: StocksInvestorState
+  actions: StocksInvestorActions
+  onBack: (() => void) | null
+  /** Below lg: the bottom sheet's open state, owned by the feature view. */
+  sheet: TradeSheetState
+}) {
   const catalog = catalogOf(state.catalog)
   const instrument = catalog?.instruments.find((item) => item.symbol === "NVDA") ?? null
   const headingRef = useRef<HTMLHeadingElement>(null)
   const interacted = useContext(UserInteractionContext)
+  const desktop = useIsDesktop()
   // "View" removed the focused button: land on the detail heading. Same guard as useRescueFocus, but a layout effect on
   // mount, so it runs before the trade panel's own (passive, child) rescues move focus to the quantity field or order card.
+  // In the page's detail column (the page owns list/detail) the heading is aligned to the top instead of centred, so the
+  // quantity field and the next-step action are in the first viewport; its scroll margin clears the sticky header.
+  const pageOwned = onBack === null
   useIsomorphicLayoutEffect(() => {
     if (typeof document === "undefined" || !interacted?.current) return
     const active = document.activeElement
-    if (active === null || active === document.body) headingRef.current?.focus()
-  }, [interacted])
+    const heading = headingRef.current
+    if ((active !== null && active !== document.body) || heading === null) return
+    if (!pageOwned) {
+      heading.focus()
+      return
+    }
+    heading.focus({ preventScroll: true })
+    const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    heading.scrollIntoView?.({ block: "start", behavior: reduced ? "auto" : "smooth" })
+  }, [interacted, pageOwned])
   return (
     <div className="flex w-full flex-col gap-4">
-      <div>
-        <button type="button" className={BUTTON_SECONDARY} onClick={onBack}>
-          All stocks
-        </button>
-      </div>
+      {onBack ? (
+        <div>
+          <button type="button" className={BUTTON_SECONDARY} onClick={onBack}>
+            All stocks
+          </button>
+        </div>
+      ) : null}
       <CatalogStatus state={state} actions={actions} />
       {catalog && instrument ? (
-        <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          <section className={`${PANEL} lg:self-start`} aria-labelledby="giwa-stocks-detail-title">
-            <div className="flex items-center gap-3">
-              <StockLogo symbol="NVDA" />
-              <p className="font-mono text-sm text-[var(--color-arco-text-soft)]">NVDA</p>
-            </div>
-            <h2
-              id="giwa-stocks-detail-title"
-              ref={headingRef}
-              tabIndex={-1}
-              className="mt-1 text-2xl font-medium tabular-nums text-[var(--color-arco-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
-            >
-              {formatPrice(instrument.price)} <span className="text-base font-normal text-[var(--color-arco-text-soft)]">{catalog.cashSymbol}</span>
-            </h2>
-            <p className="mt-1 text-xs text-[var(--color-arco-text-soft)]">Fixed mock price · as of {formatUtc(catalog.observedAt)}</p>
-            <dl className="mt-4 w-full">
-              <Field label="Order capability">{instrument.orderCapability === "CHECK_PAUSE_AT_ORDER" ? "Open unless paused (checked per order)" : "Not activated"}</Field>
-              <Field label="Quantity precision">{instrument.quantityScale} decimal places</Field>
-              <Field label="Test cash">{cashLabel(catalog.cashSymbol)}</Field>
-              <Field label="Deployment" mono>
-                {catalog.deploymentId}
-              </Field>
-            </dl>
-          </section>
-          <section className={PANEL}>
-            <TradePanel state={state} actions={actions} />
-          </section>
-        </div>
+        desktop ? (
+          <div className="w-full max-w-[488px]">
+            <TradePanel state={state} actions={actions} titleId={DETAIL_TITLE_ID} headingRef={headingRef} />
+          </div>
+        ) : (
+          <MobileTrade state={state} actions={actions} catalog={catalog} instrument={instrument} headingRef={headingRef} sheet={sheet} />
+        )
       ) : catalog ? (
         <Notice tone="info">NVDA is not in the server catalog.</Notice>
       ) : null}
@@ -252,7 +405,8 @@ function OrdersList({ state, actions, cashSymbol }: { state: StocksInvestorState
           <p className="text-sm text-[var(--color-arco-text-soft)]">No Stocks orders for this wallet.</p>
         ) : null}
         {merged.length > 0 ? (
-          <ul className="flex w-full flex-col gap-2">
+          // Rows lay out by the list's own width (a 488px detail column stacks them), not the viewport.
+          <ul className="flex w-full flex-col gap-2 [container-type:inline-size]">
             {merged.map((order) => {
               const side = order.side === "SELL" ? orders.status === "ready" && orders.sell.status === "ready" ? orders.sell.observedAt : null : orders.status === "ready" && orders.buy.status === "ready" ? orders.buy.observedAt : null
               const meaning = orderStatusMeaning(order, side)
@@ -261,7 +415,7 @@ function OrdersList({ state, actions, cashSymbol }: { state: StocksInvestorState
                   <button
                     type="button"
                     onClick={() => actions.selectOrder(order)}
-                    className="grid w-full grid-cols-1 gap-2 rounded-[var(--radius-row)] border border-[var(--color-arco-border)] p-4 text-left hover:bg-[var(--color-row-hover-weak)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)] md:grid-cols-[6rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] md:items-center"
+                    className="grid w-full grid-cols-1 gap-2 rounded-[var(--radius-row)] border border-[var(--color-arco-border)] p-4 text-left hover:bg-[var(--color-row-hover-weak)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)] [@container_(min-width:36rem)]:grid-cols-[6rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] [@container_(min-width:36rem)]:items-center"
                   >
                     <span className="text-sm font-medium text-[var(--color-arco-ink)]">{order.side === "SELL" ? "Sell" : "Buy"}</span>
                     <span className="text-sm tabular-nums text-[var(--color-arco-ink)]">{formatQuantity(order.quantity)} NVDA</span>

@@ -63,8 +63,8 @@ test("BUY quote review shows exact amounts; expired quote offers only a manual n
   await h.enter(WALLET_A)
   await h.quote("0.000000001")
   const ready = text(render(h.controller, "stocks", true))
-  assert.match(ready, /You pay \(test cash\) 0\.000001 ARCO_TEST_USDC/)
-  assert.match(ready, /Exact amount 1 base units \(6 decimals\)/)
+  // GIWA-style amount block: the cash side is the server quote's exact amount, with its exact base units under it.
+  assert.match(ready, /You pay ARCO_TEST_USDC TEST 0\.000001 1 base units \(6 decimals\)/)
   assert.match(ready, /Place buy order/)
   h.advanceDevice(60_000)
   h.controller.tick()
@@ -465,4 +465,45 @@ test("I6: the feature title is a section heading (h2) below the page's h1, same 
   assert.match(html, /<h2 id="giwa-stocks-title" class="text-2xl font-medium text-\[var\(--color-arco-ink\)\]">Stocks<\/h2>/)
   assert.doesNotMatch(html, /<h1\b/)
   assert.match(html, /aria-labelledby="giwa-stocks-title"/)
+})
+
+test("order rows lay out by the list's own width (a 488px detail column stacks them), never by the viewport", async () => {
+  const h = createHarness()
+  await h.enter(WALLET_A)
+  await h.quote("2")
+  await h.controller.placeOrder()
+  await h.controller.loadOrders()
+  const html = render(h.controller, "orders")
+  const list = html.match(/<ul class="([^"]*)"/)?.[1] ?? ""
+  assert.match(list, /\[container-type:inline-size\]/, "the list is the query container")
+  const rows = [...html.matchAll(/<li><button type="button" class="([^"]*)"/g)].map((match) => match[1])
+  assert.ok(rows.length > 0)
+  for (const row of rows) {
+    assert.match(row, /(^| )grid-cols-1( |$)/, "stacked below the container threshold")
+    assert.match(row, /\[@container_\(min-width:36rem\)\]:grid-cols-\[6rem_minmax\(0,1fr\)_minmax\(0,1fr\)_minmax\(0,1fr\)\]/)
+    assert.doesNotMatch(row, /(^| )(sm|md|lg|xl):grid-cols-/, "no viewport breakpoint for the columns")
+  }
+})
+
+test("controlled detail (the /stocks page's NVDA column): compact header keeps the session line, the test-value note and the title for AT", async () => {
+  const h = createHarness()
+  await h.enter(WALLET_A)
+  const view = (detailOpen: boolean, showAllStocks: boolean) =>
+    renderToStaticMarkup(
+      <GiwaStocksFeatureView state={h.controller.getState()} actions={actionsFor(h.controller)} tab="stocks" onTabChange={() => undefined} detailOpen={detailOpen} onDetailChange={() => undefined} showAllStocks={showAllStocks} />,
+    )
+  const compact = view(true, false)
+  assert.match(compact, /<h2 id="giwa-stocks-title" class="sr-only">Stocks<\/h2>/, "the title stays, for aria-labelledby and assistive technology")
+  assert.match(compact, /aria-labelledby="giwa-stocks-title"/)
+  assert.match(compact, /<p class="text-sm text-\[var\(--color-arco-text-soft\)\]" data-testid="giwa-stocks-session">Signed in as/, "the session line stays visible")
+  assert.match(text(compact), /GIWA Sepolia testnet · Test value only · Mock broker · Fixed mock price\. No real shares, cash or broker execution\./)
+  const wrapper = compact.match(/data-testid="giwa-stocks-feature"[^>]*><div class="([^"]*)"/)?.[1] ?? ""
+  assert.match(wrapper, /(^| )gap-3( |$)/)
+  assert.doesNotMatch(wrapper, /(^| )(gap-6|py-5|md:py-6)( |$)/, "smaller gaps and padding than the list")
+  assert.match(compact, /role="tablist"/)
+  assert.match(compact, /data-testid="stocks-trade-panel"/)
+  // The page's list mode and the standalone feature keep the full header.
+  for (const html of [view(false, false), view(true, true), view(false, true)]) {
+    assert.match(html, /<h2 id="giwa-stocks-title" class="text-2xl font-medium text-\[var\(--color-arco-ink\)\]">Stocks<\/h2>/)
+  }
 })

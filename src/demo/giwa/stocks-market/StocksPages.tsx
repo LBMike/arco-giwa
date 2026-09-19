@@ -1,4 +1,4 @@
-import { useCallback, useContext, useMemo } from "react"
+import { useCallback, useContext, useId, useMemo } from "react"
 import { Link } from "react-router-dom"
 import { GIWA_ADMIN_STOCKS_ROUTE, GIWA_STOCKS_ROUTE } from "../routes"
 import { GiwaStocksAdminFeature } from "../stocks-admin"
@@ -7,7 +7,8 @@ import { StocksSignIn, useGiwaStocksHost } from "../stocks-host"
 import { GiwaStocksFeature, createGiwaStocksHttpClient, type GiwaStocksFeatureProps } from "../stocks-investor"
 import { createMarketClient } from "./client"
 import { StocksPageEnvironment, usePageApiBase } from "./environment"
-import { StocksMarketFeature } from "./StocksMarketFeature"
+import { useStocksPageAccess } from "./page-access"
+import { StocksMarketFeature, type StocksAsideView } from "./StocksMarketFeature"
 /** Re-exported under the same name for the verification pages and DOM suites that import it from here. */
 export { StocksPageEnvironment }
 const link = "rounded-lg border border-[var(--color-arco-border)] px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-arco-ink)]"
@@ -31,6 +32,14 @@ function InvestorWithExecution(props: GiwaStocksFeatureProps) {
   const renderOrderExecution = useStocksOrderExecutionSlot()
   return <GiwaStocksFeature {...props} renderOrderExecution={renderOrderExecution} />
 }
+/** A non-NVDA detail: market data only. No order panel is opened for it and nothing is requested on its behalf. */
+function ViewOnlyCard({ symbol }: { symbol: string }) {
+  const id = useId()
+  return <section aria-labelledby={id} className="w-full min-w-0 rounded-3xl border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-4 sm:p-6">
+    <h2 id={id} className="text-lg font-medium">조회 전용</h2>
+    <p role="status" className="mt-2 text-sm text-[var(--color-arco-text-soft)]">{symbol}은 시장정보 조회만 지원합니다. 현재 모의 주문은 NVDA만 지원하며 이 종목을 NVDA 주문으로 전환하지 않습니다.</p>
+  </section>
+}
 export function StocksPage() {
   const environment = useContext(StocksPageEnvironment)
   const apiBase = usePageApiBase()
@@ -45,13 +54,25 @@ export function StocksPage() {
   // The ID is captured in this render's callback. A late rejection cannot invalidate a newer session.
   const rejected = useCallback(() => { if (sessionId) invalidate(sessionId) }, [sessionId, invalidate])
   const session = host.snapshot.session
+  // The steps before a Stocks request, for the order panel to offer (WALLET_CHANGED after a wallet switch; no address).
+  const access = useStocksPageAccess()
+  // Keyed siblings at one tree position: switching list ↔ detail reorders them without remounting the investor controller.
+  const aside = ({ selection, unverified }: StocksAsideView) => {
+    const symbol = selection.symbol
+    // Detail mode: only the heading above the order panel (it starts near the top of the column); the full explanation follows it.
+    const explain = <><p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">테스트넷 모의 체결가: 서버 발급 견적 기준. 현재 고정 모의 가격 120이며 위 USD 시장시세와 별개입니다. 시장정보 종목 선택은 이 NVDA 주문에 적용되지 않습니다.</p><ExecutionCapabilityNote /></>
+    const trade = <section key="trade" aria-label="NVDA testnet mock trading" className="w-full min-w-0 rounded-3xl border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] [&>:last-child]:rounded-b-3xl">
+      <div className="border-b border-[var(--color-arco-border)] p-4 sm:p-6"><h2 className="text-lg font-medium">NVDA · 테스트넷 모의 거래</h2>{symbol === null ? explain : null}</div>
+      <InvestorWithExecution client={clients.investor} session={host.investor} hostWallet={session ? { address: session.walletAddress, chainId: session.chainId } : null} onSessionRejected={rejected} access={access} detailOpen={symbol === "NVDA"} onDetailChange={open => { if (open) selection.openDetail("NVDA", "investor"); else selection.closeDetail() }} />
+      {symbol !== null ? <div className="border-t border-[var(--color-arco-border)] p-4 sm:p-6">{explain}</div> : null}
+    </section>
+    const signInRegion = <div key="sign-in" className="min-w-0 empty:hidden"><StocksSignIn /></div>
+    const notice = <div key="session-notice" className="min-w-0 empty:hidden"><StocksExecutionSessionNotice /></div>
+    if (symbol === null) return [signInRegion, notice, trade]
+    return [symbol !== "NVDA" && !unverified ? <ViewOnlyCard key="view-only" symbol={symbol} /> : null, trade, signInRegion, notice]
+  }
   return <StocksExecutionProvider apiBase={apiBase} fetch={environment.fetch as typeof globalThis.fetch | undefined} clock={environment.executionClock} activeSource={environment.activeWalletSource} knownHashes={environment.knownHashes}>
-    <div className="w-full min-w-0 space-y-6"><StocksNavigation /><StocksMarketFeature client={clients.market} ordersClient={clients.investor} /><StocksSignIn /><StocksExecutionSessionNotice />
-      <section aria-label="NVDA testnet mock trading" className="w-full min-w-0 rounded-2xl border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)]">
-        <div className="border-b border-[var(--color-arco-border)] p-4 sm:p-6"><h2 className="text-lg font-medium">NVDA · 테스트넷 모의 거래</h2><p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">테스트넷 모의 체결가: 서버 발급 견적 기준. 현재 고정 모의 가격 120이며 위 USD 시장시세와 별개입니다. 시장정보 종목 선택은 이 NVDA 주문에 적용되지 않습니다.</p><ExecutionCapabilityNote /></div>
-        <InvestorWithExecution client={clients.investor} session={host.investor} hostWallet={session ? { address: session.walletAddress, chainId: session.chainId } : null} onSessionRejected={rejected} />
-      </section>
-    </div>
+    <div className="w-full min-w-0 space-y-6"><StocksNavigation /><StocksMarketFeature client={clients.market} ordersClient={clients.investor} aside={aside} /></div>
   </StocksExecutionProvider>
 }
 /**

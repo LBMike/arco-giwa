@@ -18,13 +18,18 @@ export function useOrderCapabilities(client: OrdersCatalogClient | null): Capabi
   const orders = useOwnedRead("orders-catalog", load)
   return useMemo(() => !client || orders.phase === "error" ? { phase: "error" } : orders.phase === "loading" ? { phase: "loading" } : { phase: "ready", bySymbol: new Map(orders.value.instruments.map(item => [item.symbol, item.orderCapability])) }, [client, orders])
 }
-export type StocksMarketTableProps = { catalog: Catalog; quotes: ReadState<Envelope<Quote[]>>; capabilities: Capabilities; series: Readonly<Record<string, Chart>>; variant: "full" | "home"; selectedSymbol?: string; onSelect?: (symbol: string) => void; rowHref?: (symbol: string) => string; limit?: number }
+/** The full table's toolbar state. The /stocks page keeps it above the list so it survives a detail visit; absent, the table keeps its own. */
+export type TableView = { filter: TableFilter; query: string; sort: TableSort }
+export const DEFAULT_TABLE_VIEW: TableView = Object.freeze({ filter: "ALL", query: "", sort: "rank" })
+export type StocksMarketTableProps = { catalog: Catalog; quotes: ReadState<Envelope<Quote[]>>; capabilities: Capabilities; series: Readonly<Record<string, Chart>>; variant: "full" | "home"; selectedSymbol?: string; onSelect?: (symbol: string) => void; rowHref?: (symbol: string) => string; limit?: number; view?: TableView; onViewChange?: (view: TableView) => void }
 
 export function MarketStatus({ status }: { status: string }) { return <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{status === "loading" ? "시장정보 불러오는 중…" : status === "UNCONFIGURED" ? "시세 연결 준비 중" : status === "STALE" ? "마지막 확인 시세 · 오래된 데이터" : "시세를 불러올 수 없습니다"}</p> }
 
 type Row = { symbol: string; name: string; rank: number | null; position: number; curated: CuratedStock | null; quote: Quote | null }
-type Sort = "rank" | "gainer" | "loser" | "priceHigh" | "priceLow"
-type Filter = "ALL" | "STOCK" | "ETF"
+export type TableSort = "rank" | "gainer" | "loser" | "priceHigh" | "priceLow"
+export type TableFilter = "ALL" | "STOCK" | "ETF"
+type Sort = TableSort
+type Filter = TableFilter
 const SORTS: readonly (readonly [Sort, string])[] = [["rank", "Rank"], ["gainer", "Top Gainer"], ["loser", "Top Loser"], ["priceHigh", "Price: High to Low"], ["priceLow", "Price: Low to High"]]
 const FILTERS: readonly (readonly [Filter, string])[] = [["ALL", "All assets"], ["STOCK", "Stocks"], ["ETF", "ETF"]]
 const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
@@ -54,7 +59,7 @@ function compare(sort: Sort) {
   }
 }
 
-function Triangle({ up }: { up: boolean }) {
+export function Triangle({ up }: { up: boolean }) {
   return <svg aria-hidden="true" width={12} height={10} viewBox="0 0 12 10" fill="currentColor" className="shrink-0"><path d={up ? "M4.82 1.29C5.33.57 6.42.57 6.93 1.29l4.21 5.98c.59.84-.02 1.98-1.05 1.98H1.66C.62 9.25.02 8.11.61 7.27z" : "M6.93 8.71c-.51.72-1.6.72-2.11 0L.61 2.73C.02 1.89.62.75 1.66.75h8.43c1.03 0 1.64 1.14 1.05 1.98z"} /></svg>
 }
 function Change({ raw, unit }: { raw: string | null; unit: "$" | "%" }) {
@@ -65,7 +70,8 @@ function Change({ raw, unit }: { raw: string | null; unit: "$" | "%" }) {
   const up = parts.direction === "up"
   return <span className={`inline-flex items-center gap-1 ${up ? "text-[var(--color-arco-up-text)]" : "text-[var(--color-arco-down)]"}`}><Triangle up={up} /><span className="sr-only">{up ? "상승 " : "하락 "}</span>{text}</span>
 }
-function StatusBadge({ symbol, capabilities }: { symbol: string; capabilities: Capabilities }) {
+/** Order capability for one symbol, as the Asset Status column and the detail header show it. */
+export function StatusBadge({ symbol, capabilities }: { symbol: string; capabilities: Capabilities }) {
   const capability = capabilities.phase === "ready" ? capabilities.bySymbol.get(symbol) ?? null : null
   const base = "inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full bg-[var(--color-arco-chip)] px-2 text-xs font-medium"
   const badge = `${base} text-[var(--color-arco-ink)]`, quiet = `${base} text-[var(--color-arco-chip-ink)]`
@@ -96,11 +102,12 @@ function Sparkline({ chart }: { chart: Chart }) {
   </svg>
 }
 
-export function StocksMarketTable({ catalog, quotes, capabilities, series, variant, selectedSymbol, onSelect, rowHref, limit }: StocksMarketTableProps) {
+export function StocksMarketTable({ catalog, quotes, capabilities, series, variant, selectedSymbol, onSelect, rowHref, limit, view, onViewChange }: StocksMarketTableProps) {
   const full = variant === "full"
-  const [filter, setFilter] = useState<Filter>("ALL")
-  const [query, setQuery] = useState("")
-  const [sort, setSort] = useState<Sort>("rank")
+  const [ownView, setOwnView] = useState<TableView>(DEFAULT_TABLE_VIEW)
+  const { filter, query, sort } = view ?? ownView
+  const change = (patch: Partial<TableView>) => { const next = { filter, query, sort, ...patch }; if (view) onViewChange?.(next); else setOwnView(next) }
+  const setFilter = (next: Filter) => change({ filter: next }), setQuery = (next: string) => change({ query: next }), setSort = (next: Sort) => change({ sort: next })
   const searchId = useId(), sortId = useId()
   const rows = useMemo(() => {
     const bySymbol = new Map((quotes.phase === "ready" ? quotes.value.data ?? [] : []).map(quote => [quote.symbol, quote]))
@@ -153,6 +160,7 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, varia
         </div>
         <div role="rowgroup">
           {shown.map(row => {
+            // A pressed state only where a selection is shown next to the list; a row that opens a detail page is a plain button.
             const selected = full && row.symbol === selectedSymbol
             const surface = selected ? "md:bg-[var(--color-arco-page)]" : "md:bg-[var(--color-arco-surface)] md:group-hover:bg-[linear-gradient(var(--color-row-hover-weak),var(--color-row-hover-weak))]"
             const label = <><StockLogo symbol={row.symbol} size={40} /><span className="min-w-0"><span className="block truncate text-base font-medium leading-[21px] tracking-[-0.01em] text-[var(--color-arco-ink)]">{row.symbol}</span>{" "}<span className="mt-1 block truncate text-sm font-medium leading-[18px] tracking-[-0.01em] text-[var(--color-arco-chip-ink)]">{row.name}</span></span></>
@@ -161,7 +169,7 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, varia
             return <div role="row" key={row.symbol} onClick={activate} className={`group cursor-pointer items-center gap-y-2 border-b border-[var(--color-arco-border)] py-3 md:min-h-[73px] md:py-0 ${GRID} ${COLS[variant]} ${selected ? "bg-[var(--color-arco-page)]" : "hover:bg-[var(--color-row-hover-weak)]"}`}>
               {cell(`col-start-1 row-start-1 text-base font-medium tabular-nums text-[var(--color-arco-chip-ink)] ${RESET} ${STICKY_RANK} ${surface}`, row.rank ?? "—")}
               {cell(`col-start-2 row-start-1 ${RESET} ${STICKY_ASSET} ${surface}`, full
-                ? <button type="button" data-row-primary="" data-symbol={row.symbol} aria-pressed={selected} onClick={() => onSelect?.(row.symbol)} className={primary}>{label}</button>
+                ? <button type="button" data-row-primary="" data-symbol={row.symbol} aria-pressed={selectedSymbol === undefined ? undefined : selected} onClick={() => onSelect?.(row.symbol)} className={primary}>{label}</button>
                 : rowHref ? <Link to={rowHref(row.symbol)} data-row-primary="" className={primary}>{label}</Link> : <span className={primary}>{label}</span>)}
               {cell(`col-start-3 row-start-1 text-right text-base font-medium tabular-nums text-[var(--color-arco-ink)] md:px-3 md:text-left ${RESET}`, <><span title={quote?.price ? dollars(quote.price) : undefined}>{priceLabel(quote?.price ?? null)}</span>{quote?.status === "STALE" && <span className="block text-xs font-normal text-[var(--color-arco-text-soft)]">오래된 데이터</span>}</>)}
               {cell("hidden text-sm tabular-nums md:block md:px-3", <Change raw={quote?.change ?? null} unit="$" />)}

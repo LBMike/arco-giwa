@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Copy,
   ExternalLink,
   Info,
   Loader2,
@@ -49,6 +48,20 @@ import { ASSET_MANAGERS, ISSUERS, ISSUER_OPTIONS, aumLabel, apyLabel, productByI
 import { ACAPIX_INSTANT_FEES } from "../data/acapix-detail"
 import { Input } from "@/components/ui/input"
 import { GiwaMultiSelect } from "./GiwaMultiSelect"
+import {
+  AmountBlock,
+  AmountField,
+  INVEST_CTA,
+  INVEST_CTA_BUSY,
+  INVEST_CTA_READY,
+  INVEST_NOTICE,
+  INVEST_PANEL_CARD,
+  INVEST_TAB,
+  INVEST_TAB_ACTIVE,
+  INVEST_TAB_INACTIVE,
+  INVEST_TAB_TRACK,
+  InfoRow,
+} from "./invest-panel-ui"
 
 // VISIBILITY gate only (not security): the admin nav link is shown solely to allowlisted
 // wallets. Real enforcement is server requireOperator + on-chain FEED_ADMIN_ROLE.
@@ -1164,131 +1177,6 @@ function GiwaCatalogRow({
   )
 }
 
-function AmountField({
-  caption,
-  symbol,
-  icon,
-  value,
-  onChange,
-  readOnly,
-  balance,
-  onMax,
-  subValue,
-}: {
-  caption: string
-  symbol: string
-  icon?: ReactNode
-  value: string
-  onChange?: (value: string) => void
-  readOnly?: boolean
-  balance?: string
-  onMax?: () => void
-  subValue?: string
-}) {
-  return (
-    <div className="p-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-[var(--color-arco-muted)]">{caption}</p>
-        {balance !== undefined && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-[var(--color-arco-muted)]">Balance: {balance}</span>
-            {onMax && (
-              <button
-                type="button"
-                onClick={onMax}
-                className="rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-arco-text-soft)]"
-              >
-                MAX
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-[var(--color-arco-ink)]">
-          {icon}
-          {symbol}
-          <button
-            type="button"
-            aria-label={`Copy ${symbol} address`}
-            className="inline-flex text-[var(--color-arco-muted)]"
-          >
-            <Copy className="size-3.5" />
-          </button>
-        </span>
-        <input
-          inputMode="decimal"
-          value={value}
-          readOnly={readOnly}
-          onChange={(event) => {
-            const next = event.target.value
-            // Accept only "" or a non-negative decimal (mid-typing "1." allowed); reject "-", "+",
-            // "e", letters, and multiple dots — so a typed/pasted "-1" is dropped and the controlled
-            // input keeps its prior value. Covers "You pay" + "Amount to redeem" (shared input).
-            if (/^\d*\.?\d*$/.test(next)) onChange?.(next)
-          }}
-          className="w-full bg-transparent text-right tabular-nums text-lg text-[var(--color-arco-ink)] outline-none placeholder:text-[var(--color-arco-muted)]"
-          placeholder="0.0"
-        />
-      </div>
-      {subValue !== undefined && (
-        <p className="mt-0.5 text-right tabular-nums text-[11px] text-[var(--color-arco-muted)]">{subValue}</p>
-      )}
-    </div>
-  )
-}
-
-function AmountBlock({ children }: { children: ReactNode }) {
-  return (
-    <div className="relative divide-y divide-[var(--color-arco-border)] overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)]">
-      {children}
-      <span className="pointer-events-none absolute left-1/2 top-1/2 z-10 inline-flex size-[21px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)]">
-        <ArrowDown className="size-3.5 text-[var(--color-arco-muted)]" />
-      </span>
-    </div>
-  )
-}
-
-function InfoRow({
-  label,
-  value,
-  expandable,
-  children,
-}: {
-  label: string
-  value?: ReactNode
-  expandable?: boolean
-  children?: ReactNode
-}) {
-  const [open, setOpen] = useState(false)
-
-  if (expandable) {
-    return (
-      <div className="border-t border-[var(--color-arco-border)]">
-        <button
-          type="button"
-          onClick={() => setOpen((current) => !current)}
-          aria-expanded={open}
-          className="flex w-full items-center justify-between py-2.5 text-sm"
-        >
-          <span className="text-[var(--color-arco-text-soft)]">{label}</span>
-          <ChevronDown
-            className={`size-3.5 text-[var(--color-arco-muted)] transition-transform ${open ? "rotate-180" : ""}`}
-          />
-        </button>
-        {open && children && <div className="pb-3">{children}</div>}
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex items-center justify-between border-t border-[var(--color-arco-border)] py-2.5 text-sm">
-      <span className="text-[var(--color-arco-text-soft)]">{label}</span>
-      <span className="tabular-nums text-[var(--color-arco-ink)]">{value}</span>
-    </div>
-  )
-}
-
 // Expandable Transaction Fees content (Instant Fees). Config-first per fee: a set bps
 // overrides the aCAPIX fallback; each is formatted with the shared percent rule.
 function GiwaFeeBreakdown({ mintingBps, redemptionBps }: { mintingBps: number | null; redemptionBps: number | null }) {
@@ -1515,7 +1403,7 @@ export function GiwaInvestPanel({
   }
 
   return (
-    <div className={`${variant === "sidebar" ? "sticky top-[104px]" : ""} rounded-[var(--radius-strategy)] bg-[var(--color-arco-surface)] p-4 shadow-[var(--shadow-control)]`}>
+    <div className={`${variant === "sidebar" ? "sticky top-[104px]" : ""} ${INVEST_PANEL_CARD}`}>
       <div className="flex items-center justify-between">
         <button
           type="button"
@@ -1527,17 +1415,13 @@ export function GiwaInvestPanel({
         </button>
       </div>
 
-      <div className="mt-3 grid grid-cols-3 rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] p-0.5 text-sm">
+      <div className={`mt-3 grid grid-cols-3 ${INVEST_TAB_TRACK}`}>
         {(["invest", "redeem", "pending"] as const).map((item) => (
           <button
             key={item}
             type="button"
             onClick={() => onOperationChange(item === "invest" ? "deposit" : item === "redeem" ? "redeemInstant" : "claimRedeem")}
-            className={`rounded-[var(--radius-pill)] py-1.5 capitalize ${
-              tab === item
-                ? "bg-[var(--color-arco-surface)] font-medium text-[var(--color-arco-ink)] shadow-[var(--shadow-control)]"
-                : "text-[var(--color-arco-muted)]"
-            }`}
+            className={`${INVEST_TAB} capitalize ${tab === item ? INVEST_TAB_ACTIVE : INVEST_TAB_INACTIVE}`}
           >
             {item}
           </button>
@@ -1635,7 +1519,7 @@ export function GiwaInvestPanel({
               )}
             </div>
             {liquidityShort && !pausedNotice && !insufficientBalance && (
-              <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3 text-xs text-[var(--color-arco-text-soft)]">
+              <div className={`${INVEST_NOTICE} text-[var(--color-arco-text-soft)]`}>
                 <AlertCircle className="mt-0.5 size-4 shrink-0" />
                 <span className="break-words">
                   {`Instant liquidity is ${compactNumber(liquidityInPaymentAsset ?? 0)} ${product.paymentAssetSymbol}. This is processed as a redemption request — your ${product.symbol} is redeemed now and the ${product.paymentAssetSymbol} payout follows after processing.`}
@@ -1646,11 +1530,7 @@ export function GiwaInvestPanel({
               type="button"
               disabled={busy || phase === "missing-payment-token" || Boolean(pausedNotice) || insufficientBalance}
               onClick={runPrimary}
-              className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-card)] py-3 text-sm font-medium ${
-                busy
-                  ? "bg-[var(--color-arco-surface-muted)] text-[var(--color-arco-muted)]"
-                  : "bg-[var(--color-arco-ink)] text-[var(--color-arco-on-dark)] disabled:opacity-50"
-              }`}
+              className={`${INVEST_CTA} ${busy ? INVEST_CTA_BUSY : INVEST_CTA_READY}`}
             >
               {busy && <Loader2 className="size-4 animate-spin" />}
               {busy ? "Processing the transaction" : actionLabel}
@@ -1660,19 +1540,19 @@ export function GiwaInvestPanel({
       </div>
 
       {pausedNotice && (
-        <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3 text-xs text-[var(--color-arco-text-soft)]">
+        <div className={`${INVEST_NOTICE} text-[var(--color-arco-text-soft)]`}>
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <span className="break-words">{pausedNotice}</span>
         </div>
       )}
       {(error || phase === "failed") && (
-        <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3 text-xs text-[var(--color-arco-down)]">
+        <div className={`${INVEST_NOTICE} text-[var(--color-arco-down)]`}>
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <span className="break-words">{error ?? "Transaction failed"}</span>
         </div>
       )}
       {(phase === "success" || phase === "pending-redemption") && (
-        <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3 text-xs">
+        <div className={INVEST_NOTICE}>
           <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[var(--color-arco-up)]" />
           <div className="flex flex-col gap-0.5">
             <span className="font-medium text-[var(--color-arco-ink)]">{successLabel ?? "Transaction confirmed"}</span>

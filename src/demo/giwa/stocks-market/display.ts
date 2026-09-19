@@ -1,4 +1,4 @@
-import type { Chart, FeedDelay } from "./contracts"
+import type { Chart, FeedDelay, Range } from "./contracts"
 import { scaled } from "./validate"
 export function exact(value: string | null): string { if (value === null) return "—"; const [whole, fraction = ""] = value.split("."); const trimmed = fraction.replace(/0+$/, ""); return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (trimmed ? `.${trimmed}` : "") }
 export function dollars(value: string | null): string { return value === null ? "—" : `$${exact(value)}` }
@@ -37,4 +37,55 @@ export function chartPoints(chart: Chart) {
   // Number conversion happens only here at the plotting boundary; labels retain original bars.
   let segment = 0
   return chart.bars.map((bar, index) => { const timestamp = Date.parse(bar.timestamp); if (index && timestamp - Date.parse(chart.bars[index - 1].timestamp) > width + (chart.interval === "1d" ? 3600000 : 0)) segment++; return { timestamp, coordinate: Number(bar.close), bar, segment, index } })
+}
+const UNITS: readonly (readonly [bigint, string])[] = [[10n ** 12n, "T"], [10n ** 9n, "B"], [10n ** 6n, "M"]]
+/** "$5.36T"-style: integer maths on the exact decimal, at most two decimals, no forced trailing zeros; below a million it is priceLabel. */
+export function compactDollars(value: string | null): string {
+  if (value === null) return "—"
+  const units = scaled(value)
+  if (units < 0n) return dollars(value)
+  const index = UNITS.findIndex(([size]) => units >= size * 10n ** 18n)
+  if (index === -1) { const plain = priceLabel(value); return plain === "$1,000,000" ? "$1M" : plain }
+  const [size, suffix] = UNITS[index]
+  const base = size * 10n ** 18n
+  const hundredths = (units * 100n + base / 2n) / base
+  // Rounding 999.995B up to 1,000B reads as the next unit: $1T.
+  return hundredths >= 100_000n && index > 0 ? label(100n, UNITS[index - 1][1]) : label(hundredths, suffix)
+}
+function label(hundredths: bigint, suffix: string): string { const fraction = String(hundredths % 100n).padStart(2, "0").replace(/0+$/, ""); return `$${exact(String(hundredths / 100n))}${fraction ? `.${fraction}` : ""}${suffix}` }
+/** First open, highest high and lowest low of the returned bars, compared exactly; null when there are none. */
+export function barRange(chart: Chart): { open: string; high: string; low: string } | null {
+  if (!chart.bars.length) return null
+  let high = chart.bars[0].high, low = chart.bars[0].low
+  for (const bar of chart.bars) { if (scaled(bar.high) > scaled(high)) high = bar.high; if (scaled(bar.low) < scaled(low)) low = bar.low }
+  return { open: chart.bars[0].open, high, low }
+}
+const AXIS_TIME = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+/** X-axis tick in New York time: MM/DD HH:mm for the intraday ranges (1D, 1W), MM/DD otherwise. */
+export function axisTime(value: number, range: Range): string {
+  const parts = AXIS_TIME.formatToParts(new Date(value))
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? ""
+  const date = `${part("month")}/${part("day")}`
+  return range === "1D" || range === "1W" ? `${date} ${part("hour")}:${part("minute")}` : date
+}
+/** Y-axis tick: the plotted coordinate (already a Number at the plotting boundary) as a two-decimal priceLabel. */
+export function axisPrice(value: number): string { return Number.isFinite(value) && value >= 0 ? priceLabel(value.toFixed(10)) : "" }
+/**
+ * Y-axis ticks for the plotted closes (Numbers at the plotting boundary only): a 1-2-5×10^n step of WHOLE cents spanning
+ * the values, so every tick is exactly a two-decimal price and its axisPrice label is the gridline's own value (a library
+ * "nice" step can fall between cents and round two gridlines to one label). Empty when there is nothing to plot.
+ */
+export function axisTicks(values: readonly number[], count = 5): number[] {
+  const cents = values.filter(Number.isFinite).map(value => Math.round(value * 100))
+  if (!cents.length) return []
+  const low = Math.min(...cents), high = Math.max(...cents)
+  const raw = Math.max(1, (high - low) / Math.max(1, count - 1))
+  const magnitude = 10 ** Math.floor(Math.log10(raw))
+  const step = [1, 2, 5, 10].map(multiple => multiple * magnitude).find(candidate => candidate >= raw) ?? 10 * magnitude
+  let start = Math.floor(low / step) * step, end = Math.ceil(high / step) * step
+  if (start === end) { start = Math.max(0, start - step); end += step }
+  const ticks: number[] = []
+  // Integer cents throughout; the division by 100 happens once per tick.
+  for (let cent = start; cent <= end; cent += step) ticks.push(cent / 100)
+  return ticks
 }

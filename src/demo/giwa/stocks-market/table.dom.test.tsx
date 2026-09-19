@@ -1,5 +1,5 @@
-// The Stocks & ETFs table and detail inside the real StocksMarketFeature, on a memory router, against the synthetic 40-symbol
-// market fixture. Gated like routes.dom.test.mjs: set GIWA_MARKET_DOM_RUNTIME to an existing jsdom package.json. jsdom globals
+// The Stocks & ETFs list and the security detail inside the real StocksMarketFeature (list ↔ detail on ?symbol=), on a memory
+// router, against the synthetic 40-symbol market fixture. Gated like routes.dom.test.mjs: set GIWA_MARKET_DOM_RUNTIME to an existing jsdom package.json. jsdom globals
 // are installed before react-dom and the feature are imported (dynamic imports inside the gated body).
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
@@ -9,7 +9,7 @@ import type { Quote } from "./contracts"
 type AnyModule = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 const runtime = process.env.GIWA_MARKET_DOM_RUNTIME
 
-test("Stocks & ETFs table filters, sorts, selects by keyboard and returns focus (set GIWA_MARKET_DOM_RUNTIME to an existing jsdom package.json)", { skip: !runtime }, async (t: TestContext) => {
+test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps list state and returns focus (set GIWA_MARKET_DOM_RUNTIME to an existing jsdom package.json)", { skip: !runtime }, async (t: TestContext) => {
   const { JSDOM } = createRequire(runtime!)("jsdom")
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://fixture.invalid/stocks", pretendToBeVisual: true })
   const w = dom.window
@@ -55,7 +55,10 @@ test("Stocks & ETFs table filters, sorts, selects by keyboard and returns focus 
     const visible = () => rows().map(row => [row.querySelector("[data-symbol]")!.getAttribute("data-symbol"), row.querySelector('[role="cell"]')!.textContent])
     const button = (name: string) => [...element.querySelectorAll("button")].find(item => item.textContent === name) as HTMLButtonElement
     const rowButton = (symbol: string) => element.querySelector(`button[data-symbol="${symbol}"]`) as HTMLButtonElement
-    const heading = () => element.querySelector("article h2") as HTMLHeadingElement
+    const heading = () => element.querySelector("article h1") as HTMLHeadingElement
+    /** The page-level back control above the detail ("← Stocks & ETFs", accessible name with 목록으로). */
+    const back = () => [...element.querySelectorAll("button")].find(item => item.textContent === "Stocks & ETFs 목록으로") as HTMLButtonElement
+    const listed = () => Boolean(element.querySelector('[role="table"][aria-label="Stocks & ETFs"]'))
     const run = async (work: () => void) => { await act(async () => { work(); await flush() }) }
     /** Native <button> activation: browsers turn Enter/Space into a click; jsdom does not, so the click is issued the same way. */
     const press = async (target: HTMLButtonElement, key: "Enter" | " ") => {
@@ -63,7 +66,7 @@ test("Stocks & ETFs table filters, sorts, selects by keyboard and returns focus 
       await run(() => { target.focus(); target.dispatchEvent(new w.KeyboardEvent("keydown", { key, bubbles: true })); target.dispatchEvent(new w.KeyboardEvent("keyup", { key, bubbles: true })); target.click() })
     }
     st.after(async () => { await act(async () => root.unmount()); router.dispose(); element.remove() })
-    return { element, router, calls, get orderReads() { return orderReads }, table, rows, visible, button, rowButton, heading, run, press }
+    return { element, router, calls, get orderReads() { return orderReads }, table, rows, visible, button, rowButton, heading, back, listed, run, press, close: () => run(() => back().click()) }
   }
   const rankOf = (symbol: string) => String(curatedStock(symbol).rank)
 
@@ -108,41 +111,88 @@ test("Stocks & ETFs table filters, sorts, selects by keyboard and returns focus 
     assert.match(m.rows().find(row => row.querySelector('[data-symbol="NVDA"]'))!.textContent!, /모의 주문/)
   })
 
-  await t.test("keyboard activation selects a row: ?symbol updates, the detail heading takes focus; 목록으로 returns to the row", async (st) => {
+  await t.test("a row opens the detail in place of the list: ?symbol is pushed and the heading takes focus; Back returns focus to the row", async (st) => {
     const m = await mount(st)
-    assert.equal(m.rowButton("SOXL").getAttribute("aria-pressed"), "true", "the first security is shown with no click")
     assert.equal(m.router.state.location.search, "")
+    assert.equal(m.heading(), null, "no detail without ?symbol")
+    // The rows open a detail page (they toggle nothing), so the list's row buttons carry no pressed state at all.
+    assert.ok(m.rows().every(row => !row.querySelector("[data-symbol]")!.hasAttribute("aria-pressed")), "no toggle-button semantics on navigating rows")
+    assert.equal(m.calls.filter(url => url.includes("/chart") || url.includes("/profile")).length, 0, "the list requests no chart or profile")
     scrolls.length = 0
     await m.press(m.rowButton("MU"), "Enter")
     assert.equal(m.router.state.location.search, "?symbol=MU")
-    assert.equal(m.rowButton("MU").getAttribute("aria-pressed"), "true")
-    assert.equal(m.rowButton("SOXL").getAttribute("aria-pressed"), "false")
+    assert.equal(m.listed(), false, "the detail replaces the list")
     assert.ok(document.activeElement === m.heading(), `focus on the detail heading, not ${document.activeElement?.tagName}`)
     assert.match(m.heading().textContent!, /MU/)
     assert.equal(m.heading().tabIndex, -1)
-    assert.deepEqual(scrolls.map(item => [item.element.tagName, item.options?.behavior]), [["ARTICLE", "smooth"]])
+    assert.deepEqual(scrolls.map(item => [item.element.textContent, item.options?.behavior, item.options?.block]), [["Stocks & ETFs 목록으로", "smooth", "start"]], "the top of the detail (its back control) scrolls into view")
+    scrolls.length = 0
+    await m.close()
+    assert.equal(m.router.state.location.search, "", "closing pushes the list URL")
+    assert.ok(document.activeElement === m.rowButton("MU"), `focus back on the MU row button, not ${document.activeElement?.outerHTML.slice(0, 60)}`)
+    assert.deepEqual(scrolls.map(item => [item.element.getAttribute("data-symbol"), item.options?.block]), [["MU", "center"]])
     await m.press(m.rowButton("TSLA"), " ")
     assert.equal(m.router.state.location.search, "?symbol=TSLA")
     assert.ok(document.activeElement === m.heading())
     assert.match(m.heading().textContent!, /TSLA/)
+    await m.close()
+    assert.ok(document.activeElement === m.rowButton("TSLA"))
+    // Back/Forward follow the history entries without moving focus.
+    ;(document.activeElement as HTMLElement | null)?.blur()
     scrolls.length = 0
-    await m.run(() => m.button("목록으로").click())
-    assert.ok(document.activeElement === m.rowButton("TSLA"), `focus back on the TSLA row button, not ${document.activeElement?.outerHTML.slice(0, 60)}`)
-    assert.deepEqual(scrolls.map(item => [item.element.getAttribute("data-symbol"), item.options?.block]), [["TSLA", "center"]])
     await m.run(() => { m.router.navigate(-1) })
-    assert.equal(m.router.state.location.search, "?symbol=MU", "each selection is a history entry")
-    assert.equal(m.rowButton("MU").getAttribute("aria-pressed"), "true")
+    assert.equal(m.router.state.location.search, "?symbol=TSLA", "each open and close is a history entry")
+    assert.match(m.heading().textContent!, /TSLA/)
+    assert.ok(document.activeElement !== m.heading(), "Back into a detail does not take focus")
+    await m.run(() => { m.router.navigate(-1) })
+    assert.equal(m.router.state.location.search, "")
+    assert.equal(m.listed(), true)
+    await m.run(() => { m.router.navigate(-1) })
+    assert.match(m.heading().textContent!, /MU/)
+    await m.run(() => { m.router.navigate(1) })
+    assert.equal(m.listed(), true)
+    assert.deepEqual(scrolls, [], "history moves never scroll or focus")
+    assert.ok(document.activeElement === document.body)
   })
 
-  await t.test("a row click outside the button selects it too; rows never request charts, the detail's 1D chart feeds the row sparkline", async (st) => {
+  await t.test("the list's filter, search and sort survive a detail visit; a row the filter hides returns focus to the table", async (st) => {
+    const m = await mount(st)
+    const search = () => m.element.querySelector('input[type="search"]') as HTMLInputElement
+    const sort = () => m.element.querySelector("select") as HTMLSelectElement
+    await m.run(() => m.button("ETF").click())
+    await m.run(() => { inputValue.call(search(), "direxion"); search().dispatchEvent(new w.Event("input", { bubbles: true })) })
+    await m.run(() => { selectValue.call(sort(), "gainer"); sort().dispatchEvent(new w.Event("change", { bubbles: true })) })
+    const before = m.visible()
+    assert.equal(before.length, 3)
+    await m.press(m.rowButton("SOXS"), "Enter")
+    assert.equal(m.listed(), false)
+    await m.close()
+    assert.equal(m.button("ETF").getAttribute("aria-pressed"), "true")
+    assert.equal(search().value, "direxion")
+    assert.equal(sort().value, "gainer")
+    assert.deepEqual(m.visible(), before)
+    assert.ok(document.activeElement === m.rowButton("SOXS"))
+    // A navigation made elsewhere (a link to /stocks?symbol=TSLA) opens TSLA without moving focus; TSLA is not an ETF row.
+    await m.run(() => { m.router.navigate("/stocks?symbol=TSLA") })
+    assert.match(m.heading().textContent!, /TSLA/)
+    assert.ok(document.activeElement !== m.heading())
+    scrolls.length = 0
+    await m.close()
+    assert.equal(document.activeElement?.getAttribute("role"), "region", "the filtered-out row falls back to the table region")
+    assert.equal(document.activeElement?.getAttribute("aria-label"), "Stocks & ETFs 표 · 좌우로 스크롤")
+    assert.deepEqual(scrolls.map(item => item.options?.block), ["start"])
+  })
+
+  await t.test("a row click outside the button opens it too; rows never request charts, the detail's 1D chart feeds the row sparkline", async (st) => {
     const m = await mount(st)
     const row = m.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!
     await m.run(() => (row.querySelector('[role="cell"]') as HTMLElement).click())
     assert.equal(m.router.state.location.search, "?symbol=NVDA")
     const charts = m.calls.filter(url => url.includes("/chart"))
-    assert.deepEqual([...new Set(charts.map(url => new URL(url).pathname.split("/")[5]))].sort(), ["NVDA", "SOXL"], "only the detail's symbols")
-    for (const symbol of ["NVDA", "SOXL"]) assert.ok(m.rows().find(item => item.querySelector(`[data-symbol="${symbol}"]`))!.querySelector('svg[role="img"][aria-label^="최근 24시간 종가 추이"]'), symbol)
-    assert.equal(m.table().querySelectorAll('svg[role="img"]').length, 2)
+    assert.deepEqual([...new Set(charts.map(url => new URL(url).pathname.split("/")[5]))], ["NVDA"], "only the detail's symbol")
+    await m.close()
+    assert.ok(m.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!.querySelector('svg[role="img"][aria-label^="최근 24시간 종가 추이"]'))
+    assert.equal(m.table().querySelectorAll('svg[role="img"]').length, 1)
     const before = m.calls.length
     await m.run(() => {})
     assert.equal(m.calls.length, before, "no polling or update loop")
@@ -151,13 +201,16 @@ test("Stocks & ETFs table filters, sorts, selects by keyboard and returns focus 
   await t.test("only a current 1D series feeds the row: other detail ranges keep it, a STALE 1D chart is not drawn", async (st) => {
     const m = await mount(st, "/stocks?symbol=NVDA")
     const spark = (symbol: string) => m.rows().find(item => item.querySelector(`[data-symbol="${symbol}"]`))!.querySelector('svg[role="img"]')
+    await m.close()
     const label = spark("NVDA")!.getAttribute("aria-label")
-    for (const range of ["1W", "1Y"]) {
-      await m.run(() => m.button(range).click())
-      assert.equal(spark("NVDA")?.getAttribute("aria-label"), label, `${range} detail range leaves the 1D sparkline as it was`)
-    }
+    assert.ok(label)
+    await m.press(m.rowButton("NVDA"), "Enter")
+    for (const range of ["1W", "1Y"]) await m.run(() => m.button(range).click())
+    await m.close()
+    assert.equal(spark("NVDA")?.getAttribute("aria-label"), label, "1W and 1Y detail ranges leave the 1D sparkline as it was")
     await m.press(m.rowButton("SGOV"), "Enter")
     assert.ok(m.calls.some(url => url.includes("/SGOV/chart?range=1D")), "the SGOV detail loaded its 1D chart")
+    await m.close()
     assert.equal(spark("SGOV"), null, "a STALE series stays in the detail with its notice")
     assert.match(m.rows().find(item => item.querySelector('[data-symbol="SGOV"]'))!.textContent!, /24시간 차트 미로드/)
   })
@@ -180,7 +233,9 @@ test("Stocks & ETFs table filters, sorts, selects by keyboard and returns focus 
     const m = await mount(st, "/stocks?symbol=NVDA", intercept)
     const row = () => m.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!
     const spark = () => row().querySelector('svg[role="img"]')
-    const reselect = async (outcome: Outcome) => { await m.press(m.rowButton("MU"), "Enter"); next = outcome; await m.press(m.rowButton("NVDA"), "Enter"); next = null }
+    // Closing unmounts the detail, so opening NVDA again is a fresh 1D read; the row is read back in the list.
+    const reselect = async (outcome: Outcome) => { next = outcome; await m.press(m.rowButton("NVDA"), "Enter"); next = null; await m.close() }
+    await m.close()
     const valid = spark()?.getAttribute("aria-label")
     assert.ok(valid, "the first AVAILABLE 1D read draws the NVDA sparkline")
     for (const outcome of ["STALE", "UNAVAILABLE", "UNCONFIGURED", "EMPTY", "ONE_BAR", "HTTP_503"] as const) {
@@ -198,23 +253,26 @@ test("Stocks & ETFs table filters, sorts, selects by keyboard and returns focus 
     const failRange = async (url: string, response: Response) => url.includes("/NVDA/chart?range=1W") ? Response.json({}, { status: 503 }) : response
     const other = await mount(st, "/stocks?symbol=NVDA", failRange)
     const otherSpark = () => other.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!.querySelector('svg[role="img"]')
+    await other.close()
     const before = otherSpark()?.getAttribute("aria-label")
     assert.ok(before)
-    for (const range of ["1W", "1Y"]) {
-      await other.run(() => other.button(range).click())
-      assert.equal(otherSpark()?.getAttribute("aria-label"), before, `${range} (1W fails with 503) leaves the 1D sparkline`)
-    }
+    await other.press(other.rowButton("NVDA"), "Enter")
+    for (const range of ["1W", "1Y"]) await other.run(() => other.button(range).click())
+    await other.close()
+    assert.equal(otherSpark()?.getAttribute("aria-label"), before, "1W (fails with 503) and 1Y leave the 1D sparkline")
     assert.ok(other.calls.some(url => url.includes("/NVDA/chart?range=1W")) && other.calls.some(url => url.includes("/NVDA/chart?range=1Y")))
-    assert.equal(other.calls.filter(url => url.includes("/chart")).every(url => url.includes("/NVDA/") || url.includes("/SOXL/")), true, "rows request no charts")
+    assert.equal(other.calls.filter(url => url.includes("/chart")).every(url => url.includes("/NVDA/")), true, "rows request no charts")
   })
 
-  await t.test("a ?symbol deep link selects and focuses that security; an unknown symbol falls back to the first without moving focus", async (st) => {
+  await t.test("a ?symbol deep link opens and focuses that security; an unknown symbol is not found (nothing requested); a malformed one is the list", async (st) => {
     scrolls.length = 0
     const m = await mount(st, "/stocks?symbol=TSLA")
-    assert.equal(m.rowButton("TSLA").getAttribute("aria-pressed"), "true")
+    assert.equal(m.listed(), false)
     assert.match(m.heading().textContent!, /TSLA/)
     assert.ok(document.activeElement === m.heading())
-    assert.deepEqual(scrolls.map(item => item.element.tagName), ["ARTICLE"])
+    assert.deepEqual(scrolls.map(item => item.element.textContent), ["Stocks & ETFs 목록으로"])
+    await m.close()
+    assert.ok(document.activeElement === m.rowButton("TSLA"))
     const reduce = w.matchMedia
     w.matchMedia = ((query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof w.matchMedia
     try {
@@ -223,9 +281,18 @@ test("Stocks & ETFs table filters, sorts, selects by keyboard and returns focus 
       assert.equal(scrolls[0]?.options?.behavior, "auto", "reduced motion scrolls without animation")
     } finally { w.matchMedia = reduce }
     ;(document.activeElement as HTMLElement | null)?.blur()
-    const fallback = await mount(st, "/stocks?symbol=ZZZZ")
-    assert.equal(fallback.rowButton("SOXL").getAttribute("aria-pressed"), "true")
-    assert.match(fallback.heading().textContent!, /SOXL/)
-    assert.ok(document.activeElement !== fallback.heading())
+    const unknown = await mount(st, "/stocks?symbol=ZZZZ")
+    assert.equal(unknown.listed(), false)
+    assert.equal(unknown.heading().textContent, "종목을 찾을 수 없습니다")
+    assert.ok(document.activeElement === unknown.heading(), "a deep link focuses the not-found heading")
+    assert.match(unknown.element.textContent!, /ZZZZ은 서버 시장정보 목록에 없는 종목입니다/)
+    assert.equal(unknown.calls.some(url => url.includes("ZZZZ")), false, "no profile or chart request for a symbol the catalog does not list")
+    await unknown.run(() => unknown.button("목록으로").click())
+    assert.equal(unknown.listed(), true)
+    assert.equal(unknown.router.state.location.search, "")
+    const malformed = await mount(st, "/stocks?symbol=nvda%3Cx%3E")
+    assert.equal(malformed.listed(), true, "a symbol outside the contract syntax is never used")
+    assert.equal(malformed.heading(), null)
+    assert.equal(malformed.calls.some(url => /nvda|%3C/i.test(url)), false)
   })
 })

@@ -7,7 +7,7 @@ import type { Catalog, Envelope, Quote } from "./contracts"
 import { changeParts, exact } from "./display"
 import { MarketChart } from "./MarketChart"
 import { FIXTURE_TIME, fixtureCatalog, fixtureChart, fixtureQuote, fixtureTop40Catalog, fixtureTop40Chart, fixtureTop40Quote, fixtureTop40Quotes, TOP40_FLAT, TOP40_STALE, TOP40_UNAVAILABLE } from "./fixtures"
-import { StocksMarketTable, type Capabilities, type StocksMarketTableProps } from "./StocksMarketTable"
+import { DEFAULT_TABLE_VIEW, StocksMarketTable, type Capabilities, type StocksMarketTableProps } from "./StocksMarketTable"
 import type { ReadState } from "./useOwnedRead"
 
 const ready = (data: Quote[]): ReadState<Envelope<Quote[]>> => ({ phase: "ready", value: { status: "AVAILABLE", reason: null, fetchedAt: FIXTURE_TIME, cacheAgeMs: 0, feedDelay: "UNKNOWN", data } })
@@ -97,6 +97,19 @@ test("full toolbar: title with count pill, asset-type chips, labelled search, so
   assert.doesNotMatch(pilot, /<button type="button" aria-pressed="false" disabled=""[^>]*>Stocks<\/button>/)
 })
 
+test("toolbar state can be held by the page (defaults: all assets, empty search, rank) so it survives a detail visit", () => {
+  const etf = render({ view: { filter: "ETF", query: "", sort: "rank" }, onViewChange: () => {} })
+  assert.equal(bodyRows(etf).length, 14)
+  assert.match(etf, /aria-pressed="true"[^>]*>ETF<\/button>/)
+  assert.match(etf, /role="status" class="sr-only">14개 표시 · 전체 40개</)
+  const search = render({ view: { filter: "ALL", query: "nvid", sort: "priceHigh" }, onViewChange: () => {} })
+  assert.deepEqual(bodyRows(search).map(chunk => /data-symbol="([A-Z]+)"/.exec(chunk)?.[1]), ["NVDA"])
+  assert.match(search, /<input id="[^"]+" type="search"[^>]* value="nvid"/)
+  assert.match(search, /<option value="priceHigh" selected="">/)
+  assert.deepEqual(DEFAULT_TABLE_VIEW, { filter: "ALL", query: "", sort: "rank" })
+  assert.equal(bodyRows(render()).length, 40, "without a view the table keeps its own state from the same defaults")
+})
+
 test("full rows: the ticker/name button has the accessible name 'NVDA NVIDIA' and marks the selection", () => {
   const html = render({ catalog: fixtureCatalog(["NVDA", "AAPL"]), quotes: ready([fixtureQuote("NVDA"), fixtureQuote("AAPL")]), selectedSymbol: "NVDA" })
   const button = /<button type="button" data-row-primary="" data-symbol="NVDA" aria-pressed="true"[^>]*>(.*?)<\/button>/.exec(html)
@@ -104,6 +117,7 @@ test("full rows: the ticker/name button has the accessible name 'NVDA NVIDIA' an
   assert.equal(text(button[1]), "NVDA NVIDIA")
   assert.match(button[1], /<img src="\/logos\/stocks\/nvidia\.png" alt="" width="40" height="40" loading="lazy"/)
   assert.match(html, /data-symbol="AAPL" aria-pressed="false"/)
+  assert.doesNotMatch(render({ catalog: fixtureCatalog(["NVDA", "AAPL"]), quotes: ready([fixtureQuote("NVDA"), fixtureQuote("AAPL")]), selectedSymbol: undefined }), /data-symbol="[A-Z]+" aria-pressed/, "without a shown selection the rows are plain buttons")
   assert.match(html, /data-logo-fallback="" aria-hidden="true"[^>]*>A<\/span>/, "an unmapped symbol gets the letter fallback, never another logo")
 })
 
@@ -175,6 +189,6 @@ test("change text: up uses the AA text token, down/flat/missing keep their meani
   for (const symbol of TOP40_UNAVAILABLE) assert.match(rowOf(html, symbol), /<span class="text-\[var\(--color-arco-text-soft\)\]">—<\/span>/, "missing stays neutral")
   assert.match(rowOf(html, "NVDA"), /모의 주문/)
   assert.match(html, /bg-\[var\(--color-arco-up\)\] opacity-40/, "the status dot is a graphic and keeps --color-arco-up")
-  const detail = renderToStaticMarkup(<MarketChart response={{ status: "AVAILABLE", reason: null, fetchedAt: FIXTURE_TIME, cacheAgeMs: 0, feedDelay: "UNKNOWN", data: fixtureChart("NVDA", "1D") }} quote={fixtureQuote("NVDA")} />)
+  const detail = renderToStaticMarkup(<MarketChart response={{ status: "AVAILABLE", reason: null, fetchedAt: FIXTURE_TIME, cacheAgeMs: 0, feedDelay: "UNKNOWN", data: fixtureChart("NVDA", "1D") }} />)
   assert.match(detail, /반환 관측 구간 등락 <strong class="text-\[var\(--color-arco-up-text\)\]">\+/, "the detail's rising window change uses the text token")
 })
