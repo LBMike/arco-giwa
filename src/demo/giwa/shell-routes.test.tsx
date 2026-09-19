@@ -1,0 +1,61 @@
+import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
+import test from "node:test"
+import { GIWA_FUNDS_ROUTE, GIWA_PREPROD_ROUTE } from "./routes"
+
+// Source guards: main.tsx builds the browser router at module scope (it renders on import), so the
+// route tree is asserted from source, like the provider guard in stocks-host/provider.dom.test.tsx.
+const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8")
+
+test("route constants: / is Home, /funds is the Funds list", () => {
+  assert.equal(GIWA_PREPROD_ROUTE, "/")
+  assert.equal(GIWA_FUNDS_ROUTE, "/funds")
+})
+
+test("main.tsx: index renders Home, 'funds' renders the Funds page, existing routes and guards unchanged", () => {
+  const main = read("../../main.tsx")
+  assert.match(main, /const GiwaHomePage = lazy\(\(\) => import\('\.\/demo\/giwa\/HomePage'\)\)/)
+  assert.match(main, /const GiwaInvestorPage = lazy\(\(\) => import\('\.\/demo\/giwa\/Investor'\)\)/)
+  assert.match(main, /\{ index: true, element: giwaRoute\(<GiwaHomePage \/>\) \}/)
+  assert.match(main, /\{ path: 'funds', element: giwaRoute\(<GiwaInvestorPage \/>\) \}/)
+  assert.doesNotMatch(main, /index: true, element: giwaRoute\(<GiwaInvestorPage \/>\)/)
+  assert.match(main, /\{ path: 'savings', element: giwaRoute\(<GiwaSavingsPage \/>\) \}/)
+  assert.match(main, /\{ path: 'portfolio', element: giwaRoute\(<GiwaPortfolioPage \/>\) \}/)
+  assert.match(main, /\{ path: 'product\/:id', element: giwaRoute\(<GiwaProductDetailPage \/>\) \}/)
+  assert.match(main, /\.\.\.stocksRoutes\(giwaRoute\(<GiwaPreprodApp \/>\)\)/)
+  assert.match(main, /\{ path: '\/app\/\*', element: <LegacyAppRedirect \/> \}/)
+  assert.match(main, /\{ path: '\*', element: <Navigate to=\{GIWA_PREPROD_ROUTE\} replace \/> \}/)
+  assert.match(main, /path: GIWA_ADMIN_ROUTE,\s*element: giwaRoute\(<GiwaPreprodApp admin \/>\)/)
+  assert.match(main, /<GiwaPreprodProviders><RouterProvider router=\{router\} \/><\/GiwaPreprodProviders>/)
+  assert.match(main, /<RequireGiwaAdmin><GiwaAdminLayout \/><\/RequireGiwaAdmin>/)
+})
+
+test("links that mean 'the products list' point at /funds; logo links stay on Home", () => {
+  for (const file of ["ProductDetailPage.tsx", "PortfolioPage.tsx", "RequireGiwaAdmin.tsx"]) {
+    const source = read(`./${file}`)
+    assert.match(source, /to=\{GIWA_FUNDS_ROUTE\}/, file)
+    assert.doesNotMatch(source, /GIWA_PREPROD_ROUTE/, file)
+  }
+  assert.match(read("./ProductDetailPage.tsx"), /to=\{GIWA_FUNDS_ROUTE\}[\s\S]{0,200}Back to products/)
+  assert.match(read("./PortfolioPage.tsx"), /to=\{GIWA_FUNDS_ROUTE\}[\s\S]{0,300}Browse products/)
+  assert.match(read("./RequireGiwaAdmin.tsx"), /to=\{GIWA_FUNDS_ROUTE\}[\s\S]{0,200}Back to products/)
+  for (const file of ["GiwaPreprodApp.tsx", "components.tsx"]) {
+    assert.match(read(`./${file}`), /<Link\s+to=\{GIWA_PREPROD_ROUTE\}\s+aria-label="Arco home"/, file)
+  }
+})
+
+test("shell layout keeps the provider split, the 76px sticky bar and matching gutters", () => {
+  const shell = read("./GiwaPreprodApp.tsx")
+  assert.doesNotMatch(shell, /GiwaPreprodProviders/)
+  assert.match(shell, /xl:grid-cols-\[224px_minmax\(0,1fr\)\]/)
+  assert.match(shell, /<main[\s\S]*?id="giwa-main"[\s\S]*?tabIndex=\{-1\}/)
+  // scroll-mt matches the 76px sticky bar + 1px border, so "Skip to content" never parks main's first control under it.
+  assert.match(shell, /max-w-\[1512px\] flex-1 scroll-mt-\[77px\] px-4 py-8 md:px-8/)
+  const footer = readFileSync(new URL("../components/Footer.tsx", import.meta.url), "utf8")
+  assert.equal([...footer.matchAll(/mx-auto (?:grid|flex) w-full max-w-\[1512px\][^"]*px-4 py-6 md:px-8/g)].length, 2, "footer follows the shell width and gutters")
+  const components = read("./components.tsx")
+  assert.match(components, /sticky top-0 z-40[^"]*backdrop-blur/)
+  assert.match(components, /min-h-\[76px\] w-full max-w-\[1512px\][^"]*px-4 md:px-8/)
+  assert.doesNotMatch(components, /HeaderNavLink/)
+  assert.match(read("../components/SectionNav.tsx"), /sticky top-\[76px\][^"]*-mx-4 px-4 md:-mx-8 md:px-8/)
+})

@@ -1,0 +1,79 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+import { renderToStaticMarkup } from "react-dom/server"
+import { MemoryRouter } from "react-router-dom"
+import { GiwaSidebarNav } from "./GiwaSidebarNav"
+import { INVESTOR_NAV_SECTIONS, investorNavSections, isNavItemActive, type InvestorNavItemId } from "./investor-nav"
+import { GIWA_FUNDS_ROUTE } from "./routes"
+
+function shape(isAdmin: boolean) {
+  return investorNavSections(isAdmin).map((section) => ({
+    label: section.label,
+    items: section.items.map((item) => [item.label, item.to]),
+  }))
+}
+
+function activeIds(pathname: string, isAdmin = true): InvestorNavItemId[] {
+  return investorNavSections(isAdmin)
+    .flatMap((section) => section.items)
+    .filter((item) => isNavItemActive(item, pathname))
+    .map((item) => item.id)
+}
+
+test("nav sections and items keep their order, labels and routes", () => {
+  assert.equal(GIWA_FUNDS_ROUTE, "/funds")
+  assert.deepEqual(shape(false), [
+    { label: null, items: [["Home", "/"]] },
+    { label: "Invest", items: [["Savings", "/savings"], ["Funds", "/funds"], ["Stocks", "/stocks"]] },
+    { label: "Manage", items: [["Portfolio", "/portfolio"], ["Send", null]] },
+  ])
+})
+
+test("Admin item appears only for allowlisted wallets, at the end of Manage", () => {
+  assert.ok(!shape(false).flatMap((section) => section.items).some(([label]) => label === "Admin"))
+  assert.deepEqual(shape(true)[2], { label: "Manage", items: [["Portfolio", "/portfolio"], ["Send", null], ["Admin", "/admin"]] })
+  // The shared constant is never mutated by the admin variant.
+  assert.equal(INVESTOR_NAV_SECTIONS[2].items.length, 2)
+})
+
+test("Send has no route, is disabled and says Coming soon", () => {
+  const send = investorNavSections(true).flatMap((section) => section.items).find((item) => item.id === "send")!
+  assert.equal(send.to, null)
+  assert.equal(send.disabled, true)
+  assert.equal(send.note, "Coming soon")
+})
+
+test("active matching per path", () => {
+  const cases: Array<[string, InvestorNavItemId[]]> = [
+    ["/", ["home"]],
+    ["/funds", ["funds"]],
+    ["/product/abc", ["funds"]],
+    ["/savings", ["savings"]],
+    ["/stocks", ["stocks"]],
+    ["/admin/stocks", ["stocks"]],
+    ["/portfolio", ["portfolio"]],
+    ["/admin/operations", ["admin"]],
+    ["/admin", ["admin"]],
+    ["/stocks/", ["stocks"]],
+    ["/unknown", []],
+  ]
+  for (const [pathname, expected] of cases) assert.deepEqual(activeIds(pathname), expected, pathname)
+  for (const pathname of ["/", "/funds", "/savings", "/stocks", "/portfolio", "/admin", "/send"]) {
+    assert.equal(isNavItemActive({ id: "send" }, pathname), false, pathname)
+  }
+})
+
+test("GiwaSidebarNav renders links with aria-current and a non-interactive Send row", () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter initialEntries={["/product/abc"]}>
+      <GiwaSidebarNav isAdmin={false} />
+    </MemoryRouter>,
+  )
+  assert.match(html, /<nav aria-label="Main"/)
+  for (const name of ["Home", "Invest", "Manage"]) assert.match(html, new RegExp(`<ul aria-label="${name}"`))
+  assert.match(html, /<a aria-current="page"[^>]*href="\/funds"/)
+  assert.equal(html.match(/aria-current="page"/g)?.length, 1)
+  assert.match(html, /<span aria-disabled="true"[^>]*>.*?Send.*?Coming soon/)
+  assert.doesNotMatch(html, /href="\/send"|href="\/admin"/)
+  assert.doesNotMatch(html, /<(a|button)[^>]*>(?:(?!<\/\1>).)*Send/)
+})

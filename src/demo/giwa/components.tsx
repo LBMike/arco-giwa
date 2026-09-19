@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertCircle,
@@ -42,7 +42,7 @@ import { compareNullLast } from "./sort"
 import { buildActivityFeed, type ActivityRow } from "./activity-feed"
 import { isVaultCategory, type VaultCategory } from "../../../shared/vault-taxonomy"
 import { isAdminAddress, parseAdminAddresses } from "./admin-access"
-import { GIWA_STOCKS_ROUTE, GIWA_ADMIN_ROUTE, GIWA_PORTFOLIO_ROUTE, GIWA_PREPROD_ROUTE, GIWA_SAVINGS_ROUTE, giwaProductPath } from "./routes"
+import { GIWA_PREPROD_ROUTE, giwaProductPath } from "./routes"
 import { GiwaHeaderMenu } from "./GiwaHeaderMenu"
 import { BrandMark } from "../components/BrandMark"
 import { ASSET_MANAGERS, ISSUERS, ISSUER_OPTIONS, aumLabel, apyLabel, productById } from "../data/products"
@@ -376,17 +376,6 @@ export function GiwaNetworkIcon({ size = 20 }: { size?: number }) {
   )
 }
 
-function HeaderNavLink({ to, active, children }: { to: string; active: boolean; children: ReactNode }) {
-  return (
-    <Link to={to} className="relative px-4 text-base leading-6 text-[var(--color-arco-text)]">
-      {children}
-      {active && (
-        <span className="absolute -bottom-[5px] left-1/4 right-1/4 h-[0.5px] min-w-[50px] bg-[var(--color-arco-ink)]" />
-      )}
-    </Link>
-  )
-}
-
 export function GiwaWalletButton() {
   const wallet = useGiwaWallet()
 
@@ -543,7 +532,7 @@ export function TestFundsButton({ admin = false }: { admin?: boolean }) {
         {phase === "confirming" ? "Confirming" : "Mint test assets"}
       </button>
       {(cooldownNotice || message || balances.length > 0) && (
-        <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-[280px] rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-3 text-xs shadow-[var(--shadow-table)]">
+        <div className="absolute inset-x-0 top-[calc(100%+8px)] z-50 rounded-[var(--radius-card)] lg:left-auto lg:w-[280px] bg-[var(--color-arco-surface)] p-3 text-xs shadow-[var(--shadow-table)]">
           {cooldownNotice && <p className="text-[var(--color-arco-ink)]">{cooldownNotice}</p>}
           {message && <p className={phase === "failed" ? "text-red-700" : "text-[var(--color-arco-text-soft)]"}>{message}</p>}
           {balances.length > 0 && (
@@ -562,45 +551,38 @@ export function TestFundsButton({ admin = false }: { admin?: boolean }) {
   )
 }
 
-export function GiwaHeader({ admin = false }: { admin?: boolean }) {
+// VISIBILITY only (see ADMIN_ALLOWLIST): shows the Admin nav item to allowlisted wallets.
+export function useGiwaIsAdmin(): boolean {
   const { address } = useGiwaWallet()
-  const { pathname } = useLocation()
-  const isAdmin = isAdminAddress(address, ADMIN_ALLOWLIST)
+  return isAdminAddress(address, ADMIN_ALLOWLIST)
+}
+
+// Top bar of the investor shell. Below xl it carries the menu trigger + logo (the sidebar is hidden);
+// the nav itself lives in GiwaSidebarNav. Height stays 76px at every width: SectionNav (top-[76px])
+// and the invest panel (top-[104px]) stick beneath it.
+export function GiwaHeader({ admin = false }: { admin?: boolean }) {
+  const isAdmin = useGiwaIsAdmin()
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-arco-border)] bg-[var(--color-arco-page-80)] backdrop-blur">
-      <div className="mx-auto flex min-h-[76px] max-w-[var(--container-page)] items-center justify-between gap-4 px-8 pb-[6px] pt-[22px]">
-        <div className="flex items-center gap-6">
-          <Link to={GIWA_PREPROD_ROUTE} aria-label="Arco home" className="flex items-center">
+      <div className="mx-auto flex min-h-[76px] w-full max-w-[1512px] items-center justify-between gap-3 px-4 md:px-8">
+        <div className="flex items-center gap-2 xl:hidden">
+          <GiwaHeaderMenu isAdmin={isAdmin} testFunds={admin ? undefined : <TestFundsButton admin={admin} />} />
+          <Link
+            to={GIWA_PREPROD_ROUTE}
+            aria-label="Arco home"
+            className="flex items-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
+          >
             <img src="/arco-icon.svg" alt="Arco" className="h-[33px] w-[35px] shrink-0" />
           </Link>
-          {/* Desktop nav — hidden below lg (mobile uses the hamburger sheet). */}
-          <nav className="hidden items-center lg:flex">
-            <HeaderNavLink to={GIWA_SAVINGS_ROUTE} active={pathname.startsWith(GIWA_SAVINGS_ROUTE)}>
-              Savings
-            </HeaderNavLink>
-            <HeaderNavLink to={GIWA_PREPROD_ROUTE} active={pathname === GIWA_PREPROD_ROUTE}>
-              Products
-            </HeaderNavLink>
-            <HeaderNavLink to={GIWA_STOCKS_ROUTE} active={pathname === GIWA_STOCKS_ROUTE || pathname === "/admin/stocks"}>
-              Stocks
-            </HeaderNavLink>
-            <HeaderNavLink to={GIWA_PORTFOLIO_ROUTE} active={pathname.startsWith(GIWA_PORTFOLIO_ROUTE)}>
-              Portfolio
-            </HeaderNavLink>
-            {isAdmin && (
-              <HeaderNavLink to={GIWA_ADMIN_ROUTE} active={pathname.startsWith(GIWA_ADMIN_ROUTE)}>
-                Admin
-              </HeaderNavLink>
-            )}
-          </nav>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           <GiwaWalletButton />
-          {/* Mint test assets: desktop header only; on mobile it moves into the menu sheet. */}
-          <div className="hidden lg:block">
-            <TestFundsButton admin={admin} />
-          </div>
-          <GiwaHeaderMenu isAdmin={isAdmin} testFunds={<TestFundsButton admin={admin} />} />
+          {/* Mint test assets: top bar from lg; below lg it lives in the menu drawer. */}
+          {!admin && (
+            <div className="hidden lg:block">
+              <TestFundsButton admin={admin} />
+            </div>
+          )}
         </div>
       </div>
     </header>

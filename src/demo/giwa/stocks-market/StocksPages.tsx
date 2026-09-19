@@ -1,26 +1,17 @@
-import { createContext, useCallback, useContext, useMemo } from "react"
+import { useCallback, useContext, useMemo } from "react"
 import { Link } from "react-router-dom"
-import { resolveApiBase } from "../api-base"
-import { ARCO_API_BASE } from "../config"
 import { GIWA_ADMIN_STOCKS_ROUTE, GIWA_STOCKS_ROUTE } from "../routes"
 import { GiwaStocksAdminFeature } from "../stocks-admin"
-import { StocksExecutionProvider, StocksExecutionSessionNotice, useStocksExecutionCapability, useStocksOrderExecutionSlot, type ExecutionClockSeam } from "../stocks-execution-host"
+import { StocksExecutionProvider, StocksExecutionSessionNotice, useStocksExecutionCapability, useStocksOrderExecutionSlot } from "../stocks-execution-host"
 import { StocksSignIn, useGiwaStocksHost } from "../stocks-host"
-import type { KnownHashStore } from "../stocks-known-hash-recovery"
 import { GiwaStocksFeature, createGiwaStocksHttpClient, type GiwaStocksFeatureProps } from "../stocks-investor"
-import type { ActiveWalletSource } from "../stocks-wallet-source"
 import { createMarketClient } from "./client"
-import type { MarketFetch } from "./contracts"
+import { StocksPageEnvironment, usePageApiBase } from "./environment"
 import { StocksMarketFeature } from "./StocksMarketFeature"
-/** Explicit offline verification seam; normal runtime uses ARCO_API_BASE, browser fetch, real clocks and the wallet module's active source. */
-export const StocksPageEnvironment = createContext<{ apiBase: string | null; fetch?: MarketFetch; executionClock?: ExecutionClockSeam; activeWalletSource?: () => ActiveWalletSource | null; knownHashes?: KnownHashStore }>({ apiBase: ARCO_API_BASE })
+/** Re-exported under the same name for the verification pages and DOM suites that import it from here. */
+export { StocksPageEnvironment }
 const link = "rounded-lg border border-[var(--color-arco-border)] px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-arco-ink)]"
 function StocksNavigation() { return <nav aria-label="Stocks navigation" className="flex flex-wrap gap-2"><Link className={link} to={GIWA_STOCKS_ROUTE}>Stocks 시장정보·모의 거래</Link><Link className={link} to={GIWA_ADMIN_STOCKS_ROUTE}>Stocks 관리자 조회</Link></nav> }
-/** One validated API base for market, investor, admin and wallet execution, so a malformed setting fails the same way on every Stocks surface. */
-function usePageApiBase(): string | null {
-  const { apiBase } = useContext(StocksPageEnvironment)
-  return useMemo(() => (apiBase === null ? null : resolveApiBase(apiBase, window.location.origin)), [apiBase])
-}
 const CAPABILITY_COPY: Readonly<Record<string, string>> = {
   READY: "입금·매도 예치는 수락된 주문 카드에서 진행합니다: 주문 확인 → 정확한 금액 승인 → 별도 버튼으로 입금·예치. 각 단계는 버튼을 누를 때만 지갑을 엽니다.",
   WALLET_SOURCE_UNSUPPORTED: "현재 연결된 지갑 방식은 거래 요청을 한 번만 보내도록 보장할 수 없어 이 앱에서 입금·매도 예치를 지원하지 않습니다. 주문은 만들 수 있지만 이 지갑으로는 입금·예치할 수 없고, 주문 상태만 확인할 수 있습니다.",
@@ -55,7 +46,7 @@ export function StocksPage() {
   const rejected = useCallback(() => { if (sessionId) invalidate(sessionId) }, [sessionId, invalidate])
   const session = host.snapshot.session
   return <StocksExecutionProvider apiBase={apiBase} fetch={environment.fetch as typeof globalThis.fetch | undefined} clock={environment.executionClock} activeSource={environment.activeWalletSource} knownHashes={environment.knownHashes}>
-    <div className="w-full min-w-0 space-y-6"><StocksNavigation /><StocksMarketFeature client={clients.market} /><StocksSignIn /><StocksExecutionSessionNotice />
+    <div className="w-full min-w-0 space-y-6"><StocksNavigation /><StocksMarketFeature client={clients.market} ordersClient={clients.investor} /><StocksSignIn /><StocksExecutionSessionNotice />
       <section aria-label="NVDA testnet mock trading" className="w-full min-w-0 rounded-2xl border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)]">
         <div className="border-b border-[var(--color-arco-border)] p-4 sm:p-6"><h2 className="text-lg font-medium">NVDA · 테스트넷 모의 거래</h2><p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">테스트넷 모의 체결가: 서버 발급 견적 기준. 현재 고정 모의 가격 120이며 위 USD 시장시세와 별개입니다. 시장정보 종목 선택은 이 NVDA 주문에 적용되지 않습니다.</p><ExecutionCapabilityNote /></div>
         <InvestorWithExecution client={clients.investor} session={host.investor} hostWallet={session ? { address: session.walletAddress, chainId: session.chainId } : null} onSessionRejected={rejected} />

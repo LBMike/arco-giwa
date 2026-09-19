@@ -2,6 +2,7 @@
 
 import { useContext, useEffect, useLayoutEffect, useRef } from "react"
 
+import { StockLogo } from "../stocks-market/StockLogo"
 import type { CatalogState, SideOrders, StocksInvestorState } from "./controller"
 import type { StocksInvestorActions } from "./actions"
 import { cashLabel, errorMessage, formatCash, formatPrice, formatQuantity, formatSignedQuantity, formatUtc, signedOutMessage } from "./display"
@@ -69,9 +70,7 @@ export function StocksListView({ state, actions, onOpen }: { state: StocksInvest
                   className="grid w-full grid-cols-1 items-center gap-3 rounded-[var(--radius-row)] border border-[var(--color-arco-border)] p-4 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]"
                 >
                   <div className="flex min-w-0 items-center gap-3">
-                    <span aria-hidden className="inline-flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] text-xs font-medium text-[var(--color-arco-chip-ink)]">
-                      NV
-                    </span>
+                    <StockLogo symbol={instrument.symbol} />
                     <div className="min-w-0">
                       <p className="font-mono text-sm font-medium text-[var(--color-arco-ink)]">{instrument.symbol}</p>
                       <p className="text-xs text-[var(--color-arco-text-soft)]">Test units · {instrument.quantityScale} decimals</p>
@@ -125,7 +124,10 @@ export function StockDetailView({ state, actions, onBack }: { state: StocksInves
       {catalog && instrument ? (
         <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <section className={`${PANEL} lg:self-start`} aria-labelledby="giwa-stocks-detail-title">
-            <p className="font-mono text-sm text-[var(--color-arco-text-soft)]">NVDA</p>
+            <div className="flex items-center gap-3">
+              <StockLogo symbol="NVDA" />
+              <p className="font-mono text-sm text-[var(--color-arco-text-soft)]">NVDA</p>
+            </div>
             <h2
               id="giwa-stocks-detail-title"
               ref={headingRef}
@@ -307,7 +309,10 @@ export function PortfolioView({ state, actions }: { state: StocksInvestorState; 
           ) : (
             portfolio.portfolio.holdings.map((holding) => (
               <div key={holding.wallet} className="flex flex-col gap-2" data-testid="stocks-holding">
-                <Heading level={3}>NVDA</Heading>
+                <div className="flex items-center gap-2">
+                  <StockLogo symbol="NVDA" size={32} />
+                  <Heading level={3}>NVDA</Heading>
+                </div>
                 {holding.availableQuantity.startsWith("-") || holding.walletQuantity.startsWith("-") ? (
                   <Notice tone="warning" title="Holding under review">
                     The server reports more units reserved or escrowed than this wallet holds. Nothing is available to sell until this is resolved.

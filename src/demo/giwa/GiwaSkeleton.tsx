@@ -32,7 +32,7 @@ export function ProductsSkeleton() {
 
         {/* strategy cards */}
         <section className="space-y-3">
-          <div className="flex gap-3">
+          <div className="flex gap-3 overflow-hidden">
             {[0, 1, 2].map((i) => (
               <GiwaSkeleton key={i} className="h-[136px] min-w-[240px] flex-1 rounded-[12px]" />
             ))}
@@ -89,7 +89,7 @@ export function SavingsSkeleton() {
       {/* account selector: label + row of cards */}
       <div className="w-full space-y-2">
         <GiwaSkeleton className="h-3 w-28 rounded-full" />
-        <div className="flex gap-2">
+        <div className="flex gap-2 overflow-hidden">
           {[0, 1, 2, 3].map((i) => (
             <GiwaSkeleton key={i} className="h-[112px] w-[112px] shrink-0 rounded-[10px]" />
           ))}

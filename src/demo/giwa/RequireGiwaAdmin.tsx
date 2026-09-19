@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { ShieldAlert } from "lucide-react"
 import { GIWA_ADMIN_ADDRESSES_RAW } from "./config"
-import { GIWA_PREPROD_ROUTE } from "./routes"
+import { GIWA_FUNDS_ROUTE } from "./routes"
 import { isAdminAddress, parseAdminAddresses } from "./admin-access"
 import { useGiwaWallet } from "./wallet"
 
@@ -43,7 +43,7 @@ export function RequireGiwaAdmin({ children }: { children: ReactNode }) {
             </button>
           </>
         )}
-        <Link to={GIWA_PREPROD_ROUTE} className="mt-4 inline-block text-sm text-[var(--color-arco-ink)] underline">
+        <Link to={GIWA_FUNDS_ROUTE} className="mt-4 inline-block text-sm text-[var(--color-arco-ink)] underline">
           Back to products
         </Link>
       </div>
