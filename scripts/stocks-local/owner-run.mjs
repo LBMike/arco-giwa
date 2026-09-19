@@ -12,7 +12,7 @@ export async function runStack(options) {
   let host, stack, wallet, closed = false, closing;
   const check = () => assert.ok(!closed, 'LOCAL_OWNER_CLOSED_DURING_STARTUP');
   const setup = (async () => {
-    host = await createLocalBrowserHost({ root: resolve(import.meta.dirname, '../..'), resourceDir: options.resourceDir }); check();
+    host = await createLocalBrowserHost({ root: resolve(import.meta.dirname, '../..'), resourceDir: options.resourceDir, ownerWorkspace: true }); check();
     stack = await createLocalUiStack({ ...options, frontendOrigin: host.origin,
       knownHashRecovery: true, operatorControls: true }); check();
     wallet = await createLocalWallet({ ...options, ...stack, operatorLogin: true }); check();

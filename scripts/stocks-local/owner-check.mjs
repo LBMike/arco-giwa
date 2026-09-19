@@ -25,7 +25,7 @@ const stop = signal => { interrupted ??= signal; child.kill('SIGTERM'); };
 const onInt = () => stop('SIGINT'), onTerm = () => stop('SIGTERM');
 process.on('SIGINT', onInt); process.on('SIGTERM', onTerm);
 const records = () => stdout.split('\n').flatMap(line => { try { const row = JSON.parse(line); return row.kind ? [row] : []; } catch { return []; } });
-const report = { result: 'RUNNING', checks: [], pageErrors: [] };
+const report = { result: 'RUNNING', checks: [], pageErrors: [], navigation: [], clientEvents: [], rejectedRequests: [] };
 const passed = name => { report.checks.push(name); console.log(`STOCKS_OWNER_CHECK ${name}`); };
 const until = async (read, name, timeout = 20000) => {
   const deadline = performance.now() + timeout;
@@ -48,6 +48,9 @@ try {
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.setDefaultTimeout(15000);
   page.on('pageerror', error => report.pageErrors.push(error.message));
+  page.on('framenavigated', frame => { if (frame === page.mainFrame()) report.navigation.push({ at: Date.now(), path: new URL(frame.url()).pathname }); });
+  page.on('console', message => { if (message.text().startsWith('[vite]')) report.clientEvents.push({ at: Date.now(), message: message.text().slice(0, 250) }); });
+  page.on('response', response => { if (response.status() >= 400) report.rejectedRequests.push({ at: Date.now(), status: response.status(), path: new URL(response.url()).pathname }); });
   const local = async action => {
     await page.locator(`[data-local-action="${action}"]`).click();
     await until(async () => !await page.locator('[data-local-action="refresh"]').isDisabled(), action);
@@ -73,7 +76,11 @@ try {
     await panel.getByRole('button', { name: paused ? 'Confirm pause' : 'Confirm resume', exact: true }).click();
     await until(async () => await page.getByTestId('stocks-trading-control-outcome').getAttribute('data-outcome') === 'accepted', 'control accepted');
   };
-  await page.goto(ready.adminUrl); await local('account-operator'); await signIn();
+  await page.goto(ready.adminUrl);
+  // Vite can reload once while optimizing a cold dependency cache. Finish that
+  // startup before beginning the signed-session assertions.
+  await page.waitForLoadState('networkidle');
+  await local('account-operator'); await signIn();
   await until(async () => await gate().getAttribute('data-phase') === 'ready', 'initial control');
   assert.match(await gate().innerText(), /Paused/);
   assert.equal((await state()).sends.length, 0);
@@ -83,6 +90,8 @@ try {
   passed('operator signs in and resumes through the product UI without a wallet transaction');
 
   await local('account-A'); await page.goto(ready.investorUrl); await signIn();
+  await page.getByText('시세 연결 준비 중', { exact: true }).first().waitFor();
+  assert.ok(!report.rejectedRequests.some(request => request.path.startsWith('/api/v1/stocks/market/')), 'Market display routes are mounted without live provider credentials');
   const wallet = () => page.getByTestId('stocks-wallet-panel');
   const action = name => wallet().locator(`[data-action="${name}"]`);
   const status = () => wallet().getAttribute('data-status');
@@ -140,10 +149,13 @@ try {
   assert.match(await gate().innerText(), /Paused/);
   passed('operator pause survives API restart');
   assert.deepEqual(report.pageErrors, []);
+  assert.ok(report.clientEvents.some(event => event.message.includes('[vite] connected.')), 'Development updates use the owned listener');
+  assert.ok(!report.clientEvents.some(event => /connection lost|failed to connect/.test(event.message)), 'No development-server reconnect/reload loop');
+  await page.getByRole('button', { name: '로컬 실행 종료', exact: true }).click();
+  await until(async () => (await page.getByTestId('local-test-message').innerText()).includes('로컬 실행을 종료했습니다'), 'stop acknowledged');
   await browser.close(); browser = undefined;
-  child.kill('SIGINT');
   await until(() => !!outcome, 'owned shutdown');
-  assert.deepEqual(outcome, { code: 130, signal: null });
+  assert.deepEqual(outcome, { code: 0, signal: null });
   const stopped = records().find(row => row.kind === 'LOCAL_OWNER_OWNED_SERVICES_STOPPED');
   report.stopped = stopped;
   assert.ok(stopped?.postgresPidFileAbsent && stopped.postgresSocketAbsent && stopped.nodeGroupAbsent);
@@ -151,12 +163,12 @@ try {
     assert.throws(() => process.kill(pid, 0), error => error.code === 'ESRCH');
   for (const url of [ready.origin, ready.apiBase, ready.rpcUrl]) await assertPortClosed(url);
   assert.equal(existsSync(stopped.temp), false);
-  passed('Ctrl+C closes the owned API, bridge, DB and EVM and removes temporary data');
+  passed('owner stop button closes the owned API, bridge, DB and EVM and removes temporary data');
   report.result = 'PASS'; report.cleanupVerified = true;
 } catch (error) {
   report.result = 'FAIL'; report.error = error.message; process.exitCode = interrupted ? 143 : 1;
   await page?.screenshot({ path: join(evidence, 'owner-failure.png'), fullPage: true }).catch(() => {});
-  console.error(error.message);
+  console.error(error.stack);
 } finally {
   await browser?.close();
   if (!outcome) {

@@ -14,8 +14,10 @@ import { stocksSessionResolvers } from '../../server/dist/stocks-runtime/session
 import { httpStocksRpc, externalStocksSigner } from '../../server/dist/stocks-runtime/transport.js';
 import { StocksSubmissionsService } from '../../server/dist/stocks-submissions/service.js';
 import { StocksSubmissionDiagnosticsService } from '../../server/dist/stocks-submission-diagnostics/service.js';
+import { createStocksMarketDataService } from '../../server/dist/stocks-market-data/index.js';
 import { localSigner } from './local-signer.mjs';
 import { createShortSessionFixture } from './short-session.mjs';
+import { assertLocalStartupChain } from './startup-chain.mjs';
 
 const { Pool } = createRequire(import.meta.url)('pg');
 const faucetAbi = parseAbi(['function faucet(address,uint256)']);
@@ -79,7 +81,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
     }
     return row.result;
   }
-  assert.equal(await rpc('eth_chainId'), '0x164ce');
+  await assertLocalStartupChain(rpc);
   const metadata = await rpc('hardhat_metadata');
   assert.ok(metadata.instanceId && !metadata.forkedNetwork);
   const unlocked = Object.values(accounts);
@@ -145,6 +147,9 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
       change: (...args) => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : (controlFaults.serviceOverride ?? runtime.control).change(...args),
     };
     const next = buildApp(appEnv, { ...legacy,
+      // Production display routes, explicitly without credentials or external
+      // quotes. The UI shows the NVDA pilot and unconfigured market data.
+      stocksMarketData: createStocksMarketDataService(),
       stocksTradingControl: controlPort && !controlFaults.disabled ? { service: controlPort, ...resolvers } : undefined,
       stocks: { service: runtime.service, ...resolvers, reconciliationCoverage: runtime.reconciliationCoverage },
       stocksExecution: { service: runtime.execution, ...resolvers },

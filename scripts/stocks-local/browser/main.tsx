@@ -13,7 +13,7 @@ import type { ActiveWalletSource } from '../../../src/demo/giwa/stocks-wallet-so
 import '../../../src/index.css';
 import '../../../src/demo/theme.css';
 
-type Config = { apiBase: string; frontendOrigin: string; accounts: { holder: string; otherHolder: string; operator?: string }; account: string | null; capability: string; knownHashRecovery: boolean; operatorDiagnostics: boolean };
+type Config = { apiBase: string; frontendOrigin: string; accounts: { holder: string; otherHolder: string; operator?: string }; account: string | null; capability: string; knownHashRecovery: boolean; operatorDiagnostics: boolean; ownerWorkspace: boolean };
 type State = { account: string | null; holdWaiting: boolean; holdArmed: boolean; calls: number; sends: { outcome: string }[] };
 type Control = { action: 'account'; account: 'A' | 'B' | 'operator' } | { action: 'holdNextSend' | 'releaseHeld' | 'dropHeld' | 'stopProcessing' | 'startProcessing' | 'restartApi' | 'armShortSession' };
 type Request = { method: string; params?: unknown[] };
@@ -33,7 +33,7 @@ function configOf(value: unknown): Config {
   const operator = row.operatorDiagnostics === true && typeof accounts.operator === 'string' && address.test(accounts.operator) ? accounts.operator : undefined;
   if (row.operatorDiagnostics === true && !operator) throw Error('LOCAL_OPERATOR_INVALID');
   if (row.account !== null && (typeof row.account !== 'string' || ![accounts.holder.toLowerCase(), accounts.otherHolder.toLowerCase(), operator?.toLowerCase()].includes(row.account.toLowerCase()))) throw Error('LOCAL_ACCOUNT_INVALID');
-  return { apiBase: row.apiBase, frontendOrigin: row.frontendOrigin, capability: row.capability, accounts: { holder: accounts.holder, otherHolder: accounts.otherHolder, operator }, account: row.account as string | null, knownHashRecovery: row.knownHashRecovery === true, operatorDiagnostics: row.operatorDiagnostics === true };
+  return { apiBase: row.apiBase, frontendOrigin: row.frontendOrigin, capability: row.capability, accounts: { holder: accounts.holder, otherHolder: accounts.otherHolder, operator }, account: row.account as string | null, knownHashRecovery: row.knownHashRecovery === true, operatorDiagnostics: row.operatorDiagnostics === true, ownerWorkspace: row.ownerWorkspace === true };
 }
 function stateOf(value: unknown, config: Config): State {
   const row = object(value);
@@ -99,6 +99,7 @@ async function start() {
     const [view, setView] = useState({ account: initial.account, epoch: 1 });
     const [state, setState] = useState(initial);
     const [busy, setBusy] = useState(false);
+    const [stopped, setStopped] = useState(false);
     const [message, setMessage] = useState('새로고침하면 Stocks 로그인은 해제됩니다. 자동 로그인·자동 전송은 없습니다.');
     function acceptState(next: State) {
       if (!same(next.account, view.account)) {
@@ -122,6 +123,16 @@ async function start() {
       } catch { setMessage('LOCAL_CONTROL_FAILED'); }
       finally { setBusy(false); }
     }
+    async function finish() {
+      if (busy || stopped) return;
+      setBusy(true);
+      try {
+        await fetch('/__local/finish', { method: 'POST', headers, body: JSON.stringify({ ok: true }), credentials: 'omit', cache: 'no-store', redirect: 'error' }).then(json);
+        setStopped(true);
+        setMessage('로컬 실행을 종료했습니다. 다시 시작하려면 npm run stocks:dev 를 실행하세요.');
+      } catch { setMessage('종료 응답을 확인하지 못했습니다. 실행 터미널의 상태를 확인하세요.'); }
+      finally { setBusy(false); }
+    }
     const buttons: { label: string; body: Control }[] = [
       { label: 'Account A', body: { action: 'account', account: 'A' } }, { label: 'Account B', body: { action: 'account', account: 'B' } },
       { label: 'Hold next response', body: { action: 'holdNextSend' } }, { label: 'Release held response', body: { action: 'releaseHeld' } },
@@ -135,8 +146,9 @@ async function start() {
         <h1 style={{ fontSize: 16, fontWeight: 600 }}>LOCAL TEST ONLY · PostgreSQL + local EVM</h1>
         <p style={{ fontSize: 13, marginTop: 6 }}>로컬 테스트 자산 전용 · 아래 도구는 운영 화면의 기능이 아닙니다. 계정 변경과 응답 유실을 검증합니다.</p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-          {buttons.map(({ label, body }) => <button key={label} type="button" style={buttonStyle} disabled={busy} data-local-action={body.action === 'account' ? `account-${body.account}` : body.action} onClick={() => { void control(body); }}>{label}</button>)}
-          <button type="button" style={buttonStyle} disabled={busy} data-local-action="refresh" onClick={() => { void refresh(); }}>Refresh test state</button>
+          {buttons.map(({ label, body }) => <button key={label} type="button" style={buttonStyle} disabled={busy || stopped} data-local-action={body.action === 'account' ? `account-${body.account}` : body.action} onClick={() => { void control(body); }}>{label}</button>)}
+          <button type="button" style={buttonStyle} disabled={busy || stopped} data-local-action="refresh" onClick={() => { void refresh(); }}>Refresh test state</button>
+          {config.ownerWorkspace && <button type="button" style={buttonStyle} disabled={busy || stopped} data-local-action="finish" onClick={() => { void finish(); }}>로컬 실행 종료</button>}
         </div>
         <p data-testid="local-test-state" style={{ marginTop: 10, fontSize: 13 }}>
           Account {same(state.account, config.accounts.holder) ? 'A' : same(state.account, config.accounts.otherHolder) ? 'B' : config.accounts.operator && same(state.account, config.accounts.operator) ? 'Operator' : 'disconnected'}
@@ -146,11 +158,11 @@ async function start() {
         </p>
         <p role="status" data-testid="local-test-message" style={{ marginTop: 6, fontSize: 12 }}>{message}</p>
       </aside>
-      <main>
+      {!stopped && <main>
         <StocksHostProvider context={{ walletAddress: view.account, chainId: 91342, frontendOrigin: config.frontendOrigin, apiBase: config.apiBase, walletEpoch: `browser-local:${view.epoch}` }} dependencies={dependencies} walletSource={source}>
           <StocksPageEnvironment.Provider value={environment}><RouterProvider router={router} /></StocksPageEnvironment.Provider>
         </StocksHostProvider>
-      </main>
+      </main>}
     </div>;
   }
   createRoot(rootElement!).render(<StrictMode><App /></StrictMode>);

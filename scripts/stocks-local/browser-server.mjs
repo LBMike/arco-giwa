@@ -41,8 +41,9 @@ function body(request) {
   });
 }
 
-export async function createLocalBrowserHost({ root, resourceDir }) {
+export async function createLocalBrowserHost({ root, resourceDir, ownerWorkspace = false }) {
   assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1');
+  assert.equal(typeof ownerWorkspace, 'boolean');
   assert.ok(isAbsolute(root) && isAbsolute(resourceDir));
   const resources = await mkdtemp(join(resourceDir, 'browser-host-'));
   const envDir = join(resources, 'empty-env'), cacheDir = join(resources, 'cache');
@@ -74,7 +75,7 @@ export async function createLocalBrowserHost({ root, resourceDir }) {
     if (request.method === 'POST' && !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(request.headers['content-type'] ?? ''))
       throw failure(415, 'LOCAL_JSON_REQUIRED');
   }
-  const config = () => ({ apiBase: stack.apiBase, frontendOrigin: origin,
+  const config = () => ({ apiBase: stack.apiBase, frontendOrigin: origin, ownerWorkspace,
     knownHashRecovery: typeof stack.armShortSession === 'function',
     accounts: { holder: stack.accounts.holder, otherHolder: stack.accounts.otherHolder,
       ...(stack.operatorDiagnostics ? { operator: stack.accounts.operator } : {}) }, account: wallet.account,
@@ -184,6 +185,14 @@ export async function createLocalBrowserHost({ root, resourceDir }) {
   }
   try {
     const dependencyDir = await realpath(join(root, 'node_modules'));
+    // Vite 5 still opens its default WebSocket listener with hmr:false. Two
+    // workspaces then share port 24678 and the client can enter a reload loop.
+    // Put HTTP and development updates on this workspace's owned listener.
+    httpServer = createHttpServer();
+    httpServer.on('upgrade', (request, socket) => {
+      if (!host || request.headers.host !== host || request.headers.origin !== origin || phase === 'CLOSING' || phase === 'CLOSED')
+        socket.destroy();
+    });
     vite = await createServer({ root, configFile: false, envDir, envPrefix: 'STOCKS_LOCAL_BROWSER_UNUSED_', cacheDir,
       appType: 'mpa', logLevel: 'silent', clearScreen: false, plugins: [
         { name: 'stocks-local-browser-boundary', configureServer(server) {
@@ -201,12 +210,13 @@ export async function createLocalBrowserHost({ root, resourceDir }) {
           });
         } }, react(),
       ], resolve: { alias: { '@': join(root, 'src') } },
-      server: { middlewareMode: true, host: '127.0.0.1', port: 0, strictPort: true, cors: false, hmr: false,
+      server: { middlewareMode: true, host: '127.0.0.1', port: 0, strictPort: true, cors: false,
+        hmr: { server: httpServer },
         fs: { strict: true, allow: [root, dependencyDir], deny: ['.env', '.env.*', '**/.git/**', '**/.secrets/**', '*.{crt,pem,key}'] } },
     });
     // Middleware mode awaits Vite's initialization in createServer and avoids
     // its standalone SIGTERM/process.exit handler. Own the loopback listener.
-    httpServer = createHttpServer(vite.middlewares);
+    httpServer.on('request', vite.middlewares);
     await new Promise((resolve, reject) => {
       const server = httpServer;
       const failed = error => { server.off('listening', ready); reject(error); };

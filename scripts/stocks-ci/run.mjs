@@ -90,6 +90,7 @@ try {
     const units = await run('harness-unit', ['--test', '--test-reporter=tap',
       'scripts/stocks-local/browser-server.test.mjs', 'scripts/stocks-local/local-wallet.test.mjs',
       'scripts/stocks-local/owner.test.mjs',
+      'scripts/stocks-local/startup-chain.test.mjs',
       'scripts/stocks-local/short-session.test.mjs', 'scripts/stocks-ci/evidence.test.mjs',
       'scripts/stocks-ci/operator-control-ui.test.mjs', 'scripts/stocks-ci/runner-control-ui.test.mjs',
       'scripts/stocks-ci/port-cleanup.test.mjs', 'scripts/stocks-ci/postgres-harness.test.mjs', 'scripts/stocks-ci/lifecycle-wrapper.test.mjs']);

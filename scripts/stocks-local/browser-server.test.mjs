@@ -87,6 +87,36 @@ test('bootstrap and all static assets reject foreign Host; config has same-origi
   assert.equal((await fetch(f.host.origin + '/not-stocks', { headers: { accept: 'text/html' } })).status, 404);
 });
 
+test('two browser hosts own separate update connections and reject foreign origins and tokens', async t => {
+  const first = await fixture(t), second = await fixture(t);
+  const token = async fixture => {
+    const client = await fetch(fixture.host.origin + '/@vite/client').then(response => response.text());
+    const match = client.match(/const wsToken = ("[^"\n]+");/);
+    assert.ok(match, 'Vite serves a token for this host');
+    return JSON.parse(match[1]);
+  };
+  const firstToken = await token(first), secondToken = await token(second);
+  const connect = (fixture, value, origin = fixture.host.origin) => new Promise((resolve, reject) => {
+    const request = httpRequest(fixture.host.origin + '/?token=' + encodeURIComponent(value), {
+      headers: { connection: 'Upgrade', upgrade: 'websocket', origin,
+        'sec-websocket-version': '13', 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==', 'sec-websocket-protocol': 'vite-hmr' },
+    });
+    const timer = setTimeout(() => request.destroy(new Error('Owned update handshake timed out')), 3000);
+    request.once('upgrade', (_response, socket) => { clearTimeout(timer); t.after(() => socket.destroy()); resolve(socket); });
+    request.once('error', error => { clearTimeout(timer); reject(error); });
+    request.once('response', response => { clearTimeout(timer); response.resume(); reject(new Error('Update handshake rejected')); });
+    request.end();
+  });
+  const firstSocket = await connect(first, firstToken), secondSocket = await connect(second, secondToken);
+  firstSocket.resume(); secondSocket.resume();
+  await assert.rejects(connect(first, firstToken, 'http://foreign.test'));
+  await assert.rejects(connect(first, secondToken));
+  const closed = new Promise(resolve => firstSocket.once('close', resolve));
+  await first.host.close(); await closed;
+  assert.equal(secondSocket.destroyed, false, 'Closing one workspace keeps the other connection alive');
+  assert.equal((await fetch(second.host.origin + '/__local/config', { headers: { 'sec-fetch-site': 'same-origin' } })).status, 200);
+});
+
 test('short-session control is absent by default and available only in the explicit recovery fixture', async t => {
   const originalFlag = process.env.STOCKS_LOCAL_STACK_ONLY;
   const disabled = await fixture(t);
