@@ -19,7 +19,7 @@ const runtime = (input: Parameters<typeof tcRuntime>[0] = {}): RuntimeStatus => 
 const EMPTY_HISTORY: HistoryState = { phase: "ready", items: [], nextBeforeVersion: null, complete: true, observedAt: TC_OBSERVED_AT, error: null, failedPage: null }
 
 function snapshot(patch: Partial<TradingControlSnapshot> = {}): TradingControlSnapshot {
-  return { scopeKey: "scope", access: "ok", control: loaded(state(0, true)), runtime: loaded(runtime()), history: EMPTY_HISTORY, command: null, abandoned: null, ...patch }
+  return { scopeKey: "scope", access: "ok", control: loaded(state(0, true)), runtime: loaded(runtime()), history: EMPTY_HISTORY, command: null, abandoned: null, controlReadSeq: 1, ...patch }
 }
 function render(value: TradingControlSnapshot, extra: Partial<TradingControlViewProps> = {}) {
   return renderToStaticMarkup(
@@ -48,6 +48,7 @@ function command(phase: CommandState["phase"], patch: Partial<CommandState> = {}
     error: null,
     timedOut: false,
     retryRefused: false,
+    unknownSeq: null,
     ...patch,
   }
 }
@@ -141,7 +142,7 @@ test("control 404 means not enabled: no command, no history; access states show 
 
 test("outcomes: sending, accepted, replayed (old event, later state), conflict, refused, unknown", () => {
   const sending = text(render(snapshot({ command: command("sending") })))
-  assert.match(sending, /Sending the resume command… Attempt 1, key tc-tes…0001 tc-test-key-0001 ?\. Waiting for the server's answer\. No new command can be started until this one is answered or marked unknown\./)
+  assert.match(sending, /Sending the resume command… Attempt 1, key tc-tes…0001 tc-test-key-0001 ?\. Waiting for the server's answer\. No new command can be started until this one is answered, or until its unknown result is discarded\./)
   assert.doesNotMatch(sending, /Review resume|Confirm resume/, "no second command while sending")
 
   const accepted = command("accepted", { result: { change: { state: state(1, false, { reason: "Verified local reconciliation" }), change: event(1, false, { previousPaused: true, reason: "Verified local reconciliation" }), replayed: false }, meta: META } })
@@ -154,11 +155,13 @@ test("outcomes: sending, accepted, replayed (old event, later state), conflict, 
   const replayed = command("replayed", { attempts: 2, result: { change: { state: state(2, true, { operatorId: "ops-control-b" }), change: event(1, false, { previousPaused: true, reason: "Verified local reconciliation" }), replayed: true }, meta: META } })
   const r = text(render(snapshot({ control: loaded(state(2, true)), command: replayed })))
   assert.match(r, /Already recorded earlier: the resume command \(replayed\) The server returned this command's original event; nothing was changed again\./)
-  assert.match(r, /Manual gate in this response \(2026-09-19T09:00:00\.000Z\): Paused · version 2\. It differs from this request's event: a later change \(version 2\) is in effect\./)
+  assert.match(r, /Manual gate in this response \(2026-09-19T09:00:00\.000Z\): Paused · version 2\. It differs from this request's event: a later change \(version 2\) had been recorded by then\./)
   assert.doesNotMatch(r, /not a full trading resume/, "an old resume is not presented as resuming now")
 
   const conflict = text(render(snapshot({ command: command("conflict", { error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) })))
   assert.match(conflict, /Not applied: the state changed first \(409\) The resume was based on version 0, but the state had already moved on, so the server changed nothing for this request\. The current state was read again \(shown above\)\..*this command will not be resent\./)
+  const failedReread = text(render(snapshot({ control: { ...loaded(state(1, false)), phase: "error", error: failed("server", 503) }, command: command("conflict", { error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) })))
+  assert.match(failedReread, /Reading the current state again failed; read it successfully before starting a new command\./)
   const rereading = text(render(snapshot({ control: { ...loaded(state(1, false)), phase: "loading" }, command: command("conflict", { error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) })))
   assert.match(rereading, /The current state is being read again\./)
 
@@ -181,16 +184,21 @@ test("outcomes: sending, accepted, replayed (old event, later state), conflict, 
     [{ error: failed("aborted"), timedOut: true }, /no answer arrived in time/],
   ]
   for (const [patch, why] of unknowns) {
-    const html = render(snapshot({ command: command("unknown", { attempts: 2, ...patch }) }))
+    // Read after the unknown outcome (mark 2 > 1): the retry is offered.
+    const html = render(snapshot({ controlReadSeq: 2, command: command("unknown", { attempts: 2, unknownSeq: 1, ...patch }) }))
     const t = text(html)
     assert.match(t, /Result unknown: the resume may or may not have been recorded/)
     assert.match(t, why)
     // The short key is followed by its full value for screen readers.
     assert.match(t, /Do not assume that the resume failed or succeeded\. Attempt 2, key tc-tes…0001 tc-test-key-0001 ?\./)
-    assert.match(t, /a version 1 change with your reason means it was recorded/)
+    assert.match(t, /In the change history, a version 1 resume with the reason “ ?Verified local reconciliation ?” means it was recorded; any other change at version 1 means it was not, and it can no longer be recorded\./)
     assert.match(t, /Retry the same command Read state and history Discard this command/)
     assert.doesNotMatch(t, /Review resume|Review pause/, "no new command while the result is unknown")
     assert.match(html, /data-outcome="unknown"/)
+    // Not read since the outcome: read first, no Retry.
+    const first = text(render(snapshot({ controlReadSeq: 1, command: command("unknown", { attempts: 2, unknownSeq: 3, ...patch }) })))
+    assert.match(first, /Read the state and history first\. Retrying becomes available after a successful read taken now/)
+    assert.doesNotMatch(first, /Retry the same command/)
   }
 })
 
@@ -212,7 +220,7 @@ test("only the reviewed command controls exist; every button is one of a fixed s
   const htmls = [
     render(snapshot()),
     render(snapshot(), { initialDraft: { step: "review", reason: "x" } }),
-    render(snapshot({ command: command("unknown", { error: failed("network") }) })),
+    render(snapshot({ controlReadSeq: 3, command: command("unknown", { error: failed("network"), unknownSeq: 2 }) })),
     render(snapshot({ command: command("conflict", { error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) })),
     render(snapshot({ history: { ...EMPTY_HISTORY, items: [event(1, false, { previousPaused: true })], complete: false, nextBeforeVersion: 1 } })),
     render(snapshot({ access: "unauthorized" }), { onSignInRequired: noop }),
@@ -254,10 +262,17 @@ test("retained values are never stated as the present: gate card, admission noti
   assert.match(empty, /No changes were recorded as of the earlier read at 2026-09-19T09:00:00\.000Z\./)
   assert.doesNotMatch(empty, /No changes recorded for this deployment\./)
   // Before a command whose result is unknown, the shown state may be outdated.
-  const unknown = text(render(snapshot({ command: command("unknown", { error: failed("network") }) })))
-  assert.match(unknown, /Read before a command whose result is unknown The state below was read at 2026-09-19T09:00:00\.000Z, before that command; it may no longer be current\./)
-  const reread = text(render(snapshot({ control: loaded(state(1, false)), command: command("unknown", { error: failed("network"), basis: { paused: true, version: 0, observedAt: "2026-09-19T08:59:00.000Z", deploymentDigest: state(0, true).deploymentDigest } }) })))
+  const unknown = text(render(snapshot({ controlReadSeq: 1, command: command("unknown", { error: failed("network"), unknownSeq: 2 }) })))
+  assert.match(unknown, /Read before a command whose result is unknown The state below was read at 2026-09-19T09:00:00\.000Z, before that command's outcome; it may no longer be current\./)
+  const reread = text(render(snapshot({ control: loaded(state(1, false)), controlReadSeq: 3, command: command("unknown", { error: failed("network"), unknownSeq: 2 }) })))
   assert.doesNotMatch(reread, /Read before a command whose result is unknown/)
+  const sending = text(render(snapshot({ command: command("sending") })))
+  assert.match(sending, /A command is being sent The state below was read at 2026-09-19T09:00:00\.000Z, before it; it may change when the command is answered\./)
+  // A resumed gate read before an unresolved command is stated in the past tense, and no new command starts from it.
+  const resumedBefore = text(render(snapshot({ control: loaded(state(1, false)), controlReadSeq: 1, abandoned: { paused: true, expectedVersion: 1, idempotencyKey: "tc-test-key-0009", reason: "Pause drill", sinceSeq: 4 } })))
+  assert.match(resumedBefore, /At the earlier read \(2026-09-19T09:00:00\.000Z\) the manual gate was resumed; that alone does not resume trading/)
+  assert.match(resumedBefore, /The state above was read before a command whose result is unknown\. Read it again before starting a new command\./)
+  assert.doesNotMatch(resumedBefore, /Review pause/)
 })
 
 test("remaining reasons include the control store and unknown runtime; in-flight warnings stay in header and pause outcome", () => {
@@ -278,20 +293,30 @@ test("remaining reasons include the control store and unknown runtime; in-flight
   // A replayed resume after a later pause and resume: same paused value, later version.
   const later = command("replayed", { result: { change: { state: state(3, false), change: event(1, false, { previousPaused: true, reason: "Verified local reconciliation" }), replayed: true }, meta: META } })
   const t = text(render(snapshot({ control: loaded(state(3, false)), command: later })))
-  assert.match(t, /Resumed · version 3\. It differs from this request's event: a later change \(version 3\) is in effect\./)
+  assert.match(t, /Resumed · version 3\. It differs from this request's event: a later change \(version 3\) had been recorded by then\./)
   assert.doesNotMatch(t, /not a full trading resume/)
 })
 
 test("a refused retry, a changed deployment and an abandoned command stay unknown and say what is and is not known", () => {
-  const refused = text(render(snapshot({ command: command("unknown", { attempts: 2, retryRefused: true, error: failed("forbidden", 403, "OPERATOR_FORBIDDEN") }) })))
-  assert.match(refused, /Result unknown: the resume may or may not have been recorded No verifiable answer: the retry was refused \(403 OPERATOR_FORBIDDEN\)\. That refusal only means the retry changed nothing; the earlier attempt may still have been recorded\./)
+  const refused = text(render(snapshot({ controlReadSeq: 3, command: command("unknown", { attempts: 2, unknownSeq: 2, retryRefused: true, error: failed("forbidden", 403, "OPERATOR_FORBIDDEN") }) })))
+  assert.match(refused, /Result unknown: the resume may or may not have been recorded No verifiable answer: the retry was refused \(403 OPERATOR_FORBIDDEN\): this session may not change trading control now, or it could not be verified\. That refusal only concerns the retry; the earlier attempt may still have been recorded\./)
   assert.doesNotMatch(refused, /Nothing was changed/)
-  const moved = render(snapshot({ control: loaded({ ...state(0, true), deploymentDigest: "a".repeat(64) }), command: command("unknown", { error: failed("network") }) }))
-  assert.match(text(moved), /The server now serves a different deployment than the one this command was reviewed for\. It cannot be retried here/)
+  for (const [error, copy] of [
+    [failed("request", 400, "INVALID_TRADING_CONTROL_INPUT"), /the identical command was refused as invalid \(400 INVALID_TRADING_CONTROL_INPUT\), so retrying cannot help/],
+    [failed("request", 409, "CONTROL_IDEMPOTENCY_CONFLICT"), /this key as already recorded with different details \(409 CONTROL_IDEMPOTENCY_CONFLICT\), so retrying cannot help/],
+  ] as const) {
+    const html = render(snapshot({ controlReadSeq: 3, command: command("unknown", { attempts: 2, unknownSeq: 2, retryRefused: true, error }) }))
+    assert.match(text(html), copy)
+    assert.doesNotMatch(html, />Retry the same command</, "retrying cannot help")
+  }
+  const moved = render(snapshot({ control: loaded({ ...state(0, true), deploymentDigest: "a".repeat(64) }), controlReadSeq: 3, command: command("unknown", { error: failed("network"), unknownSeq: 2 }) }))
+  assert.match(text(moved), /The server now serves a different deployment than the one this command was reviewed for\. It cannot be retried here.*Discard this command, then review the current state/)
   assert.doesNotMatch(moved, />Retry the same command</)
-  const abandoned = { paused: false, expectedVersion: 0, idempotencyKey: "tc-test-key-0001" }
-  assert.match(text(render(snapshot({ access: "forbidden", abandoned }))), /No access to trading control \(403\).*A resume command sent from this page \(key tc-tes…0001 tc-test-key-0001 ?\) had no verified result when access was lost\. It may or may not have been recorded; a version 1 change in the change history means it was\. It is not resent\./)
-  assert.match(text(render(snapshot({ abandoned }))), /An earlier command has no verified result A resume command sent from this page/)
+  const abandoned = { paused: false, expectedVersion: 0, idempotencyKey: "tc-test-key-0001", reason: "Verified local reconciliation", sinceSeq: 2 }
+  assert.match(text(render(snapshot({ access: "forbidden", abandoned }))), /No access to trading control \(403\).*A resume command sent from this page \(key tc-tes…0001 tc-test-key-0001 ?\) has no verified result\. It may or may not have been recorded, and it is not resent\. In the change history, a version 1 resume with the reason “ ?Verified local reconciliation ?” means it was recorded; any other change at version 1 means it was not, and it can no longer be recorded\./)
+  assert.match(text(render(snapshot({ abandoned, controlReadSeq: 3 }))), /An earlier command has no verified result A resume command sent from this page/)
+  // A retry that met a version conflict proves the earlier attempt was not recorded.
+  assert.match(text(render(snapshot({ command: command("conflict", { attempts: 2, error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) }))), /this also shows that the earlier attempt with this key was not recorded\./)
 })
 
 test("the version limit offers no command; event ids keep their full value; read failures are summarised once", () => {
@@ -308,8 +333,23 @@ test("the version limit offers no command; event ids keep their full value; read
   }))
   assert.equal((failedAll.match(/role="alert"/g) ?? []).length, 0, "no alert per card")
   assert.match(failedAll, /role="status" class="sr-only">Could not read: trading control state, runtime status, change history\.</)
+  const disabled = render(snapshot({ control: { phase: "error", value: null, error: failed("disabled", 404) }, history: { ...EMPTY_HISTORY, phase: "error", error: failed("disabled", 404), failedPage: "first" } }))
+  assert.match(disabled, /role="status" class="sr-only">Trading control is not enabled on this server \(404\)\.</)
   // The reason help is not a live region; only the validation message is.
   const edit = render(snapshot())
   assert.doesNotMatch(edit, /id="[^"]*-reason-help"[^>]*aria-live/)
   assert.match(edit, /id="[^"]*-reason-error"[^>]*aria-live="polite"/)
+})
+
+test("a review that can no longer be confirmed says why, by read phase, and offers only Back", () => {
+  const cases: [TradingControlSnapshot["control"], RegExp][] = [
+    [{ ...loaded(state(0, true)), phase: "loading" }, /The state is being read again This review can no longer be confirmed\. Wait for the read, then go back and review the current state\. Nothing was sent\./],
+    [{ ...loaded(state(0, true)), phase: "error", error: failed("network") }, /Reading the state again failed This review can no longer be confirmed\. Read the state successfully, then go back and review it\. Nothing was sent\./],
+  ]
+  for (const [control, copy] of cases) {
+    const html = render(snapshot({ control }), { initialDraft: { step: "review", reason: "Verified local reconciliation" } })
+    assert.match(text(html), copy)
+    assert.doesNotMatch(html, />Confirm (pause|resume)</)
+    assert.match(html, /role="group"[^>]*aria-labelledby="[^"]*-review-title"/)
+  }
 })

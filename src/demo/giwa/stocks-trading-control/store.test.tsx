@@ -39,6 +39,13 @@ async function readAll(store: TradingControlStore, transport: ReturnType<typeof 
   await flush()
 }
 
+/** A retry needs a successful control read started after the unknown outcome. */
+async function reread(store: TradingControlStore, transport: ReturnType<typeof controlledTcTransport>, state: unknown = tcState(0, true)) {
+  store.loadControl()
+  transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead(state)))
+  await flush()
+}
+
 function reviewed(store: TradingControlStore) {
   const value = store.getSnapshot().control.value!
   return { version: value.data.version, paused: value.data.paused, observedAt: value.meta.observedAt }
@@ -172,6 +179,8 @@ test("unknown outcomes (503, 502, network, invalid 200, timeout): the same comma
     assert.equal(store.getSnapshot().control.value?.data.version, 0, `${name}: never assumed applied`)
     assert.equal(store.start({ paused: true, reason: "Something else", reviewed: reviewed(store) }), "busy", `${name}: resolve the unknown command first`)
     assert.equal(transport.pending.length, 0, `${name}: nothing else sent`)
+    assert.equal(store.retry(), "read_first", `${name}: read the state first`)
+    await reread(store, transport)
     assert.equal(store.retry(), null)
     const second = transport.take("POST", TRADING_CONTROL_PATH)
     assert.equal(second.init.body, first.init.body, `${name}: identical command and key`)
@@ -189,7 +198,8 @@ test("an old resume replayed after a later pause: the old event is shown with th
   store.start({ paused: false, reason: REASON, reviewed: reviewed(store) })
   transport.take("POST", TRADING_CONTROL_PATH).fail()
   await flush()
-  store.retry()
+  await reread(store, transport, tcState(2, true, { operatorId: "ops-control-b", reason: "Paused again" }))
+  assert.equal(store.retry(), null)
   transport.take("POST", TRADING_CONTROL_PATH).respond(ok(tcChange(tcState(2, true, { operatorId: "ops-control-b", reason: "Paused again" }), resumeEvent(), true)))
   await flush()
   const snapshot = store.getSnapshot()
@@ -228,7 +238,8 @@ test("token rotation keeps the unknown command; its retry uses the new Bearer an
   await flush()
   store.configure({ ...config, session: { id: "session-a", accessToken: "token-a2" } })
   assert.equal(store.getSnapshot().command?.phase, "unknown", "same session: kept")
-  store.retry()
+  await reread(store, transport)
+  assert.equal(store.retry(), null)
   const second = transport.take("POST", TRADING_CONTROL_PATH)
   assert.equal(second.authorization, "Bearer token-a2")
   assert.equal(second.init.body, first.init.body)
@@ -329,6 +340,8 @@ async function unknownCommand(options: Parameters<typeof setup>[0] = {}) {
   context.transport.take("POST", TRADING_CONTROL_PATH).respond({ status: 503, body: tcError("TRADING_CONTROL_UNAVAILABLE") })
   await flush()
   assert.equal(context.store.getSnapshot().command?.phase, "unknown")
+  assert.equal(context.store.retry(), "read_first")
+  await reread(context.store, context.transport)
   return context
 }
 
@@ -379,6 +392,8 @@ test("a timeout is unknown at once even if the transport never settles; a late a
   await new Promise((resolve) => setTimeout(resolve, 50))
   await flush()
   assert.deepEqual([store.getSnapshot().command?.phase, store.getSnapshot().command?.timedOut], ["unknown", true])
+  assert.equal(store.retry(), "read_first")
+  await reread(store, transport)
   assert.equal(store.retry(), null)
   const second = transport.all.filter((request) => request.method === "POST")[1]
   first.respond(ok(tcChange(resumedState(), resumeEvent())))
@@ -404,7 +419,8 @@ test("an access denial while a result is unknown keeps a note in the same scope 
   store.loadControl()
   transport.take("GET", TRADING_CONTROL_PATH).respond({ status: 403, body: tcError("OPERATOR_FORBIDDEN") })
   await flush()
-  assert.deepEqual([store.getSnapshot().access, store.getSnapshot().command, store.getSnapshot().abandoned], ["forbidden", null, { paused: false, expectedVersion: 0, idempotencyKey: key }])
+  const note = store.getSnapshot().abandoned
+  assert.deepEqual([store.getSnapshot().access, store.getSnapshot().command, note?.paused, note?.expectedVersion, note?.idempotencyKey, note?.reason], ["forbidden", null, false, 0, key, REASON])
   store.retryAccess()
   assert.deepEqual([store.getSnapshot().access, store.getSnapshot().abandoned?.idempotencyKey], ["ok", key])
   assert.equal(posts(transport).length, 1, "never resent")
@@ -468,4 +484,70 @@ test("history: without a readable control state, an older page must still contin
   await flush()
   const history = store.getSnapshot().history
   assert.deepEqual([history.phase, history.error?.kind, history.failedPage, history.items.length], ["error", "invalid", "older", 20])
+})
+
+// ---------------------------------------------------------------- review round 2 (order marks, unresolved commands)
+
+test("a POST answer for another deployment than the one shown never replaces it; that deployment is read again", async () => {
+  const { store, transport } = setup()
+  await readAll(store, transport)
+  store.start({ paused: false, reason: REASON, reviewed: reviewed(store) })
+  store.loadControl()
+  transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead({ ...tcState(2, false), deploymentDigest: "b".repeat(64) }), "2026-09-19T09:00:10.000Z"))
+  await flush()
+  transport.take("POST", TRADING_CONTROL_PATH).respond(ok(tcChange(resumedState(), resumeEvent()), "2026-09-19T09:00:03.000Z"))
+  await flush()
+  const snapshot = store.getSnapshot()
+  assert.equal(snapshot.command?.phase, "accepted")
+  assert.deepEqual([snapshot.control.value?.data.deploymentDigest, snapshot.control.value?.meta.observedAt], ["b".repeat(64), "2026-09-19T09:00:10.000Z"])
+  assert.ok(transport.pending.some((request) => request.method === "GET" && request.path === TRADING_CONTROL_PATH), "the shown deployment is read again")
+})
+
+test("order marks: a read started before a POST answer never replaces it; a read started after it always does", async () => {
+  const { store, transport } = setup({ ignoreAbort: true })
+  await readAll(store, transport)
+  store.start({ paused: false, reason: REASON, reviewed: reviewed(store) })
+  store.loadControl()
+  const before = transport.take("GET", TRADING_CONTROL_PATH)
+  transport.take("POST", TRADING_CONTROL_PATH).respond(ok(tcChange(resumedState(), resumeEvent())))
+  await flush()
+  store.loadControl()
+  const after = transport.all.filter((request) => request.method === "GET" && request.path === TRADING_CONTROL_PATH).slice(-1)[0]
+  before.respond(ok(tcRead(tcState(0, true))))
+  await flush()
+  assert.equal(store.getSnapshot().control.value?.data.version, 1, "the older read is ignored")
+  after.respond(ok(tcRead(tcState(3, true, { reason: "Later change" }))))
+  await flush()
+  assert.equal(store.getSnapshot().control.value?.data.version, 3, "a newer read wins")
+})
+
+test("discarding an unknown command keeps it as an unresolved note and reads again; no new command from a read taken before it", async () => {
+  const { store, transport } = setup()
+  await readAll(store, transport)
+  store.start({ paused: false, reason: REASON, reviewed: reviewed(store) })
+  transport.take("POST", TRADING_CONTROL_PATH).fail()
+  await flush()
+  assert.equal(store.discard(), true)
+  const note = store.getSnapshot().abandoned
+  assert.deepEqual([store.getSnapshot().command, note?.paused, note?.expectedVersion, note?.reason], [null, false, 0, REASON])
+  assert.equal(store.start({ paused: false, reason: REASON, reviewed: reviewed(store) }), "not_ready", "the state is being read again")
+  const read = transport.take("GET", TRADING_CONTROL_PATH)
+  read.respond(ok(tcRead(resumedState())))
+  await flush()
+  assert.equal(store.getSnapshot().control.value?.data.version, 1, "it had been recorded")
+  // The note stays until the operator closes it; a read taken after it allows a new command.
+  assert.ok(store.getSnapshot().abandoned)
+  assert.equal(store.start({ paused: true, reason: "Pause after checking", reviewed: reviewed(store) }), null)
+})
+
+test("a retry that the identical command can never pass (400, idempotency conflict) is not offered", async () => {
+  for (const reply of [{ status: 400, body: tcError("INVALID_TRADING_CONTROL_INPUT") }, { status: 409, body: tcError("CONTROL_IDEMPOTENCY_CONFLICT") }] as TcReply[]) {
+    const { store, transport } = await unknownCommand()
+    store.retry()
+    transport.take("POST", TRADING_CONTROL_PATH).respond(reply)
+    await flush()
+    await reread(store, transport)
+    assert.equal(store.retry(), "not_retryable", String(reply.status))
+    assert.equal(posts(transport).length, 2)
+  }
 })

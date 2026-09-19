@@ -13,8 +13,11 @@
 //   retry too: the server checks the key before the version, so it proves the key was never recorded). A first attempt
 //   refused with 400/401/403/404/idempotency conflict changed nothing. Anything else (503, 5xx, network, timeout,
 //   invalid 200), and any refusal of a retry, is unknown: the earlier attempt may or may not have been recorded.
-// - A POST answer never replaces a newer state that is already shown. A retry is refused once the server serves another
-//   deployment than the one the command was reviewed for (keys are deployment-scoped).
+// - Every control value carries an order mark (the read's request sequence, or the POST answer's). A read started before
+//   the shown value never replaces it; a POST answer never replaces a newer state of the same deployment, nor a state of
+//   another deployment (that one is read again instead).
+// - After an unknown outcome a retry needs a successful control read started after it, of the same deployment (keys are
+//   deployment-scoped). Discarding an unknown command keeps it as an unresolved note; so does an access denial.
 import { scopeKeyOf } from "../stocks-admin/store"
 import type { StocksAdminError } from "../stocks-admin/types"
 import { newIdempotencyKey, readRuntimeStatus, readTradingControl, readTradingControlHistory, sendTradingControlCommand } from "./client"
@@ -22,6 +25,7 @@ import { IDEMPOTENCY_KEY, MAX_VERSION, checkReason } from "./parse"
 import type {
   AbandonedCommand,
   CommandPhase,
+  CommandState,
   HistoryState,
   ResourceState,
   StocksAdminFetch,
@@ -48,7 +52,7 @@ const IDLE = Object.freeze({ phase: "idle", value: null, error: null }) as Resou
 const EMPTY_HISTORY: HistoryState = Object.freeze({ phase: "idle", items: [], nextBeforeVersion: null, complete: false, observedAt: null, error: null, failedPage: null })
 
 function emptySnapshot(scopeKey: string, access: TradingControlAccess, abandoned: AbandonedCommand | null = null): TradingControlSnapshot {
-  return { scopeKey, access, control: IDLE, runtime: IDLE, history: EMPTY_HISTORY, command: null, abandoned }
+  return { scopeKey, access, control: IDLE, runtime: IDLE, history: EMPTY_HISTORY, command: null, abandoned, controlReadSeq: null }
 }
 
 type ReadKey = "control" | "runtime" | "history"
@@ -60,9 +64,9 @@ export function canLoadOlder(history: HistoryState): boolean {
 }
 
 /** Why a start request was refused locally (nothing was sent). */
-export type StartRefusal = "not_ready" | "busy" | "stale_review" | "invalid_reason" | "version_limit" | "invalid_key"
+export type StartRefusal = "not_ready" | "busy" | "read_first" | "stale_review" | "invalid_reason" | "version_limit" | "invalid_key"
 /** Why a retry was refused locally (nothing was sent). */
-export type RetryRefusal = "not_unknown" | "deployment_changed"
+export type RetryRefusal = "not_unknown" | "not_retryable" | "read_first" | "deployment_changed"
 
 /**
  * The outcome of one attempt that did not return a verified event. `attempt` is 1 for the first send; a refusal of a
@@ -152,8 +156,16 @@ export class TradingControlStore {
     void readTradingControl(this.request(signal)).then((result) => {
       if (!this.isLatest("control", generation, sequence)) return
       this.controllers.delete("control")
-      if (result.ok) this.write({ control: { phase: "ready", value: { data: result.data, meta: result.meta, loadedAt: this.now() }, error: null } })
-      else if (!this.denyOnAccessError(result.error)) this.write({ control: { phase: "error", value: this.snapshot.control.value, error: result.error } })
+      if (result.ok) {
+        // A read that started before the shown value was obtained (a POST answer) is older: it never replaces it.
+        const shown = this.snapshot.controlReadSeq
+        if (shown !== null && sequence < shown) return
+        this.write({ control: { phase: "ready", value: { data: result.data, meta: result.meta, loadedAt: this.now() }, error: null }, controlReadSeq: sequence })
+      } else if (!this.denyOnAccessError(result.error)) {
+        const shown = this.snapshot.controlReadSeq
+        if (shown !== null && sequence < shown) return
+        this.write({ control: { phase: "error", value: this.snapshot.control.value, error: result.error } })
+      }
     })
   }
 
@@ -222,6 +234,8 @@ export class TradingControlStore {
     if (!this.active || this.snapshot.access !== "ok" || control.phase !== "ready" || control.error !== null || control.value === null) return "not_ready"
     const phase = this.snapshot.command?.phase
     if (phase === "sending" || phase === "unknown") return "busy"
+    // A state read before an unresolved command may be outdated: read again first.
+    if (readBeforeUnresolved(this.snapshot)) return "read_first"
     const state = control.value.data
     // The operator confirmed what they reviewed; if the shown state has moved since, they must review again.
     if (state.version !== input.reviewed.version || state.paused !== input.reviewed.paused || control.value.meta.observedAt !== input.reviewed.observedAt) return "stale_review"
@@ -240,6 +254,7 @@ export class TradingControlStore {
         error: null,
         timedOut: false,
         retryRefused: false,
+        unknownSeq: null,
       },
     })
     this.send()
@@ -251,18 +266,24 @@ export class TradingControlStore {
    * deployment the command was reviewed for: on another deployment the key is unknown and it would be a new command.
    */
   retry(): RetryRefusal | null {
-    const command = this.snapshot.command
-    if (!this.active || this.snapshot.access !== "ok" || command?.phase !== "unknown") return "not_unknown"
-    if (retryDeploymentChanged(this.snapshot)) return "deployment_changed"
+    if (!this.active) return "not_unknown"
+    const refusal = retryReadiness(this.snapshot)
+    if (refusal !== null) return refusal
     this.send()
     return null
   }
 
-  /** Closes the command panel. A command in flight cannot be discarded (its answer is awaited). */
+  /**
+   * Closes the command panel. A command in flight cannot be discarded (its answer is awaited). An unknown command stays
+   * as an unresolved note (it may have been recorded) and the state is read again.
+   */
   discard(): boolean {
     const command = this.snapshot.command
     if (!command || command.phase === "sending") return false
-    this.write({ command: null })
+    if (command.phase === "unknown") {
+      this.write({ command: null, abandoned: abandonedOf(command, command.unknownSeq ?? ++this.sequence) })
+      this.refresh()
+    } else this.write({ command: null })
     return true
   }
 
@@ -295,10 +316,10 @@ export class TradingControlStore {
       this.clearCommandTransport()
       const command = this.snapshot.command
       if (command && command.command === frozen && command.phase === "sending") {
-        this.write({ command: { ...command, phase: "unknown", result: null, error: { kind: "aborted", status: null, code: null }, timedOut: true, retryRefused: false } })
+        this.write({ command: { ...command, phase: "unknown", result: null, error: { kind: "aborted", status: null, code: null }, timedOut: true, retryRefused: false, unknownSeq: ++this.sequence } })
       }
     }, this.config.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS)
-    this.write({ command: { ...current, phase: "sending", attempts: attempt, error: null, timedOut: false, retryRefused: false } })
+    this.write({ command: { ...current, phase: "sending", attempts: attempt, error: null, timedOut: false, retryRefused: false, unknownSeq: null } })
     void sendTradingControlCommand({ ...this.request(controller.signal), command: frozen }).then((result) => {
       if (!this.active || generation !== this.generation || sequence !== this.commandSequence) return
       this.clearCommandTransport()
@@ -307,13 +328,16 @@ export class TradingControlStore {
       if (result.ok) {
         const shown = this.snapshot.control.value?.data
         const state = result.data.state
-        // The response state becomes the current value unless a newer state of the same deployment is already shown.
-        const newerShown = shown !== undefined && shown.deploymentDigest === state.deploymentDigest && shown.version > state.version
-        if (!newerShown) this.cancel("control")
+        // The response state becomes the current value, unless a newer state of the same deployment is already shown, or
+        // the shown state belongs to another deployment (then that deployment is read again instead).
+        const otherDeployment = shown !== undefined && shown.deploymentDigest !== state.deploymentDigest
+        const newerShown = shown !== undefined && !otherDeployment && shown.version > state.version
+        const keep = otherDeployment || newerShown
         this.write({
-          command: { ...command, phase: result.data.replayed ? "replayed" : "accepted", result: { change: result.data, meta: result.meta }, error: null, timedOut: false, retryRefused: false },
-          ...(newerShown ? {} : { control: { phase: "ready" as const, value: { data: state, meta: result.meta, loadedAt: this.now() }, error: null } }),
+          command: { ...command, phase: result.data.replayed ? "replayed" : "accepted", result: { change: result.data, meta: result.meta }, error: null, timedOut: false, retryRefused: false, unknownSeq: null },
+          ...(keep ? {} : { control: { phase: "ready" as const, value: { data: state, meta: result.meta, loadedAt: this.now() }, error: null }, controlReadSeq: ++this.sequence }),
         })
+        if (otherDeployment) this.loadControl()
         this.loadHistory(null)
         this.loadRuntime()
         return
@@ -321,7 +345,7 @@ export class TradingControlStore {
       if (result.error.kind === "aborted") return
       const phase = commandPhaseOf(result.error, false, attempt)
       const retryRefused = phase === "unknown" && attempt > 1 && result.error.kind !== "server" && result.error.kind !== "network" && result.error.kind !== "invalid"
-      this.write({ command: { ...command, phase, result: null, error: result.error, timedOut: false, retryRefused } })
+      this.write({ command: { ...command, phase, result: null, error: result.error, timedOut: false, retryRefused, unknownSeq: phase === "unknown" ? ++this.sequence : null } })
       if (phase === "conflict" || retryRefused || (phase === "rejected" && result.error.code === "CONTROL_IDEMPOTENCY_CONFLICT")) this.refresh()
     })
   }
@@ -355,12 +379,6 @@ export class TradingControlStore {
     return { sequence: this.sequence, signal: controller.signal }
   }
 
-  private cancel(key: ReadKey): void {
-    this.controllers.get(key)?.abort()
-    this.controllers.delete(key)
-    this.latest.delete(key)
-  }
-
   private isLatest(key: ReadKey, generation: number, sequence: number): boolean {
     return this.active && generation === this.generation && this.latest.get(key) === sequence
   }
@@ -370,7 +388,7 @@ export class TradingControlStore {
     if (!access) return false
     // Same scope: a command whose result is not known is not forgotten silently (its key is never resent).
     const command = this.snapshot.command
-    const abandoned = command && (command.phase === "sending" || command.phase === "unknown") ? { paused: command.command.paused, expectedVersion: command.command.expectedVersion, idempotencyKey: command.command.idempotencyKey } : this.snapshot.abandoned
+    const abandoned = command && (command.phase === "sending" || command.phase === "unknown") ? abandonedOf(command, ++this.sequence) : this.snapshot.abandoned
     this.reset(this.snapshot.scopeKey, access, abandoned)
     return true
   }
@@ -402,9 +420,40 @@ export class TradingControlStore {
   }
 }
 
-/** True when the state now read belongs to another deployment than the unknown command was reviewed for. */
-export function retryDeploymentChanged(snapshot: TradingControlSnapshot): boolean {
+function abandonedOf(command: CommandState, sinceSeq: number): AbandonedCommand {
+  const { paused, expectedVersion, idempotencyKey, reason } = command.command
+  return { paused, expectedVersion, idempotencyKey, reason, sinceSeq }
+}
+
+/**
+ * The order mark after which a control read reflects every command whose result this page does not know: a command in
+ * flight (any shown value predates it), an unknown command, or an unresolved note.
+ */
+function unresolvedMark(snapshot: TradingControlSnapshot): number | null {
   const command = snapshot.command
-  const shown = snapshot.control.value?.data
-  return command !== null && shown !== undefined && shown.deploymentDigest !== command.basis.deploymentDigest
+  if (command?.phase === "sending") return Number.POSITIVE_INFINITY
+  const marks = [command?.phase === "unknown" ? command.unknownSeq : null, snapshot.abandoned?.sinceSeq ?? null].filter((mark): mark is number => mark !== null)
+  return marks.length > 0 ? Math.max(...marks) : null
+}
+
+/** True when the shown control value was read before a command whose result this page does not know. */
+export function readBeforeUnresolved(snapshot: TradingControlSnapshot): boolean {
+  const mark = unresolvedMark(snapshot)
+  if (mark === null || snapshot.control.value === null) return false
+  return snapshot.controlReadSeq === null || snapshot.controlReadSeq <= mark
+}
+
+/**
+ * Whether an unknown command may be retried now (null) or why not. A retry needs a successful control read started after
+ * the unknown outcome, of the deployment the command was reviewed for; the identical command refused as invalid (400) or
+ * as an idempotency conflict cannot succeed by retrying.
+ */
+export function retryReadiness(snapshot: TradingControlSnapshot): RetryRefusal | null {
+  const command = snapshot.command
+  if (snapshot.access !== "ok" || command?.phase !== "unknown") return "not_unknown"
+  if (command.retryRefused && (command.error?.status === 400 || command.error?.code === "CONTROL_IDEMPOTENCY_CONFLICT")) return "not_retryable"
+  const control = snapshot.control
+  if (control.phase !== "ready" || control.error !== null || control.value === null || command.unknownSeq === null || snapshot.controlReadSeq === null || snapshot.controlReadSeq <= command.unknownSeq) return "read_first"
+  if (control.value.data.deploymentDigest !== command.basis.deploymentDigest) return "deployment_changed"
+  return null
 }

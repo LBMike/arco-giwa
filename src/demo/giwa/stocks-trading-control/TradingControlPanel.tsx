@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { formatUtcMs } from "../stocks-admin/format"
 import { Button, Card, EmptyRow, FOCUS_RING, Field, Fields, Mono, Notice, Pill, RefreshButton, Time } from "../stocks-admin/ui"
 import { MAX_VERSION, REASON_MAX_LENGTH, checkReason } from "./parse"
-import { canLoadOlder, retryDeploymentChanged, type RetryRefusal, type StartRefusal } from "./store"
+import { canLoadOlder, readBeforeUnresolved, retryReadiness, type RetryRefusal, type StartRefusal } from "./store"
 import type {
   AbandonedCommand,
   CommandState,
@@ -79,11 +79,14 @@ function readErrorCopy(error: StocksAdminError, what: string): { title: string; 
 
 export function TradingControlView(props: TradingControlViewProps) {
   const { snapshot } = props
+  const disabled = snapshot.control.error?.kind === "disabled"
   const failed = [
-    snapshot.control.phase === "error" ? "trading control state" : null,
+    snapshot.control.phase === "error" && !disabled ? "trading control state" : null,
     snapshot.runtime.phase === "error" ? "runtime status" : null,
-    snapshot.history.phase === "error" ? "change history" : null,
+    snapshot.history.phase === "error" && !disabled ? "change history" : null,
   ].filter((item): item is string => item !== null)
+  const summary = [disabled ? "Trading control is not enabled on this server (404)." : "", failed.length > 0 ? `Could not read: ${failed.join(", ")}.` : ""].filter(Boolean).join(" ")
+  const beforeUnresolved = readBeforeUnresolved(snapshot)
   return (
     <section aria-labelledby="stocks-trading-control-title" className="w-full min-w-0 space-y-4" data-testid="stocks-trading-control">
       <header className="w-full min-w-0 rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-4 shadow-[var(--shadow-control)]">
@@ -97,15 +100,15 @@ export function TradingControlView(props: TradingControlViewProps) {
         </p>
         {/* One announcement for failed reads instead of one alert per card. */}
         <p role="status" className="sr-only">
-          {snapshot.access === "ok" && failed.length > 0 ? `Could not read: ${failed.join(", ")}.` : ""}
+          {snapshot.access === "ok" ? summary : ""}
         </p>
       </header>
       {snapshot.access !== "ok" ? (
         <AccessNotice access={snapshot.access} abandoned={snapshot.abandoned} onRetry={props.onRetryAccess} onSignInRequired={props.onSignInRequired} />
       ) : (
         <div className="grid w-full min-w-0 gap-4 xl:grid-cols-2">
-          <GateCard control={snapshot.control} command={snapshot.command} now={props.now} onRefresh={props.onRefresh} />
-          <AdmissionCard runtime={snapshot.runtime} control={snapshot.control} />
+          <GateCard control={snapshot.control} unresolved={beforeUnresolved ? (snapshot.command?.phase === "sending" ? "sending" : "unknown") : null} now={props.now} onRefresh={props.onRefresh} />
+          <AdmissionCard runtime={snapshot.runtime} control={snapshot.control} gateCurrent={snapshot.control.error === null && !beforeUnresolved} />
           <div className="min-w-0 xl:col-span-2">
             <CommandCard {...props} key={snapshot.scopeKey} />
           </div>
@@ -120,11 +123,22 @@ export function TradingControlView(props: TradingControlViewProps) {
   )
 }
 
+/** How to tell from the history whether a command with an unknown result was recorded. */
+function RecordedCheck({ paused, expectedVersion, reason }: { paused: boolean; expectedVersion: number; reason: string }) {
+  const version = expectedVersion + 1
+  return (
+    <>
+      In the change history, a version {version} {actionWord(paused)} with the reason “<span className="break-words">{reason}</span>” means it was recorded; any other change
+      at version {version} means it was not, and it can no longer be recorded.
+    </>
+  )
+}
+
 function AbandonedNote({ abandoned }: { abandoned: AbandonedCommand }) {
   return (
     <>
-      A {actionWord(abandoned.paused)} command sent from this page (key <Mono value={abandoned.idempotencyKey} short />) had no verified result when access was
-      lost. It may or may not have been recorded; a version {abandoned.expectedVersion + 1} change in the change history means it was. It is not resent.
+      A {actionWord(abandoned.paused)} command sent from this page (key <Mono value={abandoned.idempotencyKey} short />) has no verified result. It may or may not have
+      been recorded, and it is not resent. <RecordedCheck paused={abandoned.paused} expectedVersion={abandoned.expectedVersion} reason={abandoned.reason} />
     </>
   )
 }
@@ -173,11 +187,9 @@ function ReadLine({ observedAt, loadedAt, busy }: { observedAt: string; loadedAt
   )
 }
 
-function GateCard({ control, command, now, onRefresh }: { control: ResourceState<TradingControlState>; command: CommandState | null; now: number; onRefresh: () => void }) {
+function GateCard({ control, unresolved, now, onRefresh }: { control: ResourceState<TradingControlState>; unresolved: "sending" | "unknown" | null; now: number; onRefresh: () => void }) {
   const value = control.value
   const state = value?.data ?? null
-  // Read before a command whose result is unknown, and not read again since: it may no longer be current.
-  const beforeUnknown = command?.phase === "unknown" && value !== null && value.meta.observedAt === command.basis.observedAt
   return (
     <Card
       title="Manual gate (database)"
@@ -193,9 +205,14 @@ function GateCard({ control, command, now, onRefresh }: { control: ResourceState
             {state && value && ` The state below is from an earlier read at ${value.meta.observedAt}; it may no longer be current. Read it again before changing it.`}
           </Notice>
         )}
-        {beforeUnknown && value && (
+        {unresolved === "sending" && value && (
+          <Notice tone="attention" title="A command is being sent">
+            The state below was read at {value.meta.observedAt}, before it; it may change when the command is answered.
+          </Notice>
+        )}
+        {unresolved === "unknown" && value && (
           <Notice tone="attention" title="Read before a command whose result is unknown">
-            The state below was read at {value.meta.observedAt}, before that command; it may no longer be current. Read it again to check.
+            The state below was read at {value.meta.observedAt}, before that command's outcome; it may no longer be current. Read it again to check.
           </Notice>
         )}
         {!state ? (
@@ -234,12 +251,11 @@ function GateCard({ control, command, now, onRefresh }: { control: ResourceState
   )
 }
 
-function AdmissionCard({ runtime, control }: { runtime: ResourceState<RuntimeStatus>; control: ResourceState<TradingControlState> }) {
+function AdmissionCard({ runtime, control, gateCurrent }: { runtime: ResourceState<RuntimeStatus>; control: ResourceState<TradingControlState>; gateCurrent: boolean }) {
   const value = runtime.value
   const status = value?.data ?? null
   const gate = control.value?.data ?? null
-  // A kept value after a failed read is an earlier observation, never stated as the present.
-  const gateCurrent = control.error === null
+  // A kept value after a failed read, or one read before an unresolved command, is an earlier observation.
   const runtimeCurrent = runtime.error === null
   const others = remainingReasons(runtime) ?? []
   const cached = status?.operatorControl ?? null
@@ -345,10 +361,12 @@ function CommandCard(props: TradingControlViewProps) {
   const [focus, setFocus] = useState<"review" | "reason" | "outcome" | null>(null)
   const reasonRef = useRef<HTMLTextAreaElement>(null)
   const reviewRef = useRef<HTMLDivElement>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
   const command = snapshot.command
   const disabledFeature = control.error?.kind === "disabled"
   const ready = control.phase === "ready" && control.error === null && state !== null && value !== null
   const busy = command?.phase === "sending" || command?.phase === "unknown"
+  const beforeUnresolved = readBeforeUnresolved(snapshot)
   const check = checkReason(text)
   const target = state ? !state.paused : true
   const reasonsLeft = remainingReasons(snapshot.runtime)
@@ -358,9 +376,11 @@ function CommandCard(props: TradingControlViewProps) {
 
   useEffect(() => {
     if (focus === null) return
-    if (focus === "review") reviewRef.current?.focus()
-    else if (focus === "reason") reasonRef.current?.focus()
-    else document.getElementById(`${ids}-outcome`)?.focus()
+    // When the target is not rendered (for example no form while the state is read again), focus stays in this card.
+    const outcome = document.getElementById(`${ids}-outcome`)
+    if (focus === "review") (reviewRef.current ?? cardRef.current)?.focus()
+    else if (focus === "reason") (reasonRef.current ?? cardRef.current)?.focus()
+    else (outcome ?? reasonRef.current ?? cardRef.current)?.focus()
     setFocus(null)
   }, [focus, ids])
 
@@ -391,34 +411,59 @@ function CommandCard(props: TradingControlViewProps) {
       setFocus("outcome")
     } else setFocus("reason")
   }
+  const staleCopy =
+    control.phase === "loading"
+      ? { title: "The state is being read again", body: "This review can no longer be confirmed. Wait for the read, then go back and review the current state. Nothing was sent." }
+      : control.phase === "error"
+        ? { title: "Reading the state again failed", body: "This review can no longer be confirmed. Read the state successfully, then go back and review it. Nothing was sent." }
+        : { title: "The state was read again while you were reviewing", body: "This review no longer matches what is shown above. Nothing was sent. Go back and review the current state." }
 
   return (
     <Card title="Pause or resume" description="Changes only the manual gate. The server decides whether this session may change it (stocks:control); this page does not guess.">
-      <div className="flex min-w-0 flex-col gap-3" data-testid="stocks-trading-control-command">
+      <div ref={cardRef} tabIndex={-1} className={`flex min-w-0 flex-col gap-3 rounded-[var(--radius-control)] ${FOCUS_RING}`} data-testid="stocks-trading-control-command">
         {snapshot.abandoned && (
           <Notice tone="attention" title="An earlier command has no verified result">
             <AbandonedNote abandoned={snapshot.abandoned} />
             <span className="mt-2 flex flex-wrap gap-2">
-              <Button onClick={props.onDismissAbandoned}>Close</Button>
+              <Button
+                onClick={() => {
+                  props.onDismissAbandoned()
+                  setFocus("reason")
+                }}
+              >
+                Close
+              </Button>
             </span>
           </Notice>
         )}
         {command && (
           <CommandOutcome
             id={`${ids}-outcome`}
+            snapshot={snapshot}
             command={command}
-            controlPhase={control.phase}
-            deploymentChanged={retryDeploymentChanged(snapshot)}
             reasonsLeft={reasonsLeft}
-            onRetry={props.onRetry}
-            onDiscard={props.onDiscard}
+            onRetry={() => {
+              props.onRetry()
+              setFocus("outcome")
+            }}
+            onDiscard={() => {
+              props.onDiscard()
+              setFocus("reason")
+            }}
             onRefresh={props.onRefresh}
           />
         )}
         {disabledFeature ? (
           <EmptyRow>Not available: trading control is not enabled on this server.</EmptyRow>
         ) : busy ? null : reviewed ? (
-          <div ref={reviewRef} tabIndex={-1} className={`flex min-w-0 flex-col gap-3 rounded-[var(--radius-control)] ${FOCUS_RING}`} data-testid="stocks-trading-control-review" aria-labelledby={`${ids}-review-title`}>
+          <div
+            ref={reviewRef}
+            role="group"
+            tabIndex={-1}
+            className={`flex min-w-0 flex-col gap-3 rounded-[var(--radius-control)] ${FOCUS_RING}`}
+            data-testid="stocks-trading-control-review"
+            aria-labelledby={`${ids}-review-title`}
+          >
             <h4 id={`${ids}-review-title`} className="text-xs font-semibold text-[var(--color-arco-ink)]">
               Review the change
             </h4>
@@ -450,8 +495,8 @@ function CommandCard(props: TradingControlViewProps) {
               </Notice>
             )}
             {reviewStale && (
-              <Notice tone="attention" title="The state was read again while you were reviewing">
-                This review no longer matches what is shown above. Nothing was sent. Go back and review the current state.
+              <Notice tone="attention" title={staleCopy.title} live>
+                {staleCopy.body}
               </Notice>
             )}
             <div className="flex flex-wrap gap-2">
@@ -461,6 +506,8 @@ function CommandCard(props: TradingControlViewProps) {
           </div>
         ) : !ready || !state ? (
           <EmptyRow>{control.phase === "loading" ? "Reading the current state…" : "Read the current state successfully before changing it."}</EmptyRow>
+        ) : beforeUnresolved ? (
+          <EmptyRow>The state above was read before a command whose result is unknown. Read it again before starting a new command.</EmptyRow>
         ) : atLimit ? (
           <EmptyRow>The version limit was reached; no further change can be recorded.</EmptyRow>
         ) : (
@@ -502,7 +549,11 @@ function CommandCard(props: TradingControlViewProps) {
             )}
             {refusal !== null && refusal !== "stale_review" && (
               <Notice tone="error" title="Not sent" live>
-                {refusal === "version_limit" ? "The version limit was reached." : refusal === "not_ready" ? "Read the current state successfully first." : "The command could not be prepared."}
+                {refusal === "version_limit"
+                  ? "The version limit was reached."
+                  : refusal === "not_ready" || refusal === "read_first"
+                    ? "Read the current state successfully first."
+                    : "The command could not be prepared."}
               </Notice>
             )}
             <div>
@@ -524,27 +575,33 @@ function EventLine({ event }: { event: TradingControlEvent }) {
   )
 }
 
-function CommandOutcome({ id, command, controlPhase, deploymentChanged, reasonsLeft, onRetry, onDiscard, onRefresh }: {
+function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard, onRefresh }: {
   id: string
+  snapshot: TradingControlSnapshot
   command: CommandState
-  controlPhase: ResourceState<TradingControlState>["phase"]
-  deploymentChanged: boolean
   reasonsLeft: readonly PauseReason[] | null
-  onRetry: () => RetryRefusal | null
+  onRetry: () => void
   onDiscard: () => void
   onRefresh: () => void
 }) {
   const verb = actionWord(command.command.paused)
   const key = <Mono value={command.command.idempotencyKey} short />
-  const target = command.command.expectedVersion + 1
+  const controlPhase = snapshot.control.phase
+  const shown = snapshot.control.value?.data ?? null
   const close = <Button onClick={onDiscard}>Close</Button>
-  const rereading = controlPhase === "loading" ? "The current state is being read again." : "The current state was read again (shown above)."
+  const rereading =
+    controlPhase === "loading"
+      ? "The current state is being read again."
+      : controlPhase === "error"
+        ? "Reading the current state again failed; read it successfully before starting a new command."
+        : "The current state was read again (shown above)."
   const body = (() => {
     switch (command.phase) {
       case "sending":
         return (
           <Notice tone="info" title={`Sending the ${verb} command…`} live>
-            Attempt {command.attempts}, key {key}. Waiting for the server's answer. No new command can be started until this one is answered or marked unknown.
+            Attempt {command.attempts}, key {key}. Waiting for the server's answer. No new command can be started until this one is answered, or until its unknown
+            result is discarded.
           </Notice>
         )
       case "accepted":
@@ -552,6 +609,14 @@ function CommandOutcome({ id, command, controlPhase, deploymentChanged, reasonsL
         const result = command.result!
         const { change, state } = result.change
         const differs = state.version !== change.version || state.paused !== change.paused
+        const shownNote =
+          shown === null
+            ? null
+            : shown.deploymentDigest !== state.deploymentDigest
+              ? "The state shown above is for a different deployment than this response; it is being read again."
+              : shown.version > state.version
+                ? `A newer state (version ${shown.version}) is shown above.`
+                : null
         return (
           <Notice tone="info" title={command.phase === "accepted" ? `Recorded: the ${verb} command` : `Already recorded earlier: the ${verb} command (replayed)`} live>
             <span className="block">
@@ -560,7 +625,8 @@ function CommandOutcome({ id, command, controlPhase, deploymentChanged, reasonsL
             </span>
             <span className="mt-1 block">
               Manual gate in this response ({result.meta.observedAt}): {gateWord(state.paused)} · version {state.version}.
-              {differs && ` It differs from this request's event: a later change (version ${state.version}) is in effect.`}
+              {differs && ` It differs from this request's event: a later change (version ${state.version}) had been recorded by then.`}
+              {shownNote && ` ${shownNote}`}
             </span>
             {state.deploymentDigest !== command.basis.deploymentDigest && (
               <span className="mt-1 block text-[var(--color-arco-down)]">The server answered for a different deployment than the one you reviewed.</span>
@@ -583,7 +649,8 @@ function CommandOutcome({ id, command, controlPhase, deploymentChanged, reasonsL
       case "conflict":
         return (
           <Notice tone="attention" title="Not applied: the state changed first (409)" live>
-            The {verb} was based on version {command.command.expectedVersion}, but the state had already moved on, so the server changed nothing for this request.{" "}
+            The {verb} was based on version {command.command.expectedVersion}, but the state had already moved on, so the server changed nothing for this request.
+            {command.attempts > 1 && " Because the server checks the key before the version, this also shows that the earlier attempt with this key was not recorded."}{" "}
             {rereading} Review it and start a new command if a change is still needed; this command will not be resent.
             <span className="mt-2 flex flex-wrap gap-2">{close}</span>
           </Notice>
@@ -611,8 +678,18 @@ function CommandOutcome({ id, command, controlPhase, deploymentChanged, reasonsL
       }
       case "unknown": {
         const error = command.error
+        const readiness = retryReadiness(snapshot)
+        const status = error?.status ? ` (${error.status}${error.code ? ` ${error.code}` : ""})` : ""
         const why = command.retryRefused
-          ? `the retry was refused${error?.status ? ` (${error.status}${error.code ? ` ${error.code}` : ""})` : ""}. That refusal only means the retry changed nothing; the earlier attempt may still have been recorded`
+          ? error?.status === 400
+            ? `the identical command was refused as invalid${status}, so retrying cannot help`
+            : error?.code === "CONTROL_IDEMPOTENCY_CONFLICT"
+              ? `the server reports this key as already recorded with different details${status}, so retrying cannot help`
+              : error?.kind === "forbidden" || error?.kind === "unauthorized"
+                ? `the retry was refused${status}: this session may not change trading control now, or it could not be verified`
+                : error?.kind === "disabled"
+                  ? `the retry was refused${status}: the change route is not available on this server now`
+                  : `the retry was refused${status}`
           : command.timedOut
             ? "no answer arrived in time"
             : error?.kind === "network"
@@ -624,23 +701,32 @@ function CommandOutcome({ id, command, controlPhase, deploymentChanged, reasonsL
                   : `the server answered ${error?.status ?? "without a status"}`
         return (
           <Notice tone="attention" title={`Result unknown: the ${verb} may or may not have been recorded`} live>
-            <span className="block">
-              No verifiable answer: {why}. Do not assume that the {verb} failed or succeeded. Attempt {command.attempts}, key {key}.
+            <span className="block break-words">
+              No verifiable answer: {why}.{command.retryRefused && " That refusal only concerns the retry; the earlier attempt may still have been recorded."} Do not
+              assume that the {verb} failed or succeeded. Attempt {command.attempts}, key {key}.
             </span>
-            {deploymentChanged ? (
+            <span className="mt-1 block">
+              <RecordedCheck paused={command.command.paused} expectedVersion={command.command.expectedVersion} reason={command.command.reason} />
+            </span>
+            {readiness === "deployment_changed" ? (
               <span className="mt-1 block text-[var(--color-arco-down)]">
                 The server now serves a different deployment than the one this command was reviewed for. It cannot be retried here: its key belongs to the earlier
-                deployment, and on this one it would be a new, unreviewed command. Review the current state and start a new command if a change is needed.
+                deployment, and on this one it would be a new, unreviewed command. Discard this command, then review the current state and start a new command if a
+                change is needed.
               </span>
-            ) : (
+            ) : readiness === "read_first" ? (
               <span className="mt-1 block">
-                Retrying sends the identical command with the same key: if it was recorded, the server returns the original event instead of changing again. To
-                check first, read the state and history: a version {target} change with your reason means it was recorded. Discarding is safe too; a new command
-                needs the current version and the server refuses an outdated one.
+                Read the state and history first. Retrying becomes available after a successful read taken now, so a retry cannot reach another deployment
+                unnoticed.
               </span>
-            )}
+            ) : readiness === null ? (
+              <span className="mt-1 block">
+                Retrying sends the identical command with the same key: if it was recorded, the server returns the original event instead of changing again.
+                Discarding is safe too: a new command needs the current version, and the server refuses an outdated one.
+              </span>
+            ) : null}
             <span className="mt-2 flex flex-wrap gap-2">
-              {!deploymentChanged && <Button onClick={() => void onRetry()}>Retry the same command</Button>}
+              {readiness === null && <Button onClick={onRetry}>Retry the same command</Button>}
               <Button onClick={onRefresh}>Read state and history</Button>
               <Button onClick={onDiscard}>Discard this command</Button>
             </span>

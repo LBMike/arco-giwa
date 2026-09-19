@@ -243,6 +243,15 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     await click(action)
     await until(() => q("stocks-trading-control-review") !== null, "review")
   }
+  // After an unknown outcome the page offers no retry until the state has been read again successfully.
+  async function readThenRetry() {
+    assert.equal(button("Retry the same command"), null, "no retry before a fresh read")
+    assert.match(q("stocks-trading-control-outcome")!.textContent!, /Read the state and history first/)
+    await click("Read state and history")
+    await until(() => button("Retry the same command") !== null, "retry offered after the read")
+    await click("Retry the same command")
+    assert.equal(w.document.activeElement, q("stocks-trading-control-outcome"), "focus stays on the outcome")
+  }
   const reset = async () => {
     if (root) await act(async () => root!.unmount())
     root = null
@@ -372,7 +381,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       await until(() => outcome() === "unknown", "unknown")
       assert.equal(w.document.activeElement, q("stocks-trading-control-outcome"), "focus moves to the outcome")
       denyNextPost = true
-      await click("Retry the same command")
+      await readThenRetry()
       await until(() => outcome() === "unknown" && /the retry was refused \(403 OPERATOR_FORBIDDEN\)/.test(text()), "retry refused")
       await until(() => /Manual gate: Resumed/.test(q("stocks-trading-control-gate")?.textContent ?? ""), "re-read shows the recorded change")
       assert.doesNotMatch(q("stocks-trading-control-outcome")!.textContent!, /Nothing was changed|Not applied/)
@@ -426,7 +435,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       assert.match(text(), /Result unknown: the resume may or may not have been recorded/)
       assert.match(text(), /Manual gate: Paused/, "not assumed applied")
       assert.equal(memory.events.length, 1, "the server did record it")
-      await click("Retry the same command")
+      await readThenRetry()
       await until(() => outcome() === "replayed", "replayed")
       const [first, second] = postsLogged()
       assert.equal(second.body, first.body, "identical command and key")
@@ -434,6 +443,29 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       assert.match(text(), /Already recorded earlier: the resume command \(replayed\)/)
       assert.match(text(), /Manual gate: Resumed/)
       assertTraffic("lost response")
+    })
+
+    await t.test("discarding an unknown command keeps an unresolved note, reads again, and lets the operator check the history", async () => {
+      await reset()
+      await open(mint(WALLET.controlA))
+      await command("Review resume", "Resume that is then discarded")
+      loseNextPostResponse = true
+      await click("Confirm resume")
+      await until(() => outcome() === "unknown", "unknown")
+      assert.match(q("stocks-trading-control-gate")!.textContent!, /Read before a command whose result is unknown/)
+      await click("Discard this command")
+      await until(() => /Manual gate: Resumed/.test(q("stocks-trading-control-gate")?.textContent ?? ""), "read again after the discard")
+      const card = q("stocks-trading-control-command")!.textContent!
+      assert.match(card, /An earlier command has no verified result/)
+      assert.match(card, /a version 1 resume with the reason “Resume that is then discarded” means it was recorded; any other change at version 1 means it was not/)
+      assert.doesNotMatch(q("stocks-trading-control-gate")!.textContent!, /Read before a command whose result is unknown/, "the fresh read is not flagged")
+      await until(() => /Version 1 · was paused/.test(q("stocks-trading-control-history")?.textContent ?? ""), "history shows it")
+      assert.equal(outcome(), null)
+      assert.ok(button("Review pause"), "a new command from the fresh read")
+      await click("Close")
+      assert.equal(w.document.activeElement, container.querySelector("textarea"), "focus goes to the reason after closing the note")
+      assert.deepEqual([postsLogged().length, memory.events.length], [1, 1], "never resent")
+      assertTraffic("discard unknown")
     })
 
     await t.test("an old resume replayed after a later pause shows the old event and the current paused state", async () => {
@@ -444,11 +476,11 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       await click("Confirm resume")
       await until(() => outcome() === "unknown", "unknown")
       assert.equal((await directChange(WALLET.controlB, { paused: true, expectedVersion: 1, idempotencyKey: "other-operator-2", reason: "Operator B paused again" })).statusCode, 200)
-      await click("Retry the same command")
+      await readThenRetry()
       await until(() => outcome() === "replayed", "replayed")
       const outcomeText = q("stocks-trading-control-outcome")!.textContent!
       assert.match(outcomeText, /Version 1: Paused → Resumed/)
-      assert.match(outcomeText, /Paused · version 2\. It differs from this request's event: a later change \(version 2\) is in effect\./)
+      assert.match(outcomeText, /Paused · version 2\. It differs from this request's event: a later change \(version 2\) had been recorded by then\./)
       assert.doesNotMatch(outcomeText, /not a full trading resume/)
       assert.match(q("stocks-trading-control-gate")!.textContent!, /Manual gate: Paused/)
       assert.deepEqual([memory.events.length, memory.state().paused], [2, true], "the replay resumed nothing")
@@ -463,7 +495,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       await until(() => outcome() === "unknown", "503 unknown")
       assert.match(text(), /the server reported that the control result is unavailable \(503\)/)
       memory.failChangeAfterCommit = false
-      await click("Retry the same command")
+      await readThenRetry()
       await until(() => outcome() === "replayed", "replayed after 503")
       assert.equal(memory.events.length, 1)
 
@@ -478,7 +510,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       await settle()
       assert.equal(outcome(), "unknown", "the late answer changes nothing on the page")
       assert.equal(memory.events.length, 1, "the request that left was processed by the server")
-      await click("Retry the same command")
+      await readThenRetry()
       await until(() => outcome() === "replayed", "replayed after timeout")
       assert.equal(memory.events.length, 1)
       assertTraffic("unknowns")

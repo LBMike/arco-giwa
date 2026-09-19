@@ -113,10 +113,15 @@ export type CommandState = {
   readonly timedOut: boolean
   /** True when a retry of an unknown command was refused: the earlier attempt may still have been recorded. */
   readonly retryRefused: boolean
+  /** Order mark taken when the outcome became unknown: only a control read started after it can be trusted for a retry. */
+  readonly unknownSeq: number | null
 }
 
-/** A command whose result was unknown when an access denial cleared the panel (same scope only). */
-export type AbandonedCommand = { readonly paused: boolean; readonly expectedVersion: number; readonly idempotencyKey: string }
+/**
+ * A command whose result stays unknown after it was discarded or an access denial cleared the panel (same scope only).
+ * `sinceSeq` is the order mark from which a control read is known to be taken after it.
+ */
+export type AbandonedCommand = { readonly paused: boolean; readonly expectedVersion: number; readonly idempotencyKey: string; readonly reason: string; readonly sinceSeq: number }
 
 export type TradingControlSnapshot = {
   readonly scopeKey: string
@@ -125,8 +130,10 @@ export type TradingControlSnapshot = {
   readonly runtime: ResourceState<RuntimeStatus>
   readonly history: HistoryState
   readonly command: CommandState | null
-  /** Kept across an access denial in the same scope so the operator knows to check the history. */
+  /** Kept across a discard or an access denial in the same scope so the operator knows to check the history. */
   readonly abandoned: AbandonedCommand | null
+  /** Order mark of the read (or POST answer) that produced the shown control value; later marks are newer. */
+  readonly controlReadSeq: number | null
 }
 
 export type GiwaStocksTradingControlFeatureProps = {
