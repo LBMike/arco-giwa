@@ -60,3 +60,19 @@ Existing scope isolation (API base, session, deployment key) is unchanged.
 **Full checks:** module, DOM, typecheck, build, frontend (Node 24 and Node 22, DOM + ABI gates on and CI-like), server, security, tokens, stories, `.mjs` DOM, harness units and diff.
 
 **Documented limit (not changed):** leaving `/admin/stocks` and coming back loses the in-memory unresolved key and the same-key retry. A fresh read shows the DB state and history, and CAS still protects any new command.
+
+## Results (recorded at completion)
+
+- **Implemented as planned** in `6b1e22c`, with the tests red first (`red/`, `red-final/`).
+- **Four builder review rounds** changed the plan in three places:
+  - **A retry's 409.** It proves "not recorded" only for the deployment that answered, and the 409 names none.
+    - The copy is conditional.
+    - The command always stays unresolved: Close, a new command and an access denial keep it as a note.
+    - An intermediate rule ("a later read of the reviewed deployment settles it") leaked in rounds 2 and 3 and was removed.
+  - **Failed or rejected first pages** are read again on a control change or an accepted POST.
+  - **Older pages** must start at `last.version − 1`.
+- **Final:**
+  - code `fa105e1`: 27 new tests; mutations 52 applied, 51 killed, 1 equivalent;
+  - Node 24 and Node 22: frontend 849/849 with the DOM + ABI gates; CI-like 764 pass + 7 skips; server 408 pass + 83 DB skips.
+- **Unchanged limit:** leaving `/admin/stocks` loses the in-memory unresolved key.
+- **Details:** `docs/evidence/giwa-stocks-operator-control-ui-003f1-builder-20260920.md`.
