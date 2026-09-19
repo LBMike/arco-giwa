@@ -474,3 +474,63 @@ test("diagnostics of another order or side are never rendered, even for one rend
   const sideSwap = card(render(snapshot({ detail: SELL_DETAIL(), diagnostics: { ...sell, side: "BUY" } }), "orders"))
   assert.ok(!sideSwap.includes("Escrow") && !sideSwap.includes("Server snapshot"))
 })
+
+// 003E-1 (DIAG-UI-003E-P3-01): a 404 refresh after a successful read keeps the earlier record, so the notice must not say
+// that nothing is shown; a first 404 (nothing kept) still says so.
+const EARLIER_LABEL = `The record below is from the earlier snapshot ${FIXTURE_OBSERVED_AT}, not a current one.`
+const NOT_FOUND: StocksAdminError = { kind: "not_found", status: 404, code: "ORDER_NOT_FOUND" }
+const ROUTE_ABSENT: StocksAdminError = { kind: "disabled", status: 404, code: null }
+
+test("diagnostics 404 (order or route): with no earlier record the card says nothing is shown", () => {
+  const detail = BUY_DETAIL()
+  const cases: [StocksAdminError, string, string][] = [
+    [NOT_FOUND, "Order not found in the current deployment (404)", "The server has no such order in the deployment it serves now. Nothing is shown."],
+    [ROUTE_ABSENT, "Wallet submission diagnostics are not available on this server (404)", "The diagnostics route is not registered. Nothing is shown."],
+  ]
+  for (const [error, title, body] of cases) {
+    const t = card(render(snapshot({ detail, diagnostics: { phase: "error", value: null, error, orderId: FIXTURE_IDS.buyFinality, side: "BUY" } }), "orders"))
+    assert.ok(t.includes(`${title} ${body}`), `${error.kind}: ${t}`)
+    assert.ok(!t.includes("earlier snapshot") && !t.includes("Server snapshot") && !t.includes("Approval APPROVAL"), `${error.kind}: nothing kept, nothing shown`)
+  }
+})
+
+test("diagnostics 404 (order or route) after a successful read: the kept record is visible and never called 'nothing is shown'", () => {
+  const detail = BUY_DETAIL()
+  const earlier = diag("BUY", FIXTURE_IDS.buyFinality, { approval: fixtureAttempt("APPROVAL", "CONFIRMED", { txHash: fixtureHash("3b"), claimId: "claim-kept-a" }), transfer: fixtureAttempt("TRANSFER", "SUBMITTED", { txHash: fixtureHash("3c"), claimId: "claim-kept-t" }) })
+  const cases: [StocksAdminError, string, string][] = [
+    [NOT_FOUND, "Order not found in the current deployment (404)", "The server has no such order in the deployment it serves now. No new diagnostics were received."],
+    [ROUTE_ABSENT, "Wallet submission diagnostics are not available on this server (404)", "The diagnostics route is not registered. No new diagnostics were received."],
+  ]
+  for (const [error, title, body] of cases) {
+    const html = render(snapshot({ detail, diagnostics: { ...earlier, phase: "error", error } }), "orders")
+    const t = card(html)
+    assert.ok(!/nothing is shown/i.test(t), `${error.kind}: contradicts the record kept below: ${t}`)
+    assert.ok(t.includes(`${title} ${body} ${EARLIER_LABEL}`), `${error.kind}: ${t}`)
+    // The kept record itself: the real earlier hashes, claims and snapshot time, still labelled as earlier.
+    for (const kept of [fixtureHash("3b"), fixtureHash("3c"), "claim-kept-a", "claim-kept-t", `Server snapshot ${FIXTURE_OBSERVED_AT}`]) assert.ok(t.includes(kept), `${error.kind}: ${kept}`)
+    assert.match(html, /data-stage="APPROVAL" data-status="CONFIRMED"/)
+    assert.match(html, /data-stage="TRANSFER" data-status="SUBMITTED"/)
+    assert.match(html, /role="alert"/)
+  }
+})
+
+test("diagnostics: every error kind keeps its own copy, and none says nothing is shown next to a kept record", () => {
+  const detail = BUY_DETAIL()
+  const earlier = diag("BUY", FIXTURE_IDS.buyFinality)
+  const kinds: [StocksAdminError, string][] = [
+    [NOT_FOUND, "Order not found in the current deployment (404)"],
+    [ROUTE_ABSENT, "Wallet submission diagnostics are not available on this server (404)"],
+    [{ kind: "server", status: 503, code: "SUBMISSION_DIAGNOSTICS_UNAVAILABLE" }, "Diagnostics unavailable (503) The server could not read a consistent snapshot. Nothing new is shown."],
+    [{ kind: "network", status: null, code: null }, "Could not reach the API The request failed before a response arrived. Nothing new is shown."],
+    [{ kind: "invalid", status: 200, code: null }, "Response did not match the diagnostics contract"],
+    [{ kind: "request", status: 400, code: "INVALID_SUBMISSION_DIAGNOSTICS_INPUT" }, "Request rejected (400) The server rejected the request. Nothing new is shown."],
+    [{ kind: "aborted", status: null, code: null }, "Request cancelled"],
+  ]
+  for (const [error, copy] of kinds) {
+    const t = card(render(snapshot({ detail, diagnostics: { ...earlier, phase: "error", error } }), "orders"))
+    assert.ok(t.includes(copy), `${error.kind}: ${t}`)
+    assert.ok(t.includes(EARLIER_LABEL), `${error.kind}: the kept record is labelled as earlier`)
+    assert.ok(!/nothing is shown/i.test(t), `${error.kind}: ${t}`)
+    assert.ok(t.includes(fixtureHash("d7")), `${error.kind}: the kept hash stays visible`)
+  }
+})

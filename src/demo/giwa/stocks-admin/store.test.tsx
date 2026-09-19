@@ -516,3 +516,25 @@ test("diagnostics: every request of the whole flow is a GET to a read route (no 
   assert.equal(transport.pending.length, 0)
   assert.ok(seen.length === 6 && seen.every((request) => request.method === "GET" && /^\/api\/v1\/admin\/stocks\/(orders|wallet-submissions)\//.test(request.path)), JSON.stringify(seen))
 })
+
+test("diagnostics (003E-1): a 404 refresh (order or route) after a successful read keeps the earlier value with its error kind", async () => {
+  const replies: [FixtureReply, string, string | null][] = [
+    [{ status: 404, body: { error: "ORDER_NOT_FOUND", ...FIXTURE_PROFILE } }, "not_found", "ORDER_NOT_FOUND"],
+    [{ status: 404, body: { message: "Route GET:/x not found", error: "Not Found", statusCode: 404 } }, "disabled", null],
+  ]
+  for (const [reply, kind, code] of replies) {
+    const { store, transport } = setup()
+    await selectLoaded(store, transport, FIXTURE_IDS.buyFinality, FIXTURE_BUY_DETAIL)
+    transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality)).respond(ok(fixtureDiagnostics(FIXTURE_IDS.buyFinality)))
+    await flush()
+    const earlier = store.getSnapshot().diagnostics.value
+    assert.ok(earlier)
+    store.refreshDiagnostics()
+    transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality)).respond(reply)
+    await flush()
+    const snapshot = store.getSnapshot()
+    assert.equal(snapshot.access, "ok", `${kind}: stays on the card`)
+    assert.deepEqual([snapshot.diagnostics.phase, snapshot.diagnostics.error?.kind, snapshot.diagnostics.error?.code], ["error", kind, code])
+    assert.equal(snapshot.diagnostics.value, earlier, `${kind}: the earlier record is kept, not cleared`)
+  }
+})

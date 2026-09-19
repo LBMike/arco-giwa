@@ -88,6 +88,10 @@ test("operator wallet submission diagnostics against the real route (set GIWA_AD
   const app = Fastify({ logger: false })
   await app.register(stocksSubmissionDiagnosticsPlugin, { service: { inspect: (side: "BUY" | "SELL", id: string) => { readerCalls++; return reader(side, id) } }, resolveOperator })
   await app.ready()
+  // A server without the diagnostics plugin: its real Fastify 404 is what "route absent" looks like (003E-1).
+  const bare = Fastify({ logger: false })
+  await bare.ready()
+  let routeAbsent = false
 
   const sign = (jwt.default ?? jwt).sign
   const mint = (wallet: string, lifetimeSeconds = 900) => {
@@ -121,7 +125,7 @@ test("operator wallet submission diagnostics against the real route (set GIWA_AD
     let reply: Reply
     if (held?.reply) reply = held.reply
     else if (path.startsWith("/api/v1/admin/stocks/wallet-submissions/")) {
-      const response = await app.inject({ method: entry.method, url: path, headers })
+      const response = await (routeAbsent ? bare : app).inject({ method: entry.method, url: path, headers })
       entry.cacheControl = String(response.headers["cache-control"] ?? "")
       reply = { status: response.statusCode, body: JSON.parse(response.body) }
     } else {
@@ -184,6 +188,7 @@ test("operator wallet submission diagnostics against the real route (set GIWA_AD
     offline = null
     reader = defaultReader
     revoked.clear()
+    routeAbsent = false
   }
   const assertReadOnly = (label: string) => {
     assert.ok(log.length > 0, label)
@@ -412,6 +417,44 @@ test("operator wallet submission diagnostics against the real route (set GIWA_AD
       assertReadOnly("late answers")
     })
 
+    await t.test("003E-1: a 404 refresh (order or route) after a successful read keeps the earlier record and never says nothing is shown; a first 404 shows nothing", async () => {
+      const cases: [string, () => void, string, string][] = [
+        ["not_found", () => { reader = async () => { throw new StocksError("ORDER_NOT_FOUND", 404) } }, "Order not found in the current deployment (404)", "The server has no such order in the deployment it serves now."],
+        ["disabled", () => { routeAbsent = true }, "Wallet submission diagnostics are not available on this server (404)", "The diagnostics route is not registered."],
+      ]
+      for (const [kind, arrange, title, first] of cases) {
+        await reset()
+        await openConsole(baseProps(mint(OPERATOR_A)))
+        await showRecord(ID.buyFinality)
+        arrange()
+        const count = diagnosticsRequests().length
+        await click(refresh(), `${kind} refresh`)
+        await until(() => diagnosticsRequests().length === count + 1 && phase() === "error", `${kind}: refresh answered 404`)
+        const requests = diagnosticsRequests()
+        assert.equal(requests[requests.length - 1].status, 404, `${kind}: a real 404`)
+        const kept = card()?.textContent ?? ""
+        assert.ok(!/nothing is shown/i.test(kept), `${kind}: contradicts the kept record: ${kept.slice(0, 400)}`)
+        assert.ok(kept.includes(title), kind)
+        assert.ok(kept.includes(`${first} No new diagnostics were received. The record below is from the earlier snapshot ${F.FIXTURE_OBSERVED_AT}, not a current one.`), `${kind}: ${kept.slice(0, 400)}`)
+        assert.ok(card()?.querySelector('[role="alert"]'), `${kind}: announced`)
+        // The kept record is the real earlier one: same hashes, claims and snapshot time.
+        for (const mark of marks(ID.buyFinality)) assert.ok(kept.includes(mark), `${kind}: kept ${mark}`)
+        assert.ok(kept.includes(`Server snapshot ${F.FIXTURE_OBSERVED_AT}`))
+        assert.deepEqual(stages(), ["APPROVAL:CONFIRMED", "TRANSFER:SUBMITTED"])
+
+        // A first 404 for another order: nothing is kept, and the card says so.
+        await select(ID.sellSettlement)
+        await until(() => diagnosticsRequests().length === count + 2 && phase() === "error", `${kind}: first 404`)
+        const empty = card()?.textContent ?? ""
+        assert.ok(empty.includes(title) && empty.includes(`${first} Nothing is shown.`), `${kind}: ${empty.slice(0, 400)}`)
+        assert.ok(!empty.includes("earlier snapshot") && !empty.includes("Server snapshot"), kind)
+        assert.deepEqual(stages(), [])
+        for (const id of [ID.buyFinality, ID.sellSettlement]) for (const mark of marks(id)) assert.ok(!text().includes(mark), `${kind}: ${mark} not on the page`)
+        assert.equal(text().includes("No Stocks read permission"), false, `${kind}: stays on the card`)
+        assertReadOnly(`404 ${kind}`)
+      }
+    })
+
     await t.test("double clicks: one detail and one diagnostics read per selection; Refresh while loading adds nothing", async () => {
       await reset()
       await openConsole(baseProps(mint(OPERATOR_A)))
@@ -442,6 +485,7 @@ test("operator wallet submission diagnostics against the real route (set GIWA_AD
   } finally {
     await reset()
     await app.close()
+    await bare.close()
     for (const [key, descriptor] of Object.entries(previous)) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor)
       else delete (globalThis as Record<string, unknown>)[key]

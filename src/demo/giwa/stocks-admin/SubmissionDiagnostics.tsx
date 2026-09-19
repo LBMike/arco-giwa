@@ -29,12 +29,17 @@ export function stageWord(side: OrderSide, stage: SubmissionStage["stage"]): str
   return side === "BUY" ? "Deposit" : "Escrow"
 }
 
-function diagnosticsErrorCopy(error: StocksAdminError): { title: string; body: string } {
+/**
+ * `kept`: an earlier record of this order is still shown below the notice (labelled as earlier), so the copy may only
+ * say that nothing new arrived, never that nothing is shown.
+ */
+function diagnosticsErrorCopy(error: StocksAdminError, kept: boolean): { title: string; body: string } {
+  const shown = kept ? "No new diagnostics were received." : "Nothing is shown."
   switch (error.kind) {
     case "not_found":
-      return { title: "Order not found in the current deployment (404)", body: "The server has no such order in the deployment it serves now. Nothing is shown." }
+      return { title: "Order not found in the current deployment (404)", body: `The server has no such order in the deployment it serves now. ${shown}` }
     case "disabled":
-      return { title: "Wallet submission diagnostics are not available on this server (404)", body: "The diagnostics route is not registered. Nothing is shown." }
+      return { title: "Wallet submission diagnostics are not available on this server (404)", body: `The diagnostics route is not registered. ${shown}` }
     case "server":
       return { title: `Diagnostics unavailable${error.status ? ` (${error.status})` : ""}`, body: "The server could not read a consistent snapshot. Nothing new is shown." }
     case "network":
@@ -82,10 +87,10 @@ export function SubmissionDiagnosticsCard({ diagnostics, detailReady, now, onRef
               )}
             </p>
             {diagnostics.phase === "error" && diagnostics.error && (
-              <Notice tone="error" title={diagnosticsErrorCopy(diagnostics.error).title} live>
+              <Notice tone="error" title={diagnosticsErrorCopy(diagnostics.error, value !== null).title} live>
                 {value
-                  ? `${diagnosticsErrorCopy(diagnostics.error).body} The record below is from the earlier snapshot ${value.meta.observedAt}, not a current one.`
-                  : diagnosticsErrorCopy(diagnostics.error).body}
+                  ? `${diagnosticsErrorCopy(diagnostics.error, true).body} The record below is from the earlier snapshot ${value.meta.observedAt}, not a current one.`
+                  : diagnosticsErrorCopy(diagnostics.error, false).body}
               </Notice>
             )}
             {diagnostics.phase !== "error" && value && age !== null && age > STALE_AFTER_MS && (
