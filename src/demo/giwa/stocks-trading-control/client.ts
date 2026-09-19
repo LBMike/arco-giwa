@@ -66,6 +66,8 @@ export async function sendTradingControlCommand(options: Common & { readonly com
       body,
       credentials: "omit",
       cache: "no-store",
+      // A redirect would re-send the frozen command elsewhere; it fails instead (an unknown outcome, never a failure).
+      redirect: "error",
       signal,
     })
     status = response.status

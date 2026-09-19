@@ -93,8 +93,10 @@ export type HistoryState = {
  * - sending: the POST is in flight (buttons disabled).
  * - accepted / replayed: the server returned this command's event.
  * - conflict: 409 CONTROL_VERSION_CONFLICT; nothing was changed by this command. A new command is needed.
- * - rejected: 400, 403, 404 or 409 CONTROL_IDEMPOTENCY_CONFLICT; nothing was changed by this command.
- * - unknown: no verifiable answer (503, 5xx, network, timeout, invalid 200). It may or may not have been recorded.
+ * - rejected: the first attempt was refused (400, 401, 403, 404 or 409 CONTROL_IDEMPOTENCY_CONFLICT); nothing was
+ *   changed by this command.
+ * - unknown: no verifiable answer (503, 5xx, network, timeout, invalid 200), or a retry of an unknown command was
+ *   refused (that refusal says nothing about the earlier attempt). It may or may not have been recorded.
  */
 export type CommandPhase = "sending" | "accepted" | "replayed" | "conflict" | "rejected" | "unknown"
 
@@ -109,7 +111,12 @@ export type CommandState = {
   readonly error: StocksAdminError | null
   /** True when the unknown outcome came from the client-side timeout. */
   readonly timedOut: boolean
+  /** True when a retry of an unknown command was refused: the earlier attempt may still have been recorded. */
+  readonly retryRefused: boolean
 }
+
+/** A command whose result was unknown when an access denial cleared the panel (same scope only). */
+export type AbandonedCommand = { readonly paused: boolean; readonly expectedVersion: number; readonly idempotencyKey: string }
 
 export type TradingControlSnapshot = {
   readonly scopeKey: string
@@ -118,6 +125,8 @@ export type TradingControlSnapshot = {
   readonly runtime: ResourceState<RuntimeStatus>
   readonly history: HistoryState
   readonly command: CommandState | null
+  /** Kept across an access denial in the same scope so the operator knows to check the history. */
+  readonly abandoned: AbandonedCommand | null
 }
 
 export type GiwaStocksTradingControlFeatureProps = {

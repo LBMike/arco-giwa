@@ -123,8 +123,17 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     { wallet: WALLET.controlB, operatorId: "ops-control-b", permissions: ["stocks:read", "stocks:control"] },
     { wallet: WALLET.reader, operatorId: "ops-reader", permissions: ["stocks:read"] },
   ])
+  // The real resolver; a test can make it refuse the next POST (a session or permission that ends between attempts).
+  let denyNextPost = false
+  const resolveOperator = async (request: AnyModule) => {
+    if (request.method === "POST" && denyNextPost) {
+      denyNextPost = false
+      return null
+    }
+    return resolvers.resolveOperator(request)
+  }
   const full = Fastify({ logger: false })
-  await full.register(stocksTradingControlPlugin, { service: port, resolveOperator: resolvers.resolveOperator })
+  await full.register(stocksTradingControlPlugin, { service: port, resolveOperator })
   await full.register(stocksRuntimeStatusPlugin, { getSnapshot: snapshot, resolveOperator: resolvers.resolveOperator })
   await full.ready()
   // A server without operator controls: the control routes are absent, runtime status stays.
@@ -240,6 +249,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     log.length = 0
     holds.length = 0
     loseNextPostResponse = false
+    denyNextPost = false
     memory.reset()
     gates.configuredPause = false
     gates.observerCurrent = true
@@ -307,6 +317,67 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       assert.doesNotMatch(text(), /Manual gate:|version 0/)
       assert.equal(postsLogged().length, 0)
       assertTraffic("stranger")
+    })
+
+    await t.test("an invalid reason never reaches the review or the server; Back returns without sending", async () => {
+      await reset()
+      await open(mint(WALLET.controlA))
+      const area = () => container.querySelector("textarea")!
+      for (const [value, message] of [
+        ["   ", /Enter a reason\. It is recorded with the change\./],
+        ["two\nlines", /Line breaks, tabs and other control characters are not allowed\./],
+        ["x".repeat(501), /The reason is 501 characters; the limit is 500\./],
+      ] as const) {
+        await typeReason(value)
+        await click("Review resume")
+        assert.equal(q("stocks-trading-control-review"), null, JSON.stringify(value.slice(0, 10)))
+        assert.equal(area().getAttribute("aria-invalid"), "true")
+        // The textarea is described by the help text and by the (live) validation message.
+        const described = area().getAttribute("aria-describedby")!.split(" ").map((id: string) => w.document.getElementById(id)?.textContent ?? "").join(" ")
+        assert.match(described, message)
+        assert.equal(w.document.activeElement, area(), "focus stays on the reason")
+      }
+      await command("Review resume", "A valid reason")
+      await click("Back")
+      assert.equal(q("stocks-trading-control-review"), null)
+      assert.equal(postsLogged().length, 0, "nothing sent without Confirm")
+      assert.equal(memory.events.length, 0)
+    })
+
+    await t.test("the review is frozen: a refresh that finds another operator's change never turns it into the opposite command", async () => {
+      await reset()
+      await open(mint(WALLET.controlA))
+      await command("Review resume", "Resume after my review")
+      assert.equal(w.document.activeElement, q("stocks-trading-control-review"), "focus moves to the review")
+      assert.equal((await directChange(WALLET.controlB, { paused: false, expectedVersion: 0, idempotencyKey: "other-operator-3", reason: "Operator B resumed first" })).statusCode, 200)
+      await click("Refresh")
+      await until(() => /Manual gate: Resumed/.test(q("stocks-trading-control-gate")?.textContent ?? ""), "refreshed gate")
+      const review = q("stocks-trading-control-review")!.textContent!
+      assert.match(review, /Resume the manual gate/, "the review still says what was reviewed")
+      assert.match(review, /The state was read again while you were reviewing/)
+      assert.equal(button("Confirm resume"), null)
+      assert.equal(button("Confirm pause"), null, "never the opposite action")
+      await click("Back")
+      assert.equal(w.document.activeElement, container.querySelector("textarea"), "focus returns to the reason")
+      assert.match(text(), /Possible change: pause new orders/)
+      assert.equal(postsLogged().length, 0)
+    })
+
+    await t.test("a retry refused by the server after a lost answer stays unknown and re-reads; the change is visible as recorded", async () => {
+      await reset()
+      await open(mint(WALLET.controlA))
+      await command("Review resume", "Resume with an ending session")
+      loseNextPostResponse = true
+      await click("Confirm resume")
+      await until(() => outcome() === "unknown", "unknown")
+      assert.equal(w.document.activeElement, q("stocks-trading-control-outcome"), "focus moves to the outcome")
+      denyNextPost = true
+      await click("Retry the same command")
+      await until(() => outcome() === "unknown" && /the retry was refused \(403 OPERATOR_FORBIDDEN\)/.test(text()), "retry refused")
+      await until(() => /Manual gate: Resumed/.test(q("stocks-trading-control-gate")?.textContent ?? ""), "re-read shows the recorded change")
+      assert.doesNotMatch(q("stocks-trading-control-outcome")!.textContent!, /Nothing was changed|Not applied/)
+      assert.deepEqual([postsLogged().map((entry) => entry.status), memory.events.length], [[200, 403], 1])
+      assertTraffic("retry refused")
     })
 
     await t.test("double click on Confirm sends one command", async () => {

@@ -231,6 +231,8 @@ export function parseRuntimeStatus(data: unknown, observedAt: string): RuntimeSt
 
 export const REASON_MAX_LENGTH = 500
 
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
 export type ReasonCheck = { readonly ok: true; readonly reason: string } | { readonly ok: false; readonly message: string }
 
 /**
@@ -241,6 +243,8 @@ export function checkReason(input: string): ReasonCheck {
   const reason = input.trim()
   if (reason.length === 0) return { ok: false, message: "Enter a reason. It is recorded with the change." }
   if (CONTROL_CHARS.test(reason)) return { ok: false, message: "Line breaks, tabs and other control characters are not allowed." }
+  // A lone surrogate cannot be stored as sent (the database would replace it), so the command could never be confirmed.
+  if (LONE_SURROGATE.test(reason)) return { ok: false, message: "The reason contains an invalid character." }
   if (reason.length > REASON_MAX_LENGTH) return { ok: false, message: `The reason is ${reason.length} characters; the limit is ${REASON_MAX_LENGTH}.` }
   return { ok: true, reason }
 }

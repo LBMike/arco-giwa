@@ -51,6 +51,7 @@ function TradingControlScopeOwner(props: GiwaStocksTradingControlFeatureProps) {
       onStart={(request) => store.start(request)}
       onRetry={() => store.retry()}
       onDiscard={() => store.discard()}
+      onDismissAbandoned={() => store.dismissAbandoned()}
       onRetryAccess={() => store.retryAccess()}
       onSignInRequired={props.onSignInRequired}
     />

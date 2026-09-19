@@ -134,6 +134,7 @@ test("client: the POST sends exactly the four fields with the Bearer only; error
   assert.equal(calls[0].init.method, "POST")
   assert.equal(calls[0].init.credentials, "omit")
   assert.equal(calls[0].init.cache, "no-store")
+  assert.equal(calls[0].init.redirect, "error", "a redirect never re-sends the command")
   assert.deepEqual(calls[0].init.headers, { accept: "application/json", "content-type": "application/json", authorization: "Bearer session.jwt" })
   assert.equal(calls[0].init.body, JSON.stringify({ paused: false, expectedVersion: 0, idempotencyKey: "tc-key-00000001", reason: "Reason for version 1" }))
   const cases: [TcReply | Error, string, number | null, string | null][] = [
@@ -241,4 +242,37 @@ test("parity: the real runtime status plugin's output parses to the same reasons
     await app.close()
   }
   assert.equal(combos.length, 2 * 2 * 4 * 1 + 2 * 2 * 4 * 2)
+})
+
+// ---------------------------------------------------------------- review round 1: each check on its own
+
+function rejectsAt(name: string, path: string, run: () => unknown) {
+  assert.throws(run, (error: unknown) => error instanceof StocksContractError && error.path === path, `${name}: expected the check at ${path}`)
+}
+
+test("each POST consistency check fires on its own", () => {
+  const sent = command({ expectedVersion: 1, reason: "Same reason" })
+  const later = (version: number, paused: boolean) => tcState(version, paused, { reason: "Later reason" })
+  // Event for another expected version, with the same reason and paused value.
+  rejectsAt("change version", "data.change.version", () => parseControlChange(tcChange(later(4, true), tcEvent(3, false, { reason: "Same reason" })), sent))
+  // Event reason differs from the command (state later, so the equal-version agreement does not apply).
+  rejectsAt("change reason", "data.change.reason", () => parseControlChange(tcChange(later(4, true), tcEvent(2, false, { reason: "Other reason" })), sent))
+  rejectsAt("change paused", "data.change.paused", () => parseControlChange(tcChange(later(4, true), tcEvent(2, true, { reason: "Same reason" })), sent))
+  // Equal versions must agree on paused and on reason separately.
+  const event = tcEvent(2, false, { reason: "Same reason" })
+  rejectsAt("equal version paused", "data.state", () => parseControlChange(tcChange({ ...tcState(2, true, { reason: "Same reason" }), updatedAt: event.createdAt }, event), sent))
+  rejectsAt("equal version reason", "data.state", () => parseControlChange(tcChange({ ...tcState(2, false, { reason: "Other" }), updatedAt: event.createdAt }, event), sent))
+  assert.equal(parseControlChange(tcChange({ ...tcState(2, false, { reason: "Same reason" }), updatedAt: event.createdAt }, event), sent).change.version, 2)
+})
+
+test("runtime CURRENT: the reported age must cover the observed wall age", () => {
+  // lastCurrentAt is 2 s before the envelope time; an age below that is inconsistent.
+  rejectsAt("age below elapsed", "data.current", () => parseRuntimeStatus({ ...tcRuntime(), lastCurrentAgeMs: 1_500 }, TC_OBSERVED_AT))
+  assert.equal(parseRuntimeStatus({ ...tcRuntime(), lastCurrentAgeMs: 2_000 }, TC_OBSERVED_AT).observerStatus, "CURRENT")
+})
+
+test("reason: a lone surrogate is refused (the database would store a replacement character)", () => {
+  assert.equal(checkReason("drill \uD800 ok").ok, false)
+  assert.equal(checkReason("drill \uDC00 ok").ok, false)
+  assert.equal(checkReason("drill \uD83D\uDE00 ok").ok, true, "a proper pair is fine")
 })

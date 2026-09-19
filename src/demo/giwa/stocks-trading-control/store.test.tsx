@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import test, { after } from "node:test"
 import { TRADING_CONTROL_PATH, RUNTIME_STATUS_PATH, historyPath } from "./client"
 import { TC_NOW, controlledTcTransport, ok, tcChange, tcError, tcEvent, tcHistory, tcRead, tcRuntime, tcState, type TcReply } from "./fixtures"
 import { TradingControlStore, type TradingControlStoreConfig } from "./store"
@@ -9,6 +9,10 @@ const HISTORY = historyPath(null)
 const flush = async () => {
   for (let i = 0; i < 6; i++) await new Promise((resolve) => setImmediate(resolve))
 }
+
+// Pending POSTs keep command timers; deactivating clears them so the file ends promptly.
+const stores: TradingControlStore[] = []
+after(() => stores.forEach((store) => store.deactivate()))
 
 function setup(options: { ignoreAbort?: boolean; timeoutMs?: number; keys?: string[] } = {}) {
   const transport = controlledTcTransport({ ignoreAbort: options.ignoreAbort })
@@ -23,6 +27,7 @@ function setup(options: { ignoreAbort?: boolean; timeoutMs?: number; keys?: stri
     commandTimeoutMs: options.timeoutMs ?? 60_000,
   }
   const store = new TradingControlStore(config)
+  stores.push(store)
   return { store, transport, config }
 }
 
@@ -108,7 +113,7 @@ test("409 version conflict: nothing is resent; state, history and runtime are re
   await flush()
   assert.equal(store.getSnapshot().command?.phase, "conflict")
   assert.equal(posts(transport).length, 1, "never resent")
-  assert.equal(store.retry(), false, "a conflict is not retried")
+  assert.equal(store.retry(), "not_unknown", "a conflict is not retried")
   transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead(tcState(1, false, { operatorId: "ops-control-b", reason: "Another operator resumed" }))))
   transport.take("GET", RUNTIME_STATUS_PATH).respond(ok(tcRuntime({ operatorControl: { status: "RESUMED", version: 1 } })))
   transport.take("GET", HISTORY).respond(ok(tcHistory([tcEvent(1, false, { previousPaused: true, operatorId: "ops-control-b", reason: "Another operator resumed" })], null)))
@@ -139,7 +144,7 @@ test("refusals that prove nothing changed: 409 idempotency, 400, 403 (read-only 
     assert.equal(snapshot.command?.error?.code ?? null, code)
     assert.equal(snapshot.access, "ok", `${reply.status}: a refused change never denies reading`)
     assert.equal(snapshot.control.value?.data.version, 0, "the state stays")
-    assert.equal(store.retry(), false)
+    assert.equal(store.retry(), "not_unknown")
     assert.equal(transport.pending.some((request) => request.method === "GET"), rereads, `${reply.status}: re-read`)
     assert.equal(posts(transport).length, 1)
   }
@@ -167,7 +172,7 @@ test("unknown outcomes (503, 502, network, invalid 200, timeout): the same comma
     assert.equal(store.getSnapshot().control.value?.data.version, 0, `${name}: never assumed applied`)
     assert.equal(store.start({ paused: true, reason: "Something else", reviewed: reviewed(store) }), "busy", `${name}: resolve the unknown command first`)
     assert.equal(transport.pending.length, 0, `${name}: nothing else sent`)
-    assert.equal(store.retry(), true)
+    assert.equal(store.retry(), null)
     const second = transport.take("POST", TRADING_CONTROL_PATH)
     assert.equal(second.init.body, first.init.body, `${name}: identical command and key`)
     second.respond(ok(tcChange(resumedState(), resumeEvent(), true)))
@@ -209,7 +214,7 @@ test("a scope change while a command is in flight aborts it: never resent, its l
     await flush()
     assert.equal(store.getSnapshot().command, null, `${change}: the late answer never lands`)
     assert.equal(store.getSnapshot().control.value, null)
-    assert.equal(store.retry(), false)
+    assert.equal(store.retry(), "not_unknown")
     assert.equal(posts(transport).length, 1, `${change}: never resent`)
   }
 })
@@ -307,10 +312,144 @@ test("discard: never while sending; clears a finished or unknown command; a bad 
   await flush()
   assert.equal(store.discard(), true)
   assert.equal(store.getSnapshot().command, null)
-  assert.equal(store.retry(), false)
+  assert.equal(store.retry(), "not_unknown")
 
   const bad = setup({ keys: ["short"] })
   await readAll(bad.store, bad.transport)
   assert.equal(bad.store.start({ paused: false, reason: REASON, reviewed: reviewed(bad.store) }), "invalid_key")
   assert.equal(posts(bad.transport).length, 0)
+})
+
+// ---------------------------------------------------------------- review round 1 (builder-side adversarial review)
+
+async function unknownCommand(options: Parameters<typeof setup>[0] = {}) {
+  const context = setup(options)
+  await readAll(context.store, context.transport)
+  context.store.start({ paused: false, reason: REASON, reviewed: reviewed(context.store) })
+  context.transport.take("POST", TRADING_CONTROL_PATH).respond({ status: 503, body: tcError("TRADING_CONTROL_UNAVAILABLE") })
+  await flush()
+  assert.equal(context.store.getSnapshot().command?.phase, "unknown")
+  return context
+}
+
+test("a refused retry of an unknown command stays unknown and re-reads; only a version conflict on the retry proves nothing was recorded", async () => {
+  const refusals: TcReply[] = [
+    { status: 403, body: tcError("OPERATOR_FORBIDDEN") },
+    { status: 404, body: { message: "Route POST:/x not found", error: "Not Found", statusCode: 404 } },
+    { status: 400, body: tcError("INVALID_TRADING_CONTROL_INPUT") },
+    { status: 401, body: { error: "Invalid bearer session token" } },
+    { status: 409, body: tcError("CONTROL_IDEMPOTENCY_CONFLICT") },
+  ]
+  for (const reply of refusals) {
+    const { store, transport } = await unknownCommand()
+    store.retry()
+    transport.take("POST", TRADING_CONTROL_PATH).respond(reply)
+    await flush()
+    const command = store.getSnapshot().command!
+    assert.deepEqual([command.phase, command.retryRefused, command.attempts], ["unknown", true, 2], String(reply.status))
+    assert.equal(store.getSnapshot().access, "ok")
+    assert.ok(transport.pending.some((request) => request.method === "GET" && request.path === TRADING_CONTROL_PATH), `${reply.status}: re-read`)
+  }
+  const { store, transport } = await unknownCommand()
+  store.retry()
+  transport.take("POST", TRADING_CONTROL_PATH).respond({ status: 409, body: tcError("CONTROL_VERSION_CONFLICT") })
+  await flush()
+  assert.equal(store.getSnapshot().command?.phase, "conflict", "the key was checked first, so it was never recorded")
+})
+
+test("a POST answer never replaces a newer state that is already shown", async () => {
+  const { store, transport } = setup()
+  await readAll(store, transport)
+  store.start({ paused: false, reason: REASON, reviewed: reviewed(store) })
+  store.loadControl()
+  transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead(tcState(2, true, { operatorId: "ops-control-b", reason: "Paused again" })), "2026-09-19T09:00:02.000Z"))
+  await flush()
+  transport.take("POST", TRADING_CONTROL_PATH).respond(ok(tcChange(resumedState(), resumeEvent()), "2026-09-19T09:00:01.000Z"))
+  await flush()
+  const snapshot = store.getSnapshot()
+  assert.equal(snapshot.command?.phase, "accepted")
+  assert.deepEqual([snapshot.control.value?.data.version, snapshot.control.value?.data.paused, snapshot.control.value?.meta.observedAt], [2, true, "2026-09-19T09:00:02.000Z"])
+})
+
+test("a timeout is unknown at once even if the transport never settles; a late answer never counts for the retry", async () => {
+  const { store, transport } = setup({ ignoreAbort: true, timeoutMs: 20 })
+  await readAll(store, transport)
+  store.start({ paused: false, reason: REASON, reviewed: reviewed(store) })
+  const first = transport.take("POST", TRADING_CONTROL_PATH)
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  await flush()
+  assert.deepEqual([store.getSnapshot().command?.phase, store.getSnapshot().command?.timedOut], ["unknown", true])
+  assert.equal(store.retry(), null)
+  const second = transport.all.filter((request) => request.method === "POST")[1]
+  first.respond(ok(tcChange(resumedState(), resumeEvent())))
+  await flush()
+  assert.equal(store.getSnapshot().command?.phase, "sending", "the first attempt's late answer is ignored")
+  second.respond(ok(tcChange(resumedState(), resumeEvent(), true)))
+  await flush()
+  assert.deepEqual([store.getSnapshot().command?.phase, store.getSnapshot().command?.attempts], ["replayed", 2])
+})
+
+test("a retry is refused once the server serves another deployment (keys are deployment-scoped)", async () => {
+  const { store, transport } = await unknownCommand()
+  store.loadControl()
+  transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead({ ...tcState(0, true), deploymentDigest: "a".repeat(64) })))
+  await flush()
+  assert.equal(store.retry(), "deployment_changed")
+  assert.equal(posts(transport).length, 1)
+})
+
+test("an access denial while a result is unknown keeps a note in the same scope only", async () => {
+  const { store, transport, config } = await unknownCommand()
+  const key = store.getSnapshot().command!.command.idempotencyKey
+  store.loadControl()
+  transport.take("GET", TRADING_CONTROL_PATH).respond({ status: 403, body: tcError("OPERATOR_FORBIDDEN") })
+  await flush()
+  assert.deepEqual([store.getSnapshot().access, store.getSnapshot().command, store.getSnapshot().abandoned], ["forbidden", null, { paused: false, expectedVersion: 0, idempotencyKey: key }])
+  store.retryAccess()
+  assert.deepEqual([store.getSnapshot().access, store.getSnapshot().abandoned?.idempotencyKey], ["ok", key])
+  assert.equal(posts(transport).length, 1, "never resent")
+  store.dismissAbandoned()
+  assert.equal(store.getSnapshot().abandoned, null)
+  const other = await unknownCommand()
+  other.store.loadControl()
+  other.transport.take("GET", TRADING_CONTROL_PATH).respond({ status: 403, body: tcError("OPERATOR_FORBIDDEN") })
+  await flush()
+  other.store.configure({ ...config, fetch: other.transport.fetch, session: { id: "session-b", accessToken: "token-b" } })
+  assert.equal(other.store.getSnapshot().abandoned, null, "another session never sees it")
+})
+
+test("history: Load older keeps the newest page's read time; no older page after a failed newest re-read; a non-continuing page is rejected", async () => {
+  const { store, transport } = setup()
+  const newest = Array.from({ length: 20 }, (_, i) => tcEvent(30 - i, (30 - i) % 2 === 0))
+  await readAll(store, transport, tcState(30, true), tcRuntime({ operatorControl: { status: "PAUSED", version: 30 } }), tcHistory(newest, 11))
+  assert.equal(store.getSnapshot().history.observedAt, "2026-09-19T09:00:00.000Z")
+  store.loadHistory(11)
+  transport.take("GET", historyPath(11)).respond(ok(tcHistory(Array.from({ length: 10 }, (_, i) => tcEvent(10 - i, (10 - i) % 2 === 0)), null), "2026-09-19T09:05:00.000Z"))
+  await flush()
+  assert.equal(store.getSnapshot().history.observedAt, "2026-09-19T09:00:00.000Z", "an older page does not re-read the newest one")
+
+  const second = setup()
+  await readAll(second.store, second.transport, tcState(30, true), tcRuntime({ operatorControl: { status: "PAUSED", version: 30 } }), tcHistory(newest, 11))
+  second.store.loadHistory(null)
+  second.transport.take("GET", HISTORY).fail()
+  await flush()
+  second.store.loadHistory(11)
+  assert.equal(second.transport.pending.length, 0, "no older page after a failed newest re-read")
+
+  const third = setup()
+  await readAll(third.store, third.transport, tcState(30, true), tcRuntime({ operatorControl: { status: "PAUSED", version: 30 } }), tcHistory(newest, 11))
+  third.store.loadHistory(11)
+  third.transport.take("GET", historyPath(11)).respond(ok(tcHistory([{ ...tcEvent(10, true), deploymentDigest: "d".repeat(64) }], null)))
+  await flush()
+  assert.deepEqual([third.store.getSnapshot().history.phase, third.store.getSnapshot().history.error?.kind, third.store.getSnapshot().history.items.length], ["error", "invalid", 20])
+})
+
+test("start refuses at the version limit and when only the read time differs from the review", async () => {
+  const { store, transport } = setup()
+  await readAll(store, transport, tcState(2_147_483_647, true), tcRuntime({ operatorControl: { status: "PAUSED", version: 2_147_483_647 } }), tcHistory([], null))
+  assert.equal(store.start({ paused: false, reason: REASON, reviewed: reviewed(store) }), "version_limit")
+  const second = setup()
+  await readAll(second.store, second.transport)
+  assert.equal(second.store.start({ paused: false, reason: REASON, reviewed: { ...reviewed(second.store), observedAt: "2026-09-19T08:59:59.000Z" } }), "stale_review")
+  assert.equal(posts(transport).length + posts(second.transport).length, 0)
 })
