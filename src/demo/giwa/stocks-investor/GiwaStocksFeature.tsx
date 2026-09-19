@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react"
 
+import type { GiwaStocksAccess } from "./access"
 import { actionsFor, type StocksInvestorActions } from "./actions"
 import type { GiwaStocksClient } from "./client"
 import { createStocksInvestorController, orderIsTerminal, type StocksInvestorState } from "./controller"
@@ -34,6 +35,14 @@ export type GiwaStocksFeatureProps = {
   newIdempotencyKey?: () => string
   /** Host wallet steps shown with an accepted order (for example the /stocks execution panel). Absent: status only. */
   renderOrderExecution?: OrderExecutionSlot | null
+  /** Host steps before a request (wallet, network, sign-in) so the trade panel can offer them. Absent: session only. */
+  access?: GiwaStocksAccess | null
+  /**
+   * Controlled NVDA detail (the /stocks page owns list/detail). When given, `onDetailChange` must be given too, and the
+   * feature does not render its own "All stocks" back control (the page provides one). Absent: internal state.
+   */
+  detailOpen?: boolean
+  onDetailChange?: (open: boolean) => void
 }
 
 const TABS: { id: GiwaStocksTab; label: string }[] = [
