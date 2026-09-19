@@ -120,14 +120,9 @@ export type CommandState = {
   readonly retryRefused: boolean
   /**
    * Order mark taken when the outcome became unknown (only a control read started after it can be trusted for a retry),
-   * or when a retry met a version conflict (only a read after it can show which deployment the page now talks to).
+   * or when a retry met a version conflict (its unresolved note counts reads from there).
    */
   readonly unknownSeq: number | null
-  /**
-   * True once a control read after a retry's version conflict showed another deployment than the reviewed one. The 409
-   * names no deployment, so after that no later read can tie it to the reviewed deployment: the command stays unresolved.
-   */
-  readonly otherDeploymentSeen: boolean
 }
 
 /**

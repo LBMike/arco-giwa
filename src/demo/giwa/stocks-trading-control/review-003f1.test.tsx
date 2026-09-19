@@ -330,7 +330,6 @@ function unknownSnapshot(): TradingControlSnapshot {
     timedOut: false,
     retryRefused: false,
     unknownSeq: 2,
-    otherDeploymentSeen: false,
   }
   return {
     scopeKey: "scope",
@@ -361,7 +360,9 @@ async function retryReady(keys: string[] = ["operator-a-own-command"]) {
   return { store, transport }
 }
 
-test("COPY-003F1-01: a 409 on a retry is not proof for the reviewed deployment when the state read after it is another deployment's; closing keeps a note", async () => {
+const UNRESOLVED_409 = /The answer does not name the deployment that gave it, and no read can tell, so whether the earlier attempt was recorded stays unresolved: closing this or starting a new command keeps it as an unresolved note\./
+
+test("COPY-003F1-01: a 409 on a retry is conditional on the reviewed deployment; with another deployment read after it, closing keeps a note", async () => {
   const { store, transport } = await retryReady()
   transport.take("POST", TRADING_CONTROL_PATH).respond({ status: 409, body: tcError("CONTROL_VERSION_CONFLICT") })
   await flush()
@@ -371,7 +372,8 @@ test("COPY-003F1-01: a 409 on a retry is not proof for the reviewed deployment w
   await flush()
   const t = text(render(store))
   assert.match(t, /If this answer came from deployment 5f0c2b…a2c4 ?5f0c2b7d9e41a3c6b8d0f2e4a6c8b0d2f4e6a8c0b2d4f6e8a0c2e4b6d8f0a2c4 ?, the one this command was reviewed for, it also shows that the earlier attempt with this key was not recorded there/)
-  assert.match(t, /The state read after it is for another deployment, so this answer may have come from that one: whether the earlier attempt was recorded is not known, and closing it or starting a new command keeps it as an unresolved note\./)
+  assert.match(t, UNRESOLVED_409)
+  assert.match(t, /The state read after it is for another deployment\./)
   assert.doesNotMatch(t, /Because the server checks the key before the version, this also shows/)
   assert.equal(store.discard(), true)
   const note = store.getSnapshot().abandoned
@@ -379,20 +381,57 @@ test("COPY-003F1-01: a 409 on a retry is not proof for the reviewed deployment w
   assert.match(text(render(store)), /This command was for deployment 5f0c2b…a2c4 ?5f0c2b7d9e41a3c6b8d0f2e4a6c8b0d2f4e6a8c0b2d4f6e8a0c2e4b6d8f0a2c4 ?; the history shown is for another deployment and cannot tell whether it was recorded\./)
 })
 
-test("COPY-003F1-01: a 409 on a retry followed by a read of the same deployment closes without a note; a read still pending keeps one", async () => {
+test("round 3 (LC-01/LC-02/F3): no read settles a retry's 409 — not one of the reviewed deployment after it, nor after another was seen during or after the retry", async () => {
+  // Read of the reviewed deployment after the 409 (and a runtime report of another one): still unresolved.
   const same = await retryReady()
   same.transport.take("POST", TRADING_CONTROL_PATH).respond({ status: 409, body: tcError("CONTROL_VERSION_CONFLICT") })
   await flush()
   same.transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead(tcState(2, true))))
+  same.transport.take("GET", RUNTIME_STATUS_PATH).respond(ok({ ...tcRuntime({ operatorControl: { status: "PAUSED", version: 2 } }), deploymentDigest: B }))
   await flush()
+  assert.match(text(render(same.store)), UNRESOLVED_409)
   assert.doesNotMatch(text(render(same.store)), /The state read after it is for another deployment/)
   same.store.discard()
-  assert.equal(same.store.getSnapshot().abandoned, null)
+  assert.equal(same.store.getSnapshot().abandoned?.idempotencyKey, "operator-a-own-command")
+  // Another deployment read while the retry was in flight, then the reviewed one after the 409.
+  const during = await retryReady()
+  during.store.loadControl()
+  during.transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead({ ...tcState(3, true), deploymentDigest: B })))
+  await flush()
+  during.transport.take("POST", TRADING_CONTROL_PATH).respond({ status: 409, body: tcError("CONTROL_VERSION_CONFLICT") })
+  await flush()
+  during.transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead(tcState(2, true))))
+  await flush()
+  assert.equal(during.store.getSnapshot().control.value?.data.deploymentDigest, TC_DIGEST)
+  during.store.discard()
+  assert.equal(during.store.getSnapshot().abandoned?.idempotencyKey, "operator-a-own-command")
+  // Before any read after it.
   const pending = await retryReady()
   pending.transport.take("POST", TRADING_CONTROL_PATH).respond({ status: 409, body: tcError("CONTROL_VERSION_CONFLICT") })
   await flush()
   pending.store.discard()
-  assert.equal(pending.store.getSnapshot().abandoned?.idempotencyKey, "operator-a-own-command", "no read after the conflict yet")
+  assert.equal(pending.store.getSnapshot().abandoned?.idempotencyKey, "operator-a-own-command")
+})
+
+test("a first attempt refused with 409 changed nothing: closing it or starting a new command leaves no note, whatever is read after it", async () => {
+  for (const via of ["close", "start"] as const) {
+    const { store, transport } = setup(["operator-a-own-command", "operator-a-next-command"])
+    await firstRead(store, transport)
+    const basis = store.getSnapshot().control.value!
+    store.start({ paused: false, reason: REASON, reviewed: { version: 0, paused: true, observedAt: basis.meta.observedAt } })
+    transport.take("POST", TRADING_CONTROL_PATH).respond({ status: 409, body: tcError("CONTROL_VERSION_CONFLICT") })
+    await flush()
+    transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead({ ...tcState(3, true), deploymentDigest: B })))
+    await flush()
+    const t = text(render(store))
+    assert.doesNotMatch(t, /earlier attempt|unresolved note/)
+    if (via === "close") store.discard()
+    else {
+      const shown = store.getSnapshot().control.value!
+      assert.equal(store.start({ paused: false, reason: "Resume after the conflict", reviewed: { version: 3, paused: true, observedAt: shown.meta.observedAt } }), null)
+    }
+    assert.equal(store.getSnapshot().abandoned, null, via)
+  }
 })
 
 test("STORE-P2-02-A: after a first page was rejected, a control state of another deployment reads the history for it", async () => {
@@ -456,14 +495,14 @@ async function conflictThenOtherDeployment() {
   return { store, transport }
 }
 
-test("R2-01: starting a new command after an unresolved retry conflict keeps the earlier command as a note", async () => {
+test("R2-01: starting a new command after a retry's 409 keeps the earlier command as a note", async () => {
   const { store, transport } = await conflictThenOtherDeployment()
   const shown = store.getSnapshot().control.value!
   assert.equal(store.start({ paused: false, reason: "Resume on the deployment now served", reviewed: { version: 3, paused: true, observedAt: shown.meta.observedAt } }), null)
   const snapshot = store.getSnapshot()
   assert.deepEqual([snapshot.abandoned?.idempotencyKey, snapshot.abandoned?.deploymentDigest, snapshot.command?.command.idempotencyKey], ["operator-a-own-command", TC_DIGEST, "operator-a-next-command"])
   assert.equal(JSON.parse(String(transport.take("POST", TRADING_CONTROL_PATH).init.body)).expectedVersion, 3)
-  // On the reviewed deployment (no other seen), the conflict is settled and a new command leaves no note.
+  // Also when the read after the 409 shows the reviewed deployment: the 409 still names none.
   const same = await retryReady(["operator-a-own-command", "operator-a-next-command"])
   same.transport.take("POST", TRADING_CONTROL_PATH).respond({ status: 409, body: tcError("CONTROL_VERSION_CONFLICT") })
   await flush()
@@ -471,7 +510,7 @@ test("R2-01: starting a new command after an unresolved retry conflict keeps the
   await flush()
   const read = same.store.getSnapshot().control.value!
   assert.equal(same.store.start({ paused: false, reason: "Resume after the conflict", reviewed: { version: 2, paused: true, observedAt: read.meta.observedAt } }), null)
-  assert.equal(same.store.getSnapshot().abandoned, null)
+  assert.equal(same.store.getSnapshot().abandoned?.idempotencyKey, "operator-a-own-command")
 })
 
 test("R2-02: an access denial on the reads after a retry's 409 keeps the command as a note", async () => {
@@ -490,14 +529,33 @@ test("R2-02: an access denial on the reads after a retry's 409 keeps the command
   }
 })
 
-test("F3: once a read after a retry's 409 showed another deployment, a later read of the reviewed one does not settle it", async () => {
+test("F3: after another deployment was read following a retry's 409, a later read of the reviewed one does not settle it", async () => {
   const { store, transport } = await conflictThenOtherDeployment()
   store.loadControl()
   transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead(tcState(2, true))))
   await flush()
   assert.equal(store.getSnapshot().control.value?.data.deploymentDigest, TC_DIGEST)
-  const t = text(render(store))
-  assert.match(t, /A state read after it showed another deployment, so this answer may have come from that one: whether the earlier attempt was recorded is not known, and closing it or starting a new command keeps it as an unresolved note\./)
+  assert.match(text(render(store)), UNRESOLVED_409)
   store.discard()
   assert.equal(store.getSnapshot().abandoned?.idempotencyKey, "operator-a-own-command")
+})
+
+// ---------------------------------------------------------------- builder review round 3 (a617c09)
+
+test("P2-02 (round 3): an empty or non-adjacent older page is not this list's continuation and never ends it", async () => {
+  for (const older of [[], [tcEvent(5, true)]]) {
+    const { store, transport } = setup()
+    const newest = Array.from({ length: 20 }, (_, i) => tcEvent(30 - i, (30 - i) % 2 === 0))
+    store.refresh()
+    transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead(tcState(30, true))))
+    transport.take("GET", RUNTIME_STATUS_PATH).respond(ok(tcRuntime({ operatorControl: { status: "PAUSED", version: 30 } })))
+    transport.take("GET", HISTORY).respond(ok(tcHistory(newest, 11)))
+    await flush()
+    store.loadHistory(11)
+    transport.take("GET", historyPath(11)).respond(ok(tcHistory(older, null)))
+    await flush()
+    const history = store.getSnapshot().history
+    assert.deepEqual([history.phase, history.error?.kind, history.failedPage, history.complete, history.items.length, history.nextBeforeVersion], ["error", "invalid", "older", false, 20, 11], JSON.stringify(older))
+    assert.doesNotMatch(text(render(store)), /End of history/)
+  }
 })

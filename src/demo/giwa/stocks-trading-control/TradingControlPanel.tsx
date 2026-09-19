@@ -699,12 +699,10 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
               <>
                 {" "}
                 If this answer came from deployment <Mono value={command.basis.deploymentDigest} short />, the one this command was reviewed for, it also shows that the
-                earlier attempt with this key was not recorded there: the server checks the key before the version.
-                {shown !== null && shown.deploymentDigest !== command.basis.deploymentDigest
-                  ? " The state read after it is for another deployment, so this answer may have come from that one: whether the earlier attempt was recorded is not known, and closing it or starting a new command keeps it as an unresolved note."
-                  : command.otherDeploymentSeen
-                    ? " A state read after it showed another deployment, so this answer may have come from that one: whether the earlier attempt was recorded is not known, and closing it or starting a new command keeps it as an unresolved note."
-                    : null}
+                earlier attempt with this key was not recorded there: the server checks the key before the version. The answer does not name the deployment that
+                gave it, and no read can tell, so whether the earlier attempt was recorded stays unresolved: closing this or starting a new command keeps it as an
+                unresolved note.
+                {shown !== null && shown.deploymentDigest !== command.basis.deploymentDigest && " The state read after it is for another deployment."}
               </>
             )}{" "}
             {rereading} Review it and start a new command if a change is still needed; this command will not be resent.

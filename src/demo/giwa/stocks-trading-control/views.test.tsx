@@ -50,7 +50,6 @@ function command(phase: CommandState["phase"], patch: Partial<CommandState> = {}
     timedOut: false,
     retryRefused: false,
     unknownSeq: null,
-    otherDeploymentSeen: false,
     ...patch,
   }
 }
@@ -324,7 +323,10 @@ test("a refused retry, a changed deployment and an abandoned command stay unknow
   // 003F-1 review: the 409 does not name the deployment that answered (keys are per deployment), so the claim is conditional.
   const conflicted = text(render(snapshot({ command: command("conflict", { attempts: 2, error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) })))
   assert.match(conflicted, /If this answer came from deployment 5f0c2b…a2c4 ?5f0c2b7d9e41a3c6b8d0f2e4a6c8b0d2f4e6a8c0b2d4f6e8a0c2e4b6d8f0a2c4 ?, the one this command was reviewed for, it also shows that the earlier attempt with this key was not recorded there: the server checks the key before the version\./)
+  assert.match(conflicted, /The answer does not name the deployment that gave it, and no read can tell, so whether the earlier attempt was recorded stays unresolved: closing this or starting a new command keeps it as an unresolved note\./)
   assert.doesNotMatch(conflicted, /The state read after it is for another deployment/)
+  // A first attempt's 409 changed nothing anywhere: no doubt about an earlier attempt.
+  assert.doesNotMatch(text(render(snapshot({ command: command("conflict", { error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) }))), /earlier attempt|unresolved note/)
 })
 
 test("the version limit offers no command; event ids keep their full value; read failures are summarised once", () => {
