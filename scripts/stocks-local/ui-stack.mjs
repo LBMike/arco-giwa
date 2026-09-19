@@ -102,7 +102,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
   const operators = [{ wallet: accounts.operator, operatorId: 'local-operator', permissions: ['stocks:read', ...(operatorControls ? ['stocks:control'] : [])] },
     ...(operatorControls ? [{ wallet: accounts.otherHolder, operatorId: 'local-read-only', permissions: ['stocks:read'] },
       { wallet: accounts.faucetOperator, operatorId: 'local-second-operator', permissions: ['stocks:read', 'stocks:control'] }] : [])];
-  const controlFaults = { unavailable: false, disabled: false, observerUnavailable: false };
+  const controlFaults = { unavailable: false, disabled: false, observerUnavailable: false, serviceOverride: null };
   const resolvers = stocksSessionResolvers(authSecret, [domain], operators);
   const nonceStore = new Map();
   const legacy = {
@@ -140,9 +140,9 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
   }
   async function listen() {
     const controlPort = runtime.control && {
-      read: () => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : runtime.control.read(),
-      history: (...args) => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : runtime.control.history(...args),
-      change: (...args) => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : runtime.control.change(...args),
+      read: () => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : (controlFaults.serviceOverride ?? runtime.control).read(),
+      history: (...args) => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : (controlFaults.serviceOverride ?? runtime.control).history(...args),
+      change: (...args) => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : (controlFaults.serviceOverride ?? runtime.control).change(...args),
     };
     const next = buildApp(appEnv, { ...legacy,
       stocksTradingControl: controlPort && !controlFaults.disabled ? { service: controlPort, ...resolvers } : undefined,

@@ -192,10 +192,18 @@ widths. A 503 is injected at the API service port (not a physical database outag
 resumes the gate and runs the original 19 investor browser scenario groups and
 their seven wallet sends/claim-before-send evidence.
 
-The concurrent-operator ambiguity probe aborts one browser command before API
-delivery and records another signed operator's command with matching visible
-fields. If the UI wrongly claims those fields prove the first command succeeded,
-it records `CONTROL-UI-003F-P2-01`, captures a screenshot and returns
-`PASS_WITH_KNOWN_P2`. That is evidence of an unresolved finding, not UI acceptance.
-Review the separate independent store/SSR results for deployment-history ordering;
-this browser case does not claim to simulate a public rolling deployment.
+The 003F-1 ambiguity regression aborts one browser command before API delivery
+and records another signed operator's command with matching visible fields. It
+requires explicit uncertainty, verifies that a same-key retry's 409 and closing
+the outcome keep an unresolved note, and repeats the match using another signed
+session for the same operator with a different key. False certainty fails the
+run. Fresh successful local changes must not show a clock-skew warning.
+
+The history ordering regression uses two real PostgreSQL control namespaces
+behind the same API URL. It delays the initial state read until history A has
+arrived, then switches the control port to namespace B. Unconfirmed A entries
+must remain hidden and B's state must trigger a B-only history read. Restoring A
+must remove B entries. B uses a synthetic digest; the EVM/runtime remains A and
+no UI write is sent to B. This is a read-ordering fixture, not a second contract
+deployment or a public rolling deployment. Independent DOM tests cover actual
+future timestamps and further delayed/reversed response ordering.

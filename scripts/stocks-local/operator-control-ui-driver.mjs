@@ -1,11 +1,12 @@
 // Actual product control UI, signed sessions, local PostgreSQL and EVM only.
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { SiweMessage } from 'siwe';
 import { getAddress, stringToHex } from 'viem';
+import { StocksTradingControlService } from '../../server/dist/stocks-trading-control/service.js';
 
 export async function runOperatorControlUiScenario({ host, stack, wallet, browser, evidence }) {
   assert.equal(stack.operatorControls, true);
@@ -92,9 +93,9 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     if (double) await confirm.dblclick(); else await confirm.click();
     await wait(async () => await outcome().getAttribute('data-outcome') === expected, `Command ${expected}`);
     assert.equal(walletAttempts.length, walletAttemptsBefore, 'A control command must not request any wallet operation');
+    if (expected === 'accepted') assert.doesNotMatch(await gate().innerText(), /in the future \(clock skew\)/, 'Fresh local change is not clock skew');
   }
-  const secondLogin = async () => {
-    const address = stack.accounts.faucetOperator;
+  const secondLogin = async (address = stack.accounts.faucetOperator) => {
     const nonce = await call('/api/v1/auth/nonce', { walletAddress: address, domain: new URL(host.origin).host }, '');
     const message = new SiweMessage({ domain: new URL(host.origin).host, address: getAddress(address), uri: host.origin,
       version: '1', chainId: 91342, nonce: nonce.nonce, issuedAt: new Date().toISOString() }).prepareMessage();
@@ -179,17 +180,44 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     assert.equal((await current()).state.operatorId, 'local-second-operator');
     assert.equal(await outcome().getAttribute('data-outcome'), 'unknown');
     const uncertainText = await outcome().innerText();
-    if (uncertainText.includes('means it was recorded')) {
-      report.knownFindings.push({ id: 'CONTROL-UI-003F-P2-01', severity: 'P2',
-        observation: 'Another operator owns the matching immutable event, but the UI says matching action/reason/version means this unknown command was recorded.' });
-      await screenshot('control-other-operator-false-certainty.png');
-    }
+    assert.doesNotMatch(uncertainText, /means it was recorded|shows only that one of the two was recorded/);
+    assert.match(uncertainText, /A matching entry does not identify this command/);
+    await screenshot('control-other-operator-stays-unknown.png');
+    // Retry reaches the original deployment in this local run. The UI still cannot infer that from a 409 payload.
+    await outcome().getByRole('button', { name: 'Retry the same command', exact: true }).click();
+    await wait(async () => await outcome().getAttribute('data-outcome') === 'conflict', 'Retry version conflict');
+    assert.deepEqual(posts[posts.length - 1], unrecorded);
+    assert.match(await outcome().innerText(), /whether the earlier attempt was recorded stays unresolved/);
+    await screenshot('control-retry-conflict-conditional.png');
+    await outcome().getByRole('button', { name: 'Close', exact: true }).click(); await ready();
+    assert.match(await panel().innerText(), /has no verified result/);
+    assert.match(await panel().innerText(), /A matching entry does not identify this command/);
+    await screenshot('control-conflict-unresolved-note.png');
+    await page.getByTestId('stocks-trading-control-command').getByRole('button', { name: 'Close', exact: true }).click();
+    passed('Different signed operator matching event stays unknown; same-key409 and close preserve unresolved note');
+
+    // A second tab is modelled by a separately signed session for the same wallet, with a different key.
+    // Its actual HTTP POST records the event; this page never sent its unknown command to the API.
+    await interceptOnce(route => route.abort('failed'));
+    const sameOperatorState = (await current()).state;
+    await change(!sameOperatorState.paused, 'Shared same-operator incident reason', 'unknown');
+    const otherTabCommand = posts[posts.length - 1];
+    const sameOperatorOtherSession = await secondLogin(stack.accounts.operator);
+    await call(root, { ...otherTabCommand, idempotencyKey: randomUUID() }, sameOperatorOtherSession);
+    await outcome().getByRole('button', { name: 'Read state and history', exact: true }).click(); await ready();
+    await wait(async () => await history().getAttribute('data-phase') === 'ready', 'Same-operator matching history');
+    assert.equal((await current()).state.operatorId, 'local-operator');
+    assert.equal(await outcome().getAttribute('data-outcome'), 'unknown');
+    assert.match(await outcome().innerText(), /A matching entry does not identify this command/);
+    assert.doesNotMatch(await outcome().innerText(), /means it was recorded/);
+    await screenshot('control-same-operator-other-key-unknown.png');
     await outcome().getByRole('button', { name: 'Discard this command', exact: true }).click(); await ready();
+    assert.match(await panel().innerText(), /has no verified result/);
     await page.getByTestId('stocks-trading-control-command').getByRole('button', { name: 'Close', exact: true }).click();
     const afterUnknown = (await current()).state;
     await call(root, { paused: true, expectedVersion: afterUnknown.version, idempotencyKey: randomUUID(), reason: 'Prepare history boundary fixture' }, second);
     await refresh();
-    passed('Real concurrent-operator unknown-command identity probe recorded separately from functional acceptance');
+    passed('Same signed operator with another key cannot identify this page command from matching public history');
     for (let n = 0; n < 22; n++) {
       const state = (await current()).state;
       await call(root, { paused: state.paused, expectedVersion: state.version, idempotencyKey: randomUUID(), reason: `History fixture ${n}` }, second);
@@ -208,6 +236,39 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
       await page.screenshot({ path: viewportPath, fullPage: false }); report.screenshots.push(viewportPath);
     }
     passed('Real DB audit pages reach explicit end; latest UI has no overflow at375/768/1440');
+
+    // Same API URL, two real PostgreSQL control namespaces. B is a synthetic digest for read-race testing;
+    // the EVM/runtime stays on A. This is not a second contract deployment or a production rollout.
+    const digestB = createHash('sha256').update(`LOCAL_CONTROL_UI_B:${stack.digest}`).digest('hex');
+    const alternate = new StocksTradingControlService(stack.pool, digestB);
+    await alternate.change({ operatorId: 'local-fixture-b', permissions: ['stocks:control'] },
+      { paused: true, expectedVersion: 0, idempotencyKey: randomUUID(), reason: 'B-only namespace audit entry' });
+    let releaseControl;
+    const heldControl = new Promise(resolve => { releaseControl = resolve; });
+    await interceptOnce(async route => {
+      assert.equal(route.request().method(), 'GET');
+      await heldControl; await route.continue();
+    });
+    try {
+      await page.reload(); await localAccount('operator'); await signIn(); operatorSession = session;
+      await wait(async () => await history().getAttribute('data-phase') === 'ready', 'History A arrives before initial control');
+      assert.equal(await gate().getAttribute('data-phase'), 'loading');
+      assert.equal(await page.getByTestId('stocks-trading-control-event').count(), 0, 'Unconfirmed A history stays hidden');
+      stack.controlForHarness.faults.serviceOverride = alternate;
+      releaseControl();
+      await ready();
+      await wait(async () => await history().getAttribute('data-phase') === 'ready' && (await history().innerText()).includes('B-only namespace audit entry'), 'B history reread');
+      assert.match(await gate().innerText(), /B-only namespace audit entry/);
+      assert.doesNotMatch(await history().innerText(), /History fixture/);
+      assert.equal(await page.getByTestId('stocks-trading-control-event').count(), 1);
+      assert.equal((await current()).state.deploymentDigest, digestB);
+      await screenshot('control-history-first-namespace-b.png');
+    } finally { releaseControl(); stack.controlForHarness.faults.serviceOverride = null; }
+    await refresh();
+    await wait(async () => await history().getAttribute('data-phase') === 'ready' && (await history().innerText()).includes('History fixture'), 'Original A history restored');
+    assert.doesNotMatch(await history().innerText(), /B-only namespace audit entry/);
+    assert.equal((await current()).state.deploymentDigest, stack.digest);
+    passed('Same API real PG namespaces: history-first A stays hidden; later control B triggers B-only history, then restores A');
 
     stack.controlForHarness.faults.unavailable = true;
     await panel().getByRole('button', { name: 'Refresh trading control', exact: true }).click();
