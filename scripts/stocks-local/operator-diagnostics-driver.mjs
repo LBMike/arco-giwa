@@ -55,8 +55,11 @@ export async function runOperatorDiagnosticsScenario({ host, stack, wallet, brow
     assert.equal(result.status(), 200); assert.equal(result.headers()['cache-control'], 'no-store');
     const body = await result.json(); await ready(); return body;
   }
-  async function screenshot(name) {
-    const file = resolve(evidence, name); await page.screenshot({ path: file, fullPage: true }); report.screenshots.push(file);
+  async function screenshot(name, cardOnly = false) {
+    const file = resolve(evidence, name);
+    if (cardOnly) await panel().screenshot({ path: file });
+    else await page.screenshot({ path: file, fullPage: true });
+    report.screenshots.push(file);
   }
   const factsDigest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
   try {
@@ -103,28 +106,46 @@ export async function runOperatorDiagnosticsScenario({ host, stack, wallet, brow
       await page.setViewportSize({ width, height: 1100 });
       const dimensions = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth }));
       assert.ok(dimensions.document <= dimensions.viewport, `No horizontal overflow at ${width}px`);
-      await panel().scrollIntoViewIfNeeded(); await screenshot(`diagnostics-${width}.png`);
+      await panel().scrollIntoViewIfNeeded(); await screenshot(`diagnostics-${width}.png`, true);
     }
     passed('375 / 768 / 1440 layouts have no horizontal overflow');
 
-    // Forward a refresh to a genuinely foreign-deployment row. The real API,
-    // not a mocked error body, supplies 404. Preserve and document the P3 copy.
-    const foreign = fixtures.foreignOrders.find(row => row.side === target.side);
-    await page.route(`${stack.apiBase}${pathOf(target)}`, route => route.continue({ url: `${stack.apiBase}${pathOf(foreign)}` }), { times: 1 });
-    await refresh().click(); await wait(async () => await panel().getAttribute('data-phase') === 'error', 'Foreign deployment 404');
-    let text = await panel().innerText();
-    assert.ok(text.includes('Order not found in the current deployment (404)'));
-    assert.ok(text.includes('from the earlier snapshot'));
-    assert.ok(text.includes(target.expected.transfer.txHash));
-    if (text.includes('Nothing is shown.')) report.knownFindings.push({ id: 'DIAG-UI-003E-P3-01',
-      severity: 'P3', evidence: '404 says Nothing is shown while the labeled earlier snapshot and hash remain visible' });
-    await screenshot('diagnostics-404-retained-snapshot.png');
-    passed('Real foreign-deployment 404; prior snapshot explicitly labeled', { knownCopyFinding: report.knownFindings.length });
-    await refresh().click(); await ready();
+    // Both errors come from actual Fastify responses: a foreign-deployment row
+    // and an unregistered route. Retained and initially empty cards differ.
+    const firstErrorOrder = fixtures.cases.find(row => row.side === 'BUY' && row.expected.approval?.status === 'UNKNOWN');
+    for (const kind of ['not_found', 'disabled']) {
+      const title = kind === 'not_found' ? 'Order not found in the current deployment (404)'
+        : 'Wallet submission diagnostics are not available on this server (404)';
+      const destination = row => kind === 'not_found'
+        ? `${stack.apiBase}${pathOf(fixtures.foreignOrders.find(foreign => foreign.side === row.side))}`
+        : `${stack.apiBase}/__local_missing_submission_diagnostics`;
+      await page.route(`${stack.apiBase}${pathOf(target)}`, route => route.continue({ url: destination(target) }), { times: 1 });
+      await refresh().click(); await wait(async () => await panel().getAttribute('data-phase') === 'error', `${kind} retained404`);
+      let text = await panel().innerText();
+      assert.ok(text.includes(title));
+      assert.ok(text.includes('No new diagnostics were received.'));
+      assert.ok(text.includes('from the earlier snapshot'));
+      assert.ok(text.includes(target.expected.transfer.txHash));
+      assert.doesNotMatch(text, /nothing is shown/i, '003E-1: a visible earlier record must never be described as absent');
+      await screenshot(`diagnostics-${kind}-retained-snapshot.png`, true);
+      passed(`${kind}: real404 preserves labeled earlier data without contradictory copy`);
+
+      await page.route(`${stack.apiBase}${pathOf(firstErrorOrder)}`, route => route.continue({ url: destination(firstErrorOrder) }), { times: 1 });
+      await page.getByRole('button', { name: `Show detail for ${firstErrorOrder.side} order ${firstErrorOrder.orderId}`, exact: true }).click();
+      await wait(async () => await panel().getAttribute('data-phase') === 'error', `${kind} initial404`);
+      text = await panel().innerText();
+      assert.ok(text.includes(title) && text.includes('Nothing is shown.'));
+      assert.ok(!text.includes('earlier snapshot') && !text.includes('Server snapshot'));
+      assert.equal(await panel().locator('[data-stage]').count(), 0);
+      assert.ok(!text.includes(target.expected.transfer.txHash));
+      await screenshot(`diagnostics-${kind}-initial-empty.png`, true);
+      passed(`${kind}: initial404 has no earlier record or leaked hash`);
+      await select(target);
+    }
 
     await page.route(`${stack.apiBase}${pathOf(target)}`, route => route.abort('failed'), { times: 1 });
     await refresh().click(); await wait(async () => await panel().getAttribute('data-phase') === 'error', 'Interrupted refresh');
-    text = await panel().innerText(); assert.ok(text.includes('from the earlier snapshot'));
+    const text = await panel().innerText(); assert.ok(text.includes('from the earlier snapshot'));
     await refresh().click(); await ready(); passed('Interrupted read preserves an explicitly old snapshot; manual retry succeeds');
 
     const held = [];

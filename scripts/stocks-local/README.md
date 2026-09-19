@@ -167,7 +167,10 @@ The final runtime stop test proves reads remain available while new execution is
 blocked by STOPPED, including expired orders. It does not claim a live
 `configuredPause: true` transition. The held-request test proves cancellation on
 selection, while delayed-response overwrite protection is tested separately by
-DOM/store regressions. Error404 retained-snapshot wording is recorded as an
-explicit known P3 finding until the Claude copy follow-up is accepted. A passing
-functional run with that finding reports `PASS_WITH_KNOWN_P3` for diagnostics.
+DOM/store regressions. 003E-1 now asserts both real404 branches (foreign order and missing route),
+each after a successful read and on a first read. A retained hash must keep its
+earlier-snapshot label and must not be described as absent. An initial404 must
+show no earlier snapshot, stage or leaked hash. The prior P3 is closed; the
+current12-group diagnostics run reports `PASS`. Actual card-only screenshots
+are saved for both errors and all three viewport widths.
 This is local Chrome/PG/EVM evidence, not public-network or physical-wallet proof.
