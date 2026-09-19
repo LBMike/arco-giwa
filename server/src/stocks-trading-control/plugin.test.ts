@@ -172,6 +172,45 @@ test('POST accepts exact input boundaries and UTF-8 reason within the body limit
   }
 });
 
+const malformedUnicode = ['\ud800', '\udfff', 'before\ud800after', 'before\udc00after', '\udc00\ud800', '\ud800\ud800\udc00', '\ud800\udc00\udc00'];
+
+test('unpaired surrogates in reasons fail before service access instead of changing committed text', async t => {
+  const { app, calls } = fixture(); t.after(() => app.close());
+  for (const reason of malformedUnicode) error(await app.inject({ method: 'POST', url: path, headers, payload: { ...valid, reason } }), 400, 'INVALID_TRADING_CONTROL_INPUT');
+  assert.deepEqual(calls, []);
+});
+
+test('unpaired surrogates in the resolved operator fail before service access', async t => {
+  for (const operatorId of malformedUnicode) {
+    const { app, calls } = fixture({}, async () => ({ ...named, operatorId })); t.after(() => app.close());
+    for (const [method, url] of [['GET', path], ['GET', `${path}/history`], ['POST', path]] as const) error(await app.inject({ method, url, headers, ...(method === 'POST' ? { payload: valid } : {}) }), 403, 'OPERATOR_FORBIDDEN');
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('valid astral characters survive request and public response validation exactly', async t => {
+  const actor = { ...named, operatorId: '운영자\ud83d\ude80\ud800\udc00\udbff\udfff' };
+  const { app, calls } = fixture({}, async () => actor); t.after(() => app.close());
+  for (const reason of ['검증 완료 \ud83d\ude80\ud800\udc00\udbff\udfff', '\ud83d\ude80'.repeat(250)]) {
+    const input = { ...valid, reason };
+    assert.deepEqual(responseData(await app.inject({ method: 'POST', url: path, headers, payload: input })).data, { ...change(input, actor), ...flags });
+    assert.deepEqual(calls[calls.length - 1].args, [actor, input]);
+  }
+});
+
+test('malformed Unicode in public state, history and later replay state fails closed', async t => {
+  for (const value of malformedUnicode) for (const field of ['operatorId', 'reason'] as const) {
+    const corrupted = { ...change().state, [field]: value };
+    const { app } = fixture({
+      read: async () => corrupted,
+      history: async () => ({ items: [{ ...event(), [field]: value }], nextBeforeVersion: null }),
+      change: async () => ({ ...change(), replayed: true, state: { ...corrupted, version: 2 } }),
+    }); t.after(() => app.close());
+    for (const url of [path, `${path}/history`]) error(await app.inject({ url, headers }), 503, 'TRADING_CONTROL_UNAVAILABLE');
+    error(await app.inject({ method: 'POST', url: path, headers, payload: valid }), 503, 'TRADING_CONTROL_UNAVAILABLE');
+  }
+});
+
 test('state and POST reject even an empty raw query delimiter', async t => {
   const app = Fastify(); let calls = 0;
   app.addHook('onRequest', async request => { request.raw.url += '?'; });

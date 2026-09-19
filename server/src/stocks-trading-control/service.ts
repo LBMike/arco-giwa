@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { ensure, type Operator, type SqlPool } from '../stocks/contracts.js';
 import type { TradingControlChange, TradingControlCommand, TradingControlEvent, TradingControlHistory, TradingControlPort, TradingControlState } from './contracts.js';
+import { validTradingControlText } from './validation.js';
 
 const invalid = 'INVALID_TRADING_CONTROL_INPUT';
-const text = (value: unknown, maximum: number): value is string => typeof value === 'string' && value.length > 0 && value.length <= maximum && value.trim() === value && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
 type Row = Record<string, any>;
 const iso = (value: Date | string): string => new Date(value).toISOString();
 function event(row: Row): TradingControlEvent {
@@ -22,11 +22,11 @@ export class StocksTradingControlService implements TradingControlPort {
     return row ? state(row) : { deploymentDigest: this.deploymentDigest, paused: true, version: 0, updatedAt: null, operatorId: null, reason: null };
   }
   async change(operator: Operator, command: TradingControlCommand): Promise<TradingControlChange> {
-    ensure(operator && text(operator.operatorId, 128) && Array.isArray(operator.permissions) && operator.permissions.includes('stocks:control'), 'OPERATOR_FORBIDDEN', 403);
+    ensure(operator && validTradingControlText(operator.operatorId, 128) && Array.isArray(operator.permissions) && operator.permissions.includes('stocks:control'), 'OPERATOR_FORBIDDEN', 403);
     const operatorId = operator.operatorId;
     ensure(command && typeof command === 'object' && !Array.isArray(command) && Object.keys(command).length === 4 && ['paused', 'expectedVersion', 'idempotencyKey', 'reason'].every(key => Object.prototype.hasOwnProperty.call(command, key)), invalid);
     const { paused, expectedVersion, idempotencyKey, reason } = command;
-    ensure(typeof paused === 'boolean' && Number.isInteger(expectedVersion) && expectedVersion >= 0 && expectedVersion <= 2147483646 && typeof idempotencyKey === 'string' && /^[a-zA-Z0-9:_-]{8,128}$/.test(idempotencyKey) && text(reason, 500), invalid);
+    ensure(typeof paused === 'boolean' && Number.isInteger(expectedVersion) && expectedVersion >= 0 && expectedVersion <= 2147483646 && typeof idempotencyKey === 'string' && /^[a-zA-Z0-9:_-]{8,128}$/.test(idempotencyKey) && validTradingControlText(reason, 500), invalid);
     const db = await this.pool.connect();
     try {
       await db.query('BEGIN ISOLATION LEVEL READ COMMITTED');

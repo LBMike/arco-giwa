@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { PROFILE, StocksError, type Operator } from '../stocks/contracts.js';
 import type { TradingControlCommand, TradingControlPort } from './contracts.js';
+import { validTradingControlText } from './validation.js';
 
 export type StocksTradingControlPluginOptions = {
   service: TradingControlPort;
@@ -30,10 +31,10 @@ function integer(value: unknown, min: number, max = MAX_VERSION): value is numbe
   return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
 }
 function operatorId(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 128 && value.trim() === value && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+  return validTradingControlText(value, 128);
 }
 function reason(value: unknown): value is string {
-  return typeof value === 'string' && value.length >= 1 && value.length <= 500 && value.trim() === value && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+  return validTradingControlText(value, 500);
 }
 function iso(value: unknown): value is string {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;

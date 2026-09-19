@@ -36,3 +36,12 @@ test('trading control history rejects malformed limits and cursors without DB ac
   for (const before of [0, -1, 1.1, NaN, Infinity, 2147483648, null, '1']) await assert.rejects(f.service.history(50, before as number), failure('INVALID_TRADING_CONTROL_INPUT', 400));
   assert.equal(f.calls(), 0);
 });
+
+test('trading control rejects unpaired UTF-16 surrogates before opening a transaction', async () => {
+  const f = fixture();
+  for (const value of ['\ud800', '\udfff', 'before\ud800after', 'before\udc00after', '\udc00\ud800', '\ud800\ud800\udc00', '\ud800\udc00\udc00']) {
+    await assert.rejects(f.service.change(operator, { ...command, reason: value }), failure('INVALID_TRADING_CONTROL_INPUT', 400));
+    await assert.rejects(f.service.change({ ...operator, operatorId: value }, command), failure('OPERATOR_FORBIDDEN', 403));
+  }
+  assert.equal(f.calls(), 0);
+});

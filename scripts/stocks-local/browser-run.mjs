@@ -20,7 +20,7 @@ export async function runStack(options) {
   const probe = process.env.STOCKS_LOCAL_BROWSER_PROBE ?? '';
   assert.ok(['', 'ready', 'held', 'failure'].includes(probe));
   const scenario = process.env.STOCKS_LOCAL_BROWSER_CASE ?? '';
-  assert.ok(['', 'known-hash', 'known-hash-ui', 'operator-diagnostics'].includes(scenario), 'Choose a fixed browser case');
+  assert.ok(['', 'known-hash', 'known-hash-ui', 'operator-diagnostics', 'operator-control-ui'].includes(scenario), 'Choose a fixed browser case');
   assert.ok(!scenario || !probe, 'Recovery and lifecycle probes are separate cases');
   const { chromium } = createRequire(runtime)('playwright');
   let host, stack, wallet, browserServer, browser, closePromise, closed = false;
@@ -28,8 +28,8 @@ export async function runStack(options) {
   const setup = (async () => {
     await mkdir(evidence, { recursive: true }); check();
     host = await createLocalBrowserHost({ root: resolve(import.meta.dirname, '../..'), resourceDir: options.resourceDir }); check();
-    stack = await createLocalUiStack({ ...options, frontendOrigin: host.origin, knownHashRecovery: scenario === 'known-hash' || scenario === 'known-hash-ui', operatorDiagnostics: scenario === 'operator-diagnostics' }); check();
-    wallet = await createLocalWallet({ ...options, ...stack, operatorLogin: scenario === 'operator-diagnostics' }); check();
+    stack = await createLocalUiStack({ ...options, frontendOrigin: host.origin, knownHashRecovery: scenario === 'known-hash' || scenario === 'known-hash-ui', operatorDiagnostics: scenario === 'operator-diagnostics', operatorControls: scenario === 'operator-control-ui' }); check();
+    wallet = await createLocalWallet({ ...options, ...stack, operatorLogin: scenario === 'operator-diagnostics' || scenario === 'operator-control-ui' }); check();
     host.attach({ stack, wallet });
     browserServer = await chromium.launchServer({ executablePath, headless: true, host: '127.0.0.1',
       handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
@@ -66,13 +66,19 @@ export async function runStack(options) {
       rpcUrl: options.rpcUrl, origin: host.origin, chromePid: browserServer.process().pid }));
     if (probe === 'failure') throw Error('LOCAL_BROWSER_EXPECTED_FAILURE');
     if (probe === 'ready') await new Promise(() => {});
+    let operatorControl;
+    if (scenario === 'operator-control-ui') {
+      const { runOperatorControlUiScenario } = await import('./operator-control-ui-driver.mjs');
+      operatorControl = await runOperatorControlUiScenario({ host, stack, wallet, browser, evidence });
+    }
     const report = await runBrowserScenario({ host, stack, wallet, browser, evidence, probe, scenario });
     report.dispatchEvidence = await verifyUiEvidence(stack, wallet);
     if (scenario === 'operator-diagnostics') {
       const { runOperatorDiagnosticsScenario } = await import('./operator-diagnostics-driver.mjs');
       report.operatorDiagnostics = await runOperatorDiagnosticsScenario({ host, stack, wallet, browser, evidence });
     }
-    report.result = 'PASS';
+    if (operatorControl) report.operatorControl = operatorControl;
+    report.result = operatorControl?.knownFindings.length ? 'PASS_WITH_KNOWN_P2' : 'PASS';
     await writeFile(resolve(evidence, 'result.json'), JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
     return report;
   } finally { await close(); }

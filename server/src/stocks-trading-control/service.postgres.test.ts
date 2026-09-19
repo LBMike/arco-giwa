@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomBytes, randomUUID } from 'node:crypto';
+import Fastify from 'fastify';
 import { StocksError, type Operator, type SqlClient, type SqlPool } from '../stocks/contracts.js';
 import { StocksTradingControlService } from './service.js';
 import type { TradingControlCommand } from './contracts.js';
+import { stocksTradingControlPlugin } from './plugin.js';
 
 const require = createRequire(import.meta.url);
 const { Pool } = require('pg') as { Pool: new (options: unknown) => SqlPool & { end(): Promise<void> } };
@@ -135,4 +137,38 @@ test('real PG control: direct event inserts require a matching atomic state tran
     await assert.rejects(db.query('UPDATE arco_evm."StocksTradingControl" SET version=2,paused=true,"operatorId"=$2,reason=\'different\',"updatedAt"=clock_timestamp() WHERE "deploymentDigest"=$1', [f.digest, operator.operatorId]), /CONTROL_EVENT_MISMATCH/);
   } finally { await db.query('ROLLBACK'); db.release(); }
   assert.deepEqual(await f.service.read(), changed.state); assert.equal(await count(f.pool, 'StocksTradingControlEvent', f.digest), 1);
+});
+
+test('real PG control: malformed Unicode is rejected without writes and astral text replays exactly', options, async t => {
+  const f = fixture(); t.after(() => f.pool.end());
+  const actor = { ...operator, operatorId: '운영자\ud83d\ude80\ud800\udc00\udbff\udfff' };
+  const app = Fastify(); t.after(() => app.close());
+  app.register(stocksTradingControlPlugin, { service: f.service, resolveOperator: async () => actor });
+  const path = '/api/v1/admin/stocks/trading-control', request = command(0);
+  for (const reason of ['\ud800', '\udfff', 'before\ud800after', '\udc00\ud800', '\ud800\ud800\udc00', '\ud800\udc00\udc00']) {
+    const response = await app.inject({ method: 'POST', url: path, payload: { ...request, reason } });
+    assert.equal(response.statusCode, 400, response.body);
+    assert.equal(response.json().error, 'INVALID_TRADING_CONTROL_INPUT');
+    assert.equal(response.headers['cache-control'], 'no-store');
+    await assert.rejects(f.service.change(actor, { ...request, reason }), /INVALID_TRADING_CONTROL_INPUT/);
+    await assert.rejects(f.service.change({ ...actor, operatorId: reason }, request), /OPERATOR_FORBIDDEN/);
+  }
+  assert.equal(await count(f.pool, 'StocksTradingControl', f.digest), 0);
+  assert.equal(await count(f.pool, 'StocksTradingControlEvent', f.digest), 0);
+  for (const reason of ['검증 완료 \ud83d\ude80\ud800\udc00\udbff\udfff', '\ud83d\ude80'.repeat(250)]) {
+    const input = { ...request, expectedVersion: (await f.service.read()).version, reason };
+    if (input.expectedVersion > 0) input.idempotencyKey = randomUUID();
+    const first = await app.inject({ method: 'POST', url: path, payload: input });
+    assert.equal(first.statusCode, 200, first.body);
+    const stored = first.json().data;
+    assert.equal(stored.replayed, false);
+    assert.equal(stored.state.reason, reason); assert.equal(stored.change.reason, reason);
+    assert.equal(stored.state.operatorId, actor.operatorId); assert.equal(stored.change.operatorId, actor.operatorId);
+    const retry = await app.inject({ method: 'POST', url: path, payload: input });
+    assert.equal(retry.statusCode, 200, retry.body);
+    assert.deepEqual(retry.json().data, { ...stored, replayed: true });
+    assert.deepEqual(await new StocksTradingControlService(f.pool, f.digest).read(), stored.state);
+    assert.equal((await f.service.history()).items[0].reason, reason);
+  }
+  assert.equal(await count(f.pool, 'StocksTradingControlEvent', f.digest), 2);
 });

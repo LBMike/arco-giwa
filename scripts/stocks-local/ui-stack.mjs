@@ -20,10 +20,11 @@ import { createShortSessionFixture } from './short-session.mjs';
 const { Pool } = createRequire(import.meta.url)('pg');
 const faucetAbi = parseAbi(['function faucet(address,uint256)']);
 
-export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test', knownHashRecovery = false, operatorDiagnostics = false }) {
+export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test', knownHashRecovery = false, operatorDiagnostics = false, operatorControls = false }) {
   assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1');
   assert.equal(typeof knownHashRecovery, 'boolean');
   assert.equal(typeof operatorDiagnostics, 'boolean');
+  assert.equal(typeof operatorControls, 'boolean');
   assert.equal(bundle.execution, 'LOCAL_EVM_TEST_HARNESS_ONLY');
   const target = new URL(rpcUrl), database = new URL(databaseUrl), origin = new URL(frontendOrigin);
   assert.equal(target.protocol, 'http:'); assert.equal(target.hostname, '127.0.0.1');
@@ -88,6 +89,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
   const readTransport = httpStocksRpc(rpcUrl, true);
   const transport = (method, params) => {
     rpcTrace.push({ ...event(), method });
+    if (operatorControls && controlFaults.observerUnavailable) return Promise.reject(Error('LOCAL_OBSERVER_UNAVAILABLE'));
     return readTransport(method, params);
   };
   const chain = createStocksRpcPort(transport, manifest);
@@ -97,7 +99,10 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
   const signerToken = `TEST_HARNESS_ONLY_${randomUUID()}`;
   const authSecret = `TEST_HARNESS_ONLY_SESSION_${randomUUID()}`;
   const shortSession = knownHashRecovery ? createShortSessionFixture({ secret: authSecret, holder: accounts.holder }) : null;
-  const operators = [{ wallet: accounts.operator, operatorId: 'local-operator', permissions: ['stocks:read'] }];
+  const operators = [{ wallet: accounts.operator, operatorId: 'local-operator', permissions: ['stocks:read', ...(operatorControls ? ['stocks:control'] : [])] },
+    ...(operatorControls ? [{ wallet: accounts.otherHolder, operatorId: 'local-read-only', permissions: ['stocks:read'] },
+      { wallet: accounts.faucetOperator, operatorId: 'local-second-operator', permissions: ['stocks:read', 'stocks:control'] }] : [])];
+  const controlFaults = { unavailable: false, disabled: false, observerUnavailable: false };
   const resolvers = stocksSessionResolvers(authSecret, [domain], operators);
   const nonceStore = new Map();
   const legacy = {
@@ -134,7 +139,13 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
     processing = false; clearInterval(timer); timer = undefined; await activeTick;
   }
   async function listen() {
+    const controlPort = runtime.control && {
+      read: () => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : runtime.control.read(),
+      history: (...args) => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : runtime.control.history(...args),
+      change: (...args) => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : runtime.control.change(...args),
+    };
     const next = buildApp(appEnv, { ...legacy,
+      stocksTradingControl: controlPort && !controlFaults.disabled ? { service: controlPort, ...resolvers } : undefined,
       stocks: { service: runtime.service, ...resolvers, reconciliationCoverage: runtime.reconciliationCoverage },
       stocksExecution: { service: runtime.execution, ...resolvers },
       stocksSubmissions: { service: new StocksSubmissionsService(runtime.service, runtime.submissionReceipts), ...resolvers },
@@ -188,7 +199,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
   try {
     signerServer = await localSigner({ pool, rpc, manifest, deploymentDigest: digest, token: signerToken });
     const signer = externalStocksSigner({ url: signerServer.url, authorization: signerToken, deploymentDigest: digest, manifest, localHarness: true });
-    runtime = await createStocksRuntime({ manifest, pool, transport, signer, autodispatch: true, paused: false, operators });
+    runtime = await createStocksRuntime({ manifest, pool, transport, signer, autodispatch: true, paused: false, operators, operatorControls });
     const initial = await chain.block('finalized');
     assert.equal(await chain.tokenBalance(manifest.stockToken, accounts.holder, initial.number), '0');
     assert.equal(await chain.tokenBalance(manifest.cashToken, accounts.holder, initial.number), '0');
@@ -201,7 +212,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
     assert.equal(receipt?.status, '0x1');
     assert.equal(await chain.tokenBalance(manifest.cashToken, accounts.holder, (await chain.block('finalized')).number), '2000000000');
     await listen(); await startProcessing();
-    assert.equal(runtime.status().newOrdersPaused, false, 'Initial observer coverage required');
+    assert.equal(runtime.status().newOrdersPaused, operatorControls, 'Initial observer current; explicit controls start paused');
     const repo = runtime.service.repo;
     async function snapshot() {
       assert.ok(!closed, 'LOCAL_UI_STACK_CLOSED');
@@ -226,7 +237,9 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
         signer: { ...signerServer.controls, operations } };
     }
     return { apiBase, frontendOrigin, accounts, manifest, digest, rpc, chain, pool, service: runtime.service, repo,
-      operatorDiagnostics,
+      operatorDiagnostics: operatorDiagnostics || operatorControls,
+      operatorControls,
+      controlForHarness: operatorControls ? { service: runtime.control, faults: controlFaults, runtime } : undefined,
       stopRuntime: operatorDiagnostics ? async () => { await stopProcessing(); runtime.stop(); } : undefined,
       armShortSession: shortSession ? () => { assert.ok(!closed); shortSession.arm(); } : undefined,
       observer: { coverage: runtime.reconciliationCoverage }, requests, rpcTrace, startProcessing, stopProcessing, restartApi, snapshot, close };

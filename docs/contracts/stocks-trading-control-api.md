@@ -69,7 +69,9 @@ Query parameters are forbidden. Send one JSON object with exactly these four fie
 | `paused` | JSON boolean. `true` pauses; `false` resumes the manual gate. |
 | `expectedVersion` | JSON integer from 0 through 2147483646 matching the currently read version for a new command. |
 | `idempotencyKey` | 8–128 ASCII letters, digits, colon, underscore or hyphen. |
-| `reason` | Nonempty string, 1–500 JavaScript UTF-16 code units; already trimmed; C0/C1 control characters prohibited. |
+| `reason` | Nonempty string, 1–500 JavaScript UTF-16 code units; already trimmed; C0/C1 control characters and unpaired UTF-16 surrogates prohibited; valid surrogate pairs such as emoji are preserved. |
+
+Server-resolved operator IDs also require well-formed UTF-16 with no unpaired surrogates. Invalid input is rejected before any control-store write, preserving exact text for idempotency.
 
 The request does not accept `operatorId`, deployment identifiers, roles, permission overrides or timestamps. The server supplies identity and scope. A new accepted command atomically updates state and appends an audit event at `expectedVersion + 1`, including when the requested boolean already matches the current state. An identical retry using the same deployment-scoped idempotency key and operator returns the original event without another update. Reusing that key with another operator, command, reason or expected version produces an idempotency conflict.
 

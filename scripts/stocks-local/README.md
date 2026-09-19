@@ -174,3 +174,28 @@ show no earlier snapshot, stage or leaked hash. The prior P3 is closed; the
 current12-group diagnostics run reports `PASS`. Actual card-only screenshots
 are saved for both errors and all three viewport widths.
 This is local Chrome/PG/EVM evidence, not public-network or physical-wallet proof.
+
+## Operator trading control UI (003F)
+
+Use `STOCKS_LOCAL_BROWSER_CASE=operator-control-ui` with the same explicit local
+Chrome command and a fresh evidence directory. This case enables the real
+runtime's optional persistent control gate and starts paused/version0. A named
+control operator uses the real `/admin/stocks` page; a separately signed operator
+competes on expectedVersion, account B is read-only, and account A is unregistered
+for administrative control. Operator wallet access remains sign-in-only.
+
+The case verifies real DB state, double confirmation, paused quote rejection,
+resume with observer failure remaining, lost committed responses and identical
+retries, CAS conflicts, role denials, history pagination, and three viewport
+widths. A 503 is injected at the API service port (not a physical database outage);
+404 comes from actually removing the optional route during API restart. It then
+resumes the gate and runs the original 19 investor browser scenario groups and
+their seven wallet sends/claim-before-send evidence.
+
+The concurrent-operator ambiguity probe aborts one browser command before API
+delivery and records another signed operator's command with matching visible
+fields. If the UI wrongly claims those fields prove the first command succeeded,
+it records `CONTROL-UI-003F-P2-01`, captures a screenshot and returns
+`PASS_WITH_KNOWN_P2`. That is evidence of an unresolved finding, not UI acceptance.
+Review the separate independent store/SSR results for deployment-history ordering;
+this browser case does not claim to simulate a public rolling deployment.
