@@ -50,6 +50,7 @@ function command(phase: CommandState["phase"], patch: Partial<CommandState> = {}
     timedOut: false,
     retryRefused: false,
     unknownSeq: null,
+    otherDeploymentSeen: false,
     ...patch,
   }
 }

@@ -11,15 +11,16 @@
 //   identical command and key. Nothing ever changes expectedVersion and resends by itself.
 // - Only a verified 2xx proves the command's event. 409 version conflict re-reads and waits for a new command (on a
 //   retry too: the server checks the key before the version, so it proves the key was never recorded on the deployment
-//   that answered, which the 409 does not name; closing it keeps an unresolved note unless a read taken after it shows
-//   the command's own deployment). A first attempt
+//   that answered, which the 409 does not name; it stays unresolved unless a read taken after it shows the command's own
+//   deployment and none showed another). A first attempt
 //   refused with 400/401/403/404/idempotency conflict changed nothing. Anything else (503, 5xx, network, timeout,
 //   invalid 200), and any refusal of a retry, is unknown: the earlier attempt may or may not have been recorded.
 // - Every control value carries an order mark (the read's request sequence, or the POST answer's). A read started before
 //   the shown value never replaces it; a POST answer never replaces a newer state of the same deployment, nor a state of
 //   another deployment (that one is read again instead).
 // - After an unknown outcome a retry needs a successful control read started after it, of the same deployment (keys are
-//   deployment-scoped). Discarding an unknown command keeps it as an unresolved note; so does an access denial.
+//   deployment-scoped). An unresolved command (unknown, or an unresolved retry conflict) is never dropped silently:
+//   discarding it, replacing it with a new command, or an access denial keeps it as an unresolved note.
 // - History is confirmed against the shown control state whenever either one arrives: every entry is that deployment's
 //   and the list is at least as new as its version. A history of another deployment is cleared (entries, pages, cursor)
 //   and its first page read again, once per control state; an older list is read again. Unconfirmed entries are not
@@ -191,6 +192,11 @@ export class TradingControlStore {
           mark = ++this.sequence
         }
         this.write({ control: { phase: "ready", value: { data: result.data, meta: result.meta, loadedAt: this.now() }, error: null }, controlReadSeq: mark })
+        // After a retry's version conflict, a read of another deployment means the 409 may have come from there, for good.
+        const command = this.snapshot.command
+        if (command?.phase === "conflict" && command.attempts > 1 && !command.otherDeploymentSeen && result.data.deploymentDigest !== command.basis.deploymentDigest) {
+          this.write({ command: { ...command, otherDeploymentSeen: true } })
+        }
         this.revalidateHistory()
       } else if (!this.denyOnAccessError(result.error)) {
         const shown = this.snapshot.controlReadSeq
@@ -286,7 +292,11 @@ export class TradingControlStore {
     if (state.version >= MAX_VERSION) return "version_limit"
     const idempotencyKey = (this.config.newIdempotencyKey ?? newIdempotencyKey)()
     if (!IDEMPOTENCY_KEY.test(idempotencyKey)) return "invalid_key"
+    // A retry conflict that is still unresolved is kept as a note, never replaced silently.
+    const previous = this.snapshot.command
+    const abandoned = previous && unresolvedOnClose(this.snapshot, previous) ? abandonedOf(previous, previous.unknownSeq ?? ++this.sequence) : this.snapshot.abandoned
     this.write({
+      abandoned,
       command: {
         phase: "sending",
         command: Object.freeze({ paused: input.paused, expectedVersion: state.version, idempotencyKey, reason: reason.reason }),
@@ -297,6 +307,7 @@ export class TradingControlStore {
         timedOut: false,
         retryRefused: false,
         unknownSeq: null,
+        otherDeploymentSeen: false,
       },
     })
     this.send()
@@ -316,15 +327,13 @@ export class TradingControlStore {
   }
 
   /**
-   * Closes the command panel. A command in flight cannot be discarded (its answer is awaited). An unknown command stays
-   * as an unresolved note (it may have been recorded) and the state is read again. So does a retry that met a version
-   * conflict, unless a read taken after it shows the command's own deployment: the 409 does not name the deployment that
-   * answered, and only that deployment's key lookup failed.
+   * Closes the command panel. A command in flight cannot be discarded (its answer is awaited). An unresolved command
+   * (see unresolvedOnClose) stays as an unresolved note (it may have been recorded) and the state is read again.
    */
   discard(): boolean {
     const command = this.snapshot.command
     if (!command || command.phase === "sending") return false
-    if (command.phase === "unknown" || (command.phase === "conflict" && command.attempts > 1 && !readSinceOnDeployment(this.snapshot, command))) {
+    if (unresolvedOnClose(this.snapshot, command)) {
       this.write({ command: null, abandoned: abandonedOf(command, command.unknownSeq ?? ++this.sequence) })
       this.refresh()
     } else this.write({ command: null })
@@ -464,7 +473,7 @@ export class TradingControlStore {
     if (!access) return false
     // Same scope: a command whose result is not known is not forgotten silently (its key is never resent).
     const command = this.snapshot.command
-    const abandoned = command && (command.phase === "sending" || command.phase === "unknown") ? abandonedOf(command, ++this.sequence) : this.snapshot.abandoned
+    const abandoned = command && unresolvedOnClose(this.snapshot, command) ? abandonedOf(command, ++this.sequence) : this.snapshot.abandoned
     this.reset(this.snapshot.scopeKey, access, abandoned)
     return true
   }
@@ -501,6 +510,16 @@ export class TradingControlStore {
 function abandonedOf(command: CommandState, sinceSeq: number): AbandonedCommand {
   const { paused, expectedVersion, idempotencyKey, reason } = command.command
   return { paused, expectedVersion, idempotencyKey, reason, sinceSeq, deploymentDigest: command.basis.deploymentDigest }
+}
+
+/**
+ * Whether this command's result is not known, so closing or replacing it must keep an unresolved note: it is in flight,
+ * unknown, or a retry that met a version conflict (the 409 names no deployment) that no read after it has tied to the
+ * command's own deployment, or after which a read showed another deployment.
+ */
+function unresolvedOnClose(snapshot: TradingControlSnapshot, command: CommandState): boolean {
+  if (command.phase === "sending" || command.phase === "unknown") return true
+  return command.phase === "conflict" && command.attempts > 1 && (command.otherDeploymentSeen || !readSinceOnDeployment(snapshot, command))
 }
 
 /** True when a control read taken after the command's outcome mark shows, without error, the deployment it was reviewed for. */

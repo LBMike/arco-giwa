@@ -123,6 +123,11 @@ export type CommandState = {
    * or when a retry met a version conflict (only a read after it can show which deployment the page now talks to).
    */
   readonly unknownSeq: number | null
+  /**
+   * True once a control read after a retry's version conflict showed another deployment than the reviewed one. The 409
+   * names no deployment, so after that no later read can tie it to the reviewed deployment: the command stays unresolved.
+   */
+  readonly otherDeploymentSeen: boolean
 }
 
 /**
