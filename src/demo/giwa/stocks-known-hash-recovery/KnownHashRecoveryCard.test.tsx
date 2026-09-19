@@ -72,3 +72,39 @@ test("a running action shows a disabled, busy button", () => {
   assert.deepEqual(buttons, [{ label: "Checking with the server…", disabled: true }])
   assert.match(html, /aria-busy="true"/)
 })
+
+// 003D-1 (Codex KH-UI-003D-P3-01): a failed receipt check after the hash was recorded must not say the server may or may
+// not have the hash. KEPT + FAILED keeps that uncertainty (the record request may or may not have reached the server).
+test("a failure keeps the right certainty: KEPT may or may not be recorded; RECORDED stays recorded and only the receipt is unknown", () => {
+  const failures: RecoveryResult[] = [{ kind: "FAILED", code: "SUBMISSION_REQUEST_FAILED" }, { kind: "FAILED", code: "SUBMISSION_TIMEOUT" }, { kind: "FAILED", code: "SUBMISSION_HTTP_ERROR" }]
+  const steps = [
+    { stage: "APPROVAL", side: "BUY", step: "approval", title: "Approval hash kept in this tab" },
+    { stage: "APPROVAL", side: "SELL", step: "approval", title: "Approval hash kept in this tab" },
+    { stage: "TRANSFER", side: "BUY", step: "deposit", title: "Deposit hash kept in this tab" },
+    { stage: "TRANSFER", side: "SELL", step: "escrow", title: "Escrow hash kept in this tab" },
+  ] as const
+  for (const { stage, side, step, title } of steps) {
+    for (const failure of failures) {
+      const label = `${side} ${stage} ${failure.kind === "FAILED" ? failure.code : ""}`
+      const recorded = render(entry({ kind: "RECORDED" }, { stage, side }), failure)
+      assert.ok(recorded.text.startsWith(title), `${label}: step wording`)
+      assert.ok(recorded.text.includes(`The server has recorded this ${step} hash for the order's request.`), `${label}: recorded`)
+      assert.ok(recorded.text.includes(`The receipt check could not be completed: the server's answer did not arrive or was an error. The ${step} hash stays recorded on the server, and this check did not open your wallet. Check the receipt again to see whether it is verified.`), `${label}: receipt-check failure`)
+      assert.doesNotMatch(recorded.text, /may or may not|may not have (it|recorded)|could not be recorded|not recorded/i, `${label}: no contradiction with "recorded"`)
+      assert.deepEqual(recorded.buttons.map((button) => button.label), ["Check the receipt again"], `${label}: explicit receipt check stays`)
+      assert.ok(recorded.text.includes(neverAgain(step)), `${label}: never this step again`)
+      assert.ok(recorded.text.includes("kept only in this tab's memory"), `${label}: tab memory limit`)
+      assert.doesNotMatch(recorded.text, /order (is|was|has been) (complete|completed)/i)
+
+      const kept = render(entry({ kind: "KEPT" }, { stage, side }), failure)
+      assert.ok(kept.text.startsWith(title), `${label}: step wording`)
+      assert.ok(kept.text.includes("The server's answer did not arrive or was an error, so it may or may not have recorded the hash. This did not open your wallet. Check again to see what the server has."), `${label}: record uncertainty kept`)
+      assert.ok(!kept.text.includes("stays recorded") && !kept.text.includes("The server has recorded"), `${label}: KEPT never claims the hash is recorded`)
+      assert.deepEqual(kept.buttons.map((button) => button.label), ["Check again"], label)
+      assert.ok(kept.text.includes(neverAgain(step)) && kept.text.includes("kept only in this tab's memory"), label)
+    }
+  }
+  // Without a failure, RECORDED says nothing about a failed check, and KEPT offers the first recording.
+  assert.ok(!render(entry({ kind: "RECORDED" })).text.includes("could not be completed"))
+  assert.deepEqual(render(entry({ kind: "KEPT" })).buttons.map((button) => button.label), ["Record this hash"])
+})

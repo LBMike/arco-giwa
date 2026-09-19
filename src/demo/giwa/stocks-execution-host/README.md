@@ -156,5 +156,9 @@ GIWA_HOST_DOM_RUNTIME=/path/to/node_modules/jsdom/package.json TMPDIR=/private/t
   - 19: a reload loses the kept hash; the new page's check stays recovery-only.
   - 20: the original answer arrives after the same owner signed in again. The old callback writes nothing with either token; the card appears live and records the hash only on the click.
   - Recovery requests in 13–18 and 20 carry one token, never the original claim's. No wallet call of any kind happens during recovery.
+  - 21–22 (003D-1): BUY approval and SELL escrow.
+    - A lost inspect leaves KEPT with "may or may not have recorded" and "Check again".
+    - A lost receipt check after a successful record leaves RECORDED. The copy says the hash stays recorded and only the receipt check failed, keeps "Check the receipt again", and shows no automatic retry.
+    - The explicit receipt check then verifies it, with the hash recorded once and 0 wallet calls.
 - `testing/`: a TEST-ONLY in-process server (real Stocks, execution and submission plugins over memory SQL, the real evidence and receipt verifier over a fake chain, fake EIP-1193 wallet). Never imported by product code.
 - `verification/`: an offline loopback page for a browser check of the same real page code (see its README). Not part of the app build.

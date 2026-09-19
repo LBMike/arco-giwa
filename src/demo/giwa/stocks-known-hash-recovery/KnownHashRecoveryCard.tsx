@@ -51,8 +51,15 @@ function copyFor(entry: KnownHashEntry, last: RecoveryResult | null): Copy {
   else paragraphs.push(`Your wallet returned this ${step} transaction hash, but it could not be recorded on the server at the time (for example because the Stocks session had ended), so the server may not have it.`, "Recording it sends nothing from your wallet. It adds this hash to the request the server already has for this order, then asks the server to check its receipt.")
   // Until recorded, the order's own check reads the server's claim without a hash and may show the result as unknown.
   if (state.kind === "KEPT") paragraphs.push("Until this hash is recorded, the order's own check may show the result as unknown.")
-  // About this recovery action only: it never opens the wallet. The server may or may not have stored what was asked.
-  if (last?.kind === "FAILED") paragraphs.push("The server's answer did not arrive or was an error, so it may or may not have recorded the hash. This did not open your wallet. Check again to see what the server has.")
+  // About this recovery action only: it never opens the wallet.
+  // - KEPT: the record request itself may or may not have reached the server, so both outcomes stay possible.
+  // - RECORDED: the server already has the hash (the store moves to RECORDED only from a server answer); only the
+  //   receipt check failed, so the hash stays recorded and only the receipt is still unknown.
+  if (last?.kind === "FAILED") {
+    paragraphs.push(state.kind === "RECORDED"
+      ? `The receipt check could not be completed: the server's answer did not arrive or was an error. The ${step} hash stays recorded on the server, and this check did not open your wallet. Check the receipt again to see whether it is verified.`
+      : "The server's answer did not arrive or was an error, so it may or may not have recorded the hash. This did not open your wallet. Check again to see what the server has.")
+  }
   if (last?.kind === "SESSION_REQUIRED" || last?.kind === "SESSION_REJECTED") paragraphs.push("Your Stocks session can no longer be used for this. Sign in again with the same wallet to continue.")
   paragraphs.push(neverAgain(step))
   paragraphs.push("This hash is kept only in this tab's memory. Reloading or closing the page loses it.")

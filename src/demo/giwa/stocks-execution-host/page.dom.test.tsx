@@ -1162,6 +1162,91 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       assert.deepEqual(ctx.rows(), [["REQUEST_MAY_START", null]])
       void order
     })
+
+    // 003D-1 (Codex KH-UI-003D-P3-01): the card's failure copy must match what the server has. A lost inspect leaves the
+    // hash KEPT (recorded or not is uncertain); a lost receipt check after a successful record leaves it RECORDED.
+    const dropOnce = (drop: { next: "inspect" | "reconcile" | null }) => (harness: InProcessStocks) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const inspect = (init?.method ?? "GET") === "GET" && /\/wallet-submissions\/(BUY|SELL)\//.test(url)
+      const reconcile = /\/wallet-submissions\/reconcile$/.test(url)
+      if ((drop.next === "inspect" && inspect) || (drop.next === "reconcile" && reconcile)) {
+        drop.next = null
+        throw new TypeError("network connection lost") // Never reaches the server.
+      }
+      return harness.fetch(input, init)
+    }) as typeof globalThis.fetch
+    const cardText = (page: Page) => recoveryCard(page)?.textContent ?? ""
+    const cardButtons = (page: Page) => [...(recoveryCard(page)?.querySelectorAll("button") ?? [])].map((button) => button.textContent)
+    const RECORDED_FAILED = (step: string) => `The receipt check could not be completed: the server's answer did not arrive or was an error. The ${step} hash stays recorded on the server, and this check did not open your wallet. Check the receipt again to see whether it is verified.`
+    const KEPT_FAILED = "The server's answer did not arrive or was an error, so it may or may not have recorded the hash. This did not open your wallet. Check again to see what the server has."
+
+    await scenario("21. BUY approval: a lost inspect keeps the hash KEPT with uncertain copy; a lost receipt check after recording shows RECORDED without contradiction; the explicit receipt check verifies it", async () => {
+      const drop: { next: "inspect" | "reconcile" | null } = { next: null }
+      const ctx = await lateHashOnPage({ side: "BUY", stage: "APPROVAL", fetch: dropOnce(drop) })
+      const { page, harness, wallet, hash, rows } = ctx
+      ctx.clockState.offset = 0
+      await signInAgain(page)
+      await page.waitFor(() => recoveryCard(page), "recovery card")
+      const sendsBefore = wallet.calls.length
+      // 1. The inspect is lost: nothing reached the server; recorded or not stays uncertain on the card.
+      drop.next = "inspect"
+      await page.click(recoveryCard(page)!.querySelector("button"), "Record this hash")
+      await page.waitFor(() => cardText(page).includes(KEPT_FAILED), "KEPT + FAILED copy")
+      assert.equal(recoveryCard(page)!.dataset.state, "KEPT")
+      assert.deepEqual(cardButtons(page), ["Check again"])
+      assert.ok(!cardText(page).includes("stays recorded"))
+      assert.equal(bodies(harness, /wallet-submissions\/outcomes$/).length, 0)
+      // 2. The record succeeds; the receipt check is lost before the server.
+      drop.next = "reconcile"
+      await page.click(recoveryCard(page)!.querySelector("button"), "Check again")
+      await page.waitFor(() => cardText(page).includes(RECORDED_FAILED("approval")), "RECORDED + FAILED copy")
+      assert.equal(recoveryCard(page)!.dataset.state, "RECORDED")
+      assert.ok(cardText(page).includes("The server has recorded this approval hash for the order's request."))
+      assert.doesNotMatch(cardText(page), /may or may not|may not have it/, "no contradiction with the recorded hash")
+      assert.deepEqual(cardButtons(page), ["Check the receipt again"])
+      assert.deepEqual(rows(), [["SUBMITTED", hash]], "the server has the original hash")
+      assert.equal(bodies(harness, /wallet-submissions\/outcomes$/).length, 1)
+      assert.equal(requestsTo(harness, "POST", /wallet-submissions\/reconcile$/).length, 0, "the lost receipt check never reached the server")
+      await page.settle(500)
+      assert.equal(requestsTo(harness, "POST", /wallet-submissions\/reconcile$/).length, 0, "no automatic retry")
+      // 3. The explicit receipt check (activated twice) verifies it; nothing is recorded again.
+      const button = recoveryCard(page)!.querySelector<HTMLButtonElement>("button")!
+      await act(async () => {
+        button.click()
+        button.click()
+        await sleep(0)
+      })
+      await page.waitFor(() => recoveryCard(page)?.dataset.state === "VERIFIED_CONFIRMED", "verified", 10_000)
+      await page.settle(300)
+      assert.equal(bodies(harness, /wallet-submissions\/outcomes$/).length, 1, "recorded once")
+      assert.equal(requestsTo(harness, "POST", /wallet-submissions\/reconcile$/).length, 1)
+      assert.deepEqual(rows(), [["CONFIRMED", hash]])
+      assert.equal(wallet.calls.length, sendsBefore, "no wallet call of any kind")
+      assert.equal(bodies(harness, /wallet-submissions\/claims$/).length, 1, "only the original claim")
+    })
+
+    await scenario("22. SELL escrow: a lost receipt check after recording shows RECORDED with escrow wording and no contradiction; the explicit receipt check verifies it", async () => {
+      const drop: { next: "inspect" | "reconcile" | null } = { next: null }
+      const ctx = await lateHashOnPage({ side: "SELL", stage: "TRANSFER", fetch: dropOnce(drop) })
+      const { page, harness, hash, rows } = ctx
+      ctx.clockState.offset = 0
+      await signInAgain(page)
+      await page.waitFor(() => recoveryCard(page), "recovery card")
+      drop.next = "reconcile"
+      await page.click(recoveryCard(page)!.querySelector("button"), "Record this hash")
+      await page.waitFor(() => cardText(page).includes(RECORDED_FAILED("escrow")), "RECORDED + FAILED copy")
+      assert.ok(cardText(page).startsWith("Escrow hash kept in this tab"))
+      assert.doesNotMatch(cardText(page), /may or may not|may not have it/)
+      assert.ok(cardText(page).includes("Do not send this escrow again"))
+      assert.deepEqual(cardButtons(page), ["Check the receipt again"])
+      assert.deepEqual(rows(), [["SUBMITTED", hash]])
+      await page.click(recoveryCard(page)!.querySelector("button"), "Check the receipt again")
+      await page.waitFor(() => recoveryCard(page)?.dataset.state === "VERIFIED_CONFIRMED", "verified", 10_000)
+      assert.ok(cardText(page).includes("This is not the order result."))
+      // The approval's own outcome was recorded normally before; the escrow hash is recorded exactly once.
+      assert.equal(bodies(harness, /wallet-submissions\/outcomes$/).filter((body) => body.stage === "TRANSFER").length, 1)
+      assert.deepEqual(rows(), [["CONFIRMED", hash]])
+    })
   } finally {
     await runCleanups(shared)
     await runCleanups(cleanups)
