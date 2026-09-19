@@ -35,7 +35,13 @@ function MarketCatalog({ client, ordersClient, response }: { client: MarketClien
   const capabilities = useOrderCapabilities(ordersClient)
   // 1D charts the detail view already loaded; rows never request charts of their own.
   const [series, setSeries] = useState<Readonly<Record<string, Chart>>>({})
-  const report = useCallback((chart: Chart) => setSeries(current => current[chart.symbol] === chart ? current : { ...current, [chart.symbol]: chart }), [])
+  // A finished 1D read either stores its series or clears the symbol's entry, so a later failed/stale read never leaves an old chart.
+  const report = useCallback((symbol: string, chart: Chart | null) => setSeries(current => {
+    if (chart) return current[symbol] === chart ? current : { ...current, [symbol]: chart }
+    if (!(symbol in current)) return current
+    const { [symbol]: _removed, ...rest } = current
+    return rest
+  }), [])
   const table = useRef<HTMLDivElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const [focus, setFocus] = useState<{ symbol: string; tick: number } | null>(() => requested !== null && names.includes(requested) ? { symbol: requested, tick: 0 } : null)
@@ -65,7 +71,7 @@ function MarketCatalog({ client, ordersClient, response }: { client: MarketClien
     </div>
   </>
 }
-function SecurityDetail({ client, security, quote, headingRef, onBack, onSeries }: { client: MarketClient; security: Security; quote: Quote | null; headingRef: RefObject<HTMLHeadingElement>; onBack: () => void; onSeries: (chart: Chart) => void }) {
+function SecurityDetail({ client, security, quote, headingRef, onBack, onSeries }: { client: MarketClient; security: Security; quote: Quote | null; headingRef: RefObject<HTMLHeadingElement>; onBack: () => void; onSeries: (symbol: string, chart: Chart | null) => void }) {
   const [range, setRange] = useState<Range>("1D")
   const load = useCallback((signal: AbortSignal) => client.profile(security.symbol, signal), [client, security.symbol])
   const profile = useOwnedRead(security.symbol, load)
@@ -86,12 +92,17 @@ function SecurityDetail({ client, security, quote, headingRef, onBack, onSeries 
     {security.symbol === "NVDA" ? <p className="text-sm">NVDA 테스트 주문은 아래 모의 거래 섹션에서 확인하세요. 표시 시세는 체결에 사용하지 않습니다.</p> : <p role="status" className="text-sm">{security.symbol}은 시장정보 조회만 지원합니다. 현재 모의 주문은 NVDA만 지원하며 이 종목을 NVDA 주문으로 전환하지 않습니다.</p>}
   </article>
 }
-function ChartRead({ client, name, range, quote, onSeries }: { client: MarketClient; name: string; range: Range; quote: Quote | null; onSeries: (chart: Chart) => void }) {
+function ChartRead({ client, name, range, quote, onSeries }: { client: MarketClient; name: string; range: Range; quote: Quote | null; onSeries: (symbol: string, chart: Chart | null) => void }) {
   const load = useCallback((signal: AbortSignal) => client.chart(name, range, signal), [client, name, range])
   const chart = useOwnedRead(JSON.stringify([client.baseUrl, name, range]), load)
-  // Only a current (AVAILABLE) series feeds the list; a STALE one stays in the detail with its stale notice.
-  const loaded = chart.phase === "ready" && chart.value.status === "AVAILABLE" ? chart.value.data : null
-  // The same parsed chart object is reported once per read, so the list's cache cannot loop.
-  useEffect(() => { if (range === "1D" && loaded && loaded.bars.length >= 2) onSeries(loaded) }, [range, loaded, onSeries])
+  // Once this owner's 1D read finishes, the list gets its series only if it is current (AVAILABLE, 2+ bars); a STALE,
+  // unavailable, empty, one-bar or failed read clears the symbol's list entry. Other ranges never touch the 1D entry.
+  // useOwnedRead only publishes this key's own result, so a late answer from an earlier symbol/range/API cannot report.
+  const settled = chart.phase === "ready" ? chart.value : chart.phase === "error" ? "error" : null
+  useEffect(() => {
+    if (range !== "1D" || settled === null) return
+    const data = settled !== "error" && settled.status === "AVAILABLE" ? settled.data : null
+    onSeries(name, data && data.bars.length >= 2 ? data : null)
+  }, [range, name, settled, onSeries])
   return chart.phase === "ready" ? <MarketChart response={chart.value} quote={quote} /> : <div className="min-h-64"><Status status={chart.phase} /></div>
 }

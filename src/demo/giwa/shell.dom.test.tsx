@@ -5,8 +5,7 @@ import { act, StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { GiwaPreprodApp } from "./GiwaPreprodApp"
-import { GiwaWalletProvider } from "./wallet"
+// GiwaPreprodApp and ./wallet are imported inside the test, after the fetch guard below is installed (see there).
 
 // No dependency added: opt into the already-installed DOM runtime for this integration gate.
 // jsdom has no media queries, so both the xl sidebar and the below-xl drawer are in the DOM; the
@@ -20,15 +19,31 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package.json)", { skip: !runtime }, async t => {
   const { JSDOM } = createRequire(runtime!)("jsdom")
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://app.example/", pretendToBeVisual: true })
+  // Everything this shell renders comes from the seeded query cache: any app network read is a failure (fetchCalls).
+  // One third-party request is expected and answered offline: loading the Dynamic SDK (./wallet imports it) starts a
+  // wallet-book CDN fetch at module evaluation (@dynamic-labs/wallet-book hooks/useWalletBookCdn.js: "Initiate wallet
+  // book fetch immediately"), retries it and then uses its bundled fallback list. Only that exact URL gets a 503 stub and
+  // is counted apart (sdkAssetCalls); nothing leaves the process. The app modules are imported after this guard is
+  // installed, so the request can no longer reach the real network or land at an arbitrary point of a leaf test.
+  const DYNAMIC_WALLET_BOOK = "https://dynamic-static-assets.com/wallet-book/v1/stable/wallet-book.json"
   const fetchCalls: string[] = []
+  const sdkAssetCalls: string[] = []
   const globals: Record<string, unknown> = {
     window: dom.window, document: dom.window.document, navigator: dom.window.navigator, HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true,
-    // Everything this shell renders comes from the seeded query cache; any network read is a failure.
-    fetch: (async (url: unknown) => { fetchCalls.push(String(url)); throw new Error("network disabled in shell DOM test") }) as typeof fetch,
+    fetch: (async (input: unknown) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : String((input as { url?: unknown })?.url ?? input)
+      if (url === DYNAMIC_WALLET_BOOK) { sdkAssetCalls.push(url); return new Response(null, { status: 503, statusText: "offline test stub" }) }
+      fetchCalls.push(url)
+      throw new Error("network disabled in shell DOM test")
+    }) as typeof fetch,
   }
   const previous = Object.fromEntries(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value })
   t.after(() => { dom.window.close(); for (const key of Object.keys(globals)) { const descriptor = previous[key]; if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key) } })
+
+  const { GiwaPreprodApp } = await import("./GiwaPreprodApp")
+  const { GiwaWalletProvider } = await import("./wallet")
+  t.after(() => { t.diagnostic(`Dynamic wallet-book requests answered offline: ${sdkAssetCalls.length}; other requests: ${fetchCalls.length}`) })
 
   async function mount(path: string) {
     const element = document.createElement("div"); document.body.append(element)

@@ -39,13 +39,14 @@ test("Stocks & ETFs table filters, sorts, selects by keyboard and returns focus 
   const selectValue = Object.getOwnPropertyDescriptor(w.HTMLSelectElement.prototype, "value")!.set!
 
   /** Unmounts in the subtest's own after hook, before the parent restores the globals. */
-  async function mount(st: TestContext, path = "/stocks") {
+  /** `intercept` may replace a fixture answer (url, fixture response) → response. */
+  async function mount(st: TestContext, path = "/stocks", intercept?: (url: string, response: Response) => Promise<Response>) {
     const element = document.createElement("div"); document.body.append(element)
     const root = createRoot(element)
     const market = fixtureTop40MarketFetch()
     const calls: string[] = []
     let orderReads = 0
-    const client = createMarketClient("https://api.fixture", async (url: string, init: RequestInit) => { calls.push(url); return market(url, init) })
+    const client = createMarketClient("https://api.fixture", async (url: string, init: RequestInit) => { calls.push(url); const response = await market(url, init); return intercept ? intercept(url, response) : response })
     const ordersClient = { async getCatalog() { orderReads++; return { instruments: [{ symbol: "NVDA", orderCapability: "CHECK_PAUSE_AT_ORDER" }] } } }
     const router = createMemoryRouter([{ path: "/stocks", element: h(StocksMarketFeature, { client, ordersClient }) }], { initialEntries: [path] })
     await act(async () => { root.render(h(StrictMode, null, h(RouterProvider, { router }))); await flush() })
@@ -159,6 +160,52 @@ test("Stocks & ETFs table filters, sorts, selects by keyboard and returns focus 
     assert.ok(m.calls.some(url => url.includes("/SGOV/chart?range=1D")), "the SGOV detail loaded its 1D chart")
     assert.equal(spark("SGOV"), null, "a STALE series stays in the detail with its notice")
     assert.match(m.rows().find(item => item.querySelector('[data-symbol="SGOV"]'))!.textContent!, /24시간 차트 미로드/)
+  })
+
+  await t.test("a finished 1D re-read that is not current clears the row sparkline; the next valid read restores it", async (st) => {
+    type Outcome = "STALE" | "UNAVAILABLE" | "UNCONFIGURED" | "EMPTY" | "ONE_BAR" | "HTTP_503" | null
+    let next: Outcome = null
+    const replaced: string[] = []
+    // Only NVDA's 1D chart answer is swapped; everything else stays the fixture answer.
+    const intercept = async (url: string, response: Response) => {
+      if (next === null || !url.endsWith("/NVDA/chart?range=1D")) return response
+      replaced.push(next)
+      if (next === "HTTP_503") return Response.json({}, { status: 503 })
+      const body = await response.json()
+      if (next === "EMPTY") { body.data.bars = []; body.data.history = "EMPTY" }
+      else if (next === "ONE_BAR") body.data.bars = body.data.bars.slice(0, 1)
+      else { body.status = next; body.reason = next === "STALE" ? "OLD_OBSERVATION" : next === "UNCONFIGURED" ? "NOT_CONFIGURED" : "MISSING_OBSERVATION"; if (next !== "STALE") body.data = null }
+      return Response.json(body)
+    }
+    const m = await mount(st, "/stocks?symbol=NVDA", intercept)
+    const row = () => m.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!
+    const spark = () => row().querySelector('svg[role="img"]')
+    const reselect = async (outcome: Outcome) => { await m.press(m.rowButton("MU"), "Enter"); next = outcome; await m.press(m.rowButton("NVDA"), "Enter"); next = null }
+    const valid = spark()?.getAttribute("aria-label")
+    assert.ok(valid, "the first AVAILABLE 1D read draws the NVDA sparkline")
+    for (const outcome of ["STALE", "UNAVAILABLE", "UNCONFIGURED", "EMPTY", "ONE_BAR", "HTTP_503"] as const) {
+      await st.test(`AVAILABLE → ${outcome} → AVAILABLE`, async () => {
+        await reselect(outcome)
+        assert.equal(replaced[replaced.length - 1], outcome, `${outcome}: the replacement answer was requested`)
+        assert.equal(Boolean(spark()), false, `${outcome}: the old sparkline is gone`)
+        assert.match(row().textContent!, /24시간 차트 미로드/, `${outcome}: the row falls back to the not-loaded state`)
+        await reselect(null)
+        assert.equal(spark()?.getAttribute("aria-label"), valid, `${outcome}: a following valid read restores it`)
+      })
+    }
+    // Other ranges neither clear nor replace a valid 1D entry, even when their own read fails.
+    next = null
+    const failRange = async (url: string, response: Response) => url.includes("/NVDA/chart?range=1W") ? Response.json({}, { status: 503 }) : response
+    const other = await mount(st, "/stocks?symbol=NVDA", failRange)
+    const otherSpark = () => other.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!.querySelector('svg[role="img"]')
+    const before = otherSpark()?.getAttribute("aria-label")
+    assert.ok(before)
+    for (const range of ["1W", "1Y"]) {
+      await other.run(() => other.button(range).click())
+      assert.equal(otherSpark()?.getAttribute("aria-label"), before, `${range} (1W fails with 503) leaves the 1D sparkline`)
+    }
+    assert.ok(other.calls.some(url => url.includes("/NVDA/chart?range=1W")) && other.calls.some(url => url.includes("/NVDA/chart?range=1Y")))
+    assert.equal(other.calls.filter(url => url.includes("/chart")).every(url => url.includes("/NVDA/") || url.includes("/SOXL/")), true, "rows request no charts")
   })
 
   await t.test("a ?symbol deep link selects and focuses that security; an unknown symbol falls back to the first without moving focus", async (st) => {

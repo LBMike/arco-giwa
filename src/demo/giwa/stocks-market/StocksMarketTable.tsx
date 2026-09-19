@@ -63,7 +63,7 @@ function Change({ raw, unit }: { raw: string | null; unit: "$" | "%" }) {
   const text = unit === "$" ? `$${parts.magnitude}` : `${parts.magnitude}%`
   if (parts.direction === "flat") return <span className="text-[var(--color-arco-text-soft)]">{text}</span>
   const up = parts.direction === "up"
-  return <span className={`inline-flex items-center gap-1 ${up ? "text-[var(--color-arco-up)]" : "text-[var(--color-arco-down)]"}`}><Triangle up={up} /><span className="sr-only">{up ? "상승 " : "하락 "}</span>{text}</span>
+  return <span className={`inline-flex items-center gap-1 ${up ? "text-[var(--color-arco-up-text)]" : "text-[var(--color-arco-down)]"}`}><Triangle up={up} /><span className="sr-only">{up ? "상승 " : "하락 "}</span>{text}</span>
 }
 function StatusBadge({ symbol, capabilities }: { symbol: string; capabilities: Capabilities }) {
   const capability = capabilities.phase === "ready" ? capabilities.bySymbol.get(symbol) ?? null : null

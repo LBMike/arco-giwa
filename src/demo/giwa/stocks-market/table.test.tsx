@@ -1,10 +1,12 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { StaticRouter } from "react-router-dom"
 import type { Catalog, Envelope, Quote } from "./contracts"
 import { changeParts, exact } from "./display"
-import { FIXTURE_TIME, fixtureCatalog, fixtureQuote, fixtureTop40Catalog, fixtureTop40Chart, fixtureTop40Quote, fixtureTop40Quotes, TOP40_FLAT, TOP40_STALE, TOP40_UNAVAILABLE } from "./fixtures"
+import { MarketChart } from "./MarketChart"
+import { FIXTURE_TIME, fixtureCatalog, fixtureChart, fixtureQuote, fixtureTop40Catalog, fixtureTop40Chart, fixtureTop40Quote, fixtureTop40Quotes, TOP40_FLAT, TOP40_STALE, TOP40_UNAVAILABLE } from "./fixtures"
 import { StocksMarketTable, type Capabilities, type StocksMarketTableProps } from "./StocksMarketTable"
 import type { ReadState } from "./useOwnedRead"
 
@@ -144,4 +146,35 @@ test("24h Chart draws only a series the detail already loaded; other rows say it
   assert.equal([...html.matchAll(/role="img"/g)].length, 1)
   const gap = { ...chart, bars: [chart.bars[0], chart.bars[1], chart.bars[10], chart.bars[11]] }
   assert.equal([...rowOf(render({ series: { NVDA: gap } }), "NVDA").matchAll(/stroke-width="2"/g)].length, 2, "a gap splits the line")
+})
+
+// WCAG 2.x relative luminance / contrast, measured on the backgrounds the table and detail actually use.
+function channel(value: number) { const c = value / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4 }
+function luminance([r, g, b]: number[]) { return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b) }
+function contrast(a: number[], b: number[]) { const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05) }
+function token(css: string, name: string) { const value = new RegExp(`${name}:\\s*([^;]+);`).exec(css)?.[1].trim(); assert.ok(value, name); return value }
+function channelsOf(value: string): number[] { if (value.startsWith("#")) return [1, 3, 5].map(i => parseInt(value.slice(i, i + 2), 16)); return /rgba?\(([^)]+)\)/.exec(value)![1].split(",").map(Number) }
+function over(value: string, base: number[]) { const [r, g, b, a = 1] = channelsOf(value); return [r, g, b].map((c, i) => Math.round(c * a + base[i] * (1 - a))) }
+
+test("positive change text meets 4.5:1 on the table's row, selected-row and hover backgrounds", () => {
+  const css = readFileSync(new URL("../../theme.css", import.meta.url), "utf8")
+  const surface = channelsOf(token(css, "--color-arco-surface")), page = channelsOf(token(css, "--color-arco-page"))
+  const backgrounds = { surface, page, hover: over(token(css, "--color-row-hover-weak"), surface) }
+  const upText = channelsOf(token(css, "--color-arco-up-text"))
+  for (const [name, background] of Object.entries(backgrounds)) assert.ok(contrast(upText, background) >= 4.5, `--color-arco-up-text on ${name}: ${contrast(upText, background).toFixed(2)}`)
+  assert.ok(contrast(channelsOf(token(css, "--color-arco-up")), surface) < 4.5, "the graphic up colour is why a separate text token exists")
+})
+
+test("change text: up uses the AA text token, down/flat/missing keep their meaning; graphics keep --color-arco-up", () => {
+  const html = render({ series: { SOXS: { ...fixtureTop40Chart("SOXS", "1D") } } })
+  const up = rowOf(html, "SOXS"), down = rowOf(html, "SOXL")
+  assert.match(up, /class="inline-flex items-center gap-1 text-\[var\(--color-arco-up-text\)\]"><svg aria-hidden="true" width="12" height="10"[^]*?상승 /)
+  assert.match(down, /class="inline-flex items-center gap-1 text-\[var\(--color-arco-down\)\]"><svg aria-hidden="true" width="12" height="10"[^]*?하락 /)
+  assert.doesNotMatch(html, /inline-flex items-center gap-1 text-\[var\(--color-arco-up\)\]/, "no change text on the 3.78:1 token")
+  assert.match(rowOf(html, TOP40_FLAT), /<span class="text-\[var\(--color-arco-text-soft\)\]">\$0<\/span>/, "zero stays neutral")
+  for (const symbol of TOP40_UNAVAILABLE) assert.match(rowOf(html, symbol), /<span class="text-\[var\(--color-arco-text-soft\)\]">—<\/span>/, "missing stays neutral")
+  assert.match(rowOf(html, "NVDA"), /모의 주문/)
+  assert.match(html, /bg-\[var\(--color-arco-up\)\] opacity-40/, "the status dot is a graphic and keeps --color-arco-up")
+  const detail = renderToStaticMarkup(<MarketChart response={{ status: "AVAILABLE", reason: null, fetchedAt: FIXTURE_TIME, cacheAgeMs: 0, feedDelay: "UNKNOWN", data: fixtureChart("NVDA", "1D") }} quote={fixtureQuote("NVDA")} />)
+  assert.match(detail, /반환 관측 구간 등락 <strong class="text-\[var\(--color-arco-up-text\)\]">\+/, "the detail's rising window change uses the text token")
 })

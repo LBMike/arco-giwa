@@ -30,7 +30,7 @@ export function MarketChart({ response, quote }: { response: Envelope<Chart>; qu
       <p title={dollars(bar?.close ?? quote?.price ?? null)} className="mt-1 break-all text-3xl font-medium tracking-tight text-[var(--color-arco-ink)]">{bar ? dollars(bar.close) : priceLabel(quote?.price ?? null)}</p>
       <p className="mt-1 text-xs text-[var(--color-arco-text-soft)]">{time(bar?.timestamp ?? quote?.sourceTimestamp ?? null)} · {FEED_LABELS[response.feedDelay]}</p>
     </div>
-    <p className="text-sm">반환 관측 구간 등락 <strong className={change.startsWith("−") ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-up)]"}>{change}</strong><span className="text-xs text-[var(--color-arco-text-soft)]"> · 분할 조정 종가 기준</span></p>
+    <p className="text-sm">반환 관측 구간 등락 <strong className={change.startsWith("−") ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-up-text)]"}>{change}</strong><span className="text-xs text-[var(--color-arco-text-soft)]"> · 분할 조정 종가 기준</span></p>
     {message && <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{message}</p>}
     {quote?.status === "STALE" && response.status !== "STALE" && <p className="text-sm text-[var(--color-arco-text-soft)]">마지막 확인 시세 · 오래된 데이터 · {time(quote.sourceTimestamp)}</p>}
     {!chart || !points.length ? <div className="flex min-h-48 items-center justify-center rounded-xl bg-[var(--color-arco-page)] p-6 text-sm text-[var(--color-arco-text-soft)]">{message ?? "반환된 차트 관측값이 없습니다"}</div> : <>
