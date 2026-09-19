@@ -22,7 +22,7 @@ export function createPreflightProbes(prepared: Prepared, migrations: readonly M
             const { Pool } = createRequire(import.meta.url)('pg') as { Pool: new (config: unknown) => SqlPool & { end(): Promise<void>; on(event: string, listener: () => void): void } };
             const pool = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 2000, statement_timeout: 2000, query_timeout: 2500, lock_timeout: 2000, idle_in_transaction_session_timeout: 3000, application_name: 'stocks_readonly_preflight' });
             pool.on('error', () => { /* never log database credentials or raw messages */ });
-            try { return await checkPreflightDatabase(pool, config.manifest, migrations, historySchema); }
+            try { return await checkPreflightDatabase(pool, config.manifest, migrations, historySchema, { operatorControls: config.operatorControls }); }
             finally { await pool.end(); }
         },
         async deployment() {

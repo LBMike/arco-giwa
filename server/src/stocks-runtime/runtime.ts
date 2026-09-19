@@ -17,10 +17,13 @@ import { verifyStocksDeployment } from './deployment.js';
 export { verifyStocksDeployment } from './deployment.js';
 import { createDeploymentEvidence } from '../stocks-execution/deployment.js';
 import { StocksExecutionService } from '../stocks-execution/service.js';
+import { StocksTradingControlService } from '../stocks-trading-control/service.js';
+import { StocksTradingControlPolicy } from '../stocks-trading-control/policy.js';
 
 export type StocksRuntimeConfig = {
   profile: 'DEMO_TESTNET'; manifest: Manifest & { schemaVersion: 2; redemptionEscrow: `0x${string}` };
   rpcUrl: string; signerUrl: string; contractPolicyVerified: true; paused: boolean; operators: NamedOperator[];
+  operatorControls?: boolean;
 };
 export function stocksAutodispatch(env: NodeJS.ProcessEnv): boolean {
   ensure(env.STOCKS_MODE === undefined || env.STOCKS_MODE === 'DISABLED' || env.STOCKS_MODE === 'DEMO_TESTNET', 'INVALID_STOCKS_MODE');
@@ -33,6 +36,7 @@ export function parseStocksRuntimeConfig(value: unknown): StocksRuntimeConfig {
   ensure(value !== null && typeof value === 'object' && !Array.isArray(value), 'INVALID_STOCKS_CONFIG');
   const row = value as StocksRuntimeConfig;
   ensure(row.profile === 'DEMO_TESTNET' && row.manifest?.schemaVersion === 2 && row.contractPolicyVerified === true && typeof row.paused === 'boolean', 'INVALID_STOCKS_ACTIVATION');
+  ensure(row.operatorControls === undefined || typeof row.operatorControls === 'boolean', 'INVALID_STOCKS_OPERATOR_CONTROLS');
   freezeManifest(row.manifest);
   endpoint(row.rpcUrl); endpoint(row.signerUrl);
   ensure(Array.isArray(row.operators) && row.operators.every(op => op && typeof op.wallet === 'string' && typeof op.operatorId === 'string' && Array.isArray(op.permissions) && op.permissions.every(p => typeof p === 'string')), 'INVALID_STOCKS_OPERATORS');
@@ -52,7 +56,7 @@ export async function configuredStocksRuntime(env: NodeJS.ProcessEnv, fallbackDa
   try {
     const transport = httpStocksRpc(config.rpcUrl);
     const signer = externalStocksSigner({ url: config.signerUrl, authorization: env.STOCKS_SIGNER_TOKEN, deploymentDigest: manifestDigest(config.manifest), manifest: config.manifest });
-    return await createStocksRuntime({ manifest: config.manifest, pool, transport, signer, autodispatch, paused: config.paused, operators: config.operators });
+    return await createStocksRuntime({ manifest: config.manifest, pool, transport, signer, autodispatch, paused: config.paused, operators: config.operators, operatorControls: config.operatorControls });
   } catch (error) { await pool.end(); throw error; }
 }
 // Trusted composition port, shared by the configured server and real local
@@ -66,11 +70,13 @@ export async function createStocksRuntime(options: {
   autodispatch: boolean;
   paused: boolean;
   operators: NamedOperator[];
+  operatorControls?: boolean;
 }) {
   const manifest = freezeManifest(options.manifest) as StocksRuntimeConfig['manifest'];
   const { pool, transport, signer, autodispatch, paused } = options;
   const operators = structuredClone(options.operators);
   ensure(typeof autodispatch === 'boolean' && typeof paused === 'boolean', 'INVALID_STOCKS_RUNTIME_POLICY');
+  ensure(options.operatorControls === undefined || typeof options.operatorControls === 'boolean', 'INVALID_STOCKS_OPERATOR_CONTROLS');
   const digest = manifestDigest(manifest);
   const rpc = createStocksRpcPort(transport, manifest);
   await verifyStocksDeployment(manifest, rpc, transport);
@@ -79,7 +85,17 @@ export async function createStocksRuntime(options: {
   let stopped = false;
   let closing: Promise<void> | null = null;
   const repo = new StocksRepository(pool, digest);
-  const service = new StocksService(repo, manifest, new ReceiptVerifier(manifest, rpc), { manifestDigest: digest, contractPolicyVerified: true }, async () => stopped || !autodispatch || paused || !health.current());
+  const control = options.operatorControls === true ? new StocksTradingControlPolicy(new StocksTradingControlService(pool, digest), digest) : undefined;
+  // Enabling controls requires its migration before startup. An absent control
+  // row is initially paused, and no startup path creates or resumes that row.
+  if (control) await control.read();
+  const basePaused = () => stopped || !autodispatch || paused || !health.current();
+  const service = new StocksService(repo, manifest, new ReceiptVerifier(manifest, rpc), { manifestDigest: digest, contractPolicyVerified: true }, async () => {
+    if (basePaused()) return true;
+    const operatorPaused = control ? await control.isPaused() : false;
+    // Stop/health can change while the authoritative control read is in flight.
+    return operatorPaused || basePaused();
+  });
   // Check the migrated database and immutable physical-vault binding before
   // exposing any configured routes. This never creates schema or tables.
   await service.bindDeployment();
@@ -94,6 +110,9 @@ export async function createStocksRuntime(options: {
     if (!autodispatch || stopped || current) return current ?? Promise.resolve();
     current = (async () => {
       try {
+        // Refresh diagnostics even while another gate blocks new admissions.
+        // Control failure does not stop observing already-sent transactions.
+        if (control) await control.isPaused();
         await service.sell.expireReservations();
         for (let n = 0; n < 20 && !stopped; n++) if (!(await worker.runOne())) break;
         const observed = await observer.runOnce();
@@ -106,7 +125,8 @@ export async function createStocksRuntime(options: {
   // The owning server lifecycle schedules only explicitly enabled dispatch.
   return {
     service, execution: new StocksExecutionService(service, createDeploymentEvidence(manifest, transport, { available: () => !stopped })), submissionReceipts: createSubmissionReceiptVerifier(manifest, rpc), operators, reconciliationCoverage: () => observer.coverage(),
-    status: () => runtimeSnapshot({ deploymentId: manifest.deploymentId, deploymentDigest: digest, autodispatch, configuredPause: paused, stopped, tickInFlight: current !== null, health: health.snapshot() }),
+    control,
+    status: () => runtimeSnapshot({ deploymentId: manifest.deploymentId, deploymentDigest: digest, autodispatch, configuredPause: paused, stopped, tickInFlight: current !== null, health: health.snapshot(), ...(control ? { operatorControl: control.snapshot() } : {}) }),
     tick,
     stop,
     close() {

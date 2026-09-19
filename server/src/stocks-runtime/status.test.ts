@@ -63,3 +63,41 @@ test('invalid clocks fail closed without timestamp serialization exceptions in h
   }
   const f = fixture(); f.mono(NaN); f.health.record('CURRENT'); assert.equal(f.health.current(), false);
 });
+test('disabled operator control preserves the exact legacy snapshot shape', () => {
+  const f = fixture(); f.health.record('CURRENT');
+  const legacy = f.status();
+  assert.equal(Object.prototype.hasOwnProperty.call(legacy, 'operatorControl'), false);
+  assert.deepEqual(f.status({ operatorControl: undefined }), legacy);
+});
+test('operator control pauses fail closed and resume preserves every independent runtime gate', () => {
+  for (const status of ['PAUSED', 'RESUMED', 'UNAVAILABLE'] as const) {
+    for (const stopped of [false, true]) for (const autodispatch of [false, true]) for (const configuredPause of [false, true]) for (const current of [false, true]) {
+      const f = fixture(); if (current) f.health.record('CURRENT');
+      const operatorControl = { status, version: status === 'UNAVAILABLE' ? null : 12 };
+      const result = f.status({ operatorControl, stopped, autodispatch, configuredPause });
+      const expected = [
+        ...(stopped ? ['RUNTIME_STOPPED'] : []),
+        ...(!autodispatch ? ['AUTODISPATCH_DISABLED'] : []),
+        ...(configuredPause ? ['CONFIGURED_PAUSE'] : []),
+        ...(status === 'PAUSED' ? ['OPERATOR_PAUSE'] : []),
+        ...(status === 'UNAVAILABLE' ? ['OPERATOR_CONTROL_UNAVAILABLE'] : []),
+        ...(!current || stopped ? ['OBSERVER_NOT_CURRENT'] : []),
+      ];
+      assert.deepEqual(result.operatorControl, operatorControl);
+      assert.deepEqual(result.pauseReasons, expected);
+      assert.equal(result.newOrdersPaused, expected.length > 0);
+      assert.equal(result.executionAuthorization, false);
+    }
+  }
+});
+test('operator status copies only public fields without mutating or retaining the cache object', () => {
+  const f = fixture(); f.health.record('CURRENT');
+  const source = { status: 'PAUSED' as const, version: 3, operatorId: 'PRIVATE_OPERATOR', reason: 'PRIVATE_REASON' };
+  Object.defineProperty(source, 'privateGetter', { get() { throw new Error('MUST_NOT_READ'); } });
+  const result = f.status({ operatorControl: source });
+  assert.deepEqual(result.operatorControl, { status: 'PAUSED', version: 3 });
+  assert.notEqual(result.operatorControl, source);
+  source.version = 4;
+  assert.equal(result.operatorControl?.version, 3);
+  assert.ok(!JSON.stringify(result).includes('PRIVATE'));
+});

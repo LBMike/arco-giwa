@@ -78,6 +78,14 @@ test('Stocks runtime is absent by default and rejects incomplete or old activati
   assert.throws(() => parseStocksRuntimeConfig({ profile: 'DEMO_TESTNET', manifest: { schemaVersion: 1 } }), /INVALID_STOCKS_ACTIVATION/);
 });
 
+test('Operator controls require an explicit boolean and preserve absent legacy configuration', () => {
+  const config = { profile: 'DEMO_TESTNET', manifest: testManifest(), rpcUrl: 'https://rpc.example.test',
+    signerUrl: 'https://signer.example.test', contractPolicyVerified: true, paused: false, operators: [] };
+  assert.equal(Object.prototype.hasOwnProperty.call(parseStocksRuntimeConfig(config), 'operatorControls'), false);
+  for (const enabled of [true, false]) assert.equal(parseStocksRuntimeConfig({ ...config, operatorControls: enabled }).operatorControls, enabled);
+  for (const invalid of [null, 0, 1, 'true', [], {}]) assert.throws(() => parseStocksRuntimeConfig({ ...config, operatorControls: invalid }), /INVALID_STOCKS_OPERATOR_CONTROLS/);
+});
+
 test('Stocks dispatch flags fail closed before file, RPC, signer or database access', async () => {
   for (const mode of [undefined, 'DISABLED', 'DEMO_TESTNET']) for (const flag of [undefined, '0']) assert.equal(stocksAutodispatch({ STOCKS_MODE: mode, STOCKS_AUTODISPATCH: flag }), false);
   assert.equal(stocksAutodispatch({ STOCKS_MODE: 'DEMO_TESTNET', STOCKS_AUTODISPATCH: '1' }), true);

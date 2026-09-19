@@ -70,6 +70,22 @@ test('successful online checks never authorize trades, database finding override
     const failed = await checkStocksPreflight(f.env, { ...f.options, online: true, probes: () => ({ database: async () => [{ id: 'migrationHistory', status: 'FAIL', code: 'MIGRATION_HISTORY_MISSING_FAILED_OR_CHANGED' }], deployment: async () => {}, signer: async () => {} }) });
     assert.equal(failed.status, 'BLOCKED');
 });
+test('operator-control configuration is preserved for database probes, and invalid flags block before probes', async () => {
+    for (const operatorControls of [true, false, undefined]) {
+        const f = fixture(); let received: boolean | undefined;
+        const report = await checkStocksPreflight(f.env, { ...f.options, online: true, readConfig: async () => ({ ...f.config, ...(operatorControls === undefined ? {} : { operatorControls }) }), probes: prepared => {
+            received = prepared.config.operatorControls;
+            return f.options.probes(prepared);
+        } });
+        assert.equal(report.status, 'STARTUP_CHECKS_PASSED'); assert.equal(received, operatorControls); assert.equal(report.tradingAuthorized, false);
+    }
+    for (const operatorControls of ['true', 'false', 0, null]) {
+        const f = fixture();
+        const report = await checkStocksPreflight(f.env, { ...f.options, online: true, readConfig: async () => ({ ...f.config, operatorControls }) });
+        assert.equal(report.status, 'BLOCKED'); assert.equal(f.counts().creates, 0);
+        assert.equal(report.checks.find(check => check.id === 'configuration')?.status, 'FAIL');
+    }
+});
 test('probe timeout rejects stalled and synchronously late success', async () => {
     await assert.rejects(boundedProbe(() => new Promise<void>(() => {}), 10), /PREFLIGHT_TIMEOUT/);
     let now = 0;

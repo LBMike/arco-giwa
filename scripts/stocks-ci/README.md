@@ -1,6 +1,6 @@
 # Stocks integration CI
 
-`.github/workflows/stocks-integration.yml` defines four independent jobs on
+`.github/workflows/stocks-integration.yml` defines five independent jobs on
 Ubuntu 24.04 with the latest Node 22 patch and PostgreSQL 16 binaries. It uses
 ordinary `pull_request`, main pushes and manual dispatch, a read-only repository
 token, no repository secrets, no deployment environment and no live RPC.
@@ -8,7 +8,8 @@ The existing general CI job remains in place.
 
 | Scenario | Checks |
 | --- | --- |
-| `postgres` | Harness boundary/acceptance tests, all frontend tests with jsdom and compiled ABI enabled, eight server PG suites plus the browser-adapter suite, then actual PostgreSQL and Node restart persistence |
+| `postgres` | Harness boundary/acceptance tests, all frontend tests with jsdom and compiled ABI enabled, nine server PG suites plus the browser-adapter suite, then actual PostgreSQL and Node restart persistence |
+| `operator-control` | Real local HTTP/SIWE, DB and EVM trading; persistent pause/resume, concurrency policy, original signer/receipt recovery, BUY/SELL conservation and owned-service cleanup; no browser required |
 | `operator-diagnostics` | Ordinary investor Chrome/Chromium trade flow, followed by the 24 operator diagnostic fixtures and read-only assertions |
 | `known-hash-ui` | Product recovery buttons across BUY/SELL and both stages, actual JWT/quote expiration, no wallet resend |
 | `browser-lifecycle` | Ready SIGINT, held-response SIGTERM and intentional failure, with independent process/port shutdown checks |
@@ -42,7 +43,7 @@ STOCKS_PG_BIN=/absolute/postgresql/bin \
 node scripts/stocks-ci/run.mjs operator-diagnostics /tmp/stocks-ci-diagnostics-new
 ```
 
-Replace the scenario with `known-hash-ui` or `browser-lifecycle`, each with a new
+Replace the scenario with `operator-control`, `known-hash-ui` or `browser-lifecycle`, each with a new
 empty absolute evidence directory. On Linux install browser system libraries
 using Playwright's `install --with-deps chromium`, as the workflow does. An
 explicit absolute `STOCKS_LOCAL_CHROME` may select an already installed local

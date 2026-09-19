@@ -13,3 +13,21 @@ Success uses exactly PROFILE's five fields, outer ISO observedAt, and data. data
 The fixed values are enabled=true, freshnessLimitMs=60000 and executionAuthorization=false. STOPPED runtime and STOPPED observer must agree. Pause reasons have deterministic order: RUNTIME_STOPPED, AUTODISPATCH_DISABLED, CONFIGURED_PAUSE, OBSERVER_NOT_CURRENT, including each exactly when its corresponding predicate holds. newOrdersPaused equals whether this list is nonempty. CURRENT requires valid last-current time and finite nonnegative reported age at most60000; its observed wall time must independently be within60000 of last-current time, and reported age cannot be less than this wall age. Runtime age is ceil(max(wall elapsed, monotonic elapsed)); exactly60000 is permitted. The runtime source owns monotonic freshness; this adapter cannot reconstruct a process monotonic clock from ISO timestamps. Non-current diagnostics can retain historical timestamps after an invalid clock without granting CURRENT. The root runtime latches stale state on invalid/backward clocks until a new valid CURRENT observation. lastObservationAt is the last observer/tick result or caught failure time; GET and stop do not refresh it. STOPPED with tickInFlight=true is valid while shutdown awaits a running tick.
 
 This is process-local status, not database/canonical-chain health or evidence of reconciliation/settlement, permission to place orders or send a transaction, or an activation mechanism. A CURRENT observer may still have other pause reasons, and no successful diagnostic response grants execution authorization.
+
+## Optional persistent operator control
+
+With `operatorControls: true`, data also includes `operatorControl: { status, version }`.
+`PAUSED` and `RESUMED` require an integer version 0–2147483647; `UNAVAILABLE` requires null.
+Without this option the property is absent and the original wire shape is unchanged.
+The ordered pause reasons become `RUNTIME_STOPPED`, `AUTODISPATCH_DISABLED`,
+`CONFIGURED_PAUSE`, `OPERATOR_PAUSE` or `OPERATOR_CONTROL_UNAVAILABLE`, then
+`OBSERVER_NOT_CURRENT`. A resumed manual gate cannot remove any other reason.
+
+This field is a process-local snapshot refreshed by runtime ticks and control
+reads/changes. It expires after 5000 ms using both wall and monotonic clocks;
+clock reversal or an unreadable control store makes it unavailable. This endpoint
+continues to perform no database/RPC reads. Another process's change may appear
+at its next refresh; read the [control endpoint](stocks-trading-control-api.md)
+for authoritative DB state. New admissions always read the control store and do
+not use this diagnostic cache as permission. `configuredPause` still reports
+only the fixed startup setting.

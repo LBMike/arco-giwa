@@ -70,7 +70,7 @@ function cleanup() {
     }
     closeSync(fd);
     if (cleanupFailure) throw new Error(`${cleanupFailure.message}; retained ${temp}`);
-    if (uiMode || browserMode) console.log(JSON.stringify({ kind: browserMode ? 'LOCAL_BROWSER_OWNED_SERVICES_STOPPED' : 'LOCAL_UI_OWNED_SERVICES_STOPPED',
+    console.log(JSON.stringify({ kind: browserMode ? 'LOCAL_BROWSER_OWNED_SERVICES_STOPPED' : uiMode ? 'LOCAL_UI_OWNED_SERVICES_STOPPED' : 'LOCAL_STACK_OWNED_SERVICES_STOPPED',
       ownerPid: process.pid, nodeGroup: node?.pid, postgresPid, temp, postgresData: data, socket,
       postgresPidFileAbsent: !existsSync(join(data, 'postmaster.pid')),
       postgresSocketAbsent: !existsSync(join(socket, '.s.PGSQL.5432')), nodeGroupAbsent: !node?.pid || !groupAlive(node.pid) }));
@@ -135,6 +135,7 @@ try {
   const report = await runStack({ rpcUrl, bundle: JSON.parse(readFileSync(bundlePath, 'utf8')),
     databaseUrl: `postgresql://stocks_local@localhost/stocks_local_test?host=${encodeURIComponent(socket)}`, resourceDir: temp, registerCleanup });
   console.log(JSON.stringify(report, null, 2));
+  if (!uiMode && !browserMode) console.log(JSON.stringify({ kind: 'LOCAL_STACK_RESULT', ...report }));
   successful = true;
 } finally {
   await cleanup();

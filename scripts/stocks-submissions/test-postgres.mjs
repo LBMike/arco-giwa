@@ -89,7 +89,7 @@ try {
   await pg('createdb', ['-h', socket, '-U', 'submissions_harness', 'submissions_test']);
   const psql = ['-h', socket, '-U', 'submissions_harness', '-d', 'submissions_test', '-v', 'ON_ERROR_STOP=1'];
   await pg('psql', [...psql, '-c', 'CREATE SCHEMA arco_evm']);
-  for (const migration of ['20260916000000_stocks_testnet', '20260917000000_stocks_redemption', '20260918000000_stocks_wallet_submissions', '20260919000000_stocks_wallet_receipts']) await pg('psql', [...psql, '-f', join(root, 'prisma/migrations', migration, 'migration.sql')]);
+  for (const migration of ['20260916000000_stocks_testnet', '20260917000000_stocks_redemption', '20260918000000_stocks_wallet_submissions', '20260919000000_stocks_wallet_receipts', '20260920000000_stocks_trading_control']) await pg('psql', [...psql, '-f', join(root, 'prisma/migrations', migration, 'migration.sql')]);
   const env = { ...process.env, STOCKS_SUBMISSIONS_TEST_ONLY: '1', STOCKS_SUBMISSIONS_RESTART_FILE: join(temp, 'restart-fixture.json'), STOCKS_SUBMISSIONS_TEST_DATABASE_URL: `postgresql://submissions_harness@localhost/submissions_test?host=${encodeURIComponent(socket)}` };
   env.STOCKS_TEST_HARNESS_ONLY = '1'; env.STOCKS_TEST_DATABASE_URL = env.STOCKS_SUBMISSIONS_TEST_DATABASE_URL;
   await run(process.execPath, ['--test', '--test-reporter=tap', '--test-concurrency=1', 'server/dist/stocks-submissions/postgres.test.js', 'server/dist/stocks-submissions/receipts.postgres.test.js', ...extra], env);

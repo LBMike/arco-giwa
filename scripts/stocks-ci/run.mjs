@@ -5,11 +5,11 @@ import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { connect } from 'node:net';
-import { parseTap, verifyBrowser, verifyLifecycle } from './evidence.mjs';
+import { parseTap, verifyBrowser, verifyLifecycle, verifyOperatorControl } from './evidence.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const [scenario, destination, ...extra] = process.argv.slice(2);
-assert.ok(['postgres', 'operator-diagnostics', 'known-hash-ui', 'browser-lifecycle'].includes(scenario), 'Choose a fixed Stocks CI scenario');
+assert.ok(['postgres', 'operator-control', 'operator-diagnostics', 'known-hash-ui', 'browser-lifecycle'].includes(scenario), 'Choose a fixed Stocks CI scenario');
 assert.equal(extra.length, 0);
 assert.ok(destination && isAbsolute(destination), 'An absolute, empty evidence directory is required');
 mkdirSync(destination, { recursive: true });
@@ -112,11 +112,13 @@ try {
       'server/dist/stocks-execution/service.postgres.test.js', 'server/dist/stocks-preflight/database.postgres.test.js',
       'server/dist/stocks-submissions/session-recovery.postgres.test.js',
       'server/dist/stocks-submission-diagnostics/service.postgres.test.js',
+      'server/dist/stocks-trading-control/service.postgres.test.js',
       'scripts/stocks-submissions-integration/client-roundtrip.test.mjs'],
     { STOCKS_SUBMISSIONS_EVIDENCE_DIR: pgEvidence });
     summary.postgresTests = parseTap(postgres);
     assert.ok(postgres.includes('PROCESS_AND_POSTGRES_RESTART_PERSISTENCE_PASS'));
     assert.ok(postgres.includes('BUY_SELL_ORDER_RECOVERY_AFTER_RESTART_PASS'));
+    assert.ok(postgres.includes('TRADING_CONTROL_STATE_HISTORY_AND_IDEMPOTENCY_AFTER_RESTART_PASS'));
     const proof = JSON.parse(readFileSync(join(pgEvidence, 'harness-evidence.json'), 'utf8'));
     assert.equal(proof.started, true); assert.equal(proof.stopped, true); assert.equal(proof.restarts, 1);
     assert.equal(proof.testsPassed, true); assert.equal(proof.restartVerified, true); assert.equal(proof.interruptedBy, null);
@@ -126,6 +128,13 @@ try {
     assert.equal(existsSync(join(proof.data, 'postmaster.pid')), false);
     assert.equal(existsSync(join(proof.socket, '.s.PGSQL.5432')), false);
     summary.postgresRestartAndCleanup = true;
+  } else if (scenario === 'operator-control') {
+    const stdout = await run('operator-control', ['scripts/stocks-local/run.mjs']);
+    const { result, stopped } = verifyOperatorControl(stdout);
+    assertGone(stopped.ownerPid); assertGone(stopped.postgresPid); assertGone(stopped.nodeGroup, true);
+    assert.equal(existsSync(stopped.temp), false);
+    summary.operatorControl = { checks: result.operatorControl.checks, lastVersion: result.operatorControl.lastVersion,
+      scenarios: result.scenarios.length, final: result.final, cleanupVerified: true };
   } else {
     const browserEvidence = join(destination, 'browser'); mkdirSync(browserEvidence);
     env.STOCKS_LOCAL_BROWSER_RUNTIME = playwright;

@@ -108,3 +108,39 @@ export function verifyLifecycle(stdout) {
     return record;
   });
 }
+
+export function verifyOperatorControl(stdout) {
+  const records = jsonRecords(stdout);
+  const result = exactlyOne(records, 'LOCAL_STACK_RESULT');
+  const stopped = exactlyOne(records, 'LOCAL_STACK_OWNED_SERVICES_STOPPED');
+  assert.ok(records.indexOf(result) < records.indexOf(stopped), 'Stack cleanup must follow the complete result');
+  const pids = ['ownerPid', 'nodeGroup', 'postgresPid'];
+  for (const key of pids) positivePid(stopped[key], `Stack cleanup.${key}`);
+  assert.equal(new Set(pids.map(key => stopped[key])).size, pids.length, 'Stack process identities must be distinct');
+  flags(stopped, ['postgresPidFileAbsent', 'postgresSocketAbsent', 'nodeGroupAbsent'], 'Stack cleanup');
+
+  assert.equal(result.result, 'PASS', 'Local stack did not pass');
+  assert.equal(result.execution, 'LOCAL_EVM_TEST_HARNESS_ONLY', 'Result must come from the real local stack');
+  assert.equal(result.chainId, 91342, 'Local chain identity is wrong');
+  const coverage = (values, count, label) => {
+    assert.ok(Array.isArray(values), `${label} must be an array`);
+    assert.equal(values.length, count, `${label} has incomplete coverage`);
+    assert.ok(values.every(value => typeof value === 'string' && value.trim().length > 0), `${label} requires named checks`);
+    assert.equal(new Set(values).size, count, `${label} cannot repeat the same check`);
+  };
+  coverage(result.scenarios, 19, 'Local stack scenarios');
+  const control = result.operatorControl;
+  assert.ok(object(control), 'Operator control result is missing');
+  assert.equal(control.result, 'PASS', 'Operator control did not pass');
+  coverage(control.checks, 8, 'Operator control checks');
+  assert.ok(Number.isInteger(control.lastVersion) && control.lastVersion > 0 && control.lastVersion <= 2147483647,
+    'Operator control revision is invalid');
+  assert.equal(control.additionalSignerOperations, 2, 'Operator roundtrip must create exactly two signer operations');
+  assert.deepEqual(result.final, {
+    stockWalletUnits: '3000000000', stockEscrowUnits: '0', stockSupplyUnits: '3000000000',
+    cashVaultUnits: '360000000', reconciliation: 'MATCHED_AT_CUTOFF', durableSignerOperations: 14,
+  }, 'Independent final economic results do not match');
+  // Actual exit status, OS PID/group absence and temp removal are still checked
+  // by the caller. A self-reported cleanup record cannot prove these alone.
+  return { result, stopped };
+}

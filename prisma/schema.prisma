@@ -514,3 +514,31 @@ model StocksWalletSubmissionProof {
   createdAt DateTime @default(now()) @db.Timestamptz
   @@schema("arco_evm")
 }
+
+model StocksTradingControl {
+  deploymentDigest String @id
+  paused Boolean @default(true)
+  version Int @default(0)
+  updatedAt DateTime? @db.Timestamptz
+  operatorId String?
+  reason String?
+  events StocksTradingControlEvent[]
+  @@schema("arco_evm")
+}
+
+model StocksTradingControlEvent {
+  id String @id
+  deploymentDigest String
+  control StocksTradingControl @relation(fields: [deploymentDigest], references: [deploymentDigest], onDelete: Restrict, onUpdate: Restrict)
+  version Int
+  expectedVersion Int
+  previousPaused Boolean
+  paused Boolean
+  operatorId String
+  reason String
+  idempotencyKey String
+  createdAt DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz
+  @@unique([deploymentDigest, version])
+  @@unique([deploymentDigest, idempotencyKey])
+  @@schema("arco_evm")
+}

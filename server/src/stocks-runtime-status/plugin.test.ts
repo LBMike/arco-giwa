@@ -51,3 +51,67 @@ test('stopped and invalid-clock history remain diagnostic with deterministic pau
  const invalidClock:StocksRuntimeSnapshot={...snapshot(),observedAt:'1970-01-01T00:00:00.000Z',observerStatus:'UNAVAILABLE_OR_REVIEW_REQUIRED',lastCurrentAgeMs:null,newOrdersPaused:true,pauseReasons:['OBSERVER_NOT_CURRENT']};
  for(const state of [stopped,invalidClock,{...snapshot(),lastCurrentAgeMs:60000,observedAt:'2026-09-17T00:01:00.000Z'}]){const app=appWith(()=>state);t.after(()=>app.close());const r=await app.inject({url,headers});assert.equal(r.statusCode,200);assert.equal(r.json().data.executionAuthorization,false);noStore(r);}
 });
+test('operator control is omitted when disabled, including an explicit undefined cache', async t => {
+ for (const state of [snapshot(), { ...snapshot(), operatorControl: undefined }]) {
+  const app=appWith(()=>state);t.after(()=>app.close());const response=await app.inject({url,headers});
+  assert.equal(response.statusCode,200);noStore(response);
+  const { observedAt, ...legacyData } = snapshot();
+  assert.deepEqual(response.json().data,legacyData);assert.equal(response.json().observedAt,observedAt);
+  assert.equal(Object.prototype.hasOwnProperty.call(response.json().data,'operatorControl'),false);
+ }
+});
+test('public operator cache contains only status and bounded version with one synchronous source read', async t => {
+ for (const status of ['PAUSED','RESUMED','UNAVAILABLE'] as const) for (const version of status==='UNAVAILABLE'?[null]:[0,2147483647]) {
+  const control={status,version,reason:'PRIVATE_REASON',operatorId:'PRIVATE_OPERATOR',rpcUrl:'PRIVATE_RPC'};
+  Object.defineProperty(control,'privateGetter',{get(){throw new Error('MUST_NOT_READ')}});
+  const reasons:StocksRuntimeSnapshot['pauseReasons']=status==='PAUSED'?['OPERATOR_PAUSE']:status==='UNAVAILABLE'?['OPERATOR_CONTROL_UNAVAILABLE']:[];
+  let calls=0;const app=appWith(()=>{calls++;return {...snapshot(),operatorControl:control,newOrdersPaused:reasons.length>0,pauseReasons:reasons}});t.after(()=>app.close());
+  const response=await app.inject({url,headers});assert.equal(response.statusCode,200);noStore(response);assert.equal(calls,1);
+  assert.deepEqual(response.json().data.operatorControl,{status,version});assert.deepEqual(response.json().data.pauseReasons,reasons);
+  assert.equal(response.json().data.executionAuthorization,false);assert.ok(!response.body.includes('PRIVATE'));
+ }
+});
+test('operator resume cannot erase configured, dispatch, stopped, or observer pause reasons', async t => {
+ const gates:Partial<StocksRuntimeSnapshot>[]=[
+  {configuredPause:true,newOrdersPaused:true,pauseReasons:['CONFIGURED_PAUSE']},
+  {autodispatch:false,newOrdersPaused:true,pauseReasons:['AUTODISPATCH_DISABLED']},
+  {observerStatus:'STALE',newOrdersPaused:true,pauseReasons:['OBSERVER_NOT_CURRENT']},
+  {runtimeState:'STOPPED',observerStatus:'STOPPED',autodispatch:false,configuredPause:true,newOrdersPaused:true,pauseReasons:['RUNTIME_STOPPED','AUTODISPATCH_DISABLED','CONFIGURED_PAUSE','OBSERVER_NOT_CURRENT']},
+ ];
+ for (const gate of gates) {
+  const state={...snapshot(),...gate,operatorControl:{status:'RESUMED' as const,version:2}};
+  const app=appWith(()=>state);t.after(()=>app.close());const response=await app.inject({url,headers});assert.equal(response.statusCode,200);noStore(response);
+  assert.equal(response.json().data.newOrdersPaused,true);assert.deepEqual(response.json().data.pauseReasons,gate.pauseReasons);
+ }
+ for (const status of ['PAUSED','UNAVAILABLE'] as const) {
+  const reasons:StocksRuntimeSnapshot['pauseReasons']=['RUNTIME_STOPPED','AUTODISPATCH_DISABLED','CONFIGURED_PAUSE',status==='PAUSED'?'OPERATOR_PAUSE':'OPERATOR_CONTROL_UNAVAILABLE','OBSERVER_NOT_CURRENT'];
+  const app=appWith(()=>({...snapshot(),...gates[3],operatorControl:{status,version:status==='PAUSED'?4:null},pauseReasons:reasons}));t.after(()=>app.close());
+  const response=await app.inject({url,headers});assert.equal(response.statusCode,200);noStore(response);assert.deepEqual(response.json().data.pauseReasons,reasons);
+ }
+});
+test('malformed operator cache fails with a fixed unavailable response and no-store', async t => {
+ const controls:unknown[]=[null,[],true,'PAUSED',{}, {status:'UNKNOWN',version:0},
+  {status:'PAUSED',version:null},{status:'RESUMED',version:null},{status:'UNAVAILABLE',version:0},
+  ...['PAUSED','RESUMED'].flatMap(status=>[-1,2147483648,0.5,NaN,Infinity,'1',undefined].map(version=>({status,version}))),
+ ];
+ const throwing={status:'PAUSED'};Object.defineProperty(throwing,'version',{get(){throw new Error('PRIVATE_DATABASE_FAILURE')}});controls.push(throwing);
+ for (const control of controls) {
+  const app=appWith(()=>({...snapshot(),operatorControl:control as StocksRuntimeSnapshot['operatorControl']}));t.after(()=>app.close());
+  const response=await app.inject({url,headers});assert.equal(response.statusCode,503);assert.equal(response.json().error,'RUNTIME_STATUS_UNAVAILABLE');noStore(response);assert.ok(!response.body.includes('PRIVATE'));
+ }
+});
+test('operator cache must agree with new-order pause flag and the complete ordered reasons', async t => {
+ const bad:Partial<StocksRuntimeSnapshot>[]=[
+  {operatorControl:{status:'PAUSED',version:1}},
+  {operatorControl:{status:'UNAVAILABLE',version:null}},
+  {operatorControl:{status:'RESUMED',version:1},newOrdersPaused:true,pauseReasons:['OPERATOR_PAUSE']},
+  {operatorControl:{status:'PAUSED',version:1},newOrdersPaused:false,pauseReasons:['OPERATOR_PAUSE']},
+  {operatorControl:{status:'PAUSED',version:1},configuredPause:true,newOrdersPaused:true,pauseReasons:['OPERATOR_PAUSE','CONFIGURED_PAUSE']},
+  {operatorControl:{status:'UNAVAILABLE',version:null},observerStatus:'STALE',newOrdersPaused:true,pauseReasons:['OBSERVER_NOT_CURRENT','OPERATOR_CONTROL_UNAVAILABLE']},
+  {newOrdersPaused:true,pauseReasons:['OPERATOR_PAUSE']},
+ ];
+ for (const patch of bad) {
+  const app=appWith(()=>({...snapshot(),...patch}));t.after(()=>app.close());const response=await app.inject({url,headers});
+  assert.equal(response.statusCode,503);assert.equal(response.json().error,'RUNTIME_STATUS_UNAVAILABLE');noStore(response);
+ }
+});

@@ -5,9 +5,11 @@ export type Migration = { name: string; checksum: string };
 const tables = ['StocksQuote', 'StocksOrder', 'StocksFunding', 'StocksOutbox', 'StocksJournal', 'StocksHolding', 'StocksAudit', 'StocksProviderReceipt', 'StocksSellQuote', 'StocksSellOrder', 'StocksQuantityReservation', 'StocksCustody', 'StocksQuantityMovement', 'StocksCashReservation', 'StocksObserverCursor', 'StocksLiquidityBinding', 'StocksWalletSubmissionEnrollment', 'StocksWalletSubmission', 'StocksWalletSubmissionProof'];
 const check = (id: string, ok: boolean, good: string, bad: string): Check => ({ id, status: ok ? 'PASS' : 'FAIL', code: ok ? good : bad });
 
-export async function checkPreflightDatabase(pool: SqlPool, manifest: Manifest, migrations: readonly Migration[], historySchema: 'public' | 'arco_evm', options: { timeoutMs?: number; monotonicNow?: () => number } = {}): Promise<Check[]> {
+export async function checkPreflightDatabase(pool: SqlPool, manifest: Manifest, migrations: readonly Migration[], historySchema: 'public' | 'arco_evm', options: { timeoutMs?: number; monotonicNow?: () => number; operatorControls?: boolean } = {}): Promise<Check[]> {
     ensure(historySchema === 'public' || historySchema === 'arco_evm', 'INVALID_HISTORY_SCHEMA');
     ensure(migrations.length > 0 && new Set(migrations.map(m => m.name)).size === migrations.length && migrations.every(m => /^[a-zA-Z0-9_]+$/.test(m.name) && /^[0-9a-f]{64}$/.test(m.checksum)), 'INVALID_EXPECTED_MIGRATIONS');
+    ensure(options.operatorControls === undefined || typeof options.operatorControls === 'boolean', 'INVALID_STOCKS_OPERATOR_CONTROLS');
+    const requiredTables = options.operatorControls === true ? [...tables, 'StocksTradingControl', 'StocksTradingControlEvent'] : tables;
     const timeout = options.timeoutMs ?? 5000, mono = options.monotonicNow ?? (() => performance.now());
     ensure(Number.isSafeInteger(timeout) && timeout > 0 && timeout <= 5000, 'INVALID_PREFLIGHT_TIMEOUT');
     const start = mono(); let closed = false, timer: ReturnType<typeof setTimeout> | undefined;
@@ -21,8 +23,8 @@ export async function checkPreflightDatabase(pool: SqlPool, manifest: Manifest, 
             await query("SET LOCAL statement_timeout='2000ms'");
             await query("SET LOCAL lock_timeout='2000ms'");
             await query("SET LOCAL idle_in_transaction_session_timeout='3000ms'");
-            const present = (await query('SELECT c.relname, has_table_privilege(c.oid,\'SELECT\') AS can_read FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=ANY($2::text[]) AND c.relkind=\'r\'', ['arco_evm', tables])).rows;
-            const schemaOk = tables.every(name => present.some(r => r.relname === name));
+            const present = (await query('SELECT c.relname, has_table_privilege(c.oid,\'SELECT\') AS can_read FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=ANY($2::text[]) AND c.relkind=\'r\'', ['arco_evm', requiredTables])).rows;
+            const schemaOk = requiredTables.every(name => present.some(r => r.relname === name));
             const checks = [check('stockTables', schemaOk, 'STOCK_TABLES_PRESENT', 'STOCK_TABLES_MISSING')];
             checks.push(check('stockReadAccess', schemaOk && present.every(row => row.can_read === true), 'STOCK_TABLES_READABLE', 'STOCK_TABLES_UNREADABLE_OR_MISSING'));
             const historyExists = !!(await query('SELECT to_regclass($1)::text AS name', [`"${historySchema}"."_prisma_migrations"`])).rows[0]?.name;

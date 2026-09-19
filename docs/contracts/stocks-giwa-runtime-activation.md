@@ -12,11 +12,15 @@
 | `STOCKS_DATABASE_URL` | 선택적인 Stocks DB 연결. 생략하면 기존 서버의 검증된 DATABASE_URL을 사용한다. |
 | `STOCKS_AUTODISPATCH` | 생략/`0`이면 새 주문이 차단되고 worker/observer tick은 실행되지 않는다. `1`은 DEMO_TESTNET과 완전한 설정을 요구한다. 다른 값은 시작 전 거절한다. |
 
-공개 JSON 구조는 `profile: "DEMO_TESTNET"`, `manifest: <검증된 v2 명세>`, `rpcUrl`, `signerUrl`, `contractPolicyVerified: true`, `paused: boolean`, `operators: [{wallet,operatorId,permissions:["stocks:read"]}]`다. RPC·서명 URL은 HTTPS여야 하며 URL의 사용자 정보·query·fragment는 허용하지 않는다. 서명 서비스 URL은 루트 경로여야 한다. 실제 주소나 명세를 추측해 샘플 값으로 활성화하지 않는다.
+공개 JSON 구조는 `profile: "DEMO_TESTNET"`, `manifest: <검증된 v2 명세>`, `rpcUrl`, `signerUrl`, `contractPolicyVerified: true`, `paused: boolean`, `operators: [{wallet,operatorId,permissions:["stocks:read"]}]`다. 선택적 `operatorControls: true`로 영속 운영자 중지·재개 기능을 활성화할 수 있다. 생략 또는 false면 기존 경로와 동작을 유지한다. RPC·서명 URL은 HTTPS여야 하며 URL의 사용자 정보·query·fragment는 허용하지 않는다. 서명 서비스 URL은 루트 경로여야 한다. 실제 주소나 명세를 추측해 샘플 값으로 활성화하지 않는다.
 
-`paused: true`는 새 주문과 새 거래 실행을 중지한다. 이미 전송된 거래의 결과 조회·확정과 관찰은 자동 실행을 켜 둔 상태에서 계속 진행한다. 반면 자동 실행을 완전히 끄면 조회 worker도 돌지 않는다. 운영 중 일시 중지와 프로세스 비활성화를 구분한다. 현재 어드민은 조회 전용이므로 중지/재개 UI 명령은 아직 없다.
+`paused: true`는 새 주문과 새 거래 실행을 중지한다. 이미 전송된 거래의 결과 조회·확정과 관찰은 자동 실행을 켜 둔 상태에서 계속 진행한다. 반면 자동 실행을 완전히 끄면 조회 worker도 돌지 않는다. 운영 중 일시 중지와 프로세스 비활성화를 구분한다. 운영자 제어 API는 구현되어 있으며, 어드민의 중지/재개 UI 연결은 별도 후속 작업이다.
 
 설정은 시작할 때 한 번 읽어 고정한다. `paused`를 바꾸려면 공개 설정 파일을 수정하고 서버를 정상 종료한 뒤 다시 시작해야 한다. 실행 중 파일 변경을 자동 반영하는 기능은 없다.
+
+운영자 제어를 사용할 때는 `20260920000000_stocks_trading_control` 마이그레이션을 포함한 검토된 이력을 먼저 적용한다. 활성화된 서버는 시작할 때 제어 테이블을 읽어 연결을 검증하며, 테이블 생성이나 자동 재개를 수행하지 않는다. 미등록 상태는 `paused: true, version: 0`이다. 조회에는 `stocks:read`, 변경에는 별도로 `stocks:control` 권한을 운영자 디렉터리에 부여한다. 상세 요청과 응답은 [운영자 제어 API](stocks-trading-control-api.md)를 따른다.
+
+동적 재개는 DB에 저장된 운영자 중지만 해제한다. 설정의 `paused: true`, 자동 실행 비활성, 프로세스 종료, 최신 관찰 부재를 해제하지 않는다. 매 신규 허용 판단은 DB를 다시 읽고, 저장소 오류·오래된 응답이면 차단한다. 이미 허용된 거래나 지갑 요청을 취소하는 기능은 아니며, 중지 중에도 원래 전송의 관찰·복구를 계속한다. 운영자 변경 이력은 DB에 영속 보관하며 자동 7일 삭제 대상이 아니다.
 
 ## 시작·종료와 복구
 

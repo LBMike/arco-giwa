@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { jsonRecords, parseTap, verifyBrowser, verifyLifecycle } from './evidence.mjs';
+import { jsonRecords, parseTap, verifyBrowser, verifyLifecycle, verifyOperatorControl } from './evidence.mjs';
 
 const tap = overrides => Object.entries({ tests: 79, pass: 79, fail: 0, skipped: 0, todo: 0, ...overrides })
   .map(([key, value]) => `# ${key} ${value}`).join('\n');
@@ -134,5 +134,64 @@ test('lifecycle rejects unconfirmed cleanup and invalid or overlapping process i
   for (const [field, value] of [['ownerPid', 1], ['chromePid', -3], ['nodeGroup', '203'], ['postgresPid', 201]]) {
     const records = lifecycleRecords(); records[0][field] = value;
     assert.throws(() => verifyLifecycle(lines(records)));
+  }
+});
+
+function controlRecords() {
+  return [{
+    kind: 'LOCAL_STACK_RESULT', result: 'PASS', execution: 'LOCAL_EVM_TEST_HARNESS_ONLY', chainId: 91342,
+    scenarios: Array.from({ length: 19 }, (_, n) => `scenario ${n + 1}`),
+    operatorControl: { result: 'PASS', checks: Array.from({ length: 8 }, (_, n) => `control ${n + 1}`), lastVersion: 13, additionalSignerOperations: 2 },
+    final: { stockWalletUnits: '3000000000', stockEscrowUnits: '0', stockSupplyUnits: '3000000000',
+      cashVaultUnits: '360000000', reconciliation: 'MATCHED_AT_CUTOFF', durableSignerOperations: 14 },
+  }, {
+    kind: 'LOCAL_STACK_OWNED_SERVICES_STOPPED', ownerPid: 301, nodeGroup: 302, postgresPid: 303,
+    postgresPidFileAbsent: true, postgresSocketAbsent: true, nodeGroupAbsent: true,
+  }];
+}
+
+test('operator control accepts one complete real-stack result followed by owned cleanup', () => {
+  const [result, stopped] = controlRecords();
+  assert.deepEqual(verifyOperatorControl(lines([result, stopped])), { result, stopped });
+});
+
+test('operator control rejects missing, duplicate, reversed or incomplete cleanup evidence', () => {
+  const valid = controlRecords();
+  for (const records of [[], valid.slice(0, 1), valid.slice(1), [...valid, valid[0]], [...valid, valid[1]], [...valid].reverse()])
+    assert.throws(() => verifyOperatorControl(lines(records)));
+  for (const field of ['postgresPidFileAbsent', 'postgresSocketAbsent', 'nodeGroupAbsent']) {
+    const records = controlRecords(); records[1][field] = false;
+    assert.throws(() => verifyOperatorControl(lines(records)));
+  }
+  for (const [field, value] of [['ownerPid', 1], ['nodeGroup', '302'], ['postgresPid', 302], ['nodeGroup', 301]]) {
+    const records = controlRecords(); records[1][field] = value;
+    assert.throws(() => verifyOperatorControl(lines(records)));
+  }
+});
+
+test('operator control refuses mislabeled scenarios and placeholder coverage despite top-level PASS', () => {
+  for (const [field, value] of [['result', 'FAIL'], ['execution', 'LOCAL_CHROME_PG_EVM_ONLY'], ['chainId', 1],
+    ['scenarios', []], ['scenarios', 'x'.repeat(19)], ['scenarios', Array(19).fill('same')],
+    ['scenarios', [...Array.from({ length: 18 }, (_, n) => `case ${n}`), ' ']], ['operatorControl', undefined]]) {
+    const records = controlRecords(); records[0][field] = value;
+    assert.throws(() => verifyOperatorControl(lines(records)));
+  }
+  for (const [field, value] of [['result', 'FAIL'], ['checks', []], ['checks', '12345678'], ['checks', Array(8).fill('same')],
+    ['checks', Array(8).fill({ name: 'unchecked' })], ['lastVersion', 0], ['lastVersion', -1],
+    ['lastVersion', 2147483648], ['lastVersion', 1.5], ['lastVersion', '13'], ['additionalSignerOperations', 1]]) {
+    const records = controlRecords(); records[0].operatorControl[field] = value;
+    assert.throws(() => verifyOperatorControl(lines(records)));
+  }
+});
+
+test('operator control requires every independent final economic result and signer count', () => {
+  for (const [field, value] of [['stockWalletUnits', '0'], ['stockEscrowUnits', '1'], ['stockSupplyUnits', '0'],
+    ['cashVaultUnits', '360'], ['reconciliation', 'UNAVAILABLE'], ['durableSignerOperations', 12]]) {
+    const records = controlRecords(); records[0].final[field] = value;
+    assert.throws(() => verifyOperatorControl(lines(records)));
+  }
+  for (const field of Object.keys(controlRecords()[0].final)) {
+    const records = controlRecords(); delete records[0].final[field];
+    assert.throws(() => verifyOperatorControl(lines(records)));
   }
 });

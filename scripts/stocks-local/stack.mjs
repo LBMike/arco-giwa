@@ -24,6 +24,7 @@ import { StocksSubmissionsService } from '../../server/dist/stocks-submissions/s
 import { createSubmissionReceiptVerifier } from '../../server/dist/stocks-submissions/receipts.js';
 import { deriveOrder, digest as transactionDigest } from '../../server/dist/stocks-submissions/contracts.js';
 import { localSigner } from './local-signer.mjs';
+import { verifyOperatorControl } from './operator-control.mjs';
 
 const require = createRequire(import.meta.url);
 const { Pool } = require('pg');
@@ -395,14 +396,17 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     // independent assertions and the remaining abnormal-inclusion scenarios.
     const signerCount = async () => (await pool.query('SELECT COUNT(*)::text AS n FROM stocks_local_harness.signer_operations')).rows[0].n;
     const cursorVersion = async () => (await pool.query('SELECT version FROM arco_evm."StocksObserverCursor" WHERE "deploymentDigest"=$1', [digest])).rows[0]?.version;
-    async function managedApp(autodispatch, paused = false, runtimeTransport = transport) {
+    async function managedApp(autodispatch, paused = false, runtimeTransport = transport, controlOptions = {}) {
+      const { operatorControls = false, manualTicks = false, runtimeSigner = signer } = controlOptions;
+      const runtimeOperators = operatorControls ? operators.map(op => ({ ...op, permissions: [...op.permissions, 'stocks:control'] })) : operators;
+      const runtimeResolvers = stocksSessionResolvers(authSecret, [domain], runtimeOperators);
       const runtimePool = new Pool({ connectionString: databaseUrl, max: 8 });
       let runtime;
       let managedUrl;
       const managed = await startManagedStocksServer({
         createRuntime: async () => {
           try {
-            runtime = await createStocksRuntime({ manifest, pool: runtimePool, transport: runtimeTransport, signer, autodispatch, paused, operators });
+            runtime = await createStocksRuntime({ manifest, pool: runtimePool, transport: runtimeTransport, signer: runtimeSigner, autodispatch, paused, operators: runtimeOperators, operatorControls });
             return runtime;
           } catch (error) {
             await runtimePool.end(); // Factory transfers ownership only after successful return.
@@ -410,12 +414,17 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
           }
         },
         buildApp: configured => buildApp(appEnv, { ...legacy, stocks: {
-          service: configured.service, ...resolvers, reconciliationCoverage: configured.reconciliationCoverage,
-        }, stocksExecution: { service: configured.execution, ...resolvers }, stocksRuntimeStatus: { getSnapshot: configured.status, ...resolvers } }),
+          service: configured.service, ...runtimeResolvers, reconciliationCoverage: configured.reconciliationCoverage,
+        }, stocksExecution: { service: configured.execution, ...runtimeResolvers },
+        stocksSubmissions: { service: new StocksSubmissionsService(configured.service, configured.submissionReceipts), ...runtimeResolvers },
+        stocksTradingControl: configured.control ? { service: configured.control, ...runtimeResolvers } : undefined,
+        stocksRuntimeStatus: { getSnapshot: configured.status, ...runtimeResolvers } }),
         listen: async instance => { managedUrl = await instance.listen({ host: '127.0.0.1', port: 0 }); },
         closeDatabase: async () => {}, // The fixture's separate original pool is not owned by this app.
         autodispatch,
-        // No scheduler override: use the production lifecycle's native 2s timer.
+        // Existing automatic scenario uses the native 2s timer. Controls also
+        // exercise deterministic pause boundaries through this test-only scheduler.
+        ...(manualTicks ? { scheduler: () => ({ cancel() {} }) } : {}),
       });
       const request = async (path, body, status = 200, actor = 'holder') => {
         const response = await fetch(`${managedUrl}/api/v1/${path}`, {
@@ -425,7 +434,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
         });
         const row = await response.json();
         assert.equal(response.status, status, JSON.stringify({ path, row }));
-        if (path === 'admin/stocks/runtime') assert.equal(response.headers.get('cache-control'), 'no-store');
+        if (path === 'admin/stocks/runtime' || path.startsWith('admin/stocks/trading-control')) assert.equal(response.headers.get('cache-control'), 'no-store');
         return row.data ?? row;
       };
       return { app: managed, pool: runtimePool, runtime, request };
@@ -532,6 +541,9 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     await assert.rejects(() => automatic.pool.query('SELECT 1'), /Cannot use a pool after calling end/);
     assert.equal((await api('stocks/portfolio')).holdings[0].walletQuantity, '3000000000');
     passed('Actual runtime factory and native managed-server timer complete HTTP BUY/SELL 0.125 without manual dispatch');
+    report.operatorControl = await verifyOperatorControl({ managedApp, pool, manifest, digest, accounts, rpc,
+      waitReceipt, deposit, escrow, currentBalance, signer, signerServer, transport });
+    passed('Persistent operator control blocks new BUY/SELL admission and dispatch while preserving original receipt and signer recovery');
 
     // Both orders are created while quotes are fresh. Only inclusion time is then
     // advanced; database quote snapshots are never edited to fabricate expiry.
@@ -563,7 +575,7 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     assert.equal(reconciliation.status, 'MATCHED_AT_CUTOFF', JSON.stringify(reconciliation));
     assert.equal((await pool.query(`SELECT COUNT(*)::text AS n FROM arco_evm."StocksOutbox" WHERE status <> 'DONE'`)).rows[0].n, '0');
     const allSignerRows = (await pool.query('SELECT id,nonce,tx_hash FROM stocks_local_harness.signer_operations ORDER BY nonce')).rows;
-    assert.equal(allSignerRows.length, 12, 'Original scenarios plus the native timer roundtrip produce twelve durable signer operations');
+    assert.equal(allSignerRows.length, 14, 'Original scenarios, native timer and operator control roundtrips produce fourteen durable signer operations');
     assert.equal(new Set(allSignerRows.map(r => r.nonce)).size, allSignerRows.length);
     assert.ok(allSignerRows.every(r => r.tx_hash));
     passed('Common-cutoff reconciliation agrees with independent cash, stock supply and wallet/escrow reads');
