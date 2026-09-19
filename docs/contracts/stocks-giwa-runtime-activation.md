@@ -14,7 +14,7 @@
 
 공개 JSON 구조는 `profile: "DEMO_TESTNET"`, `manifest: <검증된 v2 명세>`, `rpcUrl`, `signerUrl`, `contractPolicyVerified: true`, `paused: boolean`, `operators: [{wallet,operatorId,permissions:["stocks:read"]}]`다. 선택적 `operatorControls: true`로 영속 운영자 중지·재개 기능을 활성화할 수 있다. 생략 또는 false면 기존 경로와 동작을 유지한다. RPC·서명 URL은 HTTPS여야 하며 URL의 사용자 정보·query·fragment는 허용하지 않는다. 서명 서비스 URL은 루트 경로여야 한다. 실제 주소나 명세를 추측해 샘플 값으로 활성화하지 않는다.
 
-`paused: true`는 새 주문과 새 거래 실행을 중지한다. 이미 전송된 거래의 결과 조회·확정과 관찰은 자동 실행을 켜 둔 상태에서 계속 진행한다. 반면 자동 실행을 완전히 끄면 조회 worker도 돌지 않는다. 운영 중 일시 중지와 프로세스 비활성화를 구분한다. 운영자 제어 API는 구현되어 있으며, 어드민의 중지/재개 UI 연결은 별도 후속 작업이다.
+`paused: true`는 새 주문과 새 거래 실행을 중지한다. 이미 전송된 거래의 결과 조회·확정과 관찰은 자동 실행을 켜 둔 상태에서 계속 진행한다. 반면 자동 실행을 완전히 끄면 조회 worker도 돌지 않는다. 운영 중 일시 중지와 프로세스 비활성화를 구분한다. 운영자 제어 API와 `/admin/stocks`의 중지/재개 UI가 연결되어 있다. 로컬 시험용 실행은 [직접 운영 안내](../stocks-owner-guide.md)를 따른다.
 
 설정은 시작할 때 한 번 읽어 고정한다. `paused`를 바꾸려면 공개 설정 파일을 수정하고 서버를 정상 종료한 뒤 다시 시작해야 한다. 실행 중 파일 변경을 자동 반영하는 기능은 없다.
 

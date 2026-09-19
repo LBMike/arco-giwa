@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [postgres, operator-control, operator-control-ui, operator-diagnostics, known-hash-ui, browser-lifecycle]
+        scenario: [postgres, operator-control, operator-control-ui, operator-diagnostics, known-hash-ui, browser-lifecycle, owner-workspace]
     defaults:
       run:
         shell: bash

@@ -88,7 +88,8 @@ export async function createLocalBrowserHost({ root, resourceDir }) {
       calls: wallet.calls.length, sends: wallet.sends.map(({ outcome }) => ({ outcome })),
       snapshot: { buyOrders: snapshot.buyOrders.map(({ id, state }) => ({ id, state })),
         sellOrders: snapshot.sellOrders.map(({ id, state }) => ({ id, state })), claimCount: snapshot.claims.length,
-        proofCount: snapshot.proofs.length, ...snapshot.chain } };
+        proofCount: snapshot.proofs.length, ...snapshot.chain,
+        reconciliationStatus: snapshot.reconciliation?.status ?? 'UNAVAILABLE' } };
   }
   async function control(input) {
     if (!input || typeof input.action !== 'string') throw failure(400, 'LOCAL_CONTROL_INVALID');

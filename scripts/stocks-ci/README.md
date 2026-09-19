@@ -1,6 +1,6 @@
 # Stocks integration CI
 
-`.github/workflows/stocks-integration.yml` defines six independent jobs on
+`.github/workflows/stocks-integration.yml` defines seven independent jobs on
 Ubuntu 24.04 with the latest Node 22 patch and PostgreSQL 16 binaries. It uses
 ordinary `pull_request`, main pushes and manual dispatch, a read-only repository
 token, no repository secrets, no deployment environment and no live RPC.
@@ -8,6 +8,7 @@ The existing general CI job remains in place.
 
 | Scenario | Checks |
 | --- | --- |
+| `owner-workspace` | Owner launch command, real operator resume/pause, BUY/SELL through product buttons, API restart persistence, and independent Ctrl+C resource cleanup |
 | `postgres` | Harness boundary/acceptance tests, all frontend tests with jsdom and compiled ABI enabled, nine server PG suites plus the browser-adapter suite, then actual PostgreSQL and Node restart persistence |
 | `operator-control` | Real local HTTP/SIWE, DB and EVM trading; persistent pause/resume, concurrency policy, original signer/receipt recovery, BUY/SELL conservation and owned-service cleanup; no browser required |
 | `operator-control-ui` | Product operator control screen: ten required checks for signed permissions, single submission, lost-response retry, conflicting operators, unresolved results, history paging and deployment isolation, unavailable routes; then the existing nineteen investor browser checks and independent cleanup |
@@ -44,7 +45,7 @@ STOCKS_PG_BIN=/absolute/postgresql/bin \
 node scripts/stocks-ci/run.mjs operator-diagnostics /tmp/stocks-ci-diagnostics-new
 ```
 
-Replace the scenario with `operator-control`, `operator-control-ui`, `known-hash-ui` or `browser-lifecycle`, each with a new
+Replace the scenario with `operator-control`, `operator-control-ui`, `known-hash-ui`, `browser-lifecycle` or `owner-workspace`, each with a new
 empty absolute evidence directory. On Linux install browser system libraries
 using Playwright's `install --with-deps chromium`, as the workflow does. An
 explicit absolute `STOCKS_LOCAL_CHROME` may select an already installed local

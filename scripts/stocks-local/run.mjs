@@ -9,7 +9,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1', 'Explicit STOCKS_LOCAL_STACK_ONLY=1 is required');
 const uiMode = process.env.STOCKS_LOCAL_UI === '1';
 const browserMode = process.env.STOCKS_LOCAL_BROWSER === '1';
-assert.ok(Number(uiMode) + Number(browserMode) + Number(process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1') + Number(process.env.STOCKS_LOCAL_STACK_SIGNAL_PROBE === '1') <= 1, 'Choose one fixed local scenario');
+const ownerMode = process.env.STOCKS_LOCAL_OWNER === '1';
+assert.ok(Number(uiMode) + Number(browserMode) + Number(ownerMode) + Number(process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1') + Number(process.env.STOCKS_LOCAL_STACK_SIGNAL_PROBE === '1') <= 1, 'Choose one fixed local scenario');
 const root = resolve(import.meta.dirname, '../..');
 const contractsRoot = join(root, 'packages/contracts');
 assert.ok(existsSync(join(root, 'server/dist/stocks-runtime/observer.js')), 'Build the assembled backend/runtime first');
@@ -70,11 +71,11 @@ function cleanup() {
     }
     closeSync(fd);
     if (cleanupFailure) throw new Error(`${cleanupFailure.message}; retained ${temp}`);
-    console.log(JSON.stringify({ kind: browserMode ? 'LOCAL_BROWSER_OWNED_SERVICES_STOPPED' : uiMode ? 'LOCAL_UI_OWNED_SERVICES_STOPPED' : 'LOCAL_STACK_OWNED_SERVICES_STOPPED',
+    console.log(JSON.stringify({ kind: ownerMode ? 'LOCAL_OWNER_OWNED_SERVICES_STOPPED' : browserMode ? 'LOCAL_BROWSER_OWNED_SERVICES_STOPPED' : uiMode ? 'LOCAL_UI_OWNED_SERVICES_STOPPED' : 'LOCAL_STACK_OWNED_SERVICES_STOPPED',
       ownerPid: process.pid, nodeGroup: node?.pid, postgresPid, temp, postgresData: data, socket,
       postgresPidFileAbsent: !existsSync(join(data, 'postmaster.pid')),
       postgresSocketAbsent: !existsSync(join(socket, '.s.PGSQL.5432')), nodeGroupAbsent: !node?.pid || !groupAlive(node.pid) }));
-    if (successful) rmSync(temp, { recursive: true, force: true });
+    if (successful || ownerMode && signalRequested) rmSync(temp, { recursive: true, force: true });
     else console.error(`Local test diagnostics retained at ${temp}; owned services stopped`);
   })();
   return cleanupPromise;
@@ -130,12 +131,12 @@ try {
     await new Promise(() => {}); // Signal-check child deliberately awaits its owned cleanup.
   }
   // Fixed local regression selection only; never accept an arbitrary module path.
-  const { runStack } = await import(browserMode ? './browser-run.mjs' : uiMode ? './ui-run.mjs' : process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1' ? './address-case.mjs' : './stack.mjs');
+  const { runStack } = await import(ownerMode ? './owner-run.mjs' : browserMode ? './browser-run.mjs' : uiMode ? './ui-run.mjs' : process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1' ? './address-case.mjs' : './stack.mjs');
   checkRunning();
   const report = await runStack({ rpcUrl, bundle: JSON.parse(readFileSync(bundlePath, 'utf8')),
     databaseUrl: `postgresql://stocks_local@localhost/stocks_local_test?host=${encodeURIComponent(socket)}`, resourceDir: temp, registerCleanup });
   console.log(JSON.stringify(report, null, 2));
-  if (!uiMode && !browserMode) console.log(JSON.stringify({ kind: 'LOCAL_STACK_RESULT', ...report }));
+  if (!uiMode && !browserMode && !ownerMode) console.log(JSON.stringify({ kind: 'LOCAL_STACK_RESULT', ...report }));
   successful = true;
 } finally {
   await cleanup();

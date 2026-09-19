@@ -9,7 +9,7 @@ import { parseTap, verifyBrowser, verifyLifecycle, verifyOperatorControl } from 
 
 const root = resolve(import.meta.dirname, '../..');
 const [scenario, destination, ...extra] = process.argv.slice(2);
-assert.ok(['postgres', 'operator-control', 'operator-control-ui', 'operator-diagnostics', 'known-hash-ui', 'browser-lifecycle'].includes(scenario), 'Choose a fixed Stocks CI scenario');
+assert.ok(['postgres', 'operator-control', 'operator-control-ui', 'operator-diagnostics', 'known-hash-ui', 'browser-lifecycle', 'owner-workspace'].includes(scenario), 'Choose a fixed Stocks CI scenario');
 assert.equal(extra.length, 0);
 assert.ok(destination && isAbsolute(destination), 'An absolute, empty evidence directory is required');
 mkdirSync(destination, { recursive: true });
@@ -89,6 +89,7 @@ try {
   if (scenario === 'postgres') {
     const units = await run('harness-unit', ['--test', '--test-reporter=tap',
       'scripts/stocks-local/browser-server.test.mjs', 'scripts/stocks-local/local-wallet.test.mjs',
+      'scripts/stocks-local/owner.test.mjs',
       'scripts/stocks-local/short-session.test.mjs', 'scripts/stocks-ci/evidence.test.mjs',
       'scripts/stocks-ci/operator-control-ui.test.mjs', 'scripts/stocks-ci/runner-control-ui.test.mjs',
       'scripts/stocks-ci/port-cleanup.test.mjs', 'scripts/stocks-ci/postgres-harness.test.mjs', 'scripts/stocks-ci/lifecycle-wrapper.test.mjs']);
@@ -131,10 +132,28 @@ try {
     assert.ok(isAbsolute(env.STOCKS_LOCAL_CHROME) && existsSync(env.STOCKS_LOCAL_CHROME), 'Install the pinned browser first or select an installed local executable');
     env.STOCKS_LOCAL_BROWSER_EVIDENCE = browserEvidence;
     summary.browserExecutable = env.STOCKS_LOCAL_CHROME;
-    const lifecycle = scenario === 'browser-lifecycle';
-    const stdout = await run(scenario, [lifecycle ? 'scripts/stocks-local/browser-lifecycle-check.mjs' : 'scripts/stocks-local/run.mjs'],
+    const owner = scenario === 'owner-workspace', lifecycle = scenario === 'browser-lifecycle';
+    const stdout = await run(scenario, [owner ? 'scripts/stocks-local/owner-check.mjs' : lifecycle ? 'scripts/stocks-local/browser-lifecycle-check.mjs' : 'scripts/stocks-local/run.mjs'],
       lifecycle ? {} : { STOCKS_LOCAL_BROWSER: '1', STOCKS_LOCAL_BROWSER_CASE: scenario });
-    if (lifecycle) {
+    if (owner) {
+      const result = JSON.parse(readFileSync(join(browserEvidence, 'owner-result.json'), 'utf8'));
+      assert.equal(result.result, 'PASS'); assert.equal(result.cleanupVerified, true);
+      assert.deepEqual(result.pageErrors, []);
+      assert.equal(result.checks.length, 6); assert.equal(new Set(result.checks).size, 6);
+      assert.ok(result.checks.every(name => typeof name === 'string' && name.trim()));
+      assert.equal(result.final.sends, 4); assert.equal(result.final.claimCount, 4);
+      assert.equal(result.final.holderStock, '1500000000'); assert.equal(result.final.holderCash, '1820000000');
+      assert.equal(result.final.vaultCash, '180000000'); assert.equal(result.final.escrowStock, '0');
+      assert.equal(result.final.reconciliationStatus, 'MATCHED_AT_CUTOFF');
+      assert.equal(result.ready.initialPaused, true); assert.equal(result.ready.persistentAcrossRestart, false);
+      assert.equal(result.ready.ownerPid, result.stopped.ownerPid);
+      assert.equal(result.stopped.postgresPidFileAbsent, true); assert.equal(result.stopped.postgresSocketAbsent, true);
+      assert.equal(result.stopped.nodeGroupAbsent, true);
+      assertGone(result.stopped.ownerPid); assertGone(result.stopped.postgresPid); assertGone(result.stopped.nodeGroup, true);
+      assert.equal(existsSync(result.stopped.temp), false);
+      await Promise.all([result.ready.origin, result.ready.apiBase, result.ready.rpcUrl].map(base => assertPortClosed(base)));
+      summary.ownerWorkspace = { checks: result.checks, final: result.final, cleanupVerified: true };
+    } else if (lifecycle) {
       summary.lifecycle = verifyLifecycle(stdout);
     } else {
       const result = JSON.parse(readFileSync(join(browserEvidence, 'result.json'), 'utf8'));

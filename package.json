@@ -7,6 +7,9 @@
     "node": ">=22"
   },
   "scripts": {
+    "stocks:setup": "node scripts/stocks-local/owner.mjs setup",
+    "stocks:doctor": "node scripts/stocks-local/owner.mjs check",
+    "stocks:dev": "node scripts/stocks-local/owner.mjs start",
     "dev": "vite",
     "build": "tsc && vite build",
     "build:server": "tsc -p server/tsconfig.json",
