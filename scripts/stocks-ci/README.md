@@ -33,8 +33,8 @@ npm ci
 npm ci --prefix scripts/stocks-ci --ignore-scripts
 npm run prisma:generate
 npm run build:server
-corepack yarn --cwd packages/contracts install --immutable
-DOTENV_CONFIG_PATH=/dev/null corepack yarn --cwd packages/contracts compile
+(cd packages/contracts && corepack yarn install --immutable)
+(cd packages/contracts && DOTENV_CONFIG_PATH=/dev/null corepack yarn compile)
 node scripts/stocks-ci/node_modules/playwright/cli.js install chromium
 
 STOCKS_PG_BIN=/absolute/postgresql/bin \

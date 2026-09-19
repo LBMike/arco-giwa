@@ -43,7 +43,10 @@ jobs:
         run: |
           npm ci
           npm ci --prefix scripts/stocks-ci --ignore-scripts
-          corepack yarn --cwd packages/contracts install --immutable
+
+      - name: Install locked contract dependencies
+        working-directory: packages/contracts
+        run: corepack yarn install --immutable
 
       - name: Prepare PostgreSQL binaries
         run: |
@@ -53,11 +56,17 @@ jobs:
           fi
           "$STOCKS_PG_BIN/initdb" --version
 
-      - name: Build generated client, server and contract artifacts
+      - name: Build generated client and server
         run: |
           npm run prisma:generate
           npm run build:server
-          corepack yarn --cwd packages/contracts compile
+
+      - name: Build contract artifacts with the pinned package manager
+        working-directory: packages/contracts
+        run: corepack yarn compile
+
+      - name: Confirm dependency locks were not rewritten
+        run: git diff --exit-code -- package-lock.json scripts/stocks-ci/package-lock.json packages/contracts/yarn.lock
 
       - name: Install pinned Chromium and system libraries
         if: matrix.scenario != 'postgres' && matrix.scenario != 'operator-control'
