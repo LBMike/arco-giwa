@@ -118,7 +118,10 @@ export type CommandState = {
   readonly timedOut: boolean
   /** True when a retry of an unknown command was refused: the earlier attempt may still have been recorded. */
   readonly retryRefused: boolean
-  /** Order mark taken when the outcome became unknown: only a control read started after it can be trusted for a retry. */
+  /**
+   * Order mark taken when the outcome became unknown (only a control read started after it can be trusted for a retry),
+   * or when a retry met a version conflict (only a read after it can show which deployment the page now talks to).
+   */
   readonly unknownSeq: number | null
 }
 

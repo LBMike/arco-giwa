@@ -200,7 +200,8 @@ test("outcomes: sending, accepted, replayed (old event, later state), conflict, 
     assert.match(html, /data-outcome="unknown"/)
     // Not read since the outcome: read first, no Retry.
     const first = text(render(snapshot({ controlReadSeq: 1, command: command("unknown", { attempts: 2, unknownSeq: 3, ...patch }) })))
-    assert.match(first, /Read the state and history first\. Retrying becomes available after a successful read taken now/)
+    assert.match(first, /Read the state and history first\. Retrying becomes available after a successful read taken now shows the deployment this command was reviewed for; the server can still change before a retry is answered\./)
+    assert.doesNotMatch(first, /unnoticed/)
     assert.doesNotMatch(first, /Retry the same command/)
   }
 })
@@ -319,7 +320,10 @@ test("a refused retry, a changed deployment and an abandoned command stay unknow
   assert.match(text(render(snapshot({ access: "forbidden", abandoned }))), /No access to trading control \(403\).*A resume command sent from this page \(key tc-tes…0001 tc-test-key-0001 ?\) has no verified result\. It may or may not have been recorded, and it is not resent\. +The change history shows no keys, so it cannot confirm this command: .*A matching entry does not identify this command\. If the entry at version 1 is a different action or has a different reason than “ ?Verified local reconciliation ?”, this command was not recorded, and it can no longer be\. Only a verified answer for this command's key shows that it was recorded\. This page no longer resends it, so that may stay unknown here\./)
   assert.match(text(render(snapshot({ abandoned, controlReadSeq: 3 }))), /An earlier command has no verified result A resume command sent from this page/)
   // A retry that met a version conflict proves the earlier attempt was not recorded.
-  assert.match(text(render(snapshot({ command: command("conflict", { attempts: 2, error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) }))), /this also shows that the earlier attempt with this key was not recorded\./)
+  // 003F-1 review: the 409 does not name the deployment that answered (keys are per deployment), so the claim is conditional.
+  const conflicted = text(render(snapshot({ command: command("conflict", { attempts: 2, error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) })))
+  assert.match(conflicted, /If this answer came from deployment 5f0c2b…a2c4 ?5f0c2b7d9e41a3c6b8d0f2e4a6c8b0d2f4e6a8c0b2d4f6e8a0c2e4b6d8f0a2c4 ?, the one this command was reviewed for, it also shows that the earlier attempt with this key was not recorded there: the server checks the key before the version\./)
+  assert.doesNotMatch(conflicted, /The state read after it is for another deployment/)
 })
 
 test("the version limit offers no command; event ids keep their full value; read failures are summarised once", () => {
@@ -390,6 +394,6 @@ test("a disabled feature says a retry and the history check are impossible; a sh
   const note = { paused: false, expectedVersion: 0, idempotencyKey: "tc-test-key-0000", reason: "Verified local reconciliation", sinceSeq: 1, deploymentDigest: state(0, true).deploymentDigest }
   const shared = text(render(snapshot({ controlReadSeq: 3, abandoned: note, command: command("unknown", { unknownSeq: 2, error: failed("network") }) })))
   // 003F-1 P2-01: neither command is identified by the history; a retry settles only the current one.
-  assert.match(shared, /The earlier unresolved command \(note above\) has the same version, action and reason; the history cannot tell the two apart\. A retry of this command settles only this one: its own event in the answer \(accepted or replayed\) means this command is recorded; a version conflict \(409\) means it was not, and the entry at version 1 may then be the earlier command's or anyone else's\./)
+  assert.match(shared, /The earlier unresolved command \(note above\) has the same version, action and reason; the history cannot tell the two apart\. A retry of this command settles only this one: its own event in the answer \(accepted or replayed\) means this command is recorded; a version conflict \(409\) from the deployment it was reviewed for means it was not, and the entry at version 1 may then be the earlier command's or anyone else's\./)
   assert.doesNotMatch(shared, /shows only that one of the two was recorded|means the earlier one|means it was recorded/)
 })

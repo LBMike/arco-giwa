@@ -695,7 +695,15 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
         return (
           <Notice tone="attention" title="Not applied: the state changed first (409)" live>
             The {verb} was based on version {command.command.expectedVersion}, but the state had already moved on, so the server changed nothing for this request.
-            {command.attempts > 1 && " Because the server checks the key before the version, this also shows that the earlier attempt with this key was not recorded."}{" "}
+            {command.attempts > 1 && (
+              <>
+                {" "}
+                If this answer came from deployment <Mono value={command.basis.deploymentDigest} short />, the one this command was reviewed for, it also shows that the
+                earlier attempt with this key was not recorded there: the server checks the key before the version.
+                {shown !== null && shown.deploymentDigest !== command.basis.deploymentDigest &&
+                  " The state read after it is for another deployment, so this answer may have come from that one: whether the earlier attempt was recorded is not known, and closing keeps it as an unresolved note."}
+              </>
+            )}{" "}
             {rereading} Review it and start a new command if a change is still needed; this command will not be resent.
             <span className="mt-2 flex flex-wrap gap-2">{close}</span>
           </Notice>
@@ -775,7 +783,8 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
                     <>
                       {" "}
                       A retry of this command settles only this one: its own event in the answer (accepted or replayed) means this command is recorded; a version
-                      conflict (409) means it was not, and the entry at version {command.command.expectedVersion + 1} may then be the earlier command's or anyone else's.
+                      conflict (409) from the deployment it was reviewed for means it was not, and the entry at version {command.command.expectedVersion + 1} may then be
+                      the earlier command's or anyone else's.
                     </>
                   )}
                 </>
@@ -791,8 +800,8 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
               <span className="mt-1 block">The control routes are not available on this server now, so this command cannot be retried from this page.</span>
             ) : readiness === "read_first" ? (
               <span className="mt-1 block">
-                Read the state and history first. Retrying becomes available after a successful read taken now, so a retry cannot reach another deployment
-                unnoticed.
+                Read the state and history first. Retrying becomes available after a successful read taken now shows the deployment this command was reviewed
+                for; the server can still change before a retry is answered.
               </span>
             ) : readiness === null ? (
               <span className="mt-1 block">

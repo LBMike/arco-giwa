@@ -10,7 +10,9 @@
 //   fresh idempotency key and sent once; double clicks are ignored while it is in flight. A retry resends the
 //   identical command and key. Nothing ever changes expectedVersion and resends by itself.
 // - Only a verified 2xx proves the command's event. 409 version conflict re-reads and waits for a new command (on a
-//   retry too: the server checks the key before the version, so it proves the key was never recorded). A first attempt
+//   retry too: the server checks the key before the version, so it proves the key was never recorded on the deployment
+//   that answered, which the 409 does not name; closing it keeps an unresolved note unless a read taken after it shows
+//   the command's own deployment). A first attempt
 //   refused with 400/401/403/404/idempotency conflict changed nothing. Anything else (503, 5xx, network, timeout,
 //   invalid 200), and any refusal of a retry, is unknown: the earlier attempt may or may not have been recorded.
 // - Every control value carries an order mark (the read's request sequence, or the POST answer's). A read started before
@@ -90,7 +92,8 @@ export type RetryRefusal = "not_unknown" | "not_retryable" | "read_first" | "dep
  */
 export function commandPhaseOf(error: StocksAdminError, timedOut: boolean, attempt = 1): Exclude<CommandPhase, "sending" | "accepted" | "replayed"> {
   if (timedOut) return "unknown"
-  // The service looks the key up before it compares versions: a version conflict proves this key was never recorded.
+  // The service looks the key up (per deployment) before it compares versions: a version conflict proves this key was
+  // never recorded on the deployment that answered.
   if (error.kind === "request" && error.status === 409 && error.code === "CONTROL_VERSION_CONFLICT") return "conflict"
   if (attempt > 1) return "unknown"
   switch (error.kind) {
@@ -227,10 +230,8 @@ export class TradingControlStore {
         const page = result.data
         const older = beforeVersion !== null
         const invalid = () => this.write({ history: { ...current, phase: "error", error: { kind: "invalid", status: 200, code: null }, failedPage: older ? "older" : "first" } })
-        const first = page.items[0]
-        // One page is one deployment's; an older page continues the list (and so its deployment).
+        // One page is one deployment's (the parser checks it); an older page continues the list (and so its deployment).
         const last = current.items[current.items.length - 1]
-        if (!page.items.every((item) => item.deploymentDigest === first.deploymentDigest)) return invalid()
         if (older && (last === undefined || !page.items.every((item) => item.version < last.version && item.deploymentDigest === last.deploymentDigest))) return invalid()
         const control = this.snapshot.control.value?.data
         let confirmed = current.deploymentDigest
@@ -316,12 +317,14 @@ export class TradingControlStore {
 
   /**
    * Closes the command panel. A command in flight cannot be discarded (its answer is awaited). An unknown command stays
-   * as an unresolved note (it may have been recorded) and the state is read again.
+   * as an unresolved note (it may have been recorded) and the state is read again. So does a retry that met a version
+   * conflict, unless a read taken after it shows the command's own deployment: the 409 does not name the deployment that
+   * answered, and only that deployment's key lookup failed.
    */
   discard(): boolean {
     const command = this.snapshot.command
     if (!command || command.phase === "sending") return false
-    if (command.phase === "unknown") {
+    if (command.phase === "unknown" || (command.phase === "conflict" && command.attempts > 1 && !readSinceOnDeployment(this.snapshot, command))) {
       this.write({ command: null, abandoned: abandonedOf(command, command.unknownSeq ?? ++this.sequence) })
       this.refresh()
     } else this.write({ command: null })
@@ -388,7 +391,8 @@ export class TradingControlStore {
       if (result.error.kind === "aborted") return
       const phase = commandPhaseOf(result.error, false, attempt)
       const retryRefused = phase === "unknown" && attempt > 1 && result.error.kind !== "server" && result.error.kind !== "network" && result.error.kind !== "invalid"
-      this.write({ command: { ...command, phase, result: null, error: result.error, timedOut: false, retryRefused, unknownSeq: phase === "unknown" ? ++this.sequence : null } })
+      const marked = phase === "unknown" || (phase === "conflict" && attempt > 1)
+      this.write({ command: { ...command, phase, result: null, error: result.error, timedOut: false, retryRefused, unknownSeq: marked ? ++this.sequence : null } })
       if (phase === "conflict" || retryRefused || (phase === "rejected" && result.error.code === "CONTROL_IDEMPOTENCY_CONFLICT")) this.refresh()
     })
   }
@@ -408,7 +412,8 @@ export class TradingControlStore {
     if (fit === "other" || (history.deploymentDigest !== null && history.deploymentDigest !== control.deploymentDigest)) {
       this.write({ history: { ...EMPTY_HISTORY, phase: firstInFlight ? "loading" : history.phase, error: firstInFlight ? null : history.error, failedPage: firstInFlight ? null : history.failedPage } })
       if (!firstInFlight) this.recheckHistory()
-    } else if (fit === "stale") {
+    } else if (fit === "stale" || (fit === "none" && history.phase === "error")) {
+      // An older list, or a first page that failed or was rejected: read it for this state.
       if (!firstInFlight) this.recheckHistory()
     } else if (fit === "current" && history.deploymentDigest !== control.deploymentDigest) {
       this.write({ history: { ...history, deploymentDigest: control.deploymentDigest } })
@@ -496,6 +501,19 @@ export class TradingControlStore {
 function abandonedOf(command: CommandState, sinceSeq: number): AbandonedCommand {
   const { paused, expectedVersion, idempotencyKey, reason } = command.command
   return { paused, expectedVersion, idempotencyKey, reason, sinceSeq, deploymentDigest: command.basis.deploymentDigest }
+}
+
+/** True when a control read taken after the command's outcome mark shows, without error, the deployment it was reviewed for. */
+function readSinceOnDeployment(snapshot: TradingControlSnapshot, command: CommandState): boolean {
+  const control = snapshot.control
+  return (
+    control.phase === "ready" &&
+    control.error === null &&
+    control.value?.data.deploymentDigest === command.basis.deploymentDigest &&
+    command.unknownSeq !== null &&
+    snapshot.controlReadSeq !== null &&
+    snapshot.controlReadSeq > command.unknownSeq
+  )
 }
 
 /**

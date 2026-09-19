@@ -622,7 +622,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
           // A same-key retry is the positive evidence the page can get: here a version conflict proves the key was never recorded.
           await click("Retry the same command")
           await until(() => outcome() === "conflict", "retry settles it")
-          assert.match(q("stocks-trading-control-outcome")!.textContent!, /this also shows that the earlier attempt with this key was not recorded\./)
+          assert.match(q("stocks-trading-control-outcome")!.textContent!, /the one this command was reviewed for, it also shows that the earlier attempt with this key was not recorded there: the server checks the key before the version\./)
           assert.deepEqual([postsLogged().map((entry) => entry.status), memory.events.map((event) => event.idempotencyKey)], [[null, 409], [key]])
         } else {
           await click("Discard this command")
@@ -642,7 +642,18 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       await reset()
       const mountedAt = Date.parse("2026-09-19T08:00:00.000Z")
       let clientNow = mountedAt
-      await open(mint(WALLET.controlA), { now: () => clientNow })
+      // The feature's 15 s interval only re-renders; capture it to move time on without waiting.
+      const ticks: Array<() => void> = []
+      const realSetInterval = globalThis.setInterval
+      globalThis.setInterval = ((handler: () => void, ms?: number, ...rest: unknown[]) => {
+        if (ms === 15_000) ticks.push(handler)
+        return realSetInterval(handler, ms, ...rest)
+      }) as typeof setInterval
+      try {
+        await open(mint(WALLET.controlA), { now: () => clientNow })
+      } finally {
+        globalThis.setInterval = realSetInterval
+      }
       memory.clock = mountedAt + 500 // apply() adds 1000 ms: the event is recorded at T+1500
       clientNow = mountedAt + 1_600
       await command("Review resume", "Fresh change on a fixed clock")
@@ -652,6 +663,11 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       const gate = q("stocks-trading-control-gate")!.textContent!
       assert.doesNotMatch(gate, /in the future \(clock skew\)/)
       assert.match(gate, /0s ago/)
+      // Without new data, the interval re-renders and the elapsed time moves on with the clock.
+      clientNow += 90_000
+      assert.ok(ticks.length > 0, "a re-render interval is running")
+      await act(async () => ticks[ticks.length - 1]())
+      assert.match(q("stocks-trading-control-gate")!.textContent!, /1m 30s ago/)
       // An event genuinely ahead of the client clock keeps the warning.
       memory.clock = clientNow + 60_000
       assert.equal((await directChange(WALLET.controlB, { paused: true, expectedVersion: 1, idempotencyKey: "future-clock-key", reason: "Recorded ahead of this client" })).statusCode, 200)
