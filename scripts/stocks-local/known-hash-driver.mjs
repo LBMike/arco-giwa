@@ -9,7 +9,7 @@ export async function runKnownHashScenario(h) {
   const { page, stack, wallet, report, passed, wait, control, signIn, place, select,
     check, status, action, approve, transfer, complete, holdings, heldAction, screenshot } = h;
   report.execution = 'LOCAL_CHROME_KNOWN_HASH_RECOVERY_PG_EVM_ONLY';
-  report.recoveryUiImplemented = false;
+  report.recoveryViaProductButtons = false;
   report.authFixture = 'Real SIWE; explicitly armed next holder login gets a signed 30-second JWT; other logins remain 900 seconds';
   const sessions = [], sessionReads = new Set(); let authFailure;
   const onResponse = response => {

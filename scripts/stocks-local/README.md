@@ -74,6 +74,18 @@ A second owned browser origin attempts API reads, bootstrap reads and wallet wri
 
 Browser evidence is written to the explicitly selected directory: `result.json`, `portfolio-desktop.png`, `portfolio-mobile.png`, and `failure.png` when failure capture is possible. The browser result alone is insufficient: require successful resource-cleanup records and the expected process exit as well.
 
+## 003D product recovery buttons
+
+Use `STOCKS_LOCAL_BROWSER_CASE=known-hash-ui` with the Chrome command and a fresh evidence directory to validate the implemented recovery UI. The earlier `known-hash` adapter probe remains available separately. Both use the same explicit short-session fixture and disposable PostgreSQL/EVM stack.
+
+The new case waits for actual 30-second signed JWT expiry and the original 60-second quote deadline in all four BUY/SELL × APPROVAL/TRANSFER combinations. The original wallet response populates the product's in-memory candidate. The browser stays in the same tab through API restart, sign-in and A→B→A account isolation; no hash, session or store data is injected into the page. SELL TRANSFER additionally returns the old wallet answer after a renewed login.
+
+Recovery uses the actual **Record this hash** and **Check the receipt again** buttons, each double-activated. A one-time browser network fault aborts the first reconcile request before server dispatch, after the real outcome write succeeds. The card remains RECORDED, no background retry occurs, and only the explicit receipt button obtains the real EVM receipt/proof. This checks recovery from an interrupted request, not naturally delayed public-chain finality. Each case requires two inspect requests, one outcome write, two attempted reconcile requests (one dispatched), zero new claims and zero wallet calls of any kind during recovery. All requests must use the renewed session; credentials are compared in test memory and never written to evidence.
+
+After recovery, API restart and page reload must lose the tab card but preserve the actual PostgreSQL claim and trusted proof. Repeating the original claim grants no new permission; an expired approval-only order cannot obtain a new transfer claim. The real observer/worker subsequently completes the transfer orders. Expected final balances remain 2.25 NVDA, holder cash 1,730, vault cash 270 and escrow zero, with eight original sends matched to eight claims.
+
+Pending-card and portfolio screenshots cover desktop and 375px width. The default Chrome scenario also explicitly asserts that a hashless UNKNOWN and later observer completion do not manufacture a recovery card. Acceptance still requires PASS, successful cleanup markers and exit 0. No production server, contract, authentication lifetime or quote deadline is changed by this test.
+
 ## Browser bridge boundary (test only)
 
 Unlike the in-process jsdom wallet, Chrome uses a narrow local HTTP bridge. All assets and bridge routes require the exact `127.0.0.1:port` Host. The bootstrap config requires same-origin browser fetch metadata and returns a random in-memory capability with no-store/nosniff headers. Vite's broad CORS is disabled, its product config is not loaded, and its env directory is an empty owned directory. Wallet/control/finish POSTs require the exact Origin, same-origin fetch metadata, the capability header and JSON content type; bodies are size-limited and checked for exact fields. The capability is never put in a URL or log. A state read requires the capability and same-origin checks and returns only test counters/account and a read-only summary, not sessions or signatures.

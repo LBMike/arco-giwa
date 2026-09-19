@@ -20,7 +20,7 @@ export async function runStack(options) {
   const probe = process.env.STOCKS_LOCAL_BROWSER_PROBE ?? '';
   assert.ok(['', 'ready', 'held', 'failure'].includes(probe));
   const scenario = process.env.STOCKS_LOCAL_BROWSER_CASE ?? '';
-  assert.ok(['', 'known-hash'].includes(scenario), 'Choose a fixed browser case');
+  assert.ok(['', 'known-hash', 'known-hash-ui'].includes(scenario), 'Choose a fixed browser case');
   assert.ok(!scenario || !probe, 'Recovery and lifecycle probes are separate cases');
   const { chromium } = createRequire(runtime)('playwright');
   let host, stack, wallet, browserServer, browser, closePromise, closed = false;
@@ -28,7 +28,7 @@ export async function runStack(options) {
   const setup = (async () => {
     await mkdir(evidence, { recursive: true }); check();
     host = await createLocalBrowserHost({ root: resolve(import.meta.dirname, '../..'), resourceDir: options.resourceDir }); check();
-    stack = await createLocalUiStack({ ...options, frontendOrigin: host.origin, knownHashRecovery: scenario === 'known-hash' }); check();
+    stack = await createLocalUiStack({ ...options, frontendOrigin: host.origin, knownHashRecovery: scenario === 'known-hash' || scenario === 'known-hash-ui' }); check();
     wallet = await createLocalWallet({ ...options, ...stack }); check();
     host.attach({ stack, wallet });
     browserServer = await chromium.launchServer({ executablePath, headless: true, host: '127.0.0.1',

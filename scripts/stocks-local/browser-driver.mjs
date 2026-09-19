@@ -46,7 +46,8 @@ export async function runBrowserScenario({ host, stack, wallet, browser, evidenc
     assert.doesNotMatch(await page.getByTestId('local-test-message').innerText(), /FAILED/);
   }
   async function signIn() {
-    await page.getByRole('button', { name: 'Sign in to Stocks', exact: true }).click();
+    await page.getByRole('region', { name: 'Stocks sign-in', exact: true })
+      .getByRole('button', { name: /^(Sign in to Stocks|Retry Stocks sign-in)$/ }).click();
     await wait(async () => (await page.getByTestId('giwa-stocks-session').innerText()).startsWith('Signed in as'), 'SIWE signed in');
   }
   async function place(side, quantity) {
@@ -72,6 +73,8 @@ export async function runBrowserScenario({ host, stack, wallet, browser, evidenc
   }
   async function select(side, quantity) {
     await tab('orders');
+    const all = page.getByRole('button', { name: 'All orders', exact: true });
+    if (await all.count()) await all.click();
     await page.getByRole('button', { name: new RegExp(`^${side === 'BUY' ? 'Buy' : 'Sell'}.*${quantity.replace('.', '\\.')} NVDA`) }).click();
   }
   const check = () => action('prepare').click();
@@ -133,9 +136,15 @@ export async function runBrowserScenario({ host, stack, wallet, browser, evidenc
     passed('Viewport has no horizontal overflow', dimensions);
   }
   try {
+    if (scenario === 'known-hash-ui') {
+      const { runKnownHashUiScenario } = await import('./known-hash-ui-driver.mjs');
+      return await runKnownHashUiScenario({ host, stack, wallet, page, report, passed, wait,
+        control, signIn, place, select, check, status, panel, action, hash, approve, transfer,
+        complete, holdings, heldAction, screenshot });
+    }
     if (scenario === 'known-hash') {
-      // Fixed test module. Its recovery requests exercise the real HTTP adapter,
-      // not a production recovery screen (which remains a separate UI task).
+      // Retained adapter baseline. Product recovery buttons are exercised by
+      // the separate known-hash-ui case above.
       const { runKnownHashScenario } = await import('./known-hash-driver.mjs');
       return await runKnownHashScenario({ host, stack, wallet, page, report, passed, wait,
         control, signIn, place, select, check, status, panel, action, hash, approve, transfer,
@@ -180,6 +189,7 @@ export async function runBrowserScenario({ host, stack, wallet, browser, evidenc
     const lostHash = await heldAction('submit'); const lostSends = wallet.sends.length;
     await control('dropHeld'); await wait(async () => await status() === 'UNKNOWN', 'unknown wallet response');
     assert.equal(await hash(), null);
+    assert.equal(await page.getByTestId('stocks-known-hash-recovery').count(), 0, 'no recovery candidate is inferred from a hashless UNKNOWN');
     const lostSnapshot = await wait(async () => {
       const snapshot = await stack.snapshot(); return snapshot.claims.some(r => r.orderId === lost.id && r.stage === 'TRANSFER' && r.status === 'UNKNOWN') && snapshot;
     }, 'durable unknown claim');
@@ -189,6 +199,7 @@ export async function runBrowserScenario({ host, stack, wallet, browser, evidenc
     await page.setViewportSize({ width: 1440, height: 1000 }); await control('restartApi'); await page.reload(); await signIn(); await select('SELL', '0.25');
     await wait(async () => (await page.getByTestId('stocks-order-card').innerText()).includes('Completed'), 'completed after loss reload');
     assert.equal(await hash(), null); assert.equal(wallet.sends.length, lostSends);
+    assert.equal(await page.getByTestId('stocks-known-hash-recovery').count(), 0, 'observer completion/reload does not manufacture a candidate');
     passed('Lost response: UNKNOWN/no hash → real observer completion → browser reload without resend', { orderId: lost.id, instrumentationOnlyHash: lostHash });
 
     // A second owned origin exercises browser CORS, including with the correct bridge capability.
