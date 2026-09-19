@@ -79,3 +79,25 @@ Task prompt: `docs/tasks/giwa-stocks-operator-control-ui-003f-20260919.md`. Cont
 **Full checks:** typecheck, build, frontend (DOM + artifacts and CI-like), server, security, design tokens (the 7 known) and stories, `.mjs` DOM regressions, the local harness unit tests and `git diff --check`. A builder-side adversarial review runs as a workflow (contract fidelity, command safety, copy truthfulness, test adequacy).
 
 The real PostgreSQL, EVM, Chrome and operator login acceptance is Codex's. These in-memory results do not replace it.
+
+## Results (recorded at completion)
+
+- **Implemented as planned.** A separate module on `/admin/stocks` above the unchanged read-only console. Only `stocks-market/StocksPages.tsx` changed outside the module (the mount).
+- **Changes from the plan, all from three builder-side adversarial review rounds** (`074c4a2`, `7d8857f`, `fd72c58`):
+  - Every control value carries an order mark, so reads, POST answers and deployments never replace a newer shown value.
+  - After an unknown result, a retry needs a fresh successful read of the same deployment.
+  - A retry refused after an unknown result stays unknown; a version conflict still proves the key was never recorded.
+  - The review is frozen, and Confirm is withdrawn if the state is read again.
+  - Discarding an unknown command, or an access denial, leaves an unresolved note with the key, action, reason and deployment, and a per-deployment recorded-or-not check.
+  - Retained or pre-command values are always labelled as earlier.
+  - The POST refuses redirects; the reason refuses lone surrogates.
+  - Focus and live-region fixes.
+- **Tests: 72 new** (parse 12, store 27, views 18, gated DOM 15). The DOM suite runs against the real trading-control and runtime-status plugins and the real session resolver.
+- **Mutation checks:** 44 + 22 + 7 runs, all killed except two equivalent mutants (S11 and R08). Four earlier mutations could not be re-applied after the code changed.
+- **Final checks at `fd72c58`:**
+  - frontend 822/822 with DOM + artifacts; CI-like 740 pass + 7 gate skips;
+  - server 403 pass + 82 DB skips;
+  - typecheck, build, security, stories, `.mjs` DOM 23/23, harness 13/13, CI evidence 16/16 and diff all pass;
+  - design tokens: the 7 known findings.
+- **Not real integration:** real PostgreSQL, EVM, Chrome and SIWE acceptance are Codex's.
+- **Details:** `docs/evidence/giwa-stocks-operator-control-ui-003f-builder-20260919.md`.
