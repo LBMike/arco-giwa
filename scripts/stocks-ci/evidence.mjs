@@ -1,6 +1,7 @@
 // Pure acceptance checks. Exit status and independent OS cleanup checks belong
 // to the runner; a scenario's PASS result alone is not sufficient evidence.
 import assert from 'node:assert/strict';
+import { OPERATOR_CONTROL_UI_CHECK_IDS } from '../stocks-local/operator-control-ui-checks.mjs';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const positivePid = (value, label) => assert.ok(Number.isSafeInteger(value) && value > 1, `${label}: invalid owned PID`);
@@ -53,6 +54,7 @@ export function verifyBrowser({ stdout, result, scenario = '' }) {
   const executions = {
     '': 'LOCAL_CHROME_PG_EVM_ONLY',
     'operator-diagnostics': 'LOCAL_CHROME_PG_EVM_ONLY',
+    'operator-control-ui': 'LOCAL_CHROME_PG_EVM_ONLY',
     'known-hash': 'LOCAL_CHROME_KNOWN_HASH_RECOVERY_PG_EVM_ONLY',
     'known-hash-ui': 'LOCAL_CHROME_KNOWN_HASH_UI_PG_EVM_ONLY',
   };
@@ -86,7 +88,78 @@ export function verifyBrowser({ stdout, result, scenario = '' }) {
     assert.ok(Array.isArray(diagnostics.cases) && diagnostics.cases.length > 0, 'Operator diagnostics cases are missing');
     assert.ok(Array.isArray(diagnostics.checks) && diagnostics.checks.length > 0, 'Operator diagnostics checks are missing');
   }
+  if (scenario === 'operator-control-ui') verifyControlUi(result);
   return { ready, resources, stopped };
+}
+
+function namedCoverage(values, count, label) {
+  assert.ok(Array.isArray(values), `${label} must be an array`);
+  assert.equal(values.length, count, `${label} has incomplete coverage`);
+  assert.ok(values.every(value => typeof value === 'string' && value.trim().length > 0), `${label} needs named checks`);
+  assert.equal(new Set(values).size, count, `${label} contains duplicate checks`);
+}
+
+function verifyControlUi(result) {
+  assert.equal(result.actualRoutes, true, 'Control UI must use product routes');
+  assert.equal(result.strictMode, true, 'Control UI must run in StrictMode');
+  assert.ok(Array.isArray(result.scenarios), 'Investor regressions are missing');
+  namedCoverage(result.scenarios.map(row => row?.name), 19, 'Investor regressions');
+  const control = result.operatorControl;
+  assert.ok(object(control), 'Operator control UI result is missing');
+  assert.equal(control.result, 'PASS', 'Operator control UI did not pass');
+  assert.deepEqual(control.pageErrors, [], 'Operator control UI page errors must be empty');
+  assert.deepEqual(control.knownFindings, [], 'Operator control UI has unresolved findings');
+  namedCoverage(control.checks, OPERATOR_CONTROL_UI_CHECK_IDS.length, 'Operator control UI checks');
+  namedCoverage(control.checkIds, OPERATOR_CONTROL_UI_CHECK_IDS.length, 'Operator control UI check identities');
+  assert.deepEqual([...control.checkIds].sort(), [...OPERATOR_CONTROL_UI_CHECK_IDS].sort(), 'Required operator control UI coverage is missing');
+  assert.equal(control.walletSends, 0, 'Control UI must not send wallet transactions');
+  assert.ok(Array.isArray(control.walletMethods) && control.walletMethods.includes('personal_sign'), 'Operator sign-in evidence is missing');
+  assert.ok(control.walletMethods.every(method => ['personal_sign', 'eth_accounts', 'eth_chainId'].includes(method)), 'Unexpected control UI wallet operation');
+  assert.ok(Array.isArray(control.controlPosts) && control.controlPosts.length === 10, 'Ten reviewed control attempts must be recorded');
+  for (const command of control.controlPosts) {
+    assert.ok(object(command), 'Control attempt must be an object');
+    assert.deepEqual(Object.keys(command).sort(), ['expectedVersion', 'idempotencyKey', 'paused', 'reason'], 'Control command field mismatch');
+    assert.equal(typeof command.paused, 'boolean');
+    assert.ok(Number.isInteger(command.expectedVersion) && command.expectedVersion >= 0 && command.expectedVersion <= 2147483646);
+    assert.ok(typeof command.idempotencyKey === 'string' && /^[a-zA-Z0-9:_-]{8,128}$/.test(command.idempotencyKey));
+    assert.ok(typeof command.reason === 'string' && command.reason.trim().length > 0 && command.reason.length <= 500);
+  }
+  const state = control.finalControl;
+  assert.ok(object(state), 'Final control state is missing');
+  assert.equal(state.paused, false, 'Control gate must be resumed for investor regression');
+  assert.ok(Number.isInteger(state.version) && state.version > 0 && state.version <= 2147483647, 'Control revision is invalid');
+  assert.ok(typeof state.deploymentDigest === 'string' && /^[0-9a-f]{64}$/.test(state.deploymentDigest), 'Control deployment is invalid');
+  const snapshot = result.final?.snapshot;
+  assert.ok(object(snapshot), 'Final independent snapshot is missing');
+  for (const [field, value] of Object.entries({ holderStock: '1250000000', stockSupply: '1250000000', escrowStock: '0',
+    holderCash: '1850000000', vaultCash: '150000000' })) assert.equal(snapshot.chain?.[field], value, `Final ${field} mismatch`);
+  assert.equal(snapshot.reconciliation?.status, 'MATCHED_AT_CUTOFF', 'Reconciliation must match');
+  assert.deepEqual(snapshot.reconciliation?.differences, [], 'Reconciliation differences remain');
+  assert.equal(snapshot.reconciliation?.cutoff?.deploymentDigest, state.deploymentDigest, 'Reconciled deployment differs');
+  assert.equal(snapshot.runtimeStatus?.deploymentDigest, state.deploymentDigest, 'Runtime deployment differs');
+  assert.equal(snapshot.runtimeStatus?.newOrdersPaused, false, 'Runtime is still paused');
+  assert.deepEqual(snapshot.runtimeStatus?.operatorControl, { status: 'RESUMED', version: state.version });
+  assert.ok(Array.isArray(snapshot.claims) && snapshot.claims.length === 7, 'Seven durable claims are required');
+  const claims = new Map(snapshot.claims.map(claim => [claim?.claimId, claim]));
+  assert.equal(claims.size, 7, 'Durable claims must be distinct');
+  const dispatch = result.dispatchEvidence;
+  assert.equal(dispatch?.proof, 'REAL_PG_CLAIM_RESPONSE_BEFORE_SINGLE_EVM_SEND', 'Claim-before-send proof is missing');
+  assert.ok(Array.isArray(dispatch.attempts) && dispatch.attempts.length === 7, 'Seven investor sends are required');
+  assert.equal(new Set(dispatch.attempts.map(attempt => attempt?.claimId)).size, 7, 'Dispatch claims must be distinct');
+  assert.equal(new Set(dispatch.attempts.map(attempt => attempt?.txHash)).size, 7, 'Investor sends must be distinct');
+  for (const attempt of dispatch.attempts) {
+    assert.ok(object(attempt), 'Dispatch attempt is missing');
+    const claim = claims.get(attempt.claimId);
+    assert.ok(object(claim), 'Dispatch has no matching durable claim');
+    for (const field of ['claimId', 'orderId', 'side', 'stage']) {
+      assert.ok(typeof attempt[field] === 'string' && attempt[field].length > 0, `Dispatch ${field} missing`);
+      assert.equal(attempt[field], claim[field], `Dispatch ${field} differs from claim`);
+    }
+    assert.ok(['BUY', 'SELL'].includes(attempt.side) && ['APPROVAL', 'TRANSFER'].includes(attempt.stage));
+    assert.ok(Number.isSafeInteger(attempt.claimResponseSeq) && attempt.claimResponseSeq > 0);
+    assert.ok(Number.isSafeInteger(attempt.sendSeq) && attempt.claimResponseSeq < attempt.sendSeq, 'Send preceded the durable claim response');
+    assert.ok(typeof attempt.txHash === 'string' && /^0x[0-9a-f]{64}$/.test(attempt.txHash));
+  }
 }
 
 export function verifyLifecycle(stdout) {

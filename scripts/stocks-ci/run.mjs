@@ -9,7 +9,7 @@ import { parseTap, verifyBrowser, verifyLifecycle, verifyOperatorControl } from 
 
 const root = resolve(import.meta.dirname, '../..');
 const [scenario, destination, ...extra] = process.argv.slice(2);
-assert.ok(['postgres', 'operator-control', 'operator-diagnostics', 'known-hash-ui', 'browser-lifecycle'].includes(scenario), 'Choose a fixed Stocks CI scenario');
+assert.ok(['postgres', 'operator-control', 'operator-control-ui', 'operator-diagnostics', 'known-hash-ui', 'browser-lifecycle'].includes(scenario), 'Choose a fixed Stocks CI scenario');
 assert.equal(extra.length, 0);
 assert.ok(destination && isAbsolute(destination), 'An absolute, empty evidence directory is required');
 mkdirSync(destination, { recursive: true });
@@ -102,6 +102,7 @@ try {
     const units = await run('harness-unit', ['--test', '--test-reporter=tap',
       'scripts/stocks-local/browser-server.test.mjs', 'scripts/stocks-local/local-wallet.test.mjs',
       'scripts/stocks-local/short-session.test.mjs', 'scripts/stocks-ci/evidence.test.mjs',
+      'scripts/stocks-ci/operator-control-ui.test.mjs', 'scripts/stocks-ci/runner-control-ui.test.mjs',
       'scripts/stocks-ci/postgres-harness.test.mjs', 'scripts/stocks-ci/lifecycle-wrapper.test.mjs']);
     summary.harnessTests = parseTap(units);
     const frontend = await run('frontend', ['--import', 'tsx', '--test', '--test-reporter=tap', 'src/demo/giwa/**/*.test.tsx']);
@@ -155,9 +156,15 @@ try {
       assert.equal(existsSync(join(stopped.postgresData, 'postmaster.pid')), false);
       assert.equal(existsSync(join(stopped.socket, '.s.PGSQL.5432')), false);
       await Promise.all([ready.apiBase, ready.origin, ready.rpcUrl].map(assertClosed));
+      if (scenario === 'operator-control-ui') assert.equal(existsSync(stopped.temp), false, 'Owned control UI scratch directory remains');
       summary.browser = { version: result.browserVersion, scenarioGroups: result.scenarios.length,
         diagnosticsCases: result.operatorDiagnostics?.cases.length, diagnosticsGroups: result.operatorDiagnostics?.checks.length,
         cleanupVerified: true };
+      if (scenario === 'operator-control-ui') summary.browser.operatorControl = {
+        checkIds: result.operatorControl.checkIds, checks: result.operatorControl.checks.length,
+        walletSends: result.operatorControl.walletSends, investorSends: result.dispatchEvidence.attempts.length,
+        finalVersion: result.operatorControl.finalControl.version, reconciliation: result.final.snapshot.reconciliation.status,
+      };
     }
   }
   assert.ok(!requestedSignal, 'Stocks CI interrupted');

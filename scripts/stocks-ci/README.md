@@ -1,6 +1,6 @@
 # Stocks integration CI
 
-`.github/workflows/stocks-integration.yml` defines five independent jobs on
+`.github/workflows/stocks-integration.yml` defines six independent jobs on
 Ubuntu 24.04 with the latest Node 22 patch and PostgreSQL 16 binaries. It uses
 ordinary `pull_request`, main pushes and manual dispatch, a read-only repository
 token, no repository secrets, no deployment environment and no live RPC.
@@ -10,6 +10,7 @@ The existing general CI job remains in place.
 | --- | --- |
 | `postgres` | Harness boundary/acceptance tests, all frontend tests with jsdom and compiled ABI enabled, nine server PG suites plus the browser-adapter suite, then actual PostgreSQL and Node restart persistence |
 | `operator-control` | Real local HTTP/SIWE, DB and EVM trading; persistent pause/resume, concurrency policy, original signer/receipt recovery, BUY/SELL conservation and owned-service cleanup; no browser required |
+| `operator-control-ui` | Product operator control screen: ten required checks for signed permissions, single submission, lost-response retry, conflicting operators, unresolved results, history paging and deployment isolation, unavailable routes; then the existing nineteen investor browser checks and independent cleanup |
 | `operator-diagnostics` | Ordinary investor Chrome/Chromium trade flow, followed by the 24 operator diagnostic fixtures and read-only assertions |
 | `known-hash-ui` | Product recovery buttons across BUY/SELL and both stages, actual JWT/quote expiration, no wallet resend |
 | `browser-lifecycle` | Ready SIGINT, held-response SIGTERM and intentional failure, with independent process/port shutdown checks |
@@ -43,7 +44,7 @@ STOCKS_PG_BIN=/absolute/postgresql/bin \
 node scripts/stocks-ci/run.mjs operator-diagnostics /tmp/stocks-ci-diagnostics-new
 ```
 
-Replace the scenario with `operator-control`, `known-hash-ui` or `browser-lifecycle`, each with a new
+Replace the scenario with `operator-control`, `operator-control-ui`, `known-hash-ui` or `browser-lifecycle`, each with a new
 empty absolute evidence directory. On Linux install browser system libraries
 using Playwright's `install --with-deps chromium`, as the workflow does. An
 explicit absolute `STOCKS_LOCAL_CHROME` may select an already installed local
@@ -63,8 +64,25 @@ The runner rejects:
 - missing, failed, skipped or TODO TAP tests;
 - a browser PASS report without both matching ordered cleanup records;
 - residual owned PIDs, database socket/PID files or browser/API/RPC ports;
-- missing lifecycle probes or known diagnostic findings;
+- missing lifecycle probes or unresolved operator diagnostic/control findings;
 - interruption, nonzero child exits or a test exceeding its 12-minute budget.
+
+The `operator-control-ui` job requires ten distinct stable check identities from
+the real driver, product routes and StrictMode, no page errors or known findings,
+zero control wallet sends, sign-in-only wallet methods and the ten reviewed POST
+attempts. A plain investor browser report, or `PASS_WITH_KNOWN_P2`, cannot satisfy
+this job. It additionally checks seven distinct claim-before-send proofs against
+the seven durable claims, the original reconciled deployment, resumed control
+and runtime, and final balances (stock1.25, holder test cash1850, vault150, escrow0).
+Its summary includes the check identities, transaction counts and final version.
+Ordered shutdown records are followed by independent PID/group, socket/PID-file,
+API/browser/RPC port and owned scratch-directory absence checks.
+
+The history-isolation case switches between two real PostgreSQL control
+namespaces behind one API URL. The second digest is synthetic; EVM/runtime stays
+on the first deployment and no UI write targets the second namespace. This
+checks read ordering and isolation, not a public rollout or a second contract
+deployment. The separately signed same-operator client models another tab.
 
 The `postgres` job enables DOM and ABI gates before launching the tests. Its
 database tests run sequentially because the preflight suite intentionally changes

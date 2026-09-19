@@ -7,13 +7,14 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { SiweMessage } from 'siwe';
 import { getAddress, stringToHex } from 'viem';
 import { StocksTradingControlService } from '../../server/dist/stocks-trading-control/service.js';
+import { OPERATOR_CONTROL_UI_CHECK_IDS } from './operator-control-ui-checks.mjs';
 
 export async function runOperatorControlUiScenario({ host, stack, wallet, browser, evidence }) {
   assert.equal(stack.operatorControls, true);
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
   const page = await context.newPage(); page.setDefaultTimeout(15000);
   const root = '/api/v1/admin/stocks/trading-control';
-  const report = { checks: [], http: [], pageErrors: [], screenshots: [], knownFindings: [] };
+  const report = { checks: [], checkIds: [], http: [], pageErrors: [], screenshots: [], knownFindings: [] };
   const pending = new Set();
   const instrumentationErrors = [];
   let session, operatorSession;
@@ -51,7 +52,11 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
       assert.ok(performance.now() < deadline, label); await delay(50);
     }
   };
-  const passed = name => { report.checks.push(name); console.log(`STOCKS_LOCAL_CONTROL_UI_STEP ${JSON.stringify({ name })}`); };
+  const passed = (id, name) => {
+    assert.ok(OPERATOR_CONTROL_UI_CHECK_IDS.includes(id) && !report.checkIds.includes(id), 'Unique required control check');
+    report.checkIds.push(id); report.checks.push(name);
+    console.log(`STOCKS_LOCAL_CONTROL_UI_STEP ${JSON.stringify({ id, name })}`);
+  };
   const screenshot = async name => { const path = resolve(evidence, name); await page.screenshot({ path, fullPage: true }); report.screenshots.push(path); };
   const interceptOnce = handle => page.route(`${stack.apiBase}${root}`, async route => {
     try { await handle(route); }
@@ -109,7 +114,7 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     const walletBefore = wallet.sends.length;
     await call('/api/v1/stocks/quotes', { symbol: 'NVDA', quantity: '0.125' }, operatorSession, 503);
     await screenshot('control-initial-paused.png');
-    passed('Real SIWE control operator sees initial paused/version0 and backend denies new quotes');
+    passed('initial-paused', 'Real SIWE control operator sees initial paused/version0 and backend denies new quotes');
 
     stack.controlForHarness.faults.observerUnavailable = true;
     await stack.controlForHarness.runtime.tick();
@@ -121,7 +126,7 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     await screenshot('control-resumed-observer-blocked.png');
     stack.controlForHarness.faults.observerUnavailable = false; await stack.controlForHarness.runtime.tick();
     await refresh();
-    passed('Double confirmation sends once; manual resume cannot override unavailable observation');
+    passed('single-submit-other-gate', 'Double confirmation sends once; manual resume cannot override unavailable observation');
 
     await change(true, 'Browser manual pause');
     await call('/api/v1/stocks/quotes', { symbol: 'NVDA', quantity: '0.125' }, operatorSession, 503);
@@ -139,7 +144,7 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     await outcome().getByRole('button', { name: 'Retry the same command', exact: true }).click();
     await wait(async () => await outcome().getAttribute('data-outcome') === 'replayed', 'Same-key replay');
     assert.deepEqual(posts[posts.length - 1], lost); assert.equal((await current()).state.version, previousVersion + 1);
-    passed('Lost actual commit response remains unknown; same body/key retry returns one event');
+    passed('lost-response-replay', 'Lost actual commit response remains unknown; same body/key retry returns one event');
 
     await outcome().getByRole('button', { name: 'Close', exact: true }).click(); await ready();
     const second = await secondLogin();
@@ -153,7 +158,7 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     await change(true, 'First operator competing pause', 'conflict');
     await ready(); assert.equal(posts.length, beforeConflict + 1);
     assert.equal((await current()).state.reason, 'Competing second signed operator');
-    passed('Second real signed operator wins CAS; product displays conflict and does not automatically resend');
+    passed('operator-cas', 'Second real signed operator wins CAS; product displays conflict and does not automatically resend');
 
     await localAccount('B'); await signIn(); await ready();
     const versionBeforeDenied = (await current()).state.version;
@@ -165,7 +170,7 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     await wait(async () => (await panel().innerText()).includes('403'), 'Unregistered operator forbidden');
     assert.equal(await page.getByTestId('stocks-trading-control-event').count(), 0);
     await screenshot('control-unregistered-forbidden.png');
-    passed('Read-only signed operator POST403 and unregistered wallet GET403 leave DB unchanged and hide prior data');
+    passed('role-denials', 'Read-only signed operator POST403 and unregistered wallet GET403 leave DB unchanged and hide prior data');
 
     await localAccount('operator'); await signIn(); operatorSession = session; await ready();
     // Independent reproduction: the original POST never reaches the API. A
@@ -194,7 +199,7 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     assert.match(await panel().innerText(), /A matching entry does not identify this command/);
     await screenshot('control-conflict-unresolved-note.png');
     await page.getByTestId('stocks-trading-control-command').getByRole('button', { name: 'Close', exact: true }).click();
-    passed('Different signed operator matching event stays unknown; same-key409 and close preserve unresolved note');
+    passed('other-operator-uncertainty', 'Different signed operator matching event stays unknown; same-key409 and close preserve unresolved note');
 
     // A second tab is modelled by a separately signed session for the same wallet, with a different key.
     // Its actual HTTP POST records the event; this page never sent its unknown command to the API.
@@ -217,7 +222,7 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     const afterUnknown = (await current()).state;
     await call(root, { paused: true, expectedVersion: afterUnknown.version, idempotencyKey: randomUUID(), reason: 'Prepare history boundary fixture' }, second);
     await refresh();
-    passed('Same signed operator with another key cannot identify this page command from matching public history');
+    passed('same-operator-other-key', 'Same signed operator with another key cannot identify this page command from matching public history');
     for (let n = 0; n < 22; n++) {
       const state = (await current()).state;
       await call(root, { paused: state.paused, expectedVersion: state.version, idempotencyKey: randomUUID(), reason: `History fixture ${n}` }, second);
@@ -235,7 +240,7 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
       const viewportPath = resolve(evidence, `control-${width}-viewport.png`);
       await page.screenshot({ path: viewportPath, fullPage: false }); report.screenshots.push(viewportPath);
     }
-    passed('Real DB audit pages reach explicit end; latest UI has no overflow at375/768/1440');
+    passed('history-pages-viewports', 'Real DB audit pages reach explicit end; latest UI has no overflow at375/768/1440');
 
     // Same API URL, two real PostgreSQL control namespaces. B is a synthetic digest for read-race testing;
     // the EVM/runtime stays on A. This is not a second contract deployment or a production rollout.
@@ -277,7 +282,7 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     await wait(async () => await history().getAttribute('data-phase') === 'ready' && (await history().innerText()).includes('History fixture'), 'Original A history restored');
     assert.doesNotMatch(await history().innerText(), /B-only namespace audit entry/);
     assert.equal((await current()).state.deploymentDigest, stack.digest);
-    passed('Same API real PG namespaces: history-first A stays hidden; later control B triggers B-only history, then restores A');
+    passed('deployment-history-isolation', 'Same API real PG namespaces: history-first A stays hidden; later control B triggers B-only history, then restores A');
 
     stack.controlForHarness.faults.unavailable = true;
     await panel().getByRole('button', { name: 'Refresh trading control', exact: true }).click();
@@ -289,7 +294,7 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     await wait(async () => (await panel().innerText()).includes('not enabled on this server'), 'Absent route404');
     await screenshot('control-disabled.png');
     stack.controlForHarness.faults.disabled = false; await stack.restartApi(); await refresh();
-    passed('API service-port503 injection and actual unregistered-route404 show unavailable states without fabricating success');
+    passed('unavailable-routes', 'API service-port503 injection and actual unregistered-route404 show unavailable states without fabricating success');
 
     await change(false, 'Resume before investor regression');
     assert.equal((await current()).state.paused, false);
