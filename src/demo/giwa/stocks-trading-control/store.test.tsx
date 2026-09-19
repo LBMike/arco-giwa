@@ -309,9 +309,13 @@ test("history: newest page, then older pages to the end; a failed older page can
   other.transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead(tcState(2, true))))
   other.transport.take("GET", RUNTIME_STATUS_PATH).respond(ok(tcRuntime({ operatorControl: { status: "PAUSED", version: 2 } })))
   await flush()
-  other.transport.take("GET", HISTORY).respond(ok(tcHistory([{ ...tcEvent(2, true), deploymentDigest: "c".repeat(64) }], null)))
-  await flush()
-  assert.deepEqual([other.store.getSnapshot().history.phase, other.store.getSnapshot().history.error?.kind], ["error", "invalid"], "another deployment's history is not shown")
+  // 003F-1: a mismatching first page is read again once for the same control state, then reported.
+  for (let i = 0; i < 2; i++) {
+    other.transport.take("GET", HISTORY).respond(ok(tcHistory([{ ...tcEvent(2, true), deploymentDigest: "c".repeat(64) }], null)))
+    await flush()
+  }
+  assert.deepEqual([other.store.getSnapshot().history.phase, other.store.getSnapshot().history.error?.kind, other.store.getSnapshot().history.items.length], ["error", "invalid", 0], "another deployment's history is not shown")
+  assert.equal(other.transport.pending.length, 0)
 })
 
 test("discard: never while sending; clears a finished or unknown command; a bad key generator sends nothing", async () => {
@@ -579,21 +583,24 @@ test("a read started before the POST answer still wins with a higher version of 
   assert.ok(second.transport.pending.some((request) => request.method === "GET" && request.path === TRADING_CONTROL_PATH), "read again")
 })
 
-test("after a POST answer for another deployment, the history is read only once the control state was read again", async () => {
+test("after a control read of another deployment the history is read for it; a POST answer for the earlier one adds no history read", async () => {
   const { store, transport } = setup()
   await readAll(store, transport)
   store.start({ paused: false, reason: REASON, reviewed: reviewed(store) })
   store.loadControl()
   transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead({ ...tcState(2, false), deploymentDigest: "b".repeat(64) })))
   await flush()
+  // 003F-1: the earlier deployment's (empty) list is cleared and the first page is read for the deployment now shown.
+  assert.deepEqual([store.getSnapshot().history.phase, store.getSnapshot().history.deploymentDigest, transport.pending.filter((request) => request.path === HISTORY).length], ["loading", null, 1])
   transport.take("POST", TRADING_CONTROL_PATH).respond(ok(tcChange(resumedState(), resumeEvent())))
   await flush()
-  assert.equal(transport.pending.some((request) => request.path === HISTORY), false, "no history read against the wrong deployment yet")
+  assert.equal(transport.pending.filter((request) => request.path === HISTORY).length, 1, "no history read for the POST's deployment")
   transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead({ ...tcState(2, false), deploymentDigest: "b".repeat(64) })))
   await flush()
   transport.take("GET", HISTORY).respond(ok(tcHistory([{ ...tcEvent(2, false), deploymentDigest: "b".repeat(64) }, { ...tcEvent(1, true), deploymentDigest: "b".repeat(64) }], null)))
   await flush()
-  assert.deepEqual([store.getSnapshot().history.phase, store.getSnapshot().history.items.length], ["ready", 2])
+  assert.deepEqual([store.getSnapshot().history.phase, store.getSnapshot().history.items.length, store.getSnapshot().history.deploymentDigest], ["ready", 2, "b".repeat(64)])
+  assert.deepEqual(transport.pending.map((request) => request.path), [RUNTIME_STATUS_PATH], "only the POST's runtime read is left")
 })
 
 test("an unresolved note records the deployment its command was reviewed for", async () => {

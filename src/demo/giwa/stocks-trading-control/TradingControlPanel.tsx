@@ -114,7 +114,7 @@ export function TradingControlView(props: TradingControlViewProps) {
           </div>
           {snapshot.control.error?.kind !== "disabled" && (
             <div className="min-w-0 xl:col-span-2">
-              <HistoryCard history={snapshot.history} onLoadOlder={props.onLoadOlder} onRefresh={props.onRefresh} />
+              <HistoryCard history={snapshot.history} shownDigest={snapshot.control.value?.data.deploymentDigest ?? null} onLoadOlder={props.onLoadOlder} onRefresh={props.onRefresh} />
             </div>
           )}
         </div>
@@ -126,8 +126,20 @@ export function TradingControlView(props: TradingControlViewProps) {
 /** What the page can currently read: only the command's own deployment's history can tell whether it was recorded. */
 type HistoryScope = { readonly disabled: boolean; readonly shownDigest: string | null }
 
-/** How to tell from the history whether a command with an unknown result was recorded. */
-function RecordedCheck({ paused, expectedVersion, reason, deploymentDigest, scope }: { paused: boolean; expectedVersion: number; reason: string; deploymentDigest: string; scope: HistoryScope }) {
+/**
+ * What the history can and cannot say about a command with an unknown result. Its entries carry no key: another operator,
+ * another tab or any other command can record the same version, action and reason, so a matching entry never identifies
+ * this command. Only a different entry at its version excludes it; only a verified answer for its key confirms it.
+ */
+function RecordedCheck({ paused, expectedVersion, reason, deploymentDigest, scope, resent }: {
+  paused: boolean
+  expectedVersion: number
+  reason: string
+  deploymentDigest: string
+  scope: HistoryScope
+  /** False for an unresolved note: this page no longer sends that command. */
+  resent: boolean
+}) {
   const version = expectedVersion + 1
   if (scope.disabled) return <>The control routes are not available here, so whether this command was recorded cannot be checked from this page.</>
   if (scope.shownDigest !== null && scope.shownDigest !== deploymentDigest) {
@@ -139,8 +151,10 @@ function RecordedCheck({ paused, expectedVersion, reason, deploymentDigest, scop
   }
   return (
     <>
-      In the change history, a version {version} {actionWord(paused)} with the reason “<span className="break-words">{reason}</span>” means it was recorded; any other change
-      at version {version} means it was not, and it can no longer be recorded.
+      The change history shows no keys, so it cannot confirm this command: another operator, another tab or another command can record the same version {version}{" "}
+      {actionWord(paused)} with the same reason. A matching entry does not identify this command. If the entry at version {version} is a different action or has a
+      different reason than “<span className="break-words">{reason}</span>”, this command was not recorded, and it can no longer be. Only a verified answer for this
+      command's key shows that it was recorded.{!resent && " This page no longer resends it, so that may stay unknown here."}
     </>
   )
 }
@@ -150,7 +164,14 @@ function AbandonedNote({ abandoned, scope }: { abandoned: AbandonedCommand; scop
     <>
       A {actionWord(abandoned.paused)} command sent from this page (key <Mono value={abandoned.idempotencyKey} short />) has no verified result. It may or may not have
       been recorded, and it is not resent.{" "}
-      <RecordedCheck paused={abandoned.paused} expectedVersion={abandoned.expectedVersion} reason={abandoned.reason} deploymentDigest={abandoned.deploymentDigest} scope={scope} />
+      <RecordedCheck
+        paused={abandoned.paused}
+        expectedVersion={abandoned.expectedVersion}
+        reason={abandoned.reason}
+        deploymentDigest={abandoned.deploymentDigest}
+        scope={scope}
+        resent={false}
+      />
     </>
   )
 }
@@ -744,13 +765,19 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
                 reason={command.command.reason}
                 deploymentDigest={command.basis.deploymentDigest}
                 scope={historyScope(snapshot)}
+                resent
               />
               {sameSlot && (
                 <>
                   {" "}
-                  The earlier unresolved command (note above) has the same version, action and reason, so a matching version {command.command.expectedVersion + 1} entry
-                  shows only that one of the two was recorded. A retry of this command settles which: a replay means this command, a version conflict (409) means the
-                  earlier one.
+                  The earlier unresolved command (note above) has the same version, action and reason; the history cannot tell the two apart.
+                  {(readiness === null || readiness === "read_first") && snapshot.control.error?.kind !== "disabled" && (
+                    <>
+                      {" "}
+                      A retry of this command settles only this one: its own event in the answer (accepted or replayed) means this command is recorded; a version
+                      conflict (409) means it was not, and the entry at version {command.command.expectedVersion + 1} may then be the earlier command's or anyone else's.
+                    </>
+                  )}
                 </>
               )}
             </span>
@@ -790,8 +817,11 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
   )
 }
 
-function HistoryCard({ history, onLoadOlder, onRefresh }: { history: HistoryState; onLoadOlder: (beforeVersion: number) => void; onRefresh: () => void }) {
-  const { items } = history
+function HistoryCard({ history, shownDigest, onLoadOlder, onRefresh }: { history: HistoryState; shownDigest: string | null; onLoadOlder: (beforeVersion: number) => void; onRefresh: () => void }) {
+  // Only entries confirmed for the deployment of the state shown above are shown as this deployment's.
+  const confirmed = history.deploymentDigest !== null && history.deploymentDigest === shownDigest
+  const items = confirmed ? history.items : []
+  const unconfirmed = !confirmed && (history.items.length > 0 || history.complete)
   return (
     <Card
       title="Change history"
@@ -808,7 +838,7 @@ function HistoryCard({ history, onLoadOlder, onRefresh }: { history: HistoryStat
                 : ` The entries below are from an earlier read${history.observedAt ? ` at ${history.observedAt}` : ""}; they may not include later changes.`)}
           </Notice>
         )}
-        {history.observedAt && (
+        {confirmed && history.observedAt && (
           <p className="text-[11px] text-[var(--color-arco-text-soft)]">
             Newest page read at <span className="font-mono">{history.observedAt}</span>
           </p>
@@ -816,6 +846,8 @@ function HistoryCard({ history, onLoadOlder, onRefresh }: { history: HistoryStat
         {items.length === 0 ? (
           history.phase === "loading" ? (
             <EmptyRow>Reading the change history…</EmptyRow>
+          ) : unconfirmed ? (
+            <EmptyRow>The history is shown once the current state confirms which deployment it belongs to.</EmptyRow>
           ) : history.complete ? (
             <EmptyRow>
               {history.phase === "error" ? `No changes were recorded as of the earlier read${history.observedAt ? ` at ${history.observedAt}` : ""}.` : "No changes recorded for this deployment."}

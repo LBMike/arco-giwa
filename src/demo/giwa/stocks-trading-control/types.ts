@@ -86,6 +86,11 @@ export type HistoryState = {
   readonly error: StocksAdminError | null
   /** Which request failed: the first page or a "load older" page. */
   readonly failedPage: "first" | "older" | null
+  /**
+   * The deployment these entries are confirmed for: they matched the shown control state (same digest, and at least as
+   * new). Null until then; the view shows entries only for the deployment of the shown control state.
+   */
+  readonly deploymentDigest: string | null
 }
 
 /**

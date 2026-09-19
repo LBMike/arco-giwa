@@ -153,6 +153,8 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
   const log: Logged[] = []
   const holds: Hold[] = []
   let loseNextPostResponse = false
+  // The connection fails before the request reaches the server: nothing is recorded, yet the page cannot know that.
+  let failNextPostBeforeServer = false
   function hold(match: Hold["match"]): Hold {
     let release = () => {}
     const waiting = new Promise<void>((resolve) => { release = resolve })
@@ -168,6 +170,10 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     const body = typeof init.body === "string" ? init.body : undefined
     const entry: Logged = { method, path, body, bearer: headers.authorization ? fingerprint(headers.authorization.slice(7)) : null, status: null }
     log.push(entry)
+    if (method === "POST" && failNextPostBeforeServer) {
+      failNextPostBeforeServer = false
+      throw new TypeError("connection failed before the request reached the server")
+    }
     const target_ = server
     const deliver = () => target_.inject({ method, url: path, headers, ...(body === undefined ? {} : { payload: body }) })
     const held = holds.find((item) => !item.seen && item.match(method, path))
@@ -258,6 +264,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     log.length = 0
     holds.length = 0
     loseNextPostResponse = false
+    failNextPostBeforeServer = false
     denyNextPost = false
     memory.reset()
     gates.configuredPause = false
@@ -457,7 +464,9 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       await until(() => /Manual gate: Resumed/.test(q("stocks-trading-control-gate")?.textContent ?? ""), "read again after the discard")
       const card = q("stocks-trading-control-command")!.textContent!
       assert.match(card, /An earlier command has no verified result/)
-      assert.match(card, /a version 1 resume with the reason “Resume that is then discarded” means it was recorded; any other change at version 1 means it was not/)
+      // 003F-1 P2-01: a matching entry never identifies this command (the history has no keys).
+      assert.match(card, /A matching entry does not identify this command\. If the entry at version 1 is a different action or has a different reason than “ ?Resume that is then discarded ?”, this command was not recorded, and it can no longer be\./)
+      assert.doesNotMatch(card, /means it was recorded/)
       assert.doesNotMatch(q("stocks-trading-control-gate")!.textContent!, /Read before a command whose result is unknown/, "the fresh read is not flagged")
       await until(() => /Version 1 · was paused/.test(q("stocks-trading-control-history")?.textContent ?? ""), "history shows it")
       assert.equal(outcome(), null)
@@ -584,6 +593,72 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       assert.equal(button("Review resume"), null)
       assert.doesNotMatch(text(), /db\.internal|pg:/)
       assertTraffic("errors")
+    })
+
+    // ---------------------------------------------------------------- 003F-1 (Codex review of 070399c)
+    // CONTROL-UI-003F-P2-01: the public history has no key; the same version, action and reason recorded by someone else
+    // must never read as this page's command.
+    const FALSE_CERTAINTY = /means it was recorded|shows only that one of the two was recorded|means the earlier one|a matching[^.]*(means|shows) (this|it|the earlier)/i
+    for (const [label, wallet, key] of [
+      ["another operator", WALLET.controlB, "operator-b-own-key"],
+      ["the same operator in another tab (another key)", WALLET.controlA, "other-tab-key"],
+    ] as const) {
+      await t.test(`003F-1 P2-01: ${label} records the same version, action and reason after this page's request never reached the server`, async () => {
+        await reset()
+        await open(mint(WALLET.controlA))
+        await command("Review resume", "Shared resume reason")
+        failNextPostBeforeServer = true
+        await click("Confirm resume")
+        await until(() => outcome() === "unknown", "unknown")
+        assert.equal(memory.events.length, 0, "this page's command was never recorded")
+        assert.equal((await directChange(wallet, { paused: false, expectedVersion: 0, idempotencyKey: key, reason: "Shared resume reason" })).statusCode, 200)
+        await click("Read state and history")
+        await until(() => /Version 1 · was paused/.test(q("stocks-trading-control-history")?.textContent ?? "") && button("Retry the same command") !== null, "someone else's entry is shown")
+        const unknown = q("stocks-trading-control-outcome")!.textContent!
+        assert.doesNotMatch(unknown, FALSE_CERTAINTY)
+        assert.match(unknown, /A matching entry does not identify this command\./)
+        assert.match(unknown, /Only a verified answer for this command's key shows that it was recorded\./)
+        if (wallet === WALLET.controlB) {
+          // A same-key retry is the positive evidence the page can get: here a version conflict proves the key was never recorded.
+          await click("Retry the same command")
+          await until(() => outcome() === "conflict", "retry settles it")
+          assert.match(q("stocks-trading-control-outcome")!.textContent!, /this also shows that the earlier attempt with this key was not recorded\./)
+          assert.deepEqual([postsLogged().map((entry) => entry.status), memory.events.map((event) => event.idempotencyKey)], [[null, 409], [key]])
+        } else {
+          await click("Discard this command")
+          await until(() => /An earlier command has no verified result/.test(q("stocks-trading-control-command")?.textContent ?? ""), "unresolved note")
+          const note = q("stocks-trading-control-command")!.textContent!
+          assert.doesNotMatch(note, FALSE_CERTAINTY)
+          assert.match(note, /A matching entry does not identify this command\./)
+          assert.match(note, /This page no longer resends it, so that may stay unknown here\./)
+          assert.deepEqual([postsLogged().length, memory.events.map((event) => event.operatorId)], [1, ["ops-control-a"]], "one event, from the other tab")
+        }
+        assertTraffic(`other writer: ${label}`)
+      })
+    }
+
+    // CONTROL-UI-003F-P3-01: a fresh change is compared with the clock at the time it is shown, not at the last tick.
+    await t.test("003F-1 P3-01: a fresh change reads as just now on a fixed clock; a real future timestamp still warns", async () => {
+      await reset()
+      const mountedAt = Date.parse("2026-09-19T08:00:00.000Z")
+      let clientNow = mountedAt
+      await open(mint(WALLET.controlA), { now: () => clientNow })
+      memory.clock = mountedAt + 500 // apply() adds 1000 ms: the event is recorded at T+1500
+      clientNow = mountedAt + 1_600
+      await command("Review resume", "Fresh change on a fixed clock")
+      await click("Confirm resume")
+      await until(() => outcome() === "accepted", "accepted")
+      assert.equal(Date.parse(memory.state().updatedAt!), mountedAt + 1_500)
+      const gate = q("stocks-trading-control-gate")!.textContent!
+      assert.doesNotMatch(gate, /in the future \(clock skew\)/)
+      assert.match(gate, /0s ago/)
+      // An event genuinely ahead of the client clock keeps the warning.
+      memory.clock = clientNow + 60_000
+      assert.equal((await directChange(WALLET.controlB, { paused: true, expectedVersion: 1, idempotencyKey: "future-clock-key", reason: "Recorded ahead of this client" })).statusCode, 200)
+      await click("Refresh")
+      await until(() => /Recorded ahead of this client/.test(q("stocks-trading-control-gate")?.textContent ?? ""), "future change read")
+      assert.match(q("stocks-trading-control-gate")!.textContent!, /in the future \(clock skew\)/)
+      assert.equal(memory.state().updatedAt, new Date(clientNow + 61_000).toISOString(), "the timestamps themselves are unchanged")
     })
   } finally {
     await reset()

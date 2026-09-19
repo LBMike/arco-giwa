@@ -18,6 +18,10 @@
 //   another deployment (that one is read again instead).
 // - After an unknown outcome a retry needs a successful control read started after it, of the same deployment (keys are
 //   deployment-scoped). Discarding an unknown command keeps it as an unresolved note; so does an access denial.
+// - History is confirmed against the shown control state whenever either one arrives: every entry is that deployment's
+//   and the list is at least as new as its version. A history of another deployment is cleared (entries, pages, cursor)
+//   and its first page read again, once per control state; an older list is read again. Unconfirmed entries are not
+//   shown as this deployment's.
 import { scopeKeyOf } from "../stocks-admin/store"
 import type { StocksAdminError } from "../stocks-admin/types"
 import { newIdempotencyKey, readRuntimeStatus, readTradingControl, readTradingControlHistory, sendTradingControlCommand } from "./client"
@@ -49,13 +53,25 @@ export { scopeKeyOf }
 export const DEFAULT_COMMAND_TIMEOUT_MS = 20_000
 
 const IDLE = Object.freeze({ phase: "idle", value: null, error: null }) as ResourceState<never>
-const EMPTY_HISTORY: HistoryState = Object.freeze({ phase: "idle", items: [], nextBeforeVersion: null, complete: false, observedAt: null, error: null, failedPage: null })
+const EMPTY_HISTORY: HistoryState = Object.freeze({ phase: "idle", items: [], nextBeforeVersion: null, complete: false, observedAt: null, error: null, failedPage: null, deploymentDigest: null })
 
 function emptySnapshot(scopeKey: string, access: TradingControlAccess, abandoned: AbandonedCommand | null = null): TradingControlSnapshot {
   return { scopeKey, access, control: IDLE, runtime: IDLE, history: EMPTY_HISTORY, command: null, abandoned, controlReadSeq: null }
 }
 
 type ReadKey = "control" | "runtime" | "history"
+
+/**
+ * How a history list relates to a control state: all entries of that deployment and at least as new as its version
+ * ("current"), of that deployment but older ("stale"), not of that deployment ("other"), or nothing read yet ("none").
+ * Entries carry no key, so a list says nothing about who recorded them. An empty, complete list fits only version 0.
+ */
+export function historyFit(history: Pick<HistoryState, "items" | "complete">, control: { readonly deploymentDigest: string; readonly version: number }): "current" | "stale" | "other" | "none" {
+  const newest = history.items[0]
+  if (newest === undefined) return !history.complete ? "none" : control.version === 0 ? "current" : "stale"
+  if (history.items.some((item) => item.deploymentDigest !== control.deploymentDigest)) return "other"
+  return newest.version >= control.version ? "current" : "stale"
+}
 
 /** "Load older" continues a list that was read successfully, or retries an older page that failed. */
 export function canLoadOlder(history: HistoryState): boolean {
@@ -106,7 +122,10 @@ export class TradingControlStore {
   private commandController: AbortController | null = null
   private commandTimer: ReturnType<typeof setTimeout> | null = null
   private commandSequence = 0
-  private historyAfterControl = false
+  /** Which history page the latest history read asks for. */
+  private historyPage: "first" | "older" | null = null
+  /** The control mark for which the first history page was already read again after a mismatch (at most once each). */
+  private historyRecheckMark: number | null = null
 
   constructor(config: TradingControlStoreConfig) {
     this.config = config
@@ -169,14 +188,10 @@ export class TradingControlStore {
           mark = ++this.sequence
         }
         this.write({ control: { phase: "ready", value: { data: result.data, meta: result.meta, loadedAt: this.now() }, error: null }, controlReadSeq: mark })
-        if (this.historyAfterControl) {
-          this.historyAfterControl = false
-          this.loadHistory(null)
-        }
+        this.revalidateHistory()
       } else if (!this.denyOnAccessError(result.error)) {
         const shown = this.snapshot.controlReadSeq
         if (shown !== null && sequence < shown) return
-        this.historyAfterControl = false
         this.write({ control: { phase: "error", value: this.snapshot.control.value, error: result.error } })
       }
     })
@@ -202,6 +217,7 @@ export class TradingControlStore {
     if (beforeVersion !== null && (!canLoadOlder(history) || history.nextBeforeVersion !== beforeVersion)) return
     const generation = this.generation
     const { sequence, signal } = this.begin("history")
+    this.historyPage = beforeVersion === null ? "first" : "older"
     this.write({ history: { ...history, phase: "loading", error: null, failedPage: null } })
     void readTradingControlHistory({ ...this.request(signal), beforeVersion }).then((result) => {
       if (!this.isLatest("history", generation, sequence)) return
@@ -209,16 +225,27 @@ export class TradingControlStore {
       const current = this.snapshot.history
       if (result.ok) {
         const page = result.data
-        const digest = this.snapshot.control.value?.data.deploymentDigest
         const older = beforeVersion !== null
+        const invalid = () => this.write({ history: { ...current, phase: "error", error: { kind: "invalid", status: 200, code: null }, failedPage: older ? "older" : "first" } })
+        const first = page.items[0]
+        // One page is one deployment's; an older page continues the list (and so its deployment).
         const last = current.items[current.items.length - 1]
-        // Every page belongs to the deployment whose state is shown, and older pages continue the list.
-        const consistent =
-          page.items.every((item) => digest === undefined || item.deploymentDigest === digest) &&
-          (!older || (last !== undefined && page.items.every((item) => item.version < last.version && item.deploymentDigest === last.deploymentDigest)))
-        if (!consistent) {
-          this.write({ history: { ...current, phase: "error", error: { kind: "invalid", status: 200, code: null }, failedPage: older ? "older" : "first" } })
-          return
+        if (!page.items.every((item) => item.deploymentDigest === first.deploymentDigest)) return invalid()
+        if (older && (last === undefined || !page.items.every((item) => item.version < last.version && item.deploymentDigest === last.deploymentDigest))) return invalid()
+        const control = this.snapshot.control.value?.data
+        let confirmed = current.deploymentDigest
+        if (!older) {
+          confirmed = null
+          if (control) {
+            // A first page must be the shown deployment's and at least as new as its state. If not, it is never shown:
+            // read again once for this control state (the answer may predate a change), then report it.
+            if (historyFit({ items: page.items, complete: page.nextBeforeVersion === null }, control) !== "current") {
+              if (this.historyRecheckMark === this.snapshot.controlReadSeq) return invalid()
+              this.write({ history: { ...(current.deploymentDigest === control.deploymentDigest ? current : EMPTY_HISTORY), phase: "loading", error: null, failedPage: null } })
+              return this.recheckHistory()
+            }
+            confirmed = control.deploymentDigest
+          }
         }
         this.write({
           history: {
@@ -230,6 +257,7 @@ export class TradingControlStore {
             observedAt: older ? current.observedAt : result.meta.observedAt,
             error: null,
             failedPage: null,
+            deploymentDigest: confirmed,
           },
         })
       } else if (!this.denyOnAccessError(result.error)) {
@@ -350,11 +378,10 @@ export class TradingControlStore {
           command: { ...command, phase: result.data.replayed ? "replayed" : "accepted", result: { change: result.data, meta: result.meta }, error: null, timedOut: false, retryRefused: false, unknownSeq: null },
           ...(keep ? {} : { control: { phase: "ready" as const, value: { data: state, meta: result.meta, loadedAt: this.now() }, error: null }, controlReadSeq: ++this.sequence }),
         })
-        if (otherDeployment) {
-          // The history is checked against the shown deployment: read it once the control state has been read again.
-          this.historyAfterControl = true
-          this.loadControl()
-        } else this.loadHistory(null)
+        // A new control state revalidates the history (the change makes it older, so it is read again). A state of another
+        // deployment is read again first; the history follows that state.
+        if (!keep) this.revalidateHistory()
+        if (otherDeployment) this.loadControl()
         this.loadRuntime()
         return
       }
@@ -364,6 +391,34 @@ export class TradingControlStore {
       this.write({ command: { ...command, phase, result: null, error: result.error, timedOut: false, retryRefused, unknownSeq: phase === "unknown" ? ++this.sequence : null } })
       if (phase === "conflict" || retryRefused || (phase === "rejected" && result.error.code === "CONTROL_IDEMPOTENCY_CONFLICT")) this.refresh()
     })
+  }
+
+  /**
+   * After the shown control state is established or changes. Entries of another deployment are cleared with their pages
+   * and cursor, and the first page is read again (a late answer of the superseded read never lands); an older list of the
+   * same deployment is read again; a list that fits is confirmed. A first-page read already in flight is checked when it
+   * arrives instead.
+   */
+  private revalidateHistory(): void {
+    const control = this.snapshot.control.value?.data
+    const history = this.snapshot.history
+    if (!control || history.phase === "idle") return
+    const firstInFlight = history.phase === "loading" && this.historyPage === "first"
+    const fit = historyFit(history, control)
+    if (fit === "other" || (history.deploymentDigest !== null && history.deploymentDigest !== control.deploymentDigest)) {
+      this.write({ history: { ...EMPTY_HISTORY, phase: firstInFlight ? "loading" : history.phase, error: firstInFlight ? null : history.error, failedPage: firstInFlight ? null : history.failedPage } })
+      if (!firstInFlight) this.recheckHistory()
+    } else if (fit === "stale") {
+      if (!firstInFlight) this.recheckHistory()
+    } else if (fit === "current" && history.deploymentDigest !== control.deploymentDigest) {
+      this.write({ history: { ...history, deploymentDigest: control.deploymentDigest } })
+    }
+  }
+
+  /** Reads the first history page again for the shown control state. */
+  private recheckHistory(): void {
+    this.historyRecheckMark = this.snapshot.controlReadSeq
+    this.loadHistory(null)
   }
 
   private clearCommandTransport(): void {
@@ -411,7 +466,8 @@ export class TradingControlStore {
 
   private reset(scopeKey: string, access: TradingControlAccess, abandoned: AbandonedCommand | null = null): void {
     this.generation += 1
-    this.historyAfterControl = false
+    this.historyPage = null
+    this.historyRecheckMark = null
     this.abortAll()
     this.snapshot = emptySnapshot(scopeKey, access, abandoned)
     this.emit()

@@ -5,7 +5,7 @@ import test from "node:test"
 import { fileURLToPath } from "node:url"
 import { renderToStaticMarkup } from "react-dom/server"
 import { parseEnvelope } from "../stocks-admin/parse"
-import { TC_NOW, TC_OBSERVED_AT, tcEnvelope, tcEvent, tcRuntime, tcState } from "./fixtures"
+import { TC_DIGEST, TC_NOW, TC_OBSERVED_AT, tcEnvelope, tcEvent, tcRuntime, tcState } from "./fixtures"
 import { parseControlEvent, parseControlStateValue, parseRuntimeStatus } from "./parse"
 import { TradingControlView, type TradingControlViewProps } from "./TradingControlPanel"
 import type { CommandState, HistoryState, ResourceState, RuntimeStatus, StocksAdminError, TradingControlSnapshot, TradingControlState } from "./types"
@@ -16,7 +16,8 @@ const loaded = <T,>(data: T): ResourceState<T> => ({ phase: "ready", value: { da
 const failed = (kind: StocksAdminError["kind"], status: number | null = null, code: string | null = null) => ({ kind, status, code })
 const state = (version: number, paused: boolean, options?: Parameters<typeof tcState>[2]): TradingControlState => parseControlStateValue(tcState(version, paused, options))
 const runtime = (input: Parameters<typeof tcRuntime>[0] = {}): RuntimeStatus => parseRuntimeStatus(tcRuntime(input), TC_OBSERVED_AT)
-const EMPTY_HISTORY: HistoryState = { phase: "ready", items: [], nextBeforeVersion: null, complete: true, observedAt: TC_OBSERVED_AT, error: null, failedPage: null }
+// Confirmed for the shown deployment (the store confirms a list against the control state; see store.test / review-003f1).
+const EMPTY_HISTORY: HistoryState = { phase: "ready", items: [], nextBeforeVersion: null, complete: true, observedAt: TC_OBSERVED_AT, error: null, failedPage: null, deploymentDigest: TC_DIGEST }
 
 function snapshot(patch: Partial<TradingControlSnapshot> = {}): TradingControlSnapshot {
   return { scopeKey: "scope", access: "ok", control: loaded(state(0, true)), runtime: loaded(runtime()), history: EMPTY_HISTORY, command: null, abandoned: null, controlReadSeq: 1, ...patch }
@@ -191,7 +192,9 @@ test("outcomes: sending, accepted, replayed (old event, later state), conflict, 
     assert.match(t, why)
     // The short key is followed by its full value for screen readers.
     assert.match(t, /Do not assume that the resume failed or succeeded\. Attempt 2, key tc-tes…0001 tc-test-key-0001 ?\./)
-    assert.match(t, /In the change history, a version 1 resume with the reason “ ?Verified local reconciliation ?” means it was recorded; any other change at version 1 means it was not, and it can no longer be recorded\./)
+    // 003F-1 P2-01: entries carry no key, so a matching one never identifies this command; a different one excludes it.
+    assert.match(t, /The change history shows no keys, so it cannot confirm this command: another operator, another tab or another command can record the same version 1 resume with the same reason\. A matching entry does not identify this command\. If the entry at version 1 is a different action or has a different reason than “ ?Verified local reconciliation ?”, this command was not recorded, and it can no longer be\. Only a verified answer for this command's key shows that it was recorded\./)
+    assert.doesNotMatch(t, /means it was recorded|This page no longer resends it/)
     assert.match(t, /Retry the same command Read state and history Discard this command/)
     assert.doesNotMatch(t, /Review resume|Review pause/, "no new command while the result is unknown")
     assert.match(html, /data-outcome="unknown"/)
@@ -313,7 +316,7 @@ test("a refused retry, a changed deployment and an abandoned command stay unknow
   assert.match(text(moved), /The server now serves a different deployment than the one this command was reviewed for\. It cannot be retried here.*Discard this command, then review the current state/)
   assert.doesNotMatch(moved, />Retry the same command</)
   const abandoned = { paused: false, expectedVersion: 0, idempotencyKey: "tc-test-key-0001", reason: "Verified local reconciliation", sinceSeq: 2, deploymentDigest: state(0, true).deploymentDigest }
-  assert.match(text(render(snapshot({ access: "forbidden", abandoned }))), /No access to trading control \(403\).*A resume command sent from this page \(key tc-tes…0001 tc-test-key-0001 ?\) has no verified result\. It may or may not have been recorded, and it is not resent\. +In the change history, a version 1 resume with the reason “ ?Verified local reconciliation ?” means it was recorded; any other change at version 1 means it was not, and it can no longer be recorded\./)
+  assert.match(text(render(snapshot({ access: "forbidden", abandoned }))), /No access to trading control \(403\).*A resume command sent from this page \(key tc-tes…0001 tc-test-key-0001 ?\) has no verified result\. It may or may not have been recorded, and it is not resent\. +The change history shows no keys, so it cannot confirm this command: .*A matching entry does not identify this command\. If the entry at version 1 is a different action or has a different reason than “ ?Verified local reconciliation ?”, this command was not recorded, and it can no longer be\. Only a verified answer for this command's key shows that it was recorded\. This page no longer resends it, so that may stay unknown here\./)
   assert.match(text(render(snapshot({ abandoned, controlReadSeq: 3 }))), /An earlier command has no verified result A resume command sent from this page/)
   // A retry that met a version conflict proves the earlier attempt was not recorded.
   assert.match(text(render(snapshot({ command: command("conflict", { attempts: 2, error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) }))), /this also shows that the earlier attempt with this key was not recorded\./)
@@ -386,5 +389,7 @@ test("a disabled feature says a retry and the history check are impossible; a sh
   assert.match(t, /The state below is from an earlier read at 2026-09-19T09:00:00\.000Z, before the routes became unavailable\./)
   const note = { paused: false, expectedVersion: 0, idempotencyKey: "tc-test-key-0000", reason: "Verified local reconciliation", sinceSeq: 1, deploymentDigest: state(0, true).deploymentDigest }
   const shared = text(render(snapshot({ controlReadSeq: 3, abandoned: note, command: command("unknown", { unknownSeq: 2, error: failed("network") }) })))
-  assert.match(shared, /The earlier unresolved command \(note above\) has the same version, action and reason, so a matching version 1 entry shows only that one of the two was recorded\. A retry of this command settles which: a replay means this command, a version conflict \(409\) means the earlier one\./)
+  // 003F-1 P2-01: neither command is identified by the history; a retry settles only the current one.
+  assert.match(shared, /The earlier unresolved command \(note above\) has the same version, action and reason; the history cannot tell the two apart\. A retry of this command settles only this one: its own event in the answer \(accepted or replayed\) means this command is recorded; a version conflict \(409\) means it was not, and the entry at version 1 may then be the earlier command's or anyone else's\./)
+  assert.doesNotMatch(shared, /shows only that one of the two was recorded|means the earlier one|means it was recorded/)
 })
