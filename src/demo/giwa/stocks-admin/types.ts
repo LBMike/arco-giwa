@@ -241,6 +241,56 @@ export type ResourceState<T> = {
 
 export type DetailState = ResourceState<OrderDetail> & { readonly orderId: string | null }
 
+/** Wallet submission journal status of one stage (server `stocks-submission-diagnostics`). Historical, never permission. */
+export type SubmissionStatus = "REQUEST_MAY_START" | "UNKNOWN" | "SUBMITTED" | "CONFIRMED" | "REVERTED"
+
+/** The server's trusted receipt check of the recorded hash. Not mint, burn or payout completion. */
+export type SubmissionReceipt = {
+  readonly status: "CONFIRMED" | "REVERTED"
+  readonly blockNumber: string
+  readonly blockHash: string
+  /** When the server recorded the verified receipt. */
+  readonly verifiedAt: string
+}
+
+export type SubmissionStage = {
+  readonly claimId: string
+  readonly stage: "APPROVAL" | "TRANSFER"
+  readonly transactionDigest: string
+  readonly status: SubmissionStatus
+  /** Only the hash the server recorded; null when none was recorded. Never entered, guessed or searched here. */
+  readonly txHash: string | null
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly receipt: SubmissionReceipt | null
+}
+
+/** Read-only diagnostic of one order's wallet submissions at one server snapshot. */
+export type SubmissionDiagnostics = {
+  readonly deploymentId: string
+  readonly deploymentDigest: string
+  readonly order: {
+    readonly id: string
+    readonly side: OrderSide
+    readonly state: string
+    readonly wallet: string
+    readonly version: number
+    readonly quoteExpiresAt: string
+    /** As of the server snapshot (observedAt), not the browser clock. */
+    readonly quoteExpired: boolean
+  }
+  readonly enrollment: "ENROLLED" | "NOT_ENROLLED"
+  readonly intentKey: string
+  readonly approval: SubmissionStage | null
+  readonly transfer: SubmissionStage | null
+  readonly readOnly: true
+  readonly executionAuthorization: false
+  readonly resubmissionAllowed: false
+}
+
+/** Diagnostics of the selected order; `side` is the server-verified side of that order's loaded detail. */
+export type DiagnosticsState = ResourceState<SubmissionDiagnostics> & { readonly orderId: string | null; readonly side: OrderSide | null }
+
 export type AccessState = "signed_out" | "ok" | "unauthorized" | "forbidden" | "disabled"
 
 export type StocksAdminSnapshot = {
@@ -251,6 +301,7 @@ export type StocksAdminSnapshot = {
   readonly reconciliation: ResourceState<Reconciliation>
   readonly audit: ResourceState<readonly AuditRow[]>
   readonly detail: DetailState
+  readonly diagnostics: DiagnosticsState
 }
 
 export type ListResourceKey = "overview" | "orders" | "reconciliation" | "audit"

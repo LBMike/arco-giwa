@@ -3,7 +3,7 @@ import { ORDER_LIST_LIMIT } from "./client"
 import { CASH_SCALE, CASH_UNIT, QUANTITY_SCALE, formatCount } from "./format"
 import { OrderDetailView } from "./OrderDetail"
 import { CATEGORY_LABEL, isInProgress, stateInfo, type StateCategory } from "./states"
-import type { DetailState, OrderRow, ResourceState } from "./types"
+import type { DetailState, DiagnosticsState, OrderRow, ResourceState } from "./types"
 import { Amount, DataList, EmptyRow, FOCUS_RING, Mono, Notice, Pill, ResourceMeta, Time, toneOf } from "./ui"
 
 export type OrderFilters = {
@@ -32,15 +32,17 @@ export function filterOrders(rows: readonly OrderRow[], filters: OrderFilters): 
 type Props = {
   orders: ResourceState<readonly OrderRow[]>
   detail: DetailState
+  diagnostics: DiagnosticsState
   now: number
   onRefresh: () => void
   onSelect: (orderId: string) => void
   onRefreshDetail: () => void
+  onRefreshDiagnostics: () => void
 }
 
 const INPUT = `h-9 w-full min-w-0 rounded-[var(--radius-control)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-2 text-xs text-[var(--color-arco-ink)] ${FOCUS_RING}`
 
-export function OrdersPanel({ orders, detail, now, onRefresh, onSelect, onRefreshDetail }: Props) {
+export function OrdersPanel({ orders, detail, diagnostics, now, onRefresh, onSelect, onRefreshDetail, onRefreshDiagnostics }: Props) {
   const [filters, setFilters] = useState<OrderFilters>(DEFAULT_FILTERS)
   const ids = useId()
   const rows = orders.value?.data ?? null
@@ -160,7 +162,7 @@ export function OrdersPanel({ orders, detail, now, onRefresh, onSelect, onRefres
         )}
         {!rows && orders.phase !== "error" && <EmptyRow>Loading orders…</EmptyRow>}
       </section>
-      <OrderDetailView detail={detail} now={now} onRefresh={onRefreshDetail} />
+      <OrderDetailView detail={detail} diagnostics={diagnostics} now={now} onRefresh={onRefreshDetail} onRefreshDiagnostics={onRefreshDiagnostics} />
     </div>
   )
 }

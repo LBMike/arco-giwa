@@ -21,6 +21,9 @@ import type {
   ReconciliationSnapshot,
   ReconciliationStatus,
   StocksEnvelopeMeta,
+  SubmissionDiagnostics,
+  SubmissionStage,
+  SubmissionStatus,
 } from "./types"
 
 export class StocksContractError extends Error {
@@ -346,4 +349,127 @@ export function parseReconciliation(data: unknown): Reconciliation {
     sellReserved: signed(l.sellReserved, "data.currentLiabilities.sellReserved"),
   }
   return { status, reason, cutoff, snapshot, differences, pending, currentLiabilities }
+}
+
+// ---------------------------------------------------------------- wallet submission diagnostics (read only)
+// Mirrors server/src/stocks-submission-diagnostics/public.ts. Every object has an exact key set, so a field the reviewed
+// contract does not have (raw proof JSON, calldata, internal errors) makes the whole response invalid instead of shown.
+
+const DIAGNOSTIC_STATES: Record<"BUY" | "SELL", readonly string[]> = {
+  BUY: ["AWAITING_FUNDING", "FUNDED_QUOTE_EXPIRED", "FUNDING_REVIEW_REQUIRED", "BROKER_PENDING", "BROKER_UNKNOWN", "MINT_QUEUED", "MINT_SUBMITTED", "MINT_FINALITY_PENDING", "MINT_UNKNOWN", "COMPLETED", "REFUNDED", "REVIEW_REQUIRED"],
+  SELL: ["AWAITING_ESCROW", "EXPIRED", "ESCROW_HELD", "ESCROW_REVIEW_REQUIRED", "LIQUIDITY_PENDING", "SELL_BROKER_PENDING", "SELL_BROKER_UNKNOWN", "SELL_PARTIAL_HELD", "REDEEM_QUEUED", "RETURN_QUEUED", "SETTLEMENT_PENDING", "SETTLEMENT_UNKNOWN", "COMPLETED", "RETURNED", "REVIEW_REQUIRED"],
+}
+const SUBMISSION_STATUSES: readonly SubmissionStatus[] = ["REQUEST_MAY_START", "UNKNOWN", "SUBMITTED", "CONFIRMED", "REVERTED"]
+const DIAG_LABEL = /^[a-zA-Z0-9:_-]{1,128}$/
+const DIAG_DIGEST = /^[0-9a-f]{64}$/
+const DIAG_HASH = /^0x[0-9a-f]{64}$/
+const DIAG_ADDRESS = /^0x[0-9a-f]{40}$/
+const DIAG_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+
+function exactKeys(row: Json, keys: readonly string[], path: string) {
+  const present = Object.keys(row)
+  if (present.length !== keys.length || !keys.every((key) => Object.prototype.hasOwnProperty.call(row, key))) fail(`${path}{keys}`)
+}
+function matching(value: unknown, pattern: RegExp, path: string): string {
+  return typeof value === "string" && pattern.test(value) ? value : fail(path)
+}
+function isoTime(value: unknown, path: string): string {
+  const iso = matching(value, DIAG_ISO, path)
+  return new Date(iso).toISOString() === iso ? iso : fail(path)
+}
+function nonZero(value: string, path: string): string {
+  return /^0x0+$/.test(value) ? fail(path) : value
+}
+
+function submissionStage(value: unknown, stage: "APPROVAL" | "TRANSFER", intentKey: string, path: string): SubmissionStage | null {
+  if (value === null) return null
+  const row = record(value, path)
+  exactKeys(row, ["claimId", "intentKey", "stage", "transactionDigest", "status", "txHash", "createdAt", "updatedAt", "receipt"], path)
+  if (row.stage !== stage) fail(`${path}.stage`)
+  if (row.intentKey !== intentKey) fail(`${path}.intentKey`)
+  const status = SUBMISSION_STATUSES.includes(row.status as SubmissionStatus) ? (row.status as SubmissionStatus) : fail(`${path}.status`)
+  const createdAt = isoTime(row.createdAt, `${path}.createdAt`)
+  const updatedAt = isoTime(row.updatedAt, `${path}.updatedAt`)
+  if (Date.parse(createdAt) > Date.parse(updatedAt)) fail(`${path}.updatedAt`)
+  const txHash = row.txHash === null ? null : nonZero(matching(row.txHash, DIAG_HASH, `${path}.txHash`), `${path}.txHash`)
+  // A reserved claim has no hash; a submitted or verified one always has the recorded hash.
+  if (status === "REQUEST_MAY_START" && txHash !== null) fail(`${path}.txHash`)
+  if ((status === "SUBMITTED" || status === "CONFIRMED" || status === "REVERTED") && txHash === null) fail(`${path}.txHash`)
+  const terminal = status === "CONFIRMED" || status === "REVERTED"
+  let receipt: SubmissionStage["receipt"] = null
+  if (terminal) {
+    const proof = record(row.receipt, `${path}.receipt`)
+    exactKeys(proof, ["status", "blockNumber", "blockHash", "verifiedAt"], `${path}.receipt`)
+    if (proof.status !== status) fail(`${path}.receipt.status`)
+    const verifiedAt = isoTime(proof.verifiedAt, `${path}.receipt.verifiedAt`)
+    if (Date.parse(verifiedAt) < Date.parse(createdAt) || Date.parse(verifiedAt) > Date.parse(updatedAt)) fail(`${path}.receipt.verifiedAt`)
+    receipt = {
+      status,
+      blockNumber: matching(proof.blockNumber, /^(0|[1-9]\d{0,77})$/, `${path}.receipt.blockNumber`),
+      blockHash: nonZero(matching(proof.blockHash, DIAG_HASH, `${path}.receipt.blockHash`), `${path}.receipt.blockHash`),
+      verifiedAt,
+    }
+  } else if (row.receipt !== null) fail(`${path}.receipt`)
+  return {
+    claimId: matching(row.claimId, DIAG_LABEL, `${path}.claimId`),
+    stage,
+    transactionDigest: matching(row.transactionDigest, DIAG_DIGEST, `${path}.transactionDigest`),
+    status,
+    txHash,
+    createdAt,
+    updatedAt,
+    receipt,
+  }
+}
+
+/**
+ * Validates GET /api/v1/admin/stocks/wallet-submissions/:side/:orderId data for exactly the requested order and side.
+ * `observedAt` is the envelope's server snapshot time: nothing in the snapshot may be later than it.
+ */
+export function parseSubmissionDiagnostics(data: unknown, expected: { readonly side: "BUY" | "SELL"; readonly orderId: string; readonly observedAt: string }): SubmissionDiagnostics {
+  const root = record(data, "data")
+  exactKeys(root, ["deploymentId", "deploymentDigest", "order", "enrollment", "intentKey", "approval", "transfer", "readOnly", "executionAuthorization", "resubmissionAllowed"], "data")
+  // The server states this diagnostic grants nothing; anything else is not the reviewed contract.
+  if (root.readOnly !== true) fail("data.readOnly")
+  if (root.executionAuthorization !== false) fail("data.executionAuthorization")
+  if (root.resubmissionAllowed !== false) fail("data.resubmissionAllowed")
+  const order = record(root.order, "data.order")
+  exactKeys(order, ["id", "side", "state", "wallet", "version", "quoteExpiresAt", "quoteExpired"], "data.order")
+  const orderSide = side(order.side, "data.order.side")
+  if (orderSide !== expected.side) fail("data.order.side")
+  if (order.id !== expected.orderId || typeof order.id !== "string" || !DIAG_LABEL.test(order.id)) fail("data.order.id")
+  if (typeof order.state !== "string" || !DIAGNOSTIC_STATES[orderSide].includes(order.state)) fail("data.order.state")
+  if (typeof order.version !== "number" || !Number.isSafeInteger(order.version) || order.version < 0) fail("data.order.version")
+  const observedAt = isoTime(expected.observedAt, "$.observedAt")
+  const quoteExpiresAt = isoTime(order.quoteExpiresAt, "data.order.quoteExpiresAt")
+  if (typeof order.quoteExpired !== "boolean" || order.quoteExpired !== Date.parse(quoteExpiresAt) <= Date.parse(observedAt)) fail("data.order.quoteExpired")
+  const enrollment = root.enrollment === "ENROLLED" || root.enrollment === "NOT_ENROLLED" ? root.enrollment : fail("data.enrollment")
+  const intentKey = matching(root.intentKey, DIAG_DIGEST, "data.intentKey")
+  const approval = submissionStage(root.approval, "APPROVAL", intentKey, "data.approval")
+  const transfer = submissionStage(root.transfer, "TRANSFER", intentKey, "data.transfer")
+  if (enrollment === "NOT_ENROLLED" && (approval !== null || transfer !== null)) fail("data.enrollment")
+  if (approval && transfer && approval.claimId === transfer.claimId) fail("data.transfer.claimId")
+  for (const [row, path] of [[approval, "data.approval"], [transfer, "data.transfer"]] as const) {
+    if (row && Date.parse(row.updatedAt) > Date.parse(observedAt)) fail(`${path}.updatedAt`)
+  }
+  return {
+    deploymentId: matching(root.deploymentId, DIAG_LABEL, "data.deploymentId"),
+    deploymentDigest: matching(root.deploymentDigest, DIAG_DIGEST, "data.deploymentDigest"),
+    order: {
+      id: expected.orderId,
+      side: orderSide,
+      state: order.state,
+      wallet: /^0x0{40}$/.test(String(order.wallet)) ? fail("data.order.wallet") : matching(order.wallet, DIAG_ADDRESS, "data.order.wallet"),
+      version: order.version,
+      quoteExpiresAt,
+      quoteExpired: order.quoteExpired,
+    },
+    enrollment,
+    intentKey,
+    approval,
+    transfer,
+    readOnly: true,
+    executionAuthorization: false,
+    resubmissionAllowed: false,
+  }
 }

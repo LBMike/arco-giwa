@@ -10,12 +10,13 @@ import {
   lookupStatus,
   stateInfo,
 } from "./states"
-import type { AuditRow, BuyOrderDetail, DetailState, OperationRow, OrderDetail, ProofSummary, SellOrderDetail } from "./types"
+import { SubmissionDiagnosticsCard } from "./SubmissionDiagnostics"
+import type { AuditRow, BuyOrderDetail, DetailState, DiagnosticsState, OperationRow, OrderDetail, ProofSummary, SellOrderDetail } from "./types"
 import { Amount, Card, EmptyRow, Field, Fields, Mono, Pill, ResourceMeta, Time, toneOf } from "./ui"
 
-type Props = { detail: DetailState; now: number; onRefresh: () => void }
+type Props = { detail: DetailState; diagnostics: DiagnosticsState; now: number; onRefresh: () => void; onRefreshDiagnostics: () => void }
 
-export function OrderDetailView({ detail, now, onRefresh }: Props) {
+export function OrderDetailView({ detail, diagnostics, now, onRefresh, onRefreshDiagnostics }: Props) {
   const ids = useId()
   // Defence in depth: never render a detail under a different selected order id.
   const value = detail.value && detail.value.data.order.id === detail.orderId ? detail.value.data : null
@@ -38,6 +39,10 @@ export function OrderDetailView({ detail, now, onRefresh }: Props) {
         <>
           <ResourceMeta state={detail} now={now} onRefresh={onRefresh} what="order detail" />
           {value && <DetailBody detail={value} now={now} />}
+          {/* Only the selected order's own diagnostics (the store clears them with the selection). */}
+          {diagnostics.orderId === detail.orderId && (
+            <SubmissionDiagnosticsCard diagnostics={diagnostics} detailReady={value !== null} now={now} onRefresh={onRefreshDiagnostics} />
+          )}
         </>
       )}
     </section>

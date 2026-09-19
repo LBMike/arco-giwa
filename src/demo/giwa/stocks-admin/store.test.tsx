@@ -8,6 +8,9 @@ import {
   FIXTURE_OVERVIEW,
   FIXTURE_PROFILE,
   FIXTURE_SELL_DETAIL,
+  diagnosticsPathOf,
+  fixtureAttempt,
+  fixtureDiagnostics,
   fixtureEnvelope,
   fixtureResponse,
   type FixtureReply,
@@ -76,6 +79,8 @@ function hasNoData(snapshot: StocksAdminSnapshot) {
   }
   assert.equal(snapshot.detail.value, null)
   assert.equal(snapshot.detail.orderId, null)
+  assert.equal(snapshot.diagnostics.value, null)
+  assert.equal(snapshot.diagnostics.orderId, null)
 }
 
 test("session change: a late response and a late error from the previous session never reach the new session", async () => {
@@ -185,6 +190,9 @@ test("order selection: refreshing the same order keeps its value until the new r
   store.selectOrder(FIXTURE_IDS.buyFinality)
   transport.take(detailPath(FIXTURE_IDS.buyFinality)).respond(ok(FIXTURE_BUY_DETAIL))
   await flush()
+  // 003E: the first successful detail starts exactly one diagnostics read with the detail's side.
+  transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality)).respond(ok(fixtureDiagnostics(FIXTURE_IDS.buyFinality)))
+  await flush()
   store.selectOrder(FIXTURE_IDS.buyFinality)
   assert.equal(transport.pending.length, 0, "re-selecting the loaded order does not refetch")
   store.refreshDetail()
@@ -210,6 +218,8 @@ for (const [status, body, access] of [
     transport.take(detailPath(FIXTURE_IDS.buyFinality)).respond(ok(FIXTURE_BUY_DETAIL))
     await flush()
     assert.ok(store.getSnapshot().detail.value)
+    // 003E: the diagnostics read started by the detail is still in flight when access is denied.
+    const diagnostics = transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality))
 
     store.load("audit")
     const audit = transport.take(AUDIT)
@@ -221,6 +231,10 @@ for (const [status, body, access] of [
     assert.equal(snapshot.access, access)
     hasNoData(snapshot)
     assert.equal(audit.init.signal?.aborted, true)
+    assert.equal(diagnostics.init.signal?.aborted, true, "the diagnostics read is aborted too")
+    diagnostics.respond(ok(fixtureDiagnostics(FIXTURE_IDS.buyFinality)))
+    await flush()
+    assert.equal(store.getSnapshot().diagnostics.value, null, "a late diagnostics answer never lands after the denial")
 
     audit.respond(ok(FIXTURE_AUDIT))
     await flush()
@@ -305,4 +319,200 @@ test("deactivate (unmount) ignores in-flight answers; activate starts clean", as
   hasNoData(store.getSnapshot())
   store.load("overview")
   assert.equal(transport.pending.length, 1)
+})
+
+// ---------------------------------------------------------------- 003E wallet submission diagnostics
+
+async function selectLoaded(store: StocksAdminStore, transport: ReturnType<typeof controlledTransport>, id: string, detail: unknown) {
+  store.selectOrder(id)
+  transport.take(detailPath(id)).respond(ok(detail))
+  await flush()
+}
+
+test("diagnostics: no request before the detail; then exactly one GET with the detail's side, the Bearer only, and nothing else", async () => {
+  const { store, transport } = setup()
+  store.selectOrder(FIXTURE_IDS.sellSettlement)
+  assert.deepEqual(transport.pending.map((request) => request.path), [detailPath(FIXTURE_IDS.sellSettlement)], "the side is not known before the detail")
+  assert.equal(store.getSnapshot().diagnostics.side, null)
+  transport.take(detailPath(FIXTURE_IDS.sellSettlement)).respond(ok(FIXTURE_SELL_DETAIL))
+  await flush()
+  const request = transport.take(diagnosticsPathOf("SELL", FIXTURE_IDS.sellSettlement))
+  assert.equal(request.init.method, "GET")
+  assert.equal(request.init.body, undefined)
+  assert.deepEqual(Object.keys(request.init.headers as Record<string, string>).sort(), ["accept", "authorization"], "no operator token or role header")
+  assert.equal(request.token, "Bearer token-a")
+  assert.equal(store.getSnapshot().diagnostics.phase, "loading")
+  request.respond(ok(fixtureDiagnostics(FIXTURE_IDS.sellSettlement, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "REVERTED") })))
+  await flush()
+  const snapshot = store.getSnapshot().diagnostics
+  assert.equal(snapshot.phase, "ready")
+  assert.equal(snapshot.side, "SELL")
+  assert.equal(snapshot.value?.data.order.side, "SELL")
+  assert.equal(snapshot.value?.data.transfer?.receipt?.status, "REVERTED")
+  assert.equal(snapshot.value?.meta.observedAt, "2026-09-17T03:00:00.000Z", "the server snapshot time as returned")
+  assert.equal(transport.pending.length, 0, "no automatic second read")
+  store.refreshDetail()
+  transport.take(detailPath(FIXTURE_IDS.sellSettlement)).respond(ok(FIXTURE_SELL_DETAIL))
+  await flush()
+  assert.equal(transport.pending.length, 0, "a detail refresh does not re-read diagnostics")
+})
+
+test("diagnostics: selecting another order hides the previous record at once; its late answer never lands", async () => {
+  const { store, transport } = setup()
+  await selectLoaded(store, transport, FIXTURE_IDS.buyFinality, FIXTURE_BUY_DETAIL)
+  const late = transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality))
+  store.selectOrder(FIXTURE_IDS.sellSettlement)
+  const snapshot = store.getSnapshot().diagnostics
+  assert.deepEqual([snapshot.orderId, snapshot.side, snapshot.phase, snapshot.value], [FIXTURE_IDS.sellSettlement, null, "idle", null])
+  assert.equal(late.init.signal?.aborted, true)
+  late.respond(ok(fixtureDiagnostics(FIXTURE_IDS.buyFinality)))
+  await flush()
+  assert.equal(store.getSnapshot().diagnostics.value, null)
+  assert.equal(store.getSnapshot().diagnostics.orderId, FIXTURE_IDS.sellSettlement)
+})
+
+test("diagnostics: X → Y → X: the first read of X answers late (data or 403) and never replaces the new read of X", async () => {
+  for (const lateReply of [ok(fixtureDiagnostics(FIXTURE_IDS.buyFinality)), { status: 403, body: { error: "OPERATOR_FORBIDDEN", ...FIXTURE_PROFILE } } as FixtureReply]) {
+    const { store, transport } = setup()
+    await selectLoaded(store, transport, FIXTURE_IDS.buyFinality, FIXTURE_BUY_DETAIL)
+    const first = transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality))
+    store.selectOrder(FIXTURE_IDS.sellSettlement)
+    await selectLoaded(store, transport, FIXTURE_IDS.buyFinality, FIXTURE_BUY_DETAIL)
+    const second = transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality))
+    first.respond(lateReply)
+    await flush()
+    const during = store.getSnapshot()
+    assert.equal(during.access, "ok", "the superseded request cannot deny access")
+    assert.deepEqual([during.diagnostics.phase, during.diagnostics.error, during.diagnostics.value], ["loading", null, null], "the superseded request writes nothing")
+    second.respond(ok(fixtureDiagnostics(FIXTURE_IDS.buyFinality, { approval: fixtureAttempt("APPROVAL", "REVERTED"), transfer: null })))
+    await flush()
+    assert.equal(store.getSnapshot().diagnostics.value?.data.approval?.status, "REVERTED", "only the latest read lands")
+  }
+})
+
+test("diagnostics: token rotation keeps the record and the refresh uses the new token; a new session, API base or deployment clears it", async () => {
+  for (const change of ["session", "apiBase", "deployment"] as const) {
+    const { store, transport, config } = setup()
+    await selectLoaded(store, transport, FIXTURE_IDS.buyFinality, FIXTURE_BUY_DETAIL)
+    transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality)).respond(ok(fixtureDiagnostics(FIXTURE_IDS.buyFinality)))
+    await flush()
+    store.configure({ ...config, session: { id: "operator-a", accessToken: "token-b" } })
+    assert.ok(store.getSnapshot().diagnostics.value, "token-only change keeps data")
+    store.refreshDiagnostics()
+    const refresh = transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality))
+    assert.equal(refresh.token, "Bearer token-b")
+    const next = change === "session" ? { session: { id: "operator-b", accessToken: "token-c" } } : change === "apiBase" ? { apiBase: "https://other.example.test" } : { deploymentKey: "deployment-2" }
+    store.configure({ ...config, session: { id: "operator-a", accessToken: "token-b" }, ...next })
+    assert.equal(store.getSnapshot().diagnostics.value, null, `${change}: cleared`)
+    assert.equal(store.getSnapshot().diagnostics.orderId, null)
+    assert.equal(refresh.init.signal?.aborted, true)
+    refresh.respond(ok(fixtureDiagnostics(FIXTURE_IDS.buyFinality)))
+    await flush()
+    assert.equal(store.getSnapshot().diagnostics.value, null, `${change}: the old answer never lands`)
+  }
+})
+
+test("diagnostics: 401 and 403 use the global denial; 404 (order or route), 503, network and invalid stay on the card", async () => {
+  const cases: { reply?: FixtureReply; fail?: boolean; access: string; kind: string | null }[] = [
+    { reply: { status: 401, body: { error: "Invalid bearer session token" } }, access: "unauthorized", kind: null },
+    { reply: { status: 403, body: { error: "OPERATOR_FORBIDDEN", ...FIXTURE_PROFILE } }, access: "forbidden", kind: null },
+    { reply: { status: 404, body: { error: "ORDER_NOT_FOUND", ...FIXTURE_PROFILE } }, access: "ok", kind: "not_found" },
+    { reply: { status: 404, body: { message: "Route GET:/x not found", error: "Not Found", statusCode: 404 } }, access: "ok", kind: "disabled" },
+    { reply: { status: 503, body: { error: "SUBMISSION_DIAGNOSTICS_UNAVAILABLE", ...FIXTURE_PROFILE } }, access: "ok", kind: "server" },
+    { fail: true, access: "ok", kind: "network" },
+    { reply: ok({ ...fixtureDiagnostics(FIXTURE_IDS.buyFinality), resubmissionAllowed: true }), access: "ok", kind: "invalid" },
+  ]
+  for (const item of cases) {
+    const { store, transport } = setup()
+    store.load("orders")
+    transport.take(ORDERS).respond(ok(FIXTURE_ORDERS))
+    await selectLoaded(store, transport, FIXTURE_IDS.buyFinality, FIXTURE_BUY_DETAIL)
+    const request = transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality))
+    if (item.fail) request.fail(new TypeError("offline"))
+    else request.respond(item.reply!)
+    await flush()
+    const snapshot = store.getSnapshot()
+    assert.equal(snapshot.access, item.access, JSON.stringify(item.reply?.status))
+    if (item.access === "ok") {
+      assert.equal(snapshot.diagnostics.phase, "error")
+      assert.equal(snapshot.diagnostics.error?.kind, item.kind)
+      assert.equal(snapshot.diagnostics.value, null, "nothing from a failed or rejected answer")
+      assert.ok(snapshot.orders.value && snapshot.detail.value, "the rest of the console stays usable")
+    } else hasNoData(snapshot)
+  }
+})
+
+test("diagnostics: a failed refresh keeps the earlier snapshot paired with the error; refresh while loading or without a side does nothing", async () => {
+  const { store, transport } = setup()
+  store.refreshDiagnostics()
+  assert.equal(transport.pending.length, 0, "nothing selected")
+  store.selectOrder(FIXTURE_IDS.buyFinality)
+  store.refreshDiagnostics()
+  assert.deepEqual(transport.pending.map((request) => request.path), [detailPath(FIXTURE_IDS.buyFinality)], "no side before the detail")
+  transport.take(detailPath(FIXTURE_IDS.buyFinality)).respond(ok(FIXTURE_BUY_DETAIL))
+  await flush()
+  store.refreshDiagnostics()
+  store.refreshDiagnostics()
+  assert.equal(transport.pending.filter((request) => request.path.includes("/wallet-submissions/")).length, 1, "repeated clicks while loading add no request")
+  transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality)).respond(ok(fixtureDiagnostics(FIXTURE_IDS.buyFinality)))
+  await flush()
+  const first = store.getSnapshot().diagnostics.value
+  store.refreshDiagnostics()
+  transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality)).respond({ status: 503, body: { error: "SUBMISSION_DIAGNOSTICS_UNAVAILABLE", ...FIXTURE_PROFILE } })
+  await flush()
+  const snapshot = store.getSnapshot().diagnostics
+  assert.equal(snapshot.phase, "error")
+  assert.equal(snapshot.error?.kind, "server")
+  assert.equal(snapshot.value, first, "the earlier snapshot stays, labelled by the view as not current")
+})
+
+test("diagnostics: a response for another side, order, deployment or wallet, with wrong flags or extra fields is rejected", async () => {
+  const base = fixtureDiagnostics(FIXTURE_IDS.buyFinality)
+  const variants: [string, unknown][] = [
+    ["other order", { ...base, order: { ...base.order, id: FIXTURE_IDS.buyUnknown } }],
+    ["other side", { ...base, order: { ...base.order, side: "SELL", state: "SETTLEMENT_PENDING" } }],
+    ["other deployment digest", { ...base, deploymentDigest: "f".repeat(64) }],
+    ["other wallet", { ...base, order: { ...base.order, wallet: "0x2546bcd3c84621e976d8185a91a922ae77ecec30" } }],
+    ["readOnly false", { ...base, readOnly: false }],
+    ["execution authorization", { ...base, executionAuthorization: true }],
+    ["resubmission allowed", { ...base, resubmissionAllowed: true }],
+    ["raw proof field", { ...base, approval: { ...(base.approval as object), evidence: { raw: true } } }],
+    ["calldata field", { ...base, transfer: { ...(base.transfer as object), transaction: { data: "0x1234" } } }],
+  ]
+  for (const [name, data] of variants) {
+    const { store, transport } = setup()
+    await selectLoaded(store, transport, FIXTURE_IDS.buyFinality, FIXTURE_BUY_DETAIL)
+    transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality)).respond(ok(data))
+    await flush()
+    const snapshot = store.getSnapshot().diagnostics
+    assert.deepEqual([snapshot.phase, snapshot.error?.kind, snapshot.value], ["error", "invalid", null], name)
+  }
+  // A wrong profile is refused by the envelope check.
+  const { store, transport } = setup()
+  await selectLoaded(store, transport, FIXTURE_IDS.buyFinality, FIXTURE_BUY_DETAIL)
+  transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality)).respond({ status: 200, body: { ...fixtureEnvelope(base), profile: "PRODUCTION" } })
+  await flush()
+  assert.equal(store.getSnapshot().diagnostics.error?.kind, "invalid")
+})
+
+test("diagnostics: every request of the whole flow is a GET to a read route (no claim, outcome, reconcile or other mutation)", async () => {
+  const { store, transport } = setup()
+  const seen: { method: string; path: string }[] = []
+  for (const id of [FIXTURE_IDS.buyFinality, FIXTURE_IDS.sellSettlement]) {
+    store.selectOrder(id)
+    const detail = transport.take(detailPath(id))
+    seen.push({ method: String(detail.init.method), path: detail.path })
+    detail.respond(ok(id === FIXTURE_IDS.buyFinality ? FIXTURE_BUY_DETAIL : FIXTURE_SELL_DETAIL))
+    await flush()
+    const side = id === FIXTURE_IDS.buyFinality ? "BUY" : "SELL"
+    for (let i = 0; i < 2; i++) {
+      const request = transport.take(diagnosticsPathOf(side, id))
+      seen.push({ method: String(request.init.method), path: request.path })
+      request.respond(ok(fixtureDiagnostics(id)))
+      await flush()
+      if (i === 0) store.refreshDiagnostics()
+    }
+  }
+  assert.equal(transport.pending.length, 0)
+  assert.ok(seen.length === 6 && seen.every((request) => request.method === "GET" && /^\/api\/v1\/admin\/stocks\/(orders|wallet-submissions)\//.test(request.path)), JSON.stringify(seen))
 })

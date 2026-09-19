@@ -274,6 +274,65 @@ export const FIXTURE_RECONCILIATIONS: Record<ReconciliationStatus, unknown> = {
   },
 }
 
+// ---- wallet submission diagnostics (GET /api/v1/admin/stocks/wallet-submissions/:side/:orderId), shaped like the
+// server's publicSnapshot. Test and screenshot data only.
+export const FIXTURE_INTENT_KEY = "4e5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091"
+type AttemptStatus = "REQUEST_MAY_START" | "UNKNOWN" | "SUBMITTED" | "CONFIRMED" | "REVERTED"
+
+export function fixtureAttempt(stage: "APPROVAL" | "TRANSFER", status: AttemptStatus, options: { txHash?: string | null; claimId?: string } = {}) {
+  const terminal = status === "CONFIRMED" || status === "REVERTED"
+  const hashless = status === "REQUEST_MAY_START" || (status === "UNKNOWN" && options.txHash === undefined)
+  const txHash = options.txHash !== undefined ? options.txHash : hashless ? null : fixtureHash(stage === "APPROVAL" ? "a7" : "d7")
+  return {
+    claimId: options.claimId ?? `claim-${stage.toLowerCase()}-1`,
+    intentKey: FIXTURE_INTENT_KEY,
+    stage,
+    transactionDigest: stage === "APPROVAL" ? "1".repeat(64) : "2".repeat(64),
+    status,
+    txHash,
+    createdAt: stage === "APPROVAL" ? "2026-09-17T02:10:30.000Z" : "2026-09-17T02:12:30.000Z",
+    updatedAt: stage === "APPROVAL" ? "2026-09-17T02:11:40.000Z" : "2026-09-17T02:14:00.000Z",
+    receipt: terminal
+      ? { status, blockNumber: stage === "APPROVAL" ? "19834090" : "19834100", blockHash: fixtureHash(stage === "APPROVAL" ? "b7" : "e7"), verifiedAt: stage === "APPROVAL" ? "2026-09-17T02:11:30.000Z" : "2026-09-17T02:13:50.000Z" }
+      : null,
+  }
+}
+
+export function fixtureDiagnostics(orderId: string, options: { approval?: unknown; transfer?: unknown; enrollment?: "ENROLLED" | "NOT_ENROLLED"; observedAt?: string } = {}) {
+  const order = orderById(orderId)
+  const observed = Date.parse(options.observedAt ?? FIXTURE_OBSERVED_AT)
+  const enrollment = options.enrollment ?? "ENROLLED"
+  return {
+    deploymentId: DEPLOYMENT_ID,
+    deploymentDigest: DIGEST,
+    order: { id: order.id, side: order.side, state: order.state, wallet: order.wallet, version: order.version, quoteExpiresAt: order.quoteExpiresAt, quoteExpired: Date.parse(order.quoteExpiresAt) <= observed },
+    enrollment,
+    intentKey: FIXTURE_INTENT_KEY,
+    approval: options.approval !== undefined ? options.approval : enrollment === "ENROLLED" ? fixtureAttempt("APPROVAL", "CONFIRMED") : null,
+    transfer: options.transfer !== undefined ? options.transfer : enrollment === "ENROLLED" ? fixtureAttempt("TRANSFER", "SUBMITTED") : null,
+    readOnly: true,
+    executionAuthorization: false,
+    resubmissionAllowed: false,
+  }
+}
+
+/** Per-order diagnostics for the default router (screenshots and view tests). */
+export const FIXTURE_DIAGNOSTICS: Record<string, unknown> = {
+  // Awaiting funding: the approval request's wallet result is unknown and no hash was recorded.
+  [FIXTURE_IDS.buyLarge]: fixtureDiagnostics(FIXTURE_IDS.buyLarge, { approval: fixtureAttempt("APPROVAL", "UNKNOWN"), transfer: null }),
+  [FIXTURE_IDS.buyUnknown]: fixtureDiagnostics(FIXTURE_IDS.buyUnknown, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "CONFIRMED") }),
+  [FIXTURE_IDS.buyFinality]: fixtureDiagnostics(FIXTURE_IDS.buyFinality, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "SUBMITTED") }),
+  [FIXTURE_IDS.buyCompleted]: fixtureDiagnostics(FIXTURE_IDS.buyCompleted, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "CONFIRMED") }),
+  [FIXTURE_IDS.sellLiquidity]: fixtureDiagnostics(FIXTURE_IDS.sellLiquidity, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "CONFIRMED") }),
+  [FIXTURE_IDS.sellSettlement]: fixtureDiagnostics(FIXTURE_IDS.sellSettlement, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "CONFIRMED") }),
+  // An older order created before the journal: nothing is enrolled.
+  [FIXTURE_IDS.sellCompleted]: fixtureDiagnostics(FIXTURE_IDS.sellCompleted, { enrollment: "NOT_ENROLLED" }),
+}
+
+export function diagnosticsPathOf(side: "BUY" | "SELL", orderId: string): string {
+  return `/api/v1/admin/stocks/wallet-submissions/${side}/${orderId}`
+}
+
 export function fixtureEnvelope(data: unknown, observedAt: string = FIXTURE_OBSERVED_AT) {
   return { ...FIXTURE_PROFILE, observedAt, data }
 }
@@ -330,6 +389,13 @@ export function fixtureRoute(scenario: FixtureScenario = {}) {
     if (path === "/api/v1/admin/stocks/audit") return { status: 200, body: fixtureEnvelope(empty ? [] : FIXTURE_AUDIT) }
     if (path === "/api/v1/admin/stocks/reconciliations") {
       return { status: 200, body: fixtureEnvelope(FIXTURE_RECONCILIATIONS[scenario.reconciliation ?? "MATCHED_AT_CUTOFF"]) }
+    }
+    const diagnostics = /^\/api\/v1\/admin\/stocks\/wallet-submissions\/(BUY|SELL)\/([^/]+)$/.exec(path)
+    if (diagnostics) {
+      const id = decodeURIComponent(diagnostics[2])
+      const order = FIXTURE_ORDERS.find((row) => row.id === id && row.side === diagnostics[1])
+      if (!order || empty) return { status: 404, body: { error: "ORDER_NOT_FOUND", ...FIXTURE_PROFILE } }
+      return { status: 200, body: fixtureEnvelope(FIXTURE_DIAGNOSTICS[id] ?? fixtureDiagnostics(id)) }
     }
     const match = /^\/api\/v1\/admin\/stocks\/orders\/([^/]+)$/.exec(path)
     if (match) {

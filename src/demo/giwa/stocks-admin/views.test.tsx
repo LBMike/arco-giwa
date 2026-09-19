@@ -13,15 +13,20 @@ import {
   FIXTURE_ORDERS,
   FIXTURE_OVERVIEW,
   FIXTURE_RECONCILIATIONS,
+  FIXTURE_OBSERVED_AT,
   FIXTURE_SELL_DETAIL,
+  fixtureAttempt,
+  fixtureDiagnostics,
   fixtureEnvelope,
+  fixtureHash,
 } from "./fixtures"
 import { GiwaStocksAdminFeature, SECTIONS, StocksAdminView, latestMeta, nextSectionIndex } from "./GiwaStocksAdminFeature"
 import { filterOrders, DEFAULT_FILTERS } from "./OrdersPanel"
 import { auditRange } from "./AuditPanel"
-import { parseAudit, parseEnvelope, parseOrderDetail, parseOrders, parseOverview, parseReconciliation } from "./parse"
+import { parseAudit, parseEnvelope, parseOrderDetail, parseOrders, parseOverview, parseReconciliation, parseSubmissionDiagnostics } from "./parse"
 import type {
   AccessState,
+  DiagnosticsState,
   Loaded,
   ReconciliationStatus,
   ResourceState,
@@ -51,6 +56,7 @@ function snapshot(patch: Partial<StocksAdminSnapshot> = {}, access: AccessState 
     reconciliation: IDLE,
     audit: IDLE,
     detail: { ...IDLE, orderId: null },
+    diagnostics: { ...IDLE, orderId: null, side: null },
     ...patch,
   }
 }
@@ -68,6 +74,7 @@ function render(state: StocksAdminSnapshot, section: StocksAdminSection = "overv
       onSelectOrder={noop}
       onOpenOrder={noop}
       onRefreshDetail={noop}
+      onRefreshDiagnostics={noop}
       onRetryAccess={noop}
       onSignInRequired={onSignInRequired}
     />,
@@ -272,9 +279,14 @@ test("orders and audit state the 200-row server limit; filters work only on load
 
 test("the console renders no command buttons — only navigation, refresh, selection and access checks", () => {
   const detail = { ...loaded(parseOrderDetail(FIXTURE_SELL_DETAIL)), orderId: FIXTURE_IDS.sellSettlement }
+  const buyDetail = { ...loaded(parseOrderDetail(FIXTURE_BUY_DETAIL)), orderId: FIXTURE_IDS.buyFinality }
   const htmls = [
     render({ ...full(), detail }, "overview"),
     render({ ...full(), detail }, "orders"),
+    // 003E: every diagnostics status, a hashless UNKNOWN and a failed refresh add only the one Refresh button.
+    render({ ...full(), detail, diagnostics: diag("SELL", FIXTURE_IDS.sellSettlement, { approval: fixtureAttempt("APPROVAL", "REQUEST_MAY_START"), transfer: fixtureAttempt("TRANSFER", "REVERTED") }) }, "orders"),
+    render({ ...full(), detail: buyDetail, diagnostics: diag("BUY", FIXTURE_IDS.buyFinality, { approval: fixtureAttempt("APPROVAL", "UNKNOWN"), transfer: null }) }, "orders"),
+    render({ ...full(), detail: buyDetail, diagnostics: { ...diag("BUY", FIXTURE_IDS.buyFinality, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "SUBMITTED") }), phase: "error", error: { kind: "server", status: 503, code: "SUBMISSION_DIAGNOSTICS_UNAVAILABLE" } } }, "orders"),
     render({ ...full(), detail }, "reconciliation"),
     render({ ...full(), detail }, "audit"),
     render(snapshot({ reconciliation: loaded(parseReconciliation(FIXTURE_RECONCILIATIONS.MISMATCH)) }), "reconciliation"),
@@ -342,4 +354,123 @@ test("feature source never uses the legacy operator token, browser allowlist, st
     assert.doesNotMatch(source, /method: "(POST|PUT|PATCH|DELETE)"/, name)
     assert.doesNotMatch(source, /parseFloat|Number\(value\)|toFixed/, name)
   }
+})
+
+// ---------------------------------------------------------------- 003E wallet submission diagnostics card
+
+function diag(side: "BUY" | "SELL", orderId: string, options: Parameters<typeof fixtureDiagnostics>[1] = {}, ageMs = 5_000): DiagnosticsState {
+  const data = parseSubmissionDiagnostics(fixtureDiagnostics(orderId, options), { side, orderId, observedAt: FIXTURE_OBSERVED_AT })
+  return { ...loaded(data, ageMs), orderId, side }
+}
+const BUY_DETAIL = () => ({ ...loaded(parseOrderDetail(FIXTURE_BUY_DETAIL)), orderId: FIXTURE_IDS.buyFinality })
+const SELL_DETAIL = () => ({ ...loaded(parseOrderDetail(FIXTURE_SELL_DETAIL)), orderId: FIXTURE_IDS.sellSettlement })
+function card(html: string): string {
+  const start = html.indexOf('data-testid="stocks-admin-diagnostics"')
+  assert.ok(start > 0, "the diagnostics card is rendered")
+  return text(html.slice(start))
+}
+
+test("BUY diagnostics: approval and deposit wording, a hashless UNKNOWN reads 'No recorded hash', CONFIRMED is not issuance", () => {
+  const unknown = render(snapshot({ detail: BUY_DETAIL(), diagnostics: diag("BUY", FIXTURE_IDS.buyFinality, { approval: fixtureAttempt("APPROVAL", "UNKNOWN"), transfer: null }) }), "orders")
+  const t = card(unknown)
+  assert.match(text(unknown), /Wallet submissions \(read only\) The server's wallet submission journal for this order at one database snapshot\. This view cannot claim, record, reconcile, sign, send again or change any state\. Refresh/)
+  assert.match(t, new RegExp(`Server snapshot ${FIXTURE_OBSERVED_AT}`), "observedAt exactly as the server sent it")
+  assert.match(unknown, new RegExp(`<time dateTime="${FIXTURE_OBSERVED_AT}"`))
+  assert.match(t, /Approval APPROVAL UNKNOWN Wallet result unknown/)
+  assert.match(t, /Transaction hash No recorded hash/)
+  assert.match(t, /No hash was recorded for this request\. It is not entered, guessed or searched here\. Do not send the approval again\./)
+  assert.match(t, /Receipt check Not verified by the server/)
+  assert.match(t, /Claim id claim-approval-1 Transaction digest/, "the claim id in full, for matching server records")
+  assert.match(t, /Deposit TRANSFER No wallet request is recorded for the deposit\./)
+  assert.ok(!t.includes("Escrow"), "BUY has no escrow stage")
+  assert.match(unknown, /data-stage="APPROVAL" data-status="UNKNOWN"/)
+  assert.match(unknown, /data-stage="TRANSFER" data-status="NONE"/)
+
+  const confirmed = card(render(snapshot({ detail: BUY_DETAIL(), diagnostics: diag("BUY", FIXTURE_IDS.buyFinality, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "CONFIRMED") }) }), "orders"))
+  assert.match(confirmed, /Deposit TRANSFER CONFIRMED Receipt verified: confirmed/)
+  assert.match(confirmed, /The server verified this transaction's receipt\. That is not issuance of the shares; the order state shows that\./)
+  assert.ok(confirmed.includes(fixtureHash("d7")), "the recorded hash, in full")
+  assert.match(confirmed, /Receipt block 19834100/)
+  assert.ok(confirmed.includes(fixtureHash("e7")), "receipt block hash")
+  assert.match(confirmed, /Receipt verification recorded 2026-09-17 02:13:50/)
+  assert.match(confirmed, /Order state at snapshot MINT_FINALITY_PENDING/)
+  assert.match(confirmed, /Quote deadline .* Passed as of the snapshot/)
+})
+
+test("SELL diagnostics: escrow wording; REVERTED and REQUEST_MAY_START are historical; CONFIRMED is not the burn or payout", () => {
+  const html = render(snapshot({ detail: SELL_DETAIL(), diagnostics: diag("SELL", FIXTURE_IDS.sellSettlement, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "REVERTED") }) }), "orders")
+  const t = card(html)
+  assert.match(t, /Escrow TRANSFER REVERTED Receipt verified: reverted/)
+  assert.ok(!t.includes("Deposit"), "SELL has no deposit stage")
+  assert.match(t, /That is not the burn or the cash payout; the order state shows that\./)
+  assert.match(html, /data-stage="TRANSFER" data-status="REVERTED"/)
+
+  const reserved = card(render(snapshot({ detail: SELL_DETAIL(), diagnostics: diag("SELL", FIXTURE_IDS.sellSettlement, { approval: fixtureAttempt("APPROVAL", "REQUEST_MAY_START"), transfer: null }) }), "orders"))
+  assert.match(reserved, /Approval APPROVAL REQUEST_MAY_START Request reserved, no wallet answer recorded/)
+  assert.match(reserved, /No recorded hash/)
+  assert.match(reserved, /A reserved request is a historical record\. It is not permission to send\./)
+  assert.match(reserved, /Escrow TRANSFER No wallet request is recorded for the escrow\./)
+
+  const submitted = card(render(snapshot({ detail: SELL_DETAIL(), diagnostics: diag("SELL", FIXTURE_IDS.sellSettlement, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "SUBMITTED") }) }), "orders"))
+  assert.match(submitted, /Escrow TRANSFER SUBMITTED Hash recorded, receipt not verified/)
+  assert.match(submitted, /Escrow TRANSFER [^]*Receipt check Not verified by the server/)
+
+  const known = card(render(snapshot({ detail: SELL_DETAIL(), diagnostics: diag("SELL", FIXTURE_IDS.sellSettlement, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "UNKNOWN", { txHash: fixtureHash("c9") }) }) }), "orders"))
+  assert.match(known, /The result was reported unknown with this recorded hash\. Do not send the escrow again\./)
+  assert.ok(known.includes(fixtureHash("c9")))
+})
+
+test("diagnostics: NOT_ENROLLED and both stages absent are records, never permission; the footer says nothing can execute", () => {
+  const t = card(render(snapshot({ detail: SELL_DETAIL(), diagnostics: diag("SELL", FIXTURE_IDS.sellSettlement, { enrollment: "NOT_ENROLLED" }) }), "orders"))
+  assert.match(t, /Not enrolled: this order has no wallet submission journal\. Nothing was recorded, and this is not permission to send\./)
+  assert.match(t, /No wallet request is recorded for the approval\./)
+  assert.match(t, /No wallet request is recorded for the escrow\./)
+  assert.match(t, /Historical record only/)
+  assert.match(t, /Nothing here can be executed, recorded again or resent/)
+  for (const word of ["Send", "Resend", "Retry", "Claim", "Reconcile", "Record hash", "Sign"]) assert.ok(!new RegExp(`<button[^>]*>[^<]*${word}`).test(t), word)
+})
+
+test("diagnostics: loading, each error, and a failed refresh that keeps the earlier snapshot labelled as not current", () => {
+  const detail = BUY_DETAIL()
+  const before = card(render(snapshot({ detail, diagnostics: { ...IDLE, orderId: FIXTURE_IDS.buyFinality, side: null } }), "orders"))
+  assert.match(before, /Loading wallet submissions…/)
+  const loading = card(render(snapshot({ detail, diagnostics: { ...IDLE, phase: "loading", orderId: FIXTURE_IDS.buyFinality, side: "BUY" } }), "orders"))
+  assert.match(loading, /Loading…/)
+  assert.ok(!loading.includes("Approval APPROVAL"))
+
+  const copies: [StocksAdminError, RegExp][] = [
+    [{ kind: "not_found", status: 404, code: "ORDER_NOT_FOUND" }, /Order not found in the current deployment \(404\)/],
+    [{ kind: "disabled", status: 404, code: null }, /Wallet submission diagnostics are not available on this server \(404\)/],
+    [{ kind: "server", status: 503, code: "SUBMISSION_DIAGNOSTICS_UNAVAILABLE" }, /Diagnostics unavailable \(503\)/],
+    [{ kind: "network", status: null, code: null }, /Could not reach the API/],
+    [{ kind: "invalid", status: 200, code: null }, /Response did not match the diagnostics contract/],
+    [{ kind: "request", status: 400, code: "INVALID_SUBMISSION_DIAGNOSTICS_INPUT" }, /Request rejected \(400\)/],
+  ]
+  for (const [error, copy] of copies) {
+    const t = card(render(snapshot({ detail, diagnostics: { phase: "error", value: null, error, orderId: FIXTURE_IDS.buyFinality, side: "BUY" } }), "orders"))
+    assert.match(t, copy)
+    assert.ok(!t.includes("Approval APPROVAL") && !t.includes("Server snapshot"), `${error.kind}: nothing from before is shown`)
+    assert.ok(!t.includes("SUBMISSION_DIAGNOSTICS_UNAVAILABLE") && !t.includes("INVALID_SUBMISSION"), "no internal codes")
+  }
+
+  const earlier = diag("BUY", FIXTURE_IDS.buyFinality, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "SUBMITTED") })
+  const failed = card(render(snapshot({ detail, diagnostics: { ...earlier, phase: "error", error: { kind: "network", status: null, code: null } } }), "orders"))
+  assert.match(failed, new RegExp(`The record below is from the earlier snapshot ${FIXTURE_OBSERVED_AT}, not a current one\\.`))
+  assert.ok(!failed.includes("Loaded more than 60 seconds ago"))
+
+  const stale = card(render(snapshot({ detail, diagnostics: diag("BUY", FIXTURE_IDS.buyFinality, {}, 61_000) }), "orders"))
+  assert.match(stale, /Loaded more than 60 seconds ago/)
+})
+
+test("diagnostics of another order or side are never rendered, even for one render", () => {
+  const detail = BUY_DETAIL()
+  const other = diag("BUY", FIXTURE_IDS.buyUnknown, { approval: fixtureAttempt("APPROVAL", "UNKNOWN"), transfer: null })
+  const t = text(render(snapshot({ detail, diagnostics: other }), "orders"))
+  assert.ok(!t.includes("Wallet submissions (read only)"), "a record keyed to another order has no card")
+  // A value that does not belong to the keyed order and side is dropped inside the card.
+  const sell = diag("SELL", FIXTURE_IDS.sellSettlement)
+  const inside = card(render(snapshot({ detail, diagnostics: { ...sell, orderId: FIXTURE_IDS.buyFinality, side: "BUY" } }), "orders"))
+  assert.ok(!inside.includes("Escrow") && !inside.includes("Server snapshot"))
+  const sideSwap = card(render(snapshot({ detail: SELL_DETAIL(), diagnostics: { ...sell, side: "BUY" } }), "orders"))
+  assert.ok(!sideSwap.includes("Escrow") && !sideSwap.includes("Server snapshot"))
 })

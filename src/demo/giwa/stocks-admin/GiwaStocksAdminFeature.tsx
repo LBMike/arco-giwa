@@ -51,7 +51,7 @@ function useTicker(now: () => number, intervalMs: number): number {
 
 /** Most recent envelope metadata among the loaded resources (environment comes from the server). */
 export function latestMeta(snapshot: StocksAdminSnapshot): StocksEnvelopeMeta | null {
-  const loaded = [snapshot.overview.value, snapshot.orders.value, snapshot.reconciliation.value, snapshot.audit.value, snapshot.detail.value]
+  const loaded = [snapshot.overview.value, snapshot.orders.value, snapshot.reconciliation.value, snapshot.audit.value, snapshot.detail.value, snapshot.diagnostics.value]
   let best: { meta: StocksEnvelopeMeta; loadedAt: number } | null = null
   for (const value of loaded) if (value && (!best || value.loadedAt > best.loadedAt)) best = value
   return best?.meta ?? null
@@ -106,6 +106,7 @@ function StocksAdminScopeOwner(props: GiwaStocksAdminFeatureProps) {
       onSelectOrder={(orderId) => store.selectOrder(orderId)}
       onOpenOrder={openOrder}
       onRefreshDetail={() => store.refreshDetail()}
+      onRefreshDiagnostics={() => store.refreshDiagnostics()}
       onRetryAccess={() => store.retryAccess()}
       onSignInRequired={props.onSignInRequired}
     />
@@ -121,6 +122,7 @@ export type StocksAdminViewProps = {
   onSelectOrder: (orderId: string) => void
   onOpenOrder: (orderId: string) => void
   onRefreshDetail: () => void
+  onRefreshDiagnostics: () => void
   onRetryAccess: () => void
   onSignInRequired?: () => void
 }
@@ -202,10 +204,12 @@ export function StocksAdminView(props: StocksAdminViewProps) {
               <OrdersPanel
                 orders={snapshot.orders}
                 detail={snapshot.detail}
+                diagnostics={snapshot.diagnostics}
                 now={now}
                 onRefresh={() => props.onLoad("orders")}
                 onSelect={props.onSelectOrder}
                 onRefreshDetail={props.onRefreshDetail}
+                onRefreshDiagnostics={props.onRefreshDiagnostics}
               />
             )}
             {section === "reconciliation" && (

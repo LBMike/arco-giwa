@@ -25,6 +25,11 @@ export function orderDetailPath(orderId: string): string {
   return `/api/v1/admin/stocks/orders/${encodeURIComponent(orderId)}`
 }
 
+/** Read-only wallet submission diagnostics of one order; the side is the order's server-verified side. */
+export function submissionDiagnosticsPath(side: "BUY" | "SELL", orderId: string): string {
+  return `/api/v1/admin/stocks/wallet-submissions/${side}/${encodeURIComponent(orderId)}`
+}
+
 export const LIST_PARSERS = {
   overview: parseOverview,
   orders: parseOrders,
