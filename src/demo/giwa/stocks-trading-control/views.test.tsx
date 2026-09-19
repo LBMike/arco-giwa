@@ -1,0 +1,238 @@
+import assert from "node:assert/strict"
+import { readFileSync, readdirSync } from "node:fs"
+import path from "node:path"
+import test from "node:test"
+import { fileURLToPath } from "node:url"
+import { renderToStaticMarkup } from "react-dom/server"
+import { parseEnvelope } from "../stocks-admin/parse"
+import { TC_NOW, TC_OBSERVED_AT, tcEnvelope, tcEvent, tcRuntime, tcState } from "./fixtures"
+import { parseControlEvent, parseControlStateValue, parseRuntimeStatus } from "./parse"
+import { TradingControlView, type TradingControlViewProps } from "./TradingControlPanel"
+import type { CommandState, HistoryState, ResourceState, RuntimeStatus, StocksAdminError, TradingControlSnapshot, TradingControlState } from "./types"
+
+const META = parseEnvelope(tcEnvelope(null)).meta
+const noop = () => {}
+const loaded = <T,>(data: T): ResourceState<T> => ({ phase: "ready", value: { data, meta: META, loadedAt: TC_NOW - 5_000 }, error: null })
+const failed = (kind: StocksAdminError["kind"], status: number | null = null, code: string | null = null) => ({ kind, status, code })
+const state = (version: number, paused: boolean, options?: Parameters<typeof tcState>[2]): TradingControlState => parseControlStateValue(tcState(version, paused, options))
+const runtime = (input: Parameters<typeof tcRuntime>[0] = {}): RuntimeStatus => parseRuntimeStatus(tcRuntime(input), TC_OBSERVED_AT)
+const EMPTY_HISTORY: HistoryState = { phase: "ready", items: [], nextBeforeVersion: null, complete: true, observedAt: TC_OBSERVED_AT, error: null, failedPage: null }
+
+function snapshot(patch: Partial<TradingControlSnapshot> = {}): TradingControlSnapshot {
+  return { scopeKey: "scope", access: "ok", control: loaded(state(0, true)), runtime: loaded(runtime()), history: EMPTY_HISTORY, command: null, ...patch }
+}
+function render(value: TradingControlSnapshot, extra: Partial<TradingControlViewProps> = {}) {
+  return renderToStaticMarkup(
+    <TradingControlView snapshot={value} now={TC_NOW} onRefresh={noop} onLoadOlder={noop} onStart={() => null} onRetry={noop} onDiscard={noop} onRetryAccess={noop} {...extra} />,
+  )
+}
+function text(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+}
+const OVERCLAIMS = /trading (is )?(open|resumed)\b|trading has resumed|transactions (were|are) cancelled|cancelled (all|every)|emergency stop (is|was) (on|active)|guaranteed/i
+
+function command(phase: CommandState["phase"], patch: Partial<CommandState> = {}): CommandState {
+  return {
+    phase,
+    command: { paused: false, expectedVersion: 0, idempotencyKey: "tc-test-key-0001", reason: "Verified local reconciliation" },
+    basis: { paused: true, version: 0, observedAt: TC_OBSERVED_AT, deploymentDigest: state(0, true).deploymentDigest },
+    attempts: 1,
+    result: null,
+    error: null,
+    timedOut: false,
+    ...patch,
+  }
+}
+const event = (version: number, paused: boolean, options?: Parameters<typeof tcEvent>[2]) => parseControlEvent(tcEvent(version, paused, options), "e")
+
+test("initial state: paused at version 0, no change recorded, new orders paused, and a reviewed resume is offered", () => {
+  const t = text(render(snapshot()))
+  assert.match(t, /Manual gate: Paused version 0/)
+  assert.match(t, /No change recorded yet\. An enabled deployment starts paused at version 0 until an operator resumes it\./)
+  assert.match(t, /New orders paused as reported by this API process/)
+  assert.match(t, /Manual pause — The operator gate, as this process last cached it\./)
+  assert.match(t, /The manual gate is paused \(version 0, read 2026-09-19T09:00:00\.000Z\)\. You can resume the manual gate\./)
+  assert.match(t, /Review resume/)
+  assert.match(t, /No changes recorded for this deployment\./)
+  assert.match(t, /stored in the database and are not deleted automatically/)
+  assert.doesNotMatch(t, OVERCLAIMS)
+})
+
+test("resumed manual gate with other runtime reasons: never shown as trading resumed; the remaining reasons are listed", () => {
+  const t = text(render(snapshot({ control: loaded(state(1, false)), runtime: loaded(runtime({ operatorControl: { status: "RESUMED", version: 1 }, configuredPause: true, observerStatus: "STALE" })) })))
+  assert.match(t, /Manual gate: Resumed version 1/)
+  assert.match(t, /The manual gate is resumed; that alone does not resume trading New orders are still paused by: Configured pause, Chain observation not current\./)
+  assert.match(t, /New orders paused/)
+  assert.match(t, /You can pause new orders\./)
+  assert.doesNotMatch(t, OVERCLAIMS)
+  // Control store unavailable to the process is a remaining reason too.
+  const unavailable = text(render(snapshot({ control: loaded(state(1, false)), runtime: loaded(runtime({ operatorControl: { status: "UNAVAILABLE", version: null } })) })))
+  assert.match(unavailable, /still paused by: Manual gate unavailable to this process/)
+  // Unknown runtime: never "open".
+  const unknown = text(render(snapshot({ control: loaded(state(1, false)), runtime: { phase: "error", value: null, error: failed("server", 503, "RUNTIME_STATUS_UNAVAILABLE") } })))
+  assert.match(unknown, /Whether new orders are admitted is unknown until runtime status can be read\./)
+  assert.match(unknown, /Runtime status unavailable \(503\).*Whether new orders are admitted is not known from this page\./)
+  // No reason reported: a diagnostic, not permission.
+  const none = text(render(snapshot({ control: loaded(state(1, false)), runtime: loaded(runtime({ operatorControl: { status: "RESUMED", version: 1 } })) })))
+  assert.match(none, /No pause reason reported as reported by this API process/)
+  assert.match(none, /It is a diagnostic, not permission: every order is still checked by the server when it arrives\./)
+  assert.doesNotMatch(none, OVERCLAIMS)
+})
+
+test("the runtime's cached manual gate is labelled as cached and flagged when it differs from the database state", () => {
+  const t = text(render(snapshot({ control: loaded(state(2, false)), runtime: loaded(runtime({ operatorControl: { status: "PAUSED", version: 1 } })) })))
+  assert.match(t, /This process's cached manual gate Paused, version 1 Cached for up to 5 seconds; it can lag behind the database state\. It differs from the manual gate read above; read both again in a few seconds\./)
+  const absent = text(render(snapshot({ runtime: loaded(runtime({ operatorControl: undefined })) })))
+  assert.match(absent, /Not reported \(this server runs without operator controls in its runtime status\)\./)
+})
+
+test("review shows the current state and the exact change; pause and resume warnings say what they do not do", () => {
+  const resume = text(render(snapshot({ runtime: loaded(runtime({ configuredPause: true })) }), { initialDraft: { step: "review", reason: "  Verified local reconciliation " } }))
+  assert.match(resume, /Current state \(as read\) Paused · version 0 · server response 2026-09-19T09:00:00\.000Z/)
+  assert.match(resume, /Change to send Resume the manual gate\. The server records it as version 1 only if the state is still version 0; otherwise it refuses and nothing changes\./)
+  assert.match(resume, /Reason Verified local reconciliation /)
+  assert.match(resume, /What a resume does It clears the manual gate only\. New orders stay paused while any other reason remains: Configured pause \(as last reported\)\./)
+  assert.match(resume, /Confirm resume Back/)
+  const pause = text(render(snapshot({ control: loaded(state(1, false)), runtime: loaded(runtime({ operatorControl: { status: "RESUMED", version: 1 } })) }), { initialDraft: { step: "review", reason: "Drill" } }))
+  assert.match(pause, /Change to send Pause new orders\./)
+  assert.match(pause, /What a pause does New admissions that check the manual gate are blocked\. Transactions that were already approved or sent are not cancelled, issued wallet requests and execution policies stay valid, and in-flight work may still complete\. Order lookup and hash recovery stay available\./)
+  assert.match(pause, /Confirm pause/)
+  const noRuntime = text(render(snapshot({ runtime: { phase: "error", value: null, error: failed("disabled", 404) } }), { initialDraft: { step: "review", reason: "x" } }))
+  assert.match(noRuntime, /runtime status is not available, so the other reasons are unknown/)
+})
+
+test("no command from a missing, failed or stale read; earlier data is labelled as earlier", () => {
+  const loading = text(render(snapshot({ control: { phase: "loading", value: null, error: null } })))
+  assert.match(loading, /Reading the current state…/)
+  assert.doesNotMatch(loading, /Review resume|Review pause/)
+  const stale = render(snapshot({ control: { ...loaded(state(3, true)), phase: "error", error: failed("server", 503, "TRADING_CONTROL_UNAVAILABLE") } }))
+  const t = text(stale)
+  assert.match(t, /Trading control state unavailable \(503\) The server could not provide it\. The result could not be read\. The state below is from an earlier read at 2026-09-19T09:00:00\.000Z; it may no longer be current\. Read it again before changing it\./)
+  assert.match(t, /Read the current state successfully before changing it\./)
+  assert.doesNotMatch(t, /Review resume|Review pause/)
+  const history = text(render(snapshot({ history: { ...EMPTY_HISTORY, phase: "error", items: [event(2, true)], complete: false, nextBeforeVersion: null, error: failed("network"), failedPage: "first" } })))
+  assert.match(history, /The entries below are from an earlier read at 2026-09-19T09:00:00\.000Z; they may not include later changes\./)
+})
+
+test("control 404 means not enabled: no command, no history; access states show nothing from earlier reads", () => {
+  const t = text(render(snapshot({ control: { phase: "error", value: null, error: failed("disabled", 404) }, runtime: loaded(runtime({ operatorControl: undefined })) })))
+  assert.match(t, /Trading control is not enabled on this server \(404\) The trading control routes are not registered here, so nothing can be paused or resumed from this page\./)
+  assert.match(t, /Not available: trading control is not enabled on this server\./)
+  assert.doesNotMatch(t, /Change history/)
+  for (const [access, copy] of [
+    ["forbidden", /No access to trading control \(403\)/],
+    ["unauthorized", /Session not accepted \(401\)/],
+    ["signed_out", /Operator session required/],
+  ] as const) {
+    const html = render(snapshot({ access }), { onSignInRequired: noop })
+    assert.match(text(html), copy)
+    assert.doesNotMatch(text(html), /Manual gate:|version 0|Change history/)
+  }
+})
+
+test("outcomes: sending, accepted, replayed (old event, later state), conflict, refused, unknown", () => {
+  const sending = text(render(snapshot({ command: command("sending") })))
+  assert.match(sending, /Sending the resume command… Attempt 1, key tc-tes…0001/)
+  assert.doesNotMatch(sending, /Review resume|Confirm resume/, "no second command while sending")
+
+  const accepted = command("accepted", { result: { change: { state: state(1, false, { reason: "Verified local reconciliation" }), change: event(1, false, { previousPaused: true, reason: "Verified local reconciliation" }), replayed: false }, meta: META } })
+  const a = text(render(snapshot({ control: loaded(state(1, false)), runtime: loaded(runtime({ configuredPause: true, operatorControl: { status: "RESUMED", version: 1 } })), command: accepted })))
+  assert.match(a, /Recorded: the resume command This request's audit event: Version 1: Paused → Resumed at 2026-09-19 08:01:00 UTC by ops-control-a ?\. Reason: Verified local reconciliation/)
+  assert.match(a, /Current manual gate from this response \(2026-09-19T09:00:00\.000Z\): Resumed · version 1\./)
+  assert.match(a, /This is not a full trading resume\. Still paused by: Configured pause \(as last reported\)\./)
+  assert.doesNotMatch(a, OVERCLAIMS)
+
+  const replayed = command("replayed", { attempts: 2, result: { change: { state: state(2, true, { operatorId: "ops-control-b" }), change: event(1, false, { previousPaused: true, reason: "Verified local reconciliation" }), replayed: true }, meta: META } })
+  const r = text(render(snapshot({ control: loaded(state(2, true)), command: replayed })))
+  assert.match(r, /Already recorded earlier: the resume command \(replayed\) The server returned this command's original event; nothing was changed again\./)
+  assert.match(r, /Current manual gate from this response \(2026-09-19T09:00:00\.000Z\): Paused · version 2\. It differs from this request's event: a later change \(version 2\) is in effect\./)
+  assert.doesNotMatch(r, /not a full trading resume/, "an old resume is not presented as resuming now")
+
+  const conflict = text(render(snapshot({ command: command("conflict", { error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) })))
+  assert.match(conflict, /Not applied: the state changed first \(409\) The resume was based on version 0, but the state had already moved on, so the server changed nothing for this request\..*this command will not be resent\./)
+
+  const refusals: [StocksAdminError, RegExp][] = [
+    [failed("forbidden", 403, "OPERATOR_FORBIDDEN"), /The server refused the change \(403\)\. This session may not change trading control \(stocks:control\), or the session could not be verified\. Nothing was changed\./],
+    [failed("request", 409, "CONTROL_IDEMPOTENCY_CONFLICT"), /already used for a different command \(409\)\. Nothing was changed by this request\./],
+    [failed("disabled", 404), /The change route is not available on this server \(404\)\. Nothing was changed\./],
+    [failed("request", 400, "INVALID_TRADING_CONTROL_INPUT"), /rejected the command as invalid \(400\)\. Nothing was changed\./],
+  ]
+  for (const [error, copy] of refusals) {
+    const t = text(render(snapshot({ command: command("rejected", { error }) })))
+    assert.match(t, /Not applied: the resume command was refused/)
+    assert.match(t, copy)
+  }
+
+  const unknowns: [Partial<CommandState>, RegExp][] = [
+    [{ error: failed("server", 503, "TRADING_CONTROL_UNAVAILABLE") }, /the server reported that the control result is unavailable \(503\)/],
+    [{ error: failed("network") }, /the connection failed before an answer arrived/],
+    [{ error: failed("invalid", 200) }, /the answer did not match the contract/],
+    [{ error: failed("aborted"), timedOut: true }, /no answer arrived in time/],
+  ]
+  for (const [patch, why] of unknowns) {
+    const html = render(snapshot({ command: command("unknown", { attempts: 2, ...patch }) }))
+    const t = text(html)
+    assert.match(t, /Result unknown: the resume may or may not have been recorded/)
+    assert.match(t, why)
+    // The short key is followed by its full value for screen readers.
+    assert.match(t, /Do not assume that the resume failed or succeeded\. Attempt 2, key tc-tes…0001 tc-test-key-0001 ?\./)
+    assert.match(t, /a version 1 change with your reason means it was recorded/)
+    assert.match(t, /Retry the same command Read state and history Discard this command/)
+    assert.doesNotMatch(t, /Review resume|Review pause/, "no new command while the result is unknown")
+    assert.match(html, /data-outcome="unknown"/)
+  }
+})
+
+test("history: newest first with Load older, an explicit end, and a retry after a failed older page", () => {
+  const items = [event(3, true), event(2, false), event(1, true, { previousPaused: true })]
+  const more = text(render(snapshot({ history: { ...EMPTY_HISTORY, items, complete: false, nextBeforeVersion: 1 } })))
+  assert.match(more, /Paused Version 3 · was resumed .* By ops-control-a · Reason for version 3/)
+  assert.match(more, /Load older changes/)
+  const end = text(render(snapshot({ history: { ...EMPTY_HISTORY, items } })))
+  assert.match(end, /End of history: no older changes\./)
+  const html = render(snapshot({ history: { ...EMPTY_HISTORY, items, complete: false, nextBeforeVersion: 1, phase: "error", error: failed("server", 503), failedPage: "older" } }))
+  assert.match(text(html), /Older changes could not be read; the entries below were read earlier\./)
+  assert.doesNotMatch(html, /<button[^>]*disabled=""[^>]*>Load older changes/, "an older page that failed can be retried")
+  const order = [...html.matchAll(/data-version="(\d+)"/g)].map((match) => Number(match[1]))
+  assert.deepEqual(order, [3, 2, 1])
+})
+
+test("only the reviewed command controls exist; every button is one of a fixed set", () => {
+  const htmls = [
+    render(snapshot()),
+    render(snapshot(), { initialDraft: { step: "review", reason: "x" } }),
+    render(snapshot({ command: command("unknown", { error: failed("network") }) })),
+    render(snapshot({ command: command("conflict", { error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) })),
+    render(snapshot({ history: { ...EMPTY_HISTORY, items: [event(1, false, { previousPaused: true })], complete: false, nextBeforeVersion: 1 } })),
+    render(snapshot({ access: "unauthorized" }), { onSignInRequired: noop }),
+  ]
+  const allowed = /^(Refresh(ing…)?|Review (pause|resume)|Confirm (pause|resume)|Back|Close|Retry the same command|Read state and history|Discard this command|Load older changes|Loading…|Sign in with operator wallet|Check access again)$/
+  for (const html of htmls) {
+    for (const match of html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)) assert.match(text(match[1]).trim(), allowed)
+    assert.doesNotMatch(html, /<form\b|type="submit"/)
+  }
+})
+
+test("sources: POST only in the client, to the trading control path; no stored credentials, role headers, operator ids or fixtures", () => {
+  const dir = path.dirname(fileURLToPath(import.meta.url))
+  const sources = readdirSync(dir).filter((name) => /\.(ts|tsx)$/.test(name) && !/\.test\.tsx$/.test(name) && name !== "fixtures.ts")
+  assert.ok(sources.includes("client.ts") && sources.includes("TradingControlPanel.tsx"))
+  for (const name of sources) {
+    const source = readFileSync(path.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+    assert.doesNotMatch(source, /x-operator-token|operatorToken|x-role|localStorage|sessionStorage|indexedDB|document\.cookie/, name)
+    assert.doesNotMatch(source, /from "\.\/fixtures"/, name)
+    assert.doesNotMatch(source, /parseFloat|toFixed/, name)
+    assert.doesNotMatch(source, /ethereum|eth_send|sendTransaction|signMessage/, name)
+    if (name !== "client.ts") assert.doesNotMatch(source, /method: "(POST|PUT|PATCH|DELETE)"/, name)
+  }
+  const client = readFileSync(path.join(dir, "client.ts"), "utf8")
+  assert.equal((client.match(/method: "POST"/g) ?? []).length, 1)
+  assert.doesNotMatch(client, /method: "(PUT|PATCH|DELETE)"/)
+})

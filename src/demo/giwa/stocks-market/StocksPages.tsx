@@ -4,6 +4,7 @@ import { resolveApiBase } from "../api-base"
 import { ARCO_API_BASE } from "../config"
 import { GIWA_ADMIN_STOCKS_ROUTE, GIWA_STOCKS_ROUTE } from "../routes"
 import { GiwaStocksAdminFeature } from "../stocks-admin"
+import { GiwaStocksTradingControlFeature } from "../stocks-trading-control"
 import { StocksExecutionProvider, StocksExecutionSessionNotice, useStocksExecutionCapability, useStocksOrderExecutionSlot, type ExecutionClockSeam } from "../stocks-execution-host"
 import { StocksSignIn, useGiwaStocksHost } from "../stocks-host"
 import type { KnownHashStore } from "../stocks-known-hash-recovery"
@@ -65,5 +66,6 @@ export function StocksPage() {
 }
 export function StocksAdminPage() {
   const environment = useContext(StocksPageEnvironment); const host = useGiwaStocksHost(); const apiBase = usePageApiBase()
-  return <div className="w-full min-w-0 space-y-6"><StocksNavigation /><StocksSignIn />{apiBase ? <GiwaStocksAdminFeature apiBase={apiBase} session={host.admin} fetch={environment.fetch} onSignInRequired={() => { void host.signIn() }} /> : <p role="status">Stocks 관리자 API 연결 준비 중</p>}</div>
+  // Trading control (003F) uses the same signed session, API base and transport as the read-only console below it.
+  return <div className="w-full min-w-0 space-y-6"><StocksNavigation /><StocksSignIn />{apiBase ? <><GiwaStocksTradingControlFeature apiBase={apiBase} session={host.admin} fetch={environment.fetch} onSignInRequired={() => { void host.signIn() }} /><GiwaStocksAdminFeature apiBase={apiBase} session={host.admin} fetch={environment.fetch} onSignInRequired={() => { void host.signIn() }} /></> : <p role="status">Stocks 관리자 API 연결 준비 중</p>}</div>
 }

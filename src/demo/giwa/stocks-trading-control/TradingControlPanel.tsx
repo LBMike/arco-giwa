@@ -1,0 +1,594 @@
+// Operator trading control panel (003F): the persisted manual gate, the runtime's new-order admission diagnostic,
+// a reviewed pause/resume command and the change history. Every value is labelled with where and when it was read.
+// Nothing here claims that trading is open, that in-flight work was stopped, or that a result is known when it is not.
+import { useId, useState } from "react"
+import { formatUtcMs, shortId } from "../stocks-admin/format"
+import { Button, Card, EmptyRow, FOCUS_RING, Field, Fields, Mono, Notice, Pill, RefreshButton, Time } from "../stocks-admin/ui"
+import { REASON_MAX_LENGTH, checkReason } from "./parse"
+import { canLoadOlder, type StartRefusal } from "./store"
+import type {
+  CommandState,
+  HistoryState,
+  PauseReason,
+  ResourceState,
+  RuntimeStatus,
+  StocksAdminError,
+  TradingControlEvent,
+  TradingControlSnapshot,
+  TradingControlState,
+} from "./types"
+
+export type StartRequest = {
+  readonly paused: boolean
+  readonly reason: string
+  readonly reviewed: { readonly version: number; readonly paused: boolean; readonly observedAt: string }
+}
+
+export type TradingControlViewProps = {
+  readonly snapshot: TradingControlSnapshot
+  readonly now: number
+  readonly onRefresh: () => void
+  readonly onLoadOlder: (beforeVersion: number) => void
+  readonly onStart: (request: StartRequest) => StartRefusal | null
+  readonly onRetry: () => void
+  readonly onDiscard: () => void
+  readonly onRetryAccess: () => void
+  readonly onSignInRequired?: () => void
+  /** Test seam: open the command card on a given step. */
+  readonly initialDraft?: { readonly step: "edit" | "review"; readonly reason: string }
+}
+
+const gateWord = (paused: boolean) => (paused ? "Paused" : "Resumed")
+const actionWord = (paused: boolean) => (paused ? "pause" : "resume")
+
+export const PAUSE_REASON_COPY: Record<PauseReason, { readonly label: string; readonly detail: string }> = {
+  RUNTIME_STOPPED: { label: "Runtime stopped", detail: "This API process is not running the Stocks runtime." },
+  AUTODISPATCH_DISABLED: { label: "Automatic dispatch disabled", detail: "Configured off for this process. A manual resume does not change it." },
+  CONFIGURED_PAUSE: { label: "Configured pause", detail: "A startup setting of this process. A manual resume does not change it." },
+  OPERATOR_PAUSE: { label: "Manual pause", detail: "The operator gate, as this process last cached it." },
+  OPERATOR_CONTROL_UNAVAILABLE: { label: "Manual gate unavailable to this process", detail: "Its cached view expired or the control store could not be read." },
+  OBSERVER_NOT_CURRENT: { label: "Chain observation not current", detail: "The observer has not confirmed a current chain view." },
+}
+
+function readErrorCopy(error: StocksAdminError, what: string): { title: string; body: string } {
+  switch (error.kind) {
+    case "disabled":
+      return { title: `${what} is not available on this server (404)`, body: "The route is not registered here." }
+    case "server":
+      return { title: `${what} unavailable${error.status ? ` (${error.status})` : ""}`, body: "The server could not provide it. The result could not be read." }
+    case "network":
+      return { title: "Could not reach the API", body: "The request failed before a response arrived." }
+    case "invalid":
+      return { title: "Response did not match the contract", body: "The response was rejected and none of it is shown." }
+    case "configuration":
+      return { title: "Stocks admin API is not configured", body: "No request was sent." }
+    case "aborted":
+      return { title: "Request cancelled", body: "The request was cancelled before it finished." }
+    default:
+      return { title: `Request rejected${error.status ? ` (${error.status})` : ""}`, body: "The server rejected the request." }
+  }
+}
+
+export function TradingControlView(props: TradingControlViewProps) {
+  const { snapshot } = props
+  return (
+    <section aria-labelledby="stocks-trading-control-title" className="w-full min-w-0 space-y-4" data-testid="stocks-trading-control">
+      <header className="w-full min-w-0 rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-4 shadow-[var(--shadow-control)]">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-arco-text-soft)]">Admin · Stocks · trading control</p>
+        <h2 id="stocks-trading-control-title" className="mt-1 text-lg font-medium text-[var(--color-arco-ink)]">
+          Trading control
+        </h2>
+        <p className="mt-1 max-w-[720px] text-xs leading-5 text-[var(--color-arco-text-soft)]">
+          A manual admission gate for new Stocks orders on this deployment (DEMO_TESTNET, test values only). It is not an emergency stop: pausing does not
+          cancel transactions that were already approved or sent, and in-flight work may still complete. Order lookup and hash recovery stay available.
+        </p>
+      </header>
+      {snapshot.access !== "ok" ? (
+        <AccessNotice access={snapshot.access} onRetry={props.onRetryAccess} onSignInRequired={props.onSignInRequired} />
+      ) : (
+        <div className="grid w-full min-w-0 gap-4 xl:grid-cols-2">
+          <GateCard control={snapshot.control} now={props.now} onRefresh={props.onRefresh} />
+          <AdmissionCard runtime={snapshot.runtime} control={snapshot.control} />
+          <div className="min-w-0 xl:col-span-2">
+            <CommandCard {...props} key={snapshot.scopeKey} />
+          </div>
+          {snapshot.control.error?.kind !== "disabled" && (
+            <div className="min-w-0 xl:col-span-2">
+              <HistoryCard history={snapshot.history} onLoadOlder={props.onLoadOlder} onRefresh={props.onRefresh} />
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function AccessNotice({ access, onRetry, onSignInRequired }: { access: Exclude<TradingControlSnapshot["access"], "ok">; onRetry: () => void; onSignInRequired?: () => void }) {
+  const copy = {
+    signed_out: { title: "Operator session required", body: "Sign in with an operator wallet. Trading control is read and changed only with that session; the server decides its permissions." },
+    unauthorized: { title: "Session not accepted (401)", body: "The server did not accept the session. Nothing from an earlier read is shown. Sign in again, then check access." },
+    forbidden: {
+      title: "No access to trading control (403)",
+      body: "The server did not grant this session read access to trading control (stocks:read), or could not verify the session. Nothing from an earlier read is shown.",
+    },
+  }[access]
+  return (
+    <div role={access === "signed_out" ? "status" : "alert"} className="w-full rounded-[var(--radius-card)] border border-dashed border-[var(--color-arco-ink)] bg-[var(--color-arco-surface)] p-4">
+      <h3 className="text-sm font-semibold text-[var(--color-arco-ink)]">{copy.title}</h3>
+      <p className="mt-1 max-w-[640px] text-xs leading-5 text-[var(--color-arco-text-soft)]">{copy.body}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {onSignInRequired && access !== "forbidden" && <Button onClick={onSignInRequired}>Sign in with operator wallet</Button>}
+        {access !== "signed_out" && <Button onClick={onRetry}>Check access again</Button>}
+      </div>
+    </div>
+  )
+}
+
+function ReadLine({ observedAt, loadedAt, busy }: { observedAt: string; loadedAt: number; busy: boolean }) {
+  return (
+    <p className="text-[11px] leading-4 text-[var(--color-arco-text-soft)]">
+      Server response{" "}
+      <time dateTime={observedAt} className="font-mono">
+        {observedAt}
+      </time>{" "}
+      · loaded <span className="font-mono">{formatUtcMs(loadedAt)}</span>
+      {busy && " · reading again…"}
+    </p>
+  )
+}
+
+function GateCard({ control, now, onRefresh }: { control: ResourceState<TradingControlState>; now: number; onRefresh: () => void }) {
+  const value = control.value
+  const state = value?.data ?? null
+  return (
+    <Card
+      title="Manual gate (database)"
+      description="The persisted operator gate for new orders on this deployment. It is one of several reasons new orders can be paused."
+      actions={<RefreshButton onClick={onRefresh} busy={control.phase === "loading"} what="trading control" />}
+    >
+      <div className="flex min-w-0 flex-col gap-3" data-testid="stocks-trading-control-gate" data-phase={control.phase}>
+        {control.phase === "error" && control.error && (
+          <Notice tone="error" title={control.error.kind === "disabled" ? "Trading control is not enabled on this server (404)" : readErrorCopy(control.error, "Trading control state").title} live>
+            {control.error.kind === "disabled"
+              ? "The trading control routes are not registered here, so nothing can be paused or resumed from this page."
+              : readErrorCopy(control.error, "Trading control state").body}
+            {state && value && ` The state below is from an earlier read at ${value.meta.observedAt}; it may no longer be current. Read it again before changing it.`}
+          </Notice>
+        )}
+        {!state ? (
+          control.phase === "error" ? null : <EmptyRow>{control.phase === "loading" ? "Reading the current state…" : "Not read yet."}</EmptyRow>
+        ) : (
+          <>
+            {value && <ReadLine observedAt={value.meta.observedAt} loadedAt={value.loadedAt} busy={control.phase === "loading"} />}
+            <div className="flex flex-wrap items-center gap-2">
+              <Pill tone={state.paused ? "attention" : "neutral"}>Manual gate: {gateWord(state.paused)}</Pill>
+              <span className="text-xs text-[var(--color-arco-text-soft)]">version {state.version}</span>
+            </div>
+            <Fields>
+              {state.version === 0 ? (
+                <Field label="Last change" wide>
+                  No change recorded yet. An enabled deployment starts paused at version 0 until an operator resumes it.
+                </Field>
+              ) : (
+                <>
+                  <Field label="Last change">{state.updatedAt && <Time iso={state.updatedAt} now={now} elapsed />}</Field>
+                  <Field label="By operator">
+                    <Mono value={state.operatorId ?? ""} />
+                  </Field>
+                  <Field label="Reason" wide>
+                    <span className="break-words">{state.reason}</span>
+                  </Field>
+                </>
+              )}
+              <Field label="Deployment digest" wide>
+                <Mono value={state.deploymentDigest} short />
+              </Field>
+            </Fields>
+          </>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+function AdmissionCard({ runtime, control }: { runtime: ResourceState<RuntimeStatus>; control: ResourceState<TradingControlState> }) {
+  const value = runtime.value
+  const status = value?.data ?? null
+  const gate = control.value?.data ?? null
+  // The manual gate itself is shown above (from the database); every other reason still blocks new orders.
+  const otherReasons = status ? status.pauseReasons.filter((reason) => reason !== "OPERATOR_PAUSE") : []
+  const cached = status?.operatorControl ?? null
+  const cachedDiffers =
+    cached !== null && gate !== null && (cached.status === "UNAVAILABLE" || cached.version !== gate.version || (cached.status === "PAUSED") !== gate.paused)
+  return (
+    <Card
+      title="New-order admission (runtime diagnostic)"
+      description="What one API process reported about admitting new orders. It is a diagnostic, not permission: every order is still checked by the server when it arrives."
+    >
+      <div className="flex min-w-0 flex-col gap-3" data-testid="stocks-trading-control-admission" data-phase={runtime.phase}>
+        {runtime.phase === "error" && runtime.error && (
+          <Notice tone="error" title={readErrorCopy(runtime.error, "Runtime status").title} live>
+            {readErrorCopy(runtime.error, "Runtime status").body} Whether new orders are admitted is not known from this page.
+            {status && value && ` The report below is from an earlier read at ${value.meta.observedAt}; it may no longer be current.`}
+          </Notice>
+        )}
+        {gate && !gate.paused && (
+          <Notice tone="attention" title="The manual gate is resumed; that alone does not resume trading">
+            {status === null
+              ? "Whether new orders are admitted is unknown until runtime status can be read."
+              : otherReasons.length > 0
+                ? `New orders are still paused by: ${otherReasons.map((reason) => PAUSE_REASON_COPY[reason].label).join(", ")}.`
+                : "This process reported no other pause reason in the report below. Every order is still checked by the server."}
+          </Notice>
+        )}
+        {!status ? (
+          runtime.phase === "error" ? null : <EmptyRow>{runtime.phase === "loading" ? "Reading runtime status…" : "Not read yet."}</EmptyRow>
+        ) : (
+          <>
+            {value && <ReadLine observedAt={value.meta.observedAt} loadedAt={value.loadedAt} busy={runtime.phase === "loading"} />}
+            <div className="flex flex-wrap items-center gap-2">
+              {status.newOrdersPaused ? (
+                <Pill tone="attention">New orders paused</Pill>
+              ) : (
+                <Pill tone="neutral">No pause reason reported</Pill>
+              )}
+              <span className="text-xs text-[var(--color-arco-text-soft)]">as reported by this API process</span>
+            </div>
+            {status.pauseReasons.length > 0 && (
+              <ul className="flex min-w-0 flex-col gap-1.5" aria-label="Pause reasons">
+                {status.pauseReasons.map((reason) => (
+                  <li key={reason} className="min-w-0 text-xs text-[var(--color-arco-ink)]" data-reason={reason}>
+                    <span className="font-medium">{PAUSE_REASON_COPY[reason].label}</span>{" "}
+                    <span className="text-[var(--color-arco-text-soft)]">— {PAUSE_REASON_COPY[reason].detail}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Fields>
+              <Field label="This process's cached manual gate" wide>
+                {cached === null
+                  ? "Not reported (this server runs without operator controls in its runtime status)."
+                  : cached.status === "UNAVAILABLE"
+                    ? "Unavailable"
+                    : `${gateWord(cached.status === "PAUSED")}, version ${cached.version}`}
+                <span className="block text-[11px] text-[var(--color-arco-text-soft)]">
+                  Cached for up to 5 seconds; it can lag behind the database state.
+                  {cachedDiffers && " It differs from the manual gate read above; read both again in a few seconds."}
+                </span>
+              </Field>
+              <Field label="Runtime">{status.runtimeState === "RUNNING" ? "Running" : "Stopped"}</Field>
+              <Field label="Observer">{status.observerStatus}</Field>
+              <Field label="Automatic dispatch">{status.autodispatch ? "On" : "Off"}</Field>
+              <Field label="Configured pause">{status.configuredPause ? "On" : "Off"}</Field>
+              {gate && status.deploymentDigest !== gate.deploymentDigest && (
+                <Field label="Deployment" wide>
+                  <span className="text-[var(--color-arco-down)]">This report is for a different deployment digest than the manual gate above.</span>
+                </Field>
+              )}
+            </Fields>
+          </>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+function CommandCard(props: TradingControlViewProps) {
+  const { snapshot } = props
+  const ids = useId()
+  const [step, setStep] = useState<"edit" | "review">(props.initialDraft?.step ?? "edit")
+  const [text, setText] = useState(props.initialDraft?.reason ?? "")
+  const [showError, setShowError] = useState(false)
+  const [refusal, setRefusal] = useState<StartRefusal | null>(null)
+  const control = snapshot.control
+  const value = control.value
+  const state = value?.data ?? null
+  const command = snapshot.command
+  const disabledFeature = control.error?.kind === "disabled"
+  const ready = control.phase === "ready" && control.error === null && state !== null && value !== null
+  const busy = command?.phase === "sending" || command?.phase === "unknown"
+  const check = checkReason(text)
+  const target = state ? !state.paused : true
+  const reasonsLeft = snapshot.runtime.value?.data.pauseReasons.filter((reason) => reason !== "OPERATOR_PAUSE") ?? null
+
+  const review = () => {
+    setRefusal(null)
+    if (!check.ok) {
+      setShowError(true)
+      return
+    }
+    setShowError(false)
+    setStep("review")
+  }
+  const confirm = () => {
+    if (!state || !value || !check.ok) return
+    const outcome = props.onStart({ paused: target, reason: check.reason, reviewed: { version: state.version, paused: state.paused, observedAt: value.meta.observedAt } })
+    // A second click while the first command is being sent is simply ignored.
+    if (outcome === "busy") return
+    setRefusal(outcome)
+    if (outcome === null) {
+      setStep("edit")
+      setText("")
+    } else if (outcome === "stale_review") setStep("edit")
+  }
+
+  return (
+    <Card
+      title="Pause or resume"
+      description="Changes only the manual gate. The server decides whether this session may change it (stocks:control); this page does not guess."
+    >
+      <div className="flex min-w-0 flex-col gap-3" data-testid="stocks-trading-control-command">
+        {command && <CommandOutcome command={command} reasonsLeft={reasonsLeft} onRetry={props.onRetry} onDiscard={props.onDiscard} onRefresh={props.onRefresh} />}
+        {disabledFeature ? (
+          <EmptyRow>Not available: trading control is not enabled on this server.</EmptyRow>
+        ) : busy ? null : !ready || !state ? (
+          <EmptyRow>{control.phase === "loading" ? "Reading the current state…" : "Read the current state successfully before changing it."}</EmptyRow>
+        ) : step === "edit" ? (
+          <div className="flex min-w-0 flex-col gap-2">
+            <p className="text-xs text-[var(--color-arco-ink)]">
+              The manual gate is <strong>{gateWord(state.paused).toLowerCase()}</strong> (version {state.version}, read {value?.meta.observedAt}).{" "}
+              {target ? "You can pause new orders." : "You can resume the manual gate."}
+            </p>
+            <label htmlFor={`${ids}-reason`} className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-arco-text-soft)]">
+              Reason (recorded in the change history)
+            </label>
+            <textarea
+              id={`${ids}-reason`}
+              value={text}
+              rows={3}
+              maxLength={REASON_MAX_LENGTH + 100}
+              aria-invalid={showError && !check.ok}
+              aria-describedby={`${ids}-reason-help`}
+              onChange={(event) => {
+                setText(event.target.value)
+                setRefusal(null)
+              }}
+              className={`w-full min-w-0 resize-y rounded-[var(--radius-control)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-2 py-1.5 text-xs text-[var(--color-arco-ink)] ${FOCUS_RING}`}
+            />
+            <p id={`${ids}-reason-help`} className="text-[11px] text-[var(--color-arco-text-soft)]" aria-live="polite">
+              {showError && !check.ok ? <span className="text-[var(--color-arco-down)]">{check.message}</span> : `Required, up to ${REASON_MAX_LENGTH} characters, one line. Leading and trailing spaces are removed.`}{" "}
+              <span className="font-mono">
+                {text.trim().length}/{REASON_MAX_LENGTH}
+              </span>
+            </p>
+            {refusal === "stale_review" && (
+              <Notice tone="attention" title="The state changed while you were reviewing" live>
+                Nothing was sent. Review the current state and the change again.
+              </Notice>
+            )}
+            {refusal !== null && refusal !== "stale_review" && (
+              <Notice tone="error" title="Not sent" live>
+                {refusal === "version_limit" ? "The version limit was reached." : refusal === "not_ready" ? "Read the current state successfully first." : "The command could not be prepared."}
+              </Notice>
+            )}
+            <div>
+              <Button onClick={review}>{target ? "Review pause" : "Review resume"}</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex min-w-0 flex-col gap-3" data-testid="stocks-trading-control-review">
+            <Fields>
+              <Field label="Current state (as read)" wide>
+                {gateWord(state.paused)} · version {state.version} · server response {value?.meta.observedAt}
+              </Field>
+              <Field label="Change to send" wide>
+                {target ? "Pause new orders" : "Resume the manual gate"}. The server records it as version {state.version + 1} only if the state is still version{" "}
+                {state.version}; otherwise it refuses and nothing changes.
+              </Field>
+              <Field label="Reason" wide>
+                <span className="break-words">{check.ok ? check.reason : ""}</span>
+              </Field>
+            </Fields>
+            {target ? (
+              <Notice tone="info" title="What a pause does">
+                New admissions that check the manual gate are blocked. Transactions that were already approved or sent are not cancelled, issued wallet requests
+                and execution policies stay valid, and in-flight work may still complete. Order lookup and hash recovery stay available.
+              </Notice>
+            ) : (
+              <Notice tone="attention" title="What a resume does">
+                It clears the manual gate only. New orders stay paused while any other reason remains
+                {reasonsLeft === null
+                  ? " (runtime status is not available, so the other reasons are unknown)."
+                  : reasonsLeft.length > 0
+                    ? `: ${reasonsLeft.map((reason) => PAUSE_REASON_COPY[reason].label).join(", ")} (as last reported).`
+                    : " (none reported in the last runtime status read)."}
+              </Notice>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={confirm}>{target ? "Confirm pause" : "Confirm resume"}</Button>
+              <Button onClick={() => setStep("edit")}>Back</Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+function EventLine({ event }: { event: TradingControlEvent }) {
+  return (
+    <>
+      Version {event.version}: {gateWord(event.previousPaused)} → {gateWord(event.paused)} at <Time iso={event.createdAt} /> by <Mono value={event.operatorId} />. Reason:{" "}
+      <span className="break-words">{event.reason}</span>
+    </>
+  )
+}
+
+function CommandOutcome({ command, reasonsLeft, onRetry, onDiscard, onRefresh }: {
+  command: CommandState
+  reasonsLeft: readonly PauseReason[] | null
+  onRetry: () => void
+  onDiscard: () => void
+  onRefresh: () => void
+}) {
+  const verb = actionWord(command.command.paused)
+  const key = <Mono value={command.command.idempotencyKey} short />
+  const target = command.command.expectedVersion + 1
+  const close = <Button onClick={onDiscard}>Close</Button>
+  const body = (() => {
+    switch (command.phase) {
+      case "sending":
+        return (
+          <Notice tone="info" title={`Sending the ${verb} command…`} live>
+            Attempt {command.attempts}, key {key}. Waiting for the server's answer; the buttons stay disabled until it arrives.
+          </Notice>
+        )
+      case "accepted":
+      case "replayed": {
+        const result = command.result!
+        const { change, state } = result.change
+        const differs = state.version !== change.version || state.paused !== change.paused
+        return (
+          <Notice tone="info" title={command.phase === "accepted" ? `Recorded: the ${verb} command` : `Already recorded earlier: the ${verb} command (replayed)`} live>
+            <span className="block">
+              {command.phase === "replayed" && "The server returned this command's original event; nothing was changed again. "}
+              This request's audit event: <EventLine event={change} />
+            </span>
+            <span className="mt-1 block">
+              Current manual gate from this response ({result.meta.observedAt}): {gateWord(state.paused)} · version {state.version}.
+              {differs && ` It differs from this request's event: a later change (version ${state.version}) is in effect.`}
+            </span>
+            {state.deploymentDigest !== command.basis.deploymentDigest && (
+              <span className="mt-1 block text-[var(--color-arco-down)]">The server answered for a different deployment than the one you reviewed.</span>
+            )}
+            {!command.command.paused && !differs && (
+              <span className="mt-1 block">
+                This is not a full trading resume.{" "}
+                {reasonsLeft === null ? "Whether other reasons remain is unknown until runtime status is read." : reasonsLeft.length > 0 ? `Still paused by: ${reasonsLeft.map((reason) => PAUSE_REASON_COPY[reason].label).join(", ")} (as last reported).` : "See New-order admission for the runtime's latest report."}
+              </span>
+            )}
+            {command.command.paused && !differs && <span className="mt-1 block">Transactions already approved or sent are not cancelled; in-flight work may still complete.</span>}
+            <span className="mt-2 flex flex-wrap gap-2">{close}</span>
+          </Notice>
+        )
+      }
+      case "conflict":
+        return (
+          <Notice tone="attention" title="Not applied: the state changed first (409)" live>
+            The {verb} was based on version {command.command.expectedVersion}, but the state had already moved on, so the server changed nothing for this
+            request. The current state is being read again. Review it and start a new command if a change is still needed; this command will not be resent.
+            <span className="mt-2 flex flex-wrap gap-2">{close}</span>
+          </Notice>
+        )
+      case "rejected": {
+        const error = command.error
+        const copy =
+          error?.code === "CONTROL_IDEMPOTENCY_CONFLICT"
+            ? "The server refused this command's key because it was already used for a different command (409). Nothing was changed by this request. The state is being read again; start a new command if a change is still needed."
+            : error?.kind === "forbidden"
+              ? "The server refused the change (403). This session may not change trading control (stocks:control), or the session could not be verified. Nothing was changed."
+              : error?.kind === "unauthorized"
+                ? "The server did not accept the session (401). Nothing was changed."
+                : error?.kind === "disabled"
+                  ? "The change route is not available on this server (404). Nothing was changed."
+                  : error?.kind === "configuration" || error?.kind === "unauthenticated"
+                    ? "The command was not sent (no valid API base or session)."
+                    : "The server rejected the command as invalid (400). Nothing was changed."
+        return (
+          <Notice tone="error" title={`Not applied: the ${verb} command was refused`} live>
+            {copy}
+            <span className="mt-2 flex flex-wrap gap-2">{close}</span>
+          </Notice>
+        )
+      }
+      case "unknown": {
+        const error = command.error
+        const why = command.timedOut
+          ? "no answer arrived in time"
+          : error?.kind === "network"
+            ? "the connection failed before an answer arrived"
+            : error?.kind === "invalid"
+              ? "the answer did not match the contract"
+              : error?.status === 503
+                ? "the server reported that the control result is unavailable (503)"
+                : `the server answered ${error?.status ?? "without a status"}`
+        return (
+          <Notice tone="attention" title={`Result unknown: the ${verb} may or may not have been recorded`} live>
+            <span className="block">
+              No verifiable answer: {why}. Do not assume that the {verb} failed or succeeded. Attempt {command.attempts}, key {key}.
+            </span>
+            <span className="mt-1 block">
+              Retrying sends the identical command with the same key: if it was recorded, the server returns the original event instead of changing again. To
+              check first, read the state and history: a version {target} change with your reason means it was recorded. Discarding is safe too; a new command
+              needs the current version and the server refuses an outdated one.
+            </span>
+            <span className="mt-2 flex flex-wrap gap-2">
+              <Button onClick={onRetry}>Retry the same command</Button>
+              <Button onClick={onRefresh}>Read state and history</Button>
+              <Button onClick={onDiscard}>Discard this command</Button>
+            </span>
+          </Notice>
+        )
+      }
+    }
+  })()
+  return (
+    <div data-testid="stocks-trading-control-outcome" data-outcome={command.phase} data-attempts={command.attempts}>
+      {body}
+    </div>
+  )
+}
+
+function HistoryCard({ history, onLoadOlder, onRefresh }: { history: HistoryState; onLoadOlder: (beforeVersion: number) => void; onRefresh: () => void }) {
+  const { items } = history
+  return (
+    <Card
+      title="Change history"
+      description="Recorded manual gate changes for this deployment, newest first. They are stored in the database and are not deleted automatically. Each page is a separate read."
+      actions={<RefreshButton onClick={onRefresh} busy={history.phase === "loading"} what="change history" />}
+    >
+      <div className="flex min-w-0 flex-col gap-3" data-testid="stocks-trading-control-history" data-phase={history.phase} data-complete={history.complete}>
+        {history.phase === "error" && history.error && (
+          <Notice tone="error" title={readErrorCopy(history.error, "Change history").title} live>
+            {readErrorCopy(history.error, "Change history").body}
+            {items.length > 0 &&
+              (history.failedPage === "older"
+                ? " Older changes could not be read; the entries below were read earlier."
+                : ` The entries below are from an earlier read${history.observedAt ? ` at ${history.observedAt}` : ""}; they may not include later changes.`)}
+          </Notice>
+        )}
+        {history.observedAt && <p className="text-[11px] text-[var(--color-arco-text-soft)]">Newest page read at <span className="font-mono">{history.observedAt}</span></p>}
+        {items.length === 0 ? (
+          history.phase === "loading" ? (
+            <EmptyRow>Reading the change history…</EmptyRow>
+          ) : history.complete ? (
+            <EmptyRow>No changes recorded for this deployment.</EmptyRow>
+          ) : history.phase === "error" ? null : (
+            <EmptyRow>Not read yet.</EmptyRow>
+          )
+        ) : (
+          <ol className="flex min-w-0 flex-col" aria-label="Manual gate changes, newest first">
+            {items.map((event) => (
+              <li key={event.id} className="min-w-0 border-t border-[var(--color-arco-border)] py-2 first:border-t-0" data-testid="stocks-trading-control-event" data-version={event.version}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Pill tone={event.paused ? "attention" : "neutral"}>{gateWord(event.paused)}</Pill>
+                  <span className="text-xs text-[var(--color-arco-ink)]">
+                    Version {event.version} · was {gateWord(event.previousPaused).toLowerCase()}
+                  </span>
+                  <Time iso={event.createdAt} />
+                </div>
+                <p className="mt-1 text-xs text-[var(--color-arco-ink)]">
+                  By <Mono value={event.operatorId} /> · <span className="break-words">{event.reason}</span>
+                </p>
+                <p className="mt-0.5 text-[11px] text-[var(--color-arco-text-soft)]">
+                  Event <span className="font-mono">{shortId(event.id, 10, 6)}</span>
+                </p>
+              </li>
+            ))}
+          </ol>
+        )}
+        {items.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {history.complete ? (
+              <p className="text-xs text-[var(--color-arco-text-soft)]">End of history: no older changes.</p>
+            ) : history.nextBeforeVersion !== null ? (
+              <Button onClick={() => onLoadOlder(history.nextBeforeVersion as number)} disabled={!canLoadOlder(history)}>
+                {history.phase === "loading" ? "Loading…" : "Load older changes"}
+              </Button>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
