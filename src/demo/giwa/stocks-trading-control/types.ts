@@ -121,7 +121,15 @@ export type CommandState = {
  * A command whose result stays unknown after it was discarded or an access denial cleared the panel (same scope only).
  * `sinceSeq` is the order mark from which a control read is known to be taken after it.
  */
-export type AbandonedCommand = { readonly paused: boolean; readonly expectedVersion: number; readonly idempotencyKey: string; readonly reason: string; readonly sinceSeq: number }
+export type AbandonedCommand = {
+  readonly paused: boolean
+  readonly expectedVersion: number
+  readonly idempotencyKey: string
+  readonly reason: string
+  readonly sinceSeq: number
+  /** The deployment the command was reviewed for; only that deployment's history can tell whether it was recorded. */
+  readonly deploymentDigest: string
+}
 
 export type TradingControlSnapshot = {
   readonly scopeKey: string

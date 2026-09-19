@@ -551,3 +551,57 @@ test("a retry that the identical command can never pass (400, idempotency confli
     assert.equal(posts(transport).length, 2)
   }
 })
+
+// ---------------------------------------------------------------- review round 3
+
+test("a read started before the POST answer still wins with a higher version of the same deployment; another deployment is read again", async () => {
+  const { store, transport } = setup({ ignoreAbort: true })
+  await readAll(store, transport)
+  store.start({ paused: false, reason: REASON, reviewed: reviewed(store) })
+  store.loadControl()
+  const during = transport.take("GET", TRADING_CONTROL_PATH)
+  transport.take("POST", TRADING_CONTROL_PATH).respond(ok(tcChange(resumedState(), resumeEvent())))
+  await flush()
+  during.respond(ok(tcRead(tcState(2, true, { operatorId: "ops-control-b", reason: "Paused right after" }))))
+  await flush()
+  assert.equal(store.getSnapshot().control.value?.data.version, 2, "the newer version is kept")
+  // Another deployment from an older read: nothing shown from it, a new read instead.
+  const second = setup({ ignoreAbort: true })
+  await readAll(second.store, second.transport)
+  second.store.start({ paused: false, reason: REASON, reviewed: reviewed(second.store) })
+  second.store.loadControl()
+  const early = second.transport.take("GET", TRADING_CONTROL_PATH)
+  second.transport.take("POST", TRADING_CONTROL_PATH).respond(ok(tcChange(resumedState(), resumeEvent())))
+  await flush()
+  early.respond(ok(tcRead({ ...tcState(0, true), deploymentDigest: "c".repeat(64) })))
+  await flush()
+  assert.equal(second.store.getSnapshot().control.value?.data.deploymentDigest, tcState(0, true).deploymentDigest)
+  assert.ok(second.transport.pending.some((request) => request.method === "GET" && request.path === TRADING_CONTROL_PATH), "read again")
+})
+
+test("after a POST answer for another deployment, the history is read only once the control state was read again", async () => {
+  const { store, transport } = setup()
+  await readAll(store, transport)
+  store.start({ paused: false, reason: REASON, reviewed: reviewed(store) })
+  store.loadControl()
+  transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead({ ...tcState(2, false), deploymentDigest: "b".repeat(64) })))
+  await flush()
+  transport.take("POST", TRADING_CONTROL_PATH).respond(ok(tcChange(resumedState(), resumeEvent())))
+  await flush()
+  assert.equal(transport.pending.some((request) => request.path === HISTORY), false, "no history read against the wrong deployment yet")
+  transport.take("GET", TRADING_CONTROL_PATH).respond(ok(tcRead({ ...tcState(2, false), deploymentDigest: "b".repeat(64) })))
+  await flush()
+  transport.take("GET", HISTORY).respond(ok(tcHistory([{ ...tcEvent(2, false), deploymentDigest: "b".repeat(64) }, { ...tcEvent(1, true), deploymentDigest: "b".repeat(64) }], null)))
+  await flush()
+  assert.deepEqual([store.getSnapshot().history.phase, store.getSnapshot().history.items.length], ["ready", 2])
+})
+
+test("an unresolved note records the deployment its command was reviewed for", async () => {
+  const { store, transport } = setup()
+  await readAll(store, transport)
+  store.start({ paused: false, reason: REASON, reviewed: reviewed(store) })
+  transport.take("POST", TRADING_CONTROL_PATH).fail()
+  await flush()
+  store.discard()
+  assert.equal(store.getSnapshot().abandoned?.deploymentDigest, tcState(0, true).deploymentDigest)
+})

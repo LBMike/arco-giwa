@@ -123,9 +123,20 @@ export function TradingControlView(props: TradingControlViewProps) {
   )
 }
 
+/** What the page can currently read: only the command's own deployment's history can tell whether it was recorded. */
+type HistoryScope = { readonly disabled: boolean; readonly shownDigest: string | null }
+
 /** How to tell from the history whether a command with an unknown result was recorded. */
-function RecordedCheck({ paused, expectedVersion, reason }: { paused: boolean; expectedVersion: number; reason: string }) {
+function RecordedCheck({ paused, expectedVersion, reason, deploymentDigest, scope }: { paused: boolean; expectedVersion: number; reason: string; deploymentDigest: string; scope: HistoryScope }) {
   const version = expectedVersion + 1
+  if (scope.disabled) return <>The control routes are not available here, so whether this command was recorded cannot be checked from this page.</>
+  if (scope.shownDigest !== null && scope.shownDigest !== deploymentDigest) {
+    return (
+      <>
+        This command was for deployment <Mono value={deploymentDigest} short />; the history shown is for another deployment and cannot tell whether it was recorded.
+      </>
+    )
+  }
   return (
     <>
       In the change history, a version {version} {actionWord(paused)} with the reason “<span className="break-words">{reason}</span>” means it was recorded; any other change
@@ -134,13 +145,18 @@ function RecordedCheck({ paused, expectedVersion, reason }: { paused: boolean; e
   )
 }
 
-function AbandonedNote({ abandoned }: { abandoned: AbandonedCommand }) {
+function AbandonedNote({ abandoned, scope }: { abandoned: AbandonedCommand; scope: HistoryScope }) {
   return (
     <>
       A {actionWord(abandoned.paused)} command sent from this page (key <Mono value={abandoned.idempotencyKey} short />) has no verified result. It may or may not have
-      been recorded, and it is not resent. <RecordedCheck paused={abandoned.paused} expectedVersion={abandoned.expectedVersion} reason={abandoned.reason} />
+      been recorded, and it is not resent.{" "}
+      <RecordedCheck paused={abandoned.paused} expectedVersion={abandoned.expectedVersion} reason={abandoned.reason} deploymentDigest={abandoned.deploymentDigest} scope={scope} />
     </>
   )
+}
+
+function historyScope(snapshot: TradingControlSnapshot): HistoryScope {
+  return { disabled: snapshot.control.error?.kind === "disabled", shownDigest: snapshot.control.value?.data.deploymentDigest ?? null }
 }
 
 function AccessNotice({ access, abandoned, onRetry, onSignInRequired }: {
@@ -163,7 +179,7 @@ function AccessNotice({ access, abandoned, onRetry, onSignInRequired }: {
       <p className="mt-1 max-w-[640px] text-xs leading-5 text-[var(--color-arco-text-soft)]">{copy.body}</p>
       {abandoned && (
         <p className="mt-2 max-w-[640px] text-xs leading-5 text-[var(--color-arco-ink)]" data-testid="stocks-trading-control-abandoned">
-          <AbandonedNote abandoned={abandoned} />
+          <AbandonedNote abandoned={abandoned} scope={{ disabled: false, shownDigest: null }} />
         </p>
       )}
       <div className="mt-3 flex flex-wrap gap-2">
@@ -202,12 +218,16 @@ function GateCard({ control, unresolved, now, onRefresh }: { control: ResourceSt
             {control.error.kind === "disabled"
               ? "The trading control routes are not registered here, so nothing can be paused or resumed from this page."
               : readErrorCopy(control.error, "Trading control state").body}
-            {state && value && ` The state below is from an earlier read at ${value.meta.observedAt}; it may no longer be current. Read it again before changing it.`}
+            {state &&
+              value &&
+              (control.error.kind === "disabled"
+                ? ` The state below is from an earlier read at ${value.meta.observedAt}, before the routes became unavailable.`
+                : ` The state below is from an earlier read at ${value.meta.observedAt}; it may no longer be current. Read it again before changing it.`)}
           </Notice>
         )}
         {unresolved === "sending" && value && (
           <Notice tone="attention" title="A command is being sent">
-            The state below was read at {value.meta.observedAt}, before it; it may change when the command is answered.
+            The state below (read at {value.meta.observedAt}) may or may not include it. Read it again once the command is answered.
           </Notice>
         )}
         {unresolved === "unknown" && value && (
@@ -420,10 +440,10 @@ function CommandCard(props: TradingControlViewProps) {
 
   return (
     <Card title="Pause or resume" description="Changes only the manual gate. The server decides whether this session may change it (stocks:control); this page does not guess.">
-      <div ref={cardRef} tabIndex={-1} className={`flex min-w-0 flex-col gap-3 rounded-[var(--radius-control)] ${FOCUS_RING}`} data-testid="stocks-trading-control-command">
+      <div ref={cardRef} tabIndex={-1} role="group" aria-label="Pause or resume" className={`flex min-w-0 flex-col gap-3 rounded-[var(--radius-control)] ${FOCUS_RING}`} data-testid="stocks-trading-control-command">
         {snapshot.abandoned && (
           <Notice tone="attention" title="An earlier command has no verified result">
-            <AbandonedNote abandoned={snapshot.abandoned} />
+            <AbandonedNote abandoned={snapshot.abandoned} scope={historyScope(snapshot)} />
             <span className="mt-2 flex flex-wrap gap-2">
               <Button
                 onClick={() => {
@@ -613,7 +633,11 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
           shown === null
             ? null
             : shown.deploymentDigest !== state.deploymentDigest
-              ? "The state shown above is for a different deployment than this response; it is being read again."
+              ? controlPhase === "loading"
+                ? "The state shown above is for a different deployment than this response; it is being read again."
+                : controlPhase === "error"
+                  ? "The state shown above is for a different deployment than this response; reading it again failed."
+                  : "The state shown above is for a different deployment than this response: the server now serves that one."
               : shown.version > state.version
                 ? `A newer state (version ${shown.version}) is shown above.`
                 : null
@@ -679,6 +703,14 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
       case "unknown": {
         const error = command.error
         const readiness = retryReadiness(snapshot)
+        const note = snapshot.abandoned
+        const sameSlot =
+          note !== null &&
+          note.idempotencyKey !== command.command.idempotencyKey &&
+          note.expectedVersion === command.command.expectedVersion &&
+          note.paused === command.command.paused &&
+          note.reason === command.command.reason &&
+          note.deploymentDigest === command.basis.deploymentDigest
         const status = error?.status ? ` (${error.status}${error.code ? ` ${error.code}` : ""})` : ""
         const why = command.retryRefused
           ? error?.status === 400
@@ -706,7 +738,21 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
               assume that the {verb} failed or succeeded. Attempt {command.attempts}, key {key}.
             </span>
             <span className="mt-1 block">
-              <RecordedCheck paused={command.command.paused} expectedVersion={command.command.expectedVersion} reason={command.command.reason} />
+              <RecordedCheck
+                paused={command.command.paused}
+                expectedVersion={command.command.expectedVersion}
+                reason={command.command.reason}
+                deploymentDigest={command.basis.deploymentDigest}
+                scope={historyScope(snapshot)}
+              />
+              {sameSlot && (
+                <>
+                  {" "}
+                  The earlier unresolved command (note above) has the same version, action and reason, so a matching version {command.command.expectedVersion + 1} entry
+                  shows only that one of the two was recorded. A retry of this command settles which: a replay means this command, a version conflict (409) means the
+                  earlier one.
+                </>
+              )}
             </span>
             {readiness === "deployment_changed" ? (
               <span className="mt-1 block text-[var(--color-arco-down)]">
@@ -714,6 +760,8 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
                 deployment, and on this one it would be a new, unreviewed command. Discard this command, then review the current state and start a new command if a
                 change is needed.
               </span>
+            ) : readiness === "read_first" && snapshot.control.error?.kind === "disabled" ? (
+              <span className="mt-1 block">The control routes are not available on this server now, so this command cannot be retried from this page.</span>
             ) : readiness === "read_first" ? (
               <span className="mt-1 block">
                 Read the state and history first. Retrying becomes available after a successful read taken now, so a retry cannot reach another deployment

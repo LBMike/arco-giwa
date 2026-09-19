@@ -267,9 +267,9 @@ test("retained values are never stated as the present: gate card, admission noti
   const reread = text(render(snapshot({ control: loaded(state(1, false)), controlReadSeq: 3, command: command("unknown", { error: failed("network"), unknownSeq: 2 }) })))
   assert.doesNotMatch(reread, /Read before a command whose result is unknown/)
   const sending = text(render(snapshot({ command: command("sending") })))
-  assert.match(sending, /A command is being sent The state below was read at 2026-09-19T09:00:00\.000Z, before it; it may change when the command is answered\./)
+  assert.match(sending, /A command is being sent The state below \(read at 2026-09-19T09:00:00\.000Z\) may or may not include it\. Read it again once the command is answered\./)
   // A resumed gate read before an unresolved command is stated in the past tense, and no new command starts from it.
-  const resumedBefore = text(render(snapshot({ control: loaded(state(1, false)), controlReadSeq: 1, abandoned: { paused: true, expectedVersion: 1, idempotencyKey: "tc-test-key-0009", reason: "Pause drill", sinceSeq: 4 } })))
+  const resumedBefore = text(render(snapshot({ control: loaded(state(1, false)), controlReadSeq: 1, abandoned: { paused: true, expectedVersion: 1, idempotencyKey: "tc-test-key-0009", reason: "Pause drill", sinceSeq: 4, deploymentDigest: state(0, true).deploymentDigest } })))
   assert.match(resumedBefore, /At the earlier read \(2026-09-19T09:00:00\.000Z\) the manual gate was resumed; that alone does not resume trading/)
   assert.match(resumedBefore, /The state above was read before a command whose result is unknown\. Read it again before starting a new command\./)
   assert.doesNotMatch(resumedBefore, /Review pause/)
@@ -312,8 +312,8 @@ test("a refused retry, a changed deployment and an abandoned command stay unknow
   const moved = render(snapshot({ control: loaded({ ...state(0, true), deploymentDigest: "a".repeat(64) }), controlReadSeq: 3, command: command("unknown", { error: failed("network"), unknownSeq: 2 }) }))
   assert.match(text(moved), /The server now serves a different deployment than the one this command was reviewed for\. It cannot be retried here.*Discard this command, then review the current state/)
   assert.doesNotMatch(moved, />Retry the same command</)
-  const abandoned = { paused: false, expectedVersion: 0, idempotencyKey: "tc-test-key-0001", reason: "Verified local reconciliation", sinceSeq: 2 }
-  assert.match(text(render(snapshot({ access: "forbidden", abandoned }))), /No access to trading control \(403\).*A resume command sent from this page \(key tc-tes…0001 tc-test-key-0001 ?\) has no verified result\. It may or may not have been recorded, and it is not resent\. In the change history, a version 1 resume with the reason “ ?Verified local reconciliation ?” means it was recorded; any other change at version 1 means it was not, and it can no longer be recorded\./)
+  const abandoned = { paused: false, expectedVersion: 0, idempotencyKey: "tc-test-key-0001", reason: "Verified local reconciliation", sinceSeq: 2, deploymentDigest: state(0, true).deploymentDigest }
+  assert.match(text(render(snapshot({ access: "forbidden", abandoned }))), /No access to trading control \(403\).*A resume command sent from this page \(key tc-tes…0001 tc-test-key-0001 ?\) has no verified result\. It may or may not have been recorded, and it is not resent\. +In the change history, a version 1 resume with the reason “ ?Verified local reconciliation ?” means it was recorded; any other change at version 1 means it was not, and it can no longer be recorded\./)
   assert.match(text(render(snapshot({ abandoned, controlReadSeq: 3 }))), /An earlier command has no verified result A resume command sent from this page/)
   // A retry that met a version conflict proves the earlier attempt was not recorded.
   assert.match(text(render(snapshot({ command: command("conflict", { attempts: 2, error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) }))), /this also shows that the earlier attempt with this key was not recorded\./)
@@ -352,4 +352,39 @@ test("a review that can no longer be confirmed says why, by read phase, and offe
     assert.doesNotMatch(html, />Confirm (pause|resume)</)
     assert.match(html, /role="group"[^>]*aria-labelledby="[^"]*-review-title"/)
   }
+})
+
+// ---------------------------------------------------------------- review round 3
+
+test("the recorded-or-not check applies only to the command's own deployment and a readable history", () => {
+  const other = { ...state(0, true), deploymentDigest: "a".repeat(64) }
+  const moved = text(render(snapshot({ control: loaded(other), controlReadSeq: 3, command: command("unknown", { error: failed("network"), unknownSeq: 2 }) })))
+  assert.match(moved, /This command was for deployment 5f0c2b…a2c4 ?5f0c2b7d9e41a3c6b8d0f2e4a6c8b0d2f4e6a8c0b2d4f6e8a0c2e4b6d8f0a2c4 ?; the history shown is for another deployment and cannot tell whether it was recorded\./)
+  assert.doesNotMatch(moved, /means it was recorded/)
+  const note = { paused: false, expectedVersion: 0, idempotencyKey: "tc-test-key-0001", reason: "Verified local reconciliation", sinceSeq: 1, deploymentDigest: state(0, true).deploymentDigest }
+  const disabled = text(render(snapshot({ control: { phase: "error", value: null, error: failed("disabled", 404) }, abandoned: note })))
+  assert.match(disabled, /The control routes are not available here, so whether this command was recorded cannot be checked from this page\./)
+  assert.doesNotMatch(disabled, /means it was recorded/)
+})
+
+test("the other-deployment note follows the re-read; the card's focus fallback is a named group", () => {
+  const accepted = (control: TradingControlSnapshot["control"]) =>
+    text(render(snapshot({ control, command: command("accepted", { result: { change: { state: state(1, false, { reason: "Verified local reconciliation" }), change: event(1, false, { previousPaused: true, reason: "Verified local reconciliation" }), replayed: false }, meta: META } }) })))
+  const other = { ...state(2, false), deploymentDigest: "b".repeat(64) }
+  assert.match(accepted({ ...loaded(other), phase: "loading" }), /for a different deployment than this response; it is being read again\./)
+  assert.match(accepted({ ...loaded(other), phase: "error", error: failed("network") }), /for a different deployment than this response; reading it again failed\./)
+  assert.match(accepted(loaded(other)), /for a different deployment than this response: the server now serves that one\./)
+  assert.match(render(snapshot()), /role="group" aria-label="Pause or resume"[^>]*data-testid="stocks-trading-control-command"/)
+})
+
+test("a disabled feature says a retry and the history check are impossible; a shared version slot is explained", () => {
+  const disabled = { phase: "error" as const, value: loaded(state(0, true)).value, error: failed("disabled", 404) }
+  const t = text(render(snapshot({ control: disabled, controlReadSeq: 3, command: command("unknown", { attempts: 2, unknownSeq: 2, retryRefused: true, error: failed("disabled", 404) }) })))
+  assert.match(t, /The control routes are not available on this server now, so this command cannot be retried from this page\./)
+  assert.match(t, /whether this command was recorded cannot be checked from this page/)
+  assert.doesNotMatch(t, /Retrying becomes available after a successful read|Read it again before changing it/)
+  assert.match(t, /The state below is from an earlier read at 2026-09-19T09:00:00\.000Z, before the routes became unavailable\./)
+  const note = { paused: false, expectedVersion: 0, idempotencyKey: "tc-test-key-0000", reason: "Verified local reconciliation", sinceSeq: 1, deploymentDigest: state(0, true).deploymentDigest }
+  const shared = text(render(snapshot({ controlReadSeq: 3, abandoned: note, command: command("unknown", { unknownSeq: 2, error: failed("network") }) })))
+  assert.match(shared, /The earlier unresolved command \(note above\) has the same version, action and reason, so a matching version 1 entry shows only that one of the two was recorded\. A retry of this command settles which: a replay means this command, a version conflict \(409\) means the earlier one\./)
 })

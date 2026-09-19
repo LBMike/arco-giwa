@@ -106,6 +106,7 @@ export class TradingControlStore {
   private commandController: AbortController | null = null
   private commandTimer: ReturnType<typeof setTimeout> | null = null
   private commandSequence = 0
+  private historyAfterControl = false
 
   constructor(config: TradingControlStoreConfig) {
     this.config = config
@@ -157,13 +158,25 @@ export class TradingControlStore {
       if (!this.isLatest("control", generation, sequence)) return
       this.controllers.delete("control")
       if (result.ok) {
-        // A read that started before the shown value was obtained (a POST answer) is older: it never replaces it.
         const shown = this.snapshot.controlReadSeq
-        if (shown !== null && sequence < shown) return
-        this.write({ control: { phase: "ready", value: { data: result.data, meta: result.meta, loadedAt: this.now() }, error: null }, controlReadSeq: sequence })
+        let mark = sequence
+        if (shown !== null && sequence < shown) {
+          // Started before the shown value (a POST answer). It is still newer if it shows the same deployment at a higher
+          // version (versions only increase); a read of another deployment is repeated; anything else is older.
+          const current = this.snapshot.control.value?.data
+          if (current && result.data.deploymentDigest !== current.deploymentDigest) return this.loadControl()
+          if (!current || result.data.version <= current.version) return
+          mark = ++this.sequence
+        }
+        this.write({ control: { phase: "ready", value: { data: result.data, meta: result.meta, loadedAt: this.now() }, error: null }, controlReadSeq: mark })
+        if (this.historyAfterControl) {
+          this.historyAfterControl = false
+          this.loadHistory(null)
+        }
       } else if (!this.denyOnAccessError(result.error)) {
         const shown = this.snapshot.controlReadSeq
         if (shown !== null && sequence < shown) return
+        this.historyAfterControl = false
         this.write({ control: { phase: "error", value: this.snapshot.control.value, error: result.error } })
       }
     })
@@ -337,8 +350,11 @@ export class TradingControlStore {
           command: { ...command, phase: result.data.replayed ? "replayed" : "accepted", result: { change: result.data, meta: result.meta }, error: null, timedOut: false, retryRefused: false, unknownSeq: null },
           ...(keep ? {} : { control: { phase: "ready" as const, value: { data: state, meta: result.meta, loadedAt: this.now() }, error: null }, controlReadSeq: ++this.sequence }),
         })
-        if (otherDeployment) this.loadControl()
-        this.loadHistory(null)
+        if (otherDeployment) {
+          // The history is checked against the shown deployment: read it once the control state has been read again.
+          this.historyAfterControl = true
+          this.loadControl()
+        } else this.loadHistory(null)
         this.loadRuntime()
         return
       }
@@ -395,6 +411,7 @@ export class TradingControlStore {
 
   private reset(scopeKey: string, access: TradingControlAccess, abandoned: AbandonedCommand | null = null): void {
     this.generation += 1
+    this.historyAfterControl = false
     this.abortAll()
     this.snapshot = emptySnapshot(scopeKey, access, abandoned)
     this.emit()
@@ -422,7 +439,7 @@ export class TradingControlStore {
 
 function abandonedOf(command: CommandState, sinceSeq: number): AbandonedCommand {
   const { paused, expectedVersion, idempotencyKey, reason } = command.command
-  return { paused, expectedVersion, idempotencyKey, reason, sinceSeq }
+  return { paused, expectedVersion, idempotencyKey, reason, sinceSeq, deploymentDigest: command.basis.deploymentDigest }
 }
 
 /**
