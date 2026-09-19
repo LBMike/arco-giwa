@@ -54,7 +54,30 @@ This is a builder-side fix of Codex's P3 finding KH-UI-003D-P3-01 (`docs/evidenc
 | Card test | 2 pass / 1 fail: the new test, at the receipt-check line of BUY APPROVAL | 3/3 |
 | Page DOM | 20 pass / 3 fail: parent + 21 + 22, both at "timed out waiting for RECORDED + FAILED copy" after 21's KEPT + FAILED step had passed | 23/23 |
 
-@@CHECKS@@
+## Checks (`final/`, HEAD `dd66b22`; this file is added by the following docs-only commit)
+
+| Check | Exit | Result |
+| --- | --- | --- |
+| Focused: known-hash module and card tests, owner scope, first-commit DOM (DOM + artifacts) | 0 | 37/37 |
+| Focused: registry, full-stack, page DOM, harness | 0 | 66/66 |
+| Page DOM repeated | 0 | 23/23 (gate + 22 scenarios) |
+| `npm run typecheck` | 0 | no errors |
+| `npm run build` | 0 | built; the existing chunk-size warning only |
+| `npm run test:frontend` with DOM runtime + ABI artifacts | 0 | **710/710** (003D: 707; +1 card test, +2 page scenarios) |
+| `npm run test:frontend` CI-like, first run | 1 | 658 tests: 652 pass, **1 fail**, 5 skipped. The failure is `stocks-investor/recovery-regressions.test.tsx` "quote deadline subtracts 61000ms transit…" (`-1001 !== -1000`) in an unchanged module (`git diff 6455d4d HEAD -- src/demo/giwa/stocks-investor` is empty; the file was last changed in `8174fce`). It compares `deadlineMs - nowMs` across a real-clock millisecond. In isolation it failed 1 of 10 runs (`investor-deadline-repeat.log`). The log is kept as `frontend-ci-like-run1-flake.log`. Not fixed here: outside this task's scope |
+| `npm run test:frontend` CI-like, rerun | 0 | 658 tests: **653 pass, 0 fail, 5 skipped** (4 DOM gates, 1 artifact gate) |
+| `npm run test:server` | 0 | 402 tests: **330 pass, 72 DB-gated skips**, 0 fail |
+| `npm run test:security` | 0 | env exposure and evmVersion checks pass |
+| design tokens `--all` | 1 | the 7 known baseline findings, none new |
+| design stories `--all` | 0 | no hard violations |
+| `.mjs` DOM regressions (market routes, admin scope-render, investor delayed-sell) | 0 | 23/23 |
+| `git diff --check 6455d4d HEAD` | 0 | clean |
+
+**Boundaries:**
+- `final/changed-vs-base.txt`: 6 files, which are the card, its test, the page DOM test, two READMEs and this evidence file.
+- `final/forbidden-paths-diff.txt`: empty. Nothing changed under server, packages, deployments, `scripts/`, dependencies, the wallet, submission, http, source, UI, host, investor or admin modules, or the testing harness.
+- `capture.ts`, `store.ts`, `recover.ts` and `index.ts` are unchanged.
+- `final/untouched.txt`: the base checkout (`6455d4d`) and the earlier 003D clones are clean at the same HEADs.
 
 ## Limits
 
