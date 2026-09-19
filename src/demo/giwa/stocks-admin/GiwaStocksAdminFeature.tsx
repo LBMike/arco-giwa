@@ -132,18 +132,73 @@ export function StocksAdminView(props: StocksAdminViewProps) {
   const { snapshot, section, now } = props
   const ids = useId()
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const rootRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  // Whether the operator's focus or pointer was last inside the console. Only then may an access change move focus.
+  const focusInside = useRef(false)
+  // One-shot: set by "Open detail", consumed by the next commit. A tab switch or list selection never sets it.
+  const detailFocusPending = useRef(false)
   const activeIndex = SECTIONS.findIndex((item) => item.id === section)
+
+  const changeSection = (next: StocksAdminSection) => {
+    detailFocusPending.current = false
+    props.onSectionChange(next)
+  }
 
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     const next = nextSectionIndex(activeIndex, event.key, SECTIONS.length)
     if (next === null) return
     event.preventDefault()
-    props.onSectionChange(SECTIONS[next].id)
+    changeSection(SECTIONS[next].id)
     tabRefs.current[next]?.focus()
   }
 
+  const openOrder = (orderId: string) => {
+    detailFocusPending.current = true
+    props.onOpenOrder(orderId)
+  }
+
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    const track = (event: Event) => {
+      const root = rootRef.current
+      const target = event.target as Node | null
+      focusInside.current = root !== null && target !== null && typeof target.nodeType === "number" && root.contains(target)
+    }
+    document.addEventListener("pointerdown", track, true)
+    document.addEventListener("focusin", track, true)
+    document.addEventListener("keydown", track, true)
+    return () => {
+      document.removeEventListener("pointerdown", track, true)
+      document.removeEventListener("focusin", track, true)
+      document.removeEventListener("keydown", track, true)
+    }
+  }, [])
+
+  // "Open detail" unmounts its own (focused) button with the Overview: focus the Order detail heading, not <body>.
+  useCommitEffect(() => {
+    if (!detailFocusPending.current) return
+    detailFocusPending.current = false
+    if (section === "orders") panelRef.current?.querySelector<HTMLElement>("[data-order-detail-heading]")?.focus()
+  })
+
+  // An access change within one session (401/403/404 or "Check access again") unmounts the focused control (access panel
+  // or section). If the operator was working in the console and focus fell to <body>, it goes to the heading that names
+  // the new state. Never a button; nothing on first load. A new or ended session remounts this view (scope key), so that
+  // change is not covered here.
+  useCommitEffect(() => {
+    const root = rootRef.current
+    if (!focusInside.current || root === null) return
+    const title = root.querySelector<HTMLElement>("[data-console-heading]")
+    const active = document.activeElement
+    // The title counts as lost focus too: a retry passes through "ok" (focus on the title) before a repeated denial.
+    if (active !== null && active !== document.body && active !== title) return
+    const target = snapshot.access === "ok" ? title : root.querySelector<HTMLElement>("[data-access-heading]")
+    if (target !== null && target !== active) target.focus()
+  }, [snapshot.access])
+
   return (
-    <div className="w-full min-w-0 space-y-4">
+    <div ref={rootRef} className="w-full min-w-0 space-y-4">
       <Header snapshot={snapshot} />
       {snapshot.access !== "ok" ? (
         <AccessPanel access={snapshot.access} onRetry={props.onRetryAccess} onSignInRequired={props.onSignInRequired} />
@@ -168,7 +223,7 @@ export function StocksAdminView(props: StocksAdminViewProps) {
                   aria-selected={selected}
                   aria-controls={`${ids}-panel-${item.id}`}
                   tabIndex={selected ? 0 : -1}
-                  onClick={() => props.onSectionChange(item.id)}
+                  onClick={() => changeSection(item.id)}
                   onKeyDown={onTabKeyDown}
                   className={`min-w-0 rounded-[var(--radius-control)] px-3 py-2 text-left text-sm ${FOCUS_RING} ${
                     selected
@@ -182,6 +237,7 @@ export function StocksAdminView(props: StocksAdminViewProps) {
             })}
           </div>
           <div
+            ref={panelRef}
             role="tabpanel"
             id={`${ids}-panel-${section}`}
             aria-labelledby={`${ids}-tab-${section}`}
@@ -197,7 +253,7 @@ export function StocksAdminView(props: StocksAdminViewProps) {
                   props.onLoad("overview")
                   props.onLoad("orders")
                 }}
-                onOpenOrder={props.onOpenOrder}
+                onOpenOrder={openOrder}
               />
             )}
             {section === "orders" && (
@@ -229,7 +285,7 @@ function Header({ snapshot }: { snapshot: StocksAdminSnapshot }) {
   return (
     <header className="w-full min-w-0 rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-4 shadow-[var(--shadow-control)]">
       <p className="text-xs text-[var(--color-arco-text-soft)]">Admin · Stocks · read only</p>
-      <h2 className="mt-1 text-xl font-semibold text-[var(--color-arco-ink)]">Stocks operations</h2>
+      <h1 tabIndex={-1} data-console-heading="" className={`mt-1 text-xl font-semibold text-[var(--color-arco-ink)] ${FOCUS_RING}`}>Stocks operations</h1>
       {meta ? (
         <div className="mt-3 flex min-w-0 flex-col gap-2">
           <ul aria-label="Environment reported by the server" className="flex flex-wrap gap-1.5">
@@ -293,7 +349,7 @@ function AccessPanel({ access, onRetry, onSignInRequired }: { access: Exclude<Ac
       className="w-full rounded-[var(--radius-card)] border border-dashed border-[var(--color-arco-ink)] bg-[var(--color-arco-surface)] p-6"
     >
       <Icon aria-hidden="true" className="size-5 text-[var(--color-arco-ink)]" />
-      <h3 className="mt-2 text-sm font-semibold text-[var(--color-arco-ink)]">{copy.title}</h3>
+      <h2 tabIndex={-1} data-access-heading="" className={`mt-2 text-sm font-semibold text-[var(--color-arco-ink)] ${FOCUS_RING}`}>{copy.title}</h2>
       <p className="mt-1 max-w-[640px] text-xs leading-5 text-[var(--color-arco-text-soft)]">{copy.body}</p>
       <div className="mt-4 flex flex-wrap gap-2">
         {onSignInRequired && (access === "signed_out" || access === "unauthorized") && (

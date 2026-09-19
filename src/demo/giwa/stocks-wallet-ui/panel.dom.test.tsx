@@ -539,6 +539,11 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
     await m.click(m.button("approve"))
     await m.until(() => m.status() === "APPROVAL_SUBMITTED", "APPROVAL_SUBMITTED")
     await m.settle(20)
+    // A check that still finds it pending ends in "Approval sent — check needed", the title the deadline keeps.
+    await m.click(m.button("prepare"))
+    await m.settle(30)
+    const heading = () => m.element.querySelector('[data-testid="stocks-wallet-state"] > h3')
+    assert.equal(heading()?.textContent, "Approval sent — check needed")
     const check = m.button("prepare")!
     await act(async () => {
       check.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }))
@@ -548,8 +553,77 @@ test("wallet panel DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsd
     m.f.controls.advance(600_000)
     await m.render()
     assert.equal(m.button("prepare")?.disabled, true)
-    assert.ok(document.activeElement === m.element.querySelector('[data-testid="stocks-wallet-state"] > h3'), "focus moved off the disabled button")
+    assert.equal(heading()?.textContent, "Approval sent — check needed", "the title did not change")
+    assert.ok(document.activeElement === heading(), "focus moved off the disabled button")
     assert.match(m.panel().textContent ?? "", /can no longer check the approval/)
+    assert.doesNotMatch(m.element.querySelector('[data-testid="stocks-wallet-steps"]')?.textContent ?? "", /After approval|Confirming/, "no deposit step is promised after the deadline")
+  })
+
+  await t.test("a countdown re-render after a press on panel text keeps focus where it is; a real state change still moves it", async (st) => {
+    const m = await mount(st, { tickMs: 10 })
+    const heading = () => m.element.querySelector('[data-testid="stocks-wallet-state"] > h3')
+    const pressText = async (target: Element) => {
+      await act(async () => {
+        ;(document.activeElement as HTMLElement | null)?.blur()
+        target.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true }))
+      })
+      assert.ok(document.activeElement === document.body, "a press on text leaves focus on the page body")
+    }
+    const ticksKeepFocus = async (label: string) => {
+      const status = m.status()
+      const title = heading()?.textContent
+      const from = m.commits.length
+      // One act per wait, so every tick commits on its own instead of being batched into one render.
+      for (let i = 0; i < 5; i++) await m.settle(20)
+      assert.ok(m.commits.length - from > 3, `${label}: the countdown re-rendered the panel more than three times`)
+      assert.equal(m.status(), status, `${label}: the state is unchanged`)
+      assert.equal(heading()?.textContent, title, `${label}: the title is unchanged`)
+      assert.ok(document.activeElement === document.body, `${label}: focus is not moved without a state change`)
+    }
+    // Plain paragraph text on the unchecked screen.
+    await pressText(m.panel().querySelector('[data-testid="stocks-wallet-state"] p')!)
+    await ticksKeepFocus("paragraph")
+
+    // The approval hash (a drag-selection starts with this press).
+    m.f.controls.setReconcileMode("pending")
+    await toApprovalRequired(m)
+    await m.click(m.button("approve"))
+    await m.until(() => m.status() === "APPROVAL_SUBMITTED", "APPROVAL_SUBMITTED")
+    await m.settle(20)
+    await pressText(m.element.querySelector('[data-testid="stocks-wallet-tx-hash"]')!)
+    await ticksKeepFocus("hash")
+
+    // A real state change while focus is on the body still goes to the state heading.
+    m.f.controls.advance(600_000)
+    await m.render()
+    assert.equal(m.button("prepare")?.disabled, true)
+    assert.ok(document.activeElement === heading(), "the deadline changed the state: focus moves to the state heading")
+    assert.equal(m.f.requests.length, 1)
+    assert.deepEqual(m.calls, { prepare: 1, approve: 1, submit: 0 })
+  })
+
+  await t.test("a click that leaves focus on the page body (Safari) still moves focus to the state heading on the CHECKING and result commits", async (st) => {
+    const m = await mount(st)
+    const heading = () => m.element.querySelector('[data-testid="stocks-wallet-state"] > h3') as HTMLElement
+    m.f.controls.setHoldReads(true)
+    const check = m.button("prepare")!
+    await act(async () => {
+      ;(document.activeElement as HTMLElement | null)?.blur()
+      // Safari does not focus a clicked button.
+      check.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true }))
+      check.click()
+    })
+    await m.until(() => m.f.state().heldReads > 0, "check in flight")
+    assert.equal(m.status(), "CHECKING")
+    assert.ok(document.activeElement === heading(), "the CHECKING commit moves focus from the body to the state heading")
+    await act(async () => heading().blur())
+    assert.ok(document.activeElement === document.body)
+    m.f.controls.releaseReads()
+    await m.until(() => m.status() === "APPROVAL_REQUIRED", "APPROVAL_REQUIRED")
+    assert.ok(document.activeElement === heading(), "the result commit moves it as well")
+    await m.until(() => m.button("approve")?.disabled === false, "approve armed")
+    assert.ok(document.activeElement === heading(), "never onto the wallet-opening button")
+    assert.equal(m.f.requests.length, 0)
   })
 
   await t.test("without a controller and ports the panel shows disabled execution", async (st) => {

@@ -23,7 +23,7 @@ function usePageApiBase(): string | null {
 }
 const CAPABILITY_COPY: Readonly<Record<string, string>> = {
   READY: "입금·매도 예치는 수락된 주문 카드에서 진행합니다: 주문 확인 → 정확한 금액 승인 → 별도 버튼으로 입금·예치. 각 단계는 버튼을 누를 때만 지갑을 엽니다.",
-  WALLET_SOURCE_UNSUPPORTED: "현재 연결된 지갑 방식은 거래 요청을 한 번만 보내도록 보장할 수 없어 입금·매도 예치를 지원하지 않습니다. 주문 상태 조회만 가능합니다.",
+  WALLET_SOURCE_UNSUPPORTED: "현재 연결된 지갑 방식은 거래 요청을 한 번만 보내도록 보장할 수 없어 이 앱에서 입금·매도 예치를 지원하지 않습니다. 주문은 만들 수 있지만 이 지갑으로는 입금·예치할 수 없고, 주문 상태만 확인할 수 있습니다.",
   WALLET_SOURCE_MISSING: "브라우저 지갑이 연결되지 않아 입금·매도 예치를 진행할 수 없습니다.",
   WALLET_NOT_CONNECTED: "브라우저 지갑이 연결되지 않아 입금·매도 예치를 진행할 수 없습니다.",
   WALLET_MISMATCH: "연결된 지갑이 로그인한 Stocks 계정과 달라 입금·매도 예치를 진행할 수 없습니다.",
@@ -63,7 +63,11 @@ export function StocksPage() {
     </div>
   </StocksExecutionProvider>
 }
+/**
+ * The operator sign-in shortcut is offered while the shared host can sign in, and stays while that sign-in is pending (a second
+ * press joins the same attempt), so a keyboard user keeps focus on it. StocksSignIn above states why sign-in is impossible.
+ */
 export function StocksAdminPage() {
   const environment = useContext(StocksPageEnvironment); const host = useGiwaStocksHost(); const apiBase = usePageApiBase()
-  return <div className="w-full min-w-0 space-y-6"><StocksNavigation /><StocksSignIn />{apiBase ? <GiwaStocksAdminFeature apiBase={apiBase} session={host.admin} fetch={environment.fetch} onSignInRequired={() => { void host.signIn() }} /> : <p role="status">Stocks 관리자 API 연결 준비 중</p>}</div>
+  return <div className="w-full min-w-0 space-y-6"><StocksNavigation /><StocksSignIn />{apiBase ? <GiwaStocksAdminFeature apiBase={apiBase} session={host.admin} fetch={environment.fetch} onSignInRequired={host.canSignIn || host.snapshot.status === "signing-in" ? () => { void host.signIn() } : undefined} /> : <><h1 className="sr-only">Stocks operations</h1><p role="status">Stocks 관리자 API 연결 준비 중</p></>}</div>
 }

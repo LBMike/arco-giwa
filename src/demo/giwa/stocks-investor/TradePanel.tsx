@@ -8,6 +8,7 @@ import { tradeBlock, type OrderAttempt, type StocksInvestorState } from "./contr
 import { isDecimalKeystroke } from "./decimal"
 import { attemptErrorMessage, errorMessage, formatCash, formatQuantity, formatUtc, signedOutMessage, tradeBlockMessage } from "./display"
 import { OrderStatusCard } from "./OrderStatusCard"
+import { orderStatusMeaning } from "./status"
 import { STOCKS_QUANTITY_SCALE, type StocksCashSymbol } from "./types"
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, FOCUS_RING, Field, Heading, Notice, useRescueFocus } from "./ui"
 
@@ -18,20 +19,31 @@ const QUANTITY_REASON: Record<string, string> = {
   TOO_LARGE: "This quantity is above the accepted maximum.",
 }
 
+/** Native `disabled` drops keyboard focus: while a read is in flight the button stays focusable, aria-disabled, and has no click handler. */
+const BUSY = "aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+
+/** The session can retry or look up the unresolved attempt: verified and not rejected by the server. */
+function canResolveAttempt(state: StocksInvestorState): boolean {
+  return state.session.status === "verified" && !state.authRejected
+}
+
 function statusAnnouncement(state: StocksInvestorState): string {
   const attempt = state.attempt
   if (attempt !== null) {
+    const unconfirmed = attempt.lookup === "NOT_FOUND" ? "Order result not confirmed. Not found in your latest orders." : "Order result not confirmed."
     switch (attempt.status) {
       case "SUBMITTING":
         return "Placing order."
       case "UNCONFIRMED":
-        return attempt.lookup === "NOT_FOUND" ? "Order result not confirmed. Not found in your latest orders." : "Order result not confirmed."
+        return unconfirmed
       case "AUTH_REQUIRED":
-        return "Sign in again to finish this order request."
+        // Signed in again: the 401'd send was not processed; an earlier send with an unknown outcome stays unconfirmed.
+        if (!canResolveAttempt(state)) return "Sign in again to finish this order request."
+        return attempt.outcomeUnknown ? unconfirmed : "Order request not processed. Retry it unchanged."
       case "REJECTED":
         return `Order not placed. ${attempt.error ? attemptErrorMessage(attempt.error, attempt.outcomeUnknown) : ""}`
       case "ACCEPTED":
-        return `Order accepted. ${attempt.order ? `Status: ${attempt.order.state.replace(/_/g, " ").toLowerCase()}.` : ""}`
+        return `Order accepted. ${attempt.order ? `Status: ${orderStatusMeaning(attempt.order, attempt.orderObservedAt).label}.` : ""}`
     }
   }
   switch (state.quote.status) {
@@ -67,18 +79,23 @@ function AttemptView({ attempt, state, cashSymbol, actions }: { attempt: OrderAt
       </Field>
     </dl>
   )
-  const canResolve = state.session.status === "verified" && !state.authRejected
+  const canResolve = canResolveAttempt(state)
   const checking = attempt.lookup === "CHECKING"
+  // After signing in again a 401'd request asks for nothing but the explicit retry; an unknown earlier send stays unconfirmed.
   const title =
     attempt.status === "SUBMITTING"
       ? "Placing order…"
-      : attempt.status === "UNCONFIRMED"
+      : attempt.status === "UNCONFIRMED" || (attempt.status === "AUTH_REQUIRED" && canResolve && attempt.outcomeUnknown)
         ? "Order result not confirmed"
         : attempt.status === "AUTH_REQUIRED"
-          ? "Sign in again to finish this order request"
+          ? canResolve
+            ? "Order request not processed"
+            : "Sign in again to finish this order request"
           : attempt.status === "REJECTED"
             ? "Order not placed"
             : "Order accepted"
+  // "Sign in again" from the 401 itself is obsolete once the session is verified again.
+  const staleSignIn = attempt.status === "AUTH_REQUIRED" && canResolve && !attempt.outcomeUnknown && attempt.error?.kind === "UNAUTHORIZED"
   return (
     <div className="flex flex-col gap-4" data-testid={attempt.status === "UNCONFIRMED" || attempt.status === "AUTH_REQUIRED" ? "stocks-unconfirmed-attempt" : `stocks-attempt-${attempt.status.toLowerCase()}`}>
       <Heading level={3} headingRef={headingRef}>
@@ -93,15 +110,15 @@ function AttemptView({ attempt, state, cashSymbol, actions }: { attempt: OrderAt
                 ? "The server did not accept the sign-in session, so this request was not processed. After signing in again, retry it unchanged."
                 : "This request may already have created the order. Retrying sends the same request with the same request key, so it cannot create a second order."}
             </p>
-            {attempt.error ? <p className="mt-2">{attemptErrorMessage(attempt.error, attempt.outcomeUnknown)}</p> : null}
+            {attempt.error && !staleSignIn ? <p className="mt-2">{attemptErrorMessage(attempt.error, attempt.outcomeUnknown)}</p> : null}
             {attempt.lookup === "NOT_FOUND" ? <p className="mt-2">This request was not found in your latest orders. That does not prove it was not created.</p> : null}
           </Notice>
           {request}
           <div className="flex flex-wrap gap-3">
-            <button type="button" className={BUTTON_PRIMARY} onClick={actions.retryOrder} disabled={!canResolve || checking}>
+            <button type="button" className={`${BUTTON_PRIMARY} ${BUSY}`} onClick={checking ? undefined : actions.retryOrder} disabled={!canResolve} aria-disabled={checking || undefined}>
               Retry same request
             </button>
-            <button type="button" className={BUTTON_SECONDARY} onClick={actions.checkOrder} disabled={!canResolve || checking} aria-busy={checking}>
+            <button type="button" className={`${BUTTON_SECONDARY} ${BUSY}`} onClick={checking ? undefined : actions.checkOrder} disabled={!canResolve} aria-disabled={checking || undefined} aria-busy={checking}>
               {checking ? "Checking…" : "Check my orders"}
             </button>
           </div>

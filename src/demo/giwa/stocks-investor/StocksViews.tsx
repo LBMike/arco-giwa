@@ -1,6 +1,6 @@
 // Catalog list, instrument detail, orders and portfolio. Pure views over controller state.
 
-import { useRef } from "react"
+import { useContext, useEffect, useLayoutEffect, useRef } from "react"
 
 import type { CatalogState, SideOrders, StocksInvestorState } from "./controller"
 import type { StocksInvestorActions } from "./actions"
@@ -9,7 +9,12 @@ import { OrderStatusCard } from "./OrderStatusCard"
 import { CATEGORY_TONE, orderStatusMeaning } from "./status"
 import { TradePanel } from "./TradePanel"
 import type { StocksCatalog, StocksOrder } from "./types"
-import { BUTTON_PRIMARY, BUTTON_SECONDARY, Chip, Field, Heading, Notice, PANEL, useRescueFocus } from "./ui"
+import { BUTTON_PRIMARY, BUTTON_SECONDARY, Chip, Field, Heading, Notice, PANEL, UserInteractionContext, useRescueFocus } from "./ui"
+
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect
+
+/** Native `disabled` drops keyboard focus: while loading the button stays focusable, aria-disabled, and has no click handler. */
+const BUSY = "aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
 
 function catalogOf(catalog: CatalogState): StocksCatalog | null {
   return catalog.status === "ready" ? catalog.catalog : null
@@ -101,7 +106,14 @@ export function StockDetailView({ state, actions, onBack }: { state: StocksInves
   const catalog = catalogOf(state.catalog)
   const instrument = catalog?.instruments.find((item) => item.symbol === "NVDA") ?? null
   const headingRef = useRef<HTMLHeadingElement>(null)
-  useRescueFocus(headingRef, "detail")
+  const interacted = useContext(UserInteractionContext)
+  // "View" removed the focused button: land on the detail heading. Same guard as useRescueFocus, but a layout effect on
+  // mount, so it runs before the trade panel's own (passive, child) rescues move focus to the quantity field or order card.
+  useIsomorphicLayoutEffect(() => {
+    if (typeof document === "undefined" || !interacted?.current) return
+    const active = document.activeElement
+    if (active === null || active === document.body) headingRef.current?.focus()
+  }, [interacted])
   return (
     <div className="flex w-full flex-col gap-4">
       <div>
@@ -224,7 +236,7 @@ function OrdersList({ state, actions, cashSymbol }: { state: StocksInvestorState
         <Heading id="giwa-stocks-orders-title" headingRef={headingRef}>
           Your Stocks orders
         </Heading>
-        <button type="button" className={BUTTON_SECONDARY} onClick={actions.loadOrders} disabled={orders.status === "loading"} aria-busy={orders.status === "loading"}>
+        <button type="button" className={`${BUTTON_SECONDARY} ${BUSY}`} onClick={orders.status === "loading" ? undefined : actions.loadOrders} aria-disabled={orders.status === "loading" || undefined} aria-busy={orders.status === "loading"}>
           {orders.status === "loading" ? "Loading…" : "Refresh"}
         </button>
       </div>
@@ -277,7 +289,7 @@ export function PortfolioView({ state, actions }: { state: StocksInvestorState; 
     <section className={PANEL} aria-labelledby="giwa-stocks-portfolio-title">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Heading id="giwa-stocks-portfolio-title">Stocks holdings</Heading>
-        <button type="button" className={BUTTON_SECONDARY} onClick={actions.loadPortfolio} disabled={portfolio.status === "loading"} aria-busy={portfolio.status === "loading"}>
+        <button type="button" className={`${BUTTON_SECONDARY} ${BUSY}`} onClick={portfolio.status === "loading" ? undefined : actions.loadPortfolio} aria-disabled={portfolio.status === "loading" || undefined} aria-busy={portfolio.status === "loading"}>
           {portfolio.status === "loading" ? "Loading…" : "Refresh"}
         </button>
       </div>

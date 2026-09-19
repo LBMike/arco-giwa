@@ -163,3 +163,9 @@ test("accessible structure: labelled section, polite status region, step progres
   assert.match(nested, /<h3 id="[^"]+"[^>]*>Stocks wallet steps<\/h3>/)
   assert.match(nested, /<h4 tabindex="-1"/)
 })
+
+test("a long stable code wraps inside the panel instead of running through its border on narrow screens", () => {
+  const s = setup()
+  const html = s.html({ snapshot: Object.freeze({ ...IDLE_SNAPSHOT, status: "BLOCKED", error: "WALLET_NETWORK_INSTANCE_MISMATCH" }) })
+  assert.match(html, /<p class="[^"]*\[overflow-wrap:anywhere\][^"]*">Code <span class="font-mono">WALLET_NETWORK_INSTANCE_MISMATCH<\/span><\/p>/)
+})

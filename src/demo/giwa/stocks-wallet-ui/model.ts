@@ -220,14 +220,18 @@ function steps(snapshot: WalletSnapshot, side: Side | null, server: PanelServerS
   const reverted = revertedStage(snapshot)
   const transferWord = side === "SELL" ? "Escrow" : "Deposit"
   const allowanceInPlace = status === "READY_TRANSFER" || reverted === "TRANSFER" || (stage === "TRANSFER" && (status === "SIGNING" || status === "SUBMITTED" || status === "UNKNOWN"))
+  /** Past the deadline or for a moved-on order no deposit/escrow will be offered, whatever the approval does. */
+  const noTransfer = block === "expired" || block === "movedOn"
 
   let approval: PanelStep
   if (status === "APPROVAL_REQUIRED") approval = block ? { label: "Approve exact amount", status: "problem", detail: BLOCK_DETAIL[block] } : { label: "Approve exact amount", status: "current", detail: "Required" }
   else if (status === "SIGNING" && stage === "APPROVAL") approval = { label: "Approve exact amount", status: "current", detail: "Waiting for wallet" }
-  else if (status === "APPROVAL_SUBMITTED") approval = { label: "Approve exact amount", status: "current", detail: approvalAwaitingConfirmation(snapshot) ? "Confirming" : "Approval sent" }
+  else if (status === "APPROVAL_SUBMITTED") approval = { label: "Approve exact amount", status: "current", detail: approvalAwaitingConfirmation(snapshot) && !noTransfer ? "Confirming" : "Approval sent" }
   else if (status === "UNKNOWN" && stage === "APPROVAL") approval = { label: "Approve exact amount", status: "problem", detail: "Result unknown" }
   else if (reverted === "APPROVAL") approval = { label: "Approve exact amount", status: "problem", detail: "Reverted" }
   else if (allowanceInPlace) approval = { label: "Approve exact amount", status: "done", detail: "Allowance in place" }
+  // A running check has not decided yet; it never shows an approval it may already have confirmed as "Not checked".
+  else if (status === "CHECKING") approval = { label: "Approve exact amount", status: "current", detail: "Checking" }
   else approval = { label: "Approve exact amount", status: "todo", detail: "Not checked" }
 
   let transfer: PanelStep
@@ -236,6 +240,7 @@ function steps(snapshot: WalletSnapshot, side: Side | null, server: PanelServerS
   else if (status === "SUBMITTED") transfer = { label: transferWord, status: "done", detail: "Submitted — not the order result" }
   else if (status === "UNKNOWN" && stage === "TRANSFER") transfer = { label: transferWord, status: "problem", detail: "Result unknown" }
   else if (reverted === "TRANSFER") transfer = { label: transferWord, status: "problem", detail: "Reverted" }
+  else if (noTransfer) transfer = { label: transferWord, status: "problem", detail: BLOCK_DETAIL[block] }
   else transfer = { label: transferWord, status: "todo", detail: "After approval" }
 
   let result: PanelStep
@@ -421,12 +426,14 @@ export function derivePanelModel(input: PanelInput): PanelModel {
         `Approve exactly ${exact} for ${spender} of this Stocks deployment. The approval does not ${side === "SELL" ? "escrow the units" : "pay for the order"}.`,
         `The ${word} is a separate step, offered only after the server confirms the approval.`,
       ]
+      // A stop screen describes the step; it never repeats the call to approve.
+      const stopDetail = `This step would approve exactly ${exact} for ${spender} of this Stocks deployment; the approval does not ${side === "SELL" ? "escrow the units" : "pay for the order"}.`
       return finish(
         {
           kind: "APPROVAL_REQUIRED",
           tone: stop ? "warning" : "action",
           title: stop?.title ?? "Approval required",
-          paragraphs: stop ? [...stop.lead, detail[0]!] : detail,
+          paragraphs: stop ? [...stop.lead, stopDetail] : detail,
           code: stop?.code ?? null,
           buttons: [{ action: "approve", label: `Approve ${exact}`, enabled: readyToSign, opensWallet: true }],
           txLabel: null,
@@ -456,9 +463,11 @@ export function derivePanelModel(input: PanelInput): PanelModel {
     }
     case "APPROVAL_SUBMITTED": {
       // The controller also republishes this status, with the failing code, for an approval the server
-      // already confirmed when a later deposit/escrow check fails. Only these codes mean "not yet confirmed".
-      const confirming = approvalAwaitingConfirmation(snapshot)
-      const paragraphs = [`The approval transaction was sent. The server verifies it on chain before the ${word} is offered; the ${word} is never sent automatically.`]
+      // already confirmed when a later deposit/escrow check fails. Only these codes mean "not yet confirmed",
+      // and only while this screen can still check it and the order still waits for the deposit/escrow.
+      const confirming = approvalAwaitingConfirmation(snapshot) && !expired && !movedOn
+      // Past the deadline or for a moved-on order no deposit/escrow will be offered, so none is promised here.
+      const paragraphs = [expired || movedOn ? "The approval transaction was sent." : `The approval transaction was sent. The server verifies it on chain before the ${word} is offered; the ${word} is never sent automatically.`]
       let tone: PanelTone = "info"
       if (snapshot.error === "RECEIPT_PENDING")
         paragraphs.push(ready ? "The server has not confirmed the approval yet. Check again in a moment; the approval is not sent again." : "The server has not confirmed the approval yet; the approval is not sent again.")
@@ -486,7 +495,13 @@ export function derivePanelModel(input: PanelInput): PanelModel {
         {
           kind: "APPROVAL_SUBMITTED",
           tone,
-          title: confirming ? "Approval submitted — confirming" : "Approval sent — check needed",
+          // Past the deadline this screen can no longer check a pending approval, so that title asks for no check. The
+          // RECOVERY_REQUIRED and failing-code titles are unchanged (003A review).
+          title: confirming
+            ? "Approval submitted — confirming"
+            : expired && approvalAwaitingConfirmation(snapshot)
+              ? "Approval sent — quote deadline passed"
+              : "Approval sent — check needed",
           paragraphs: withCheckNote(paragraphs, snapshot.error),
           code,
           buttons: [{ action: "prepare", label: "Check approval status", enabled: ready, opensWallet: false }],

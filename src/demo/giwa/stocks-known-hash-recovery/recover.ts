@@ -3,7 +3,8 @@
 // 1. A NEW submission gate pinned to the current session (the original gate and its expired session are never used).
 // 2. inspect(original intentKey): the stored claim of the kept stage must exist with exactly the same claimId,
 //    intentKey, stage and transactionDigest; a different stored hash is a conflict and is never overwritten.
-// 3. record({...binding, status: SUBMITTED, txHash: original hash}) only when the server has no hash yet.
+// 3. record({...binding, status: SUBMITTED, txHash: original hash}) only when the server has no hash yet; when it
+//    already has the same hash, the candidate is RECORDED from that inspect answer.
 // 4. reconcile(binding + hash): only the server's trusted receipt check can report CONFIRMED or REVERTED.
 //
 // It never claims, never opens the wallet, reads no execution policy, evidence or order deadline, and never retries.
@@ -143,6 +144,9 @@ export async function recoverKnownHash(options: RecoverKnownHashOptions): Promis
       store.settle(candidate.claimId, candidate.txHash, { kind: "VERIFIED", status: stored.status })
       return result({ kind: stored.status })
     }
+    // The server's answer already shows this hash on the claim: it is recorded, whatever the receipt check below
+    // answers (a verified entry is never overwritten by settle). Nothing is recorded again.
+    if (stored.txHash === candidate.txHash) store.settle(candidate.claimId, candidate.txHash, { kind: "RECORDED" })
 
     try {
       if (stored.txHash === undefined) {

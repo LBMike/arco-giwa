@@ -213,3 +213,172 @@ test("kept hashes are shown only to their owner on their order, from the first c
     }
   }
 })
+
+// UI review G3 K1/K2: the recovery card through the real providers, operated from the keyboard only. One always-mounted
+// polite status region carries each result (a repeated identical failure is announced again, the busy label never);
+// when a result removes the card's button, focus lands on the card itself (a non-interactive div), never on a button
+// and never on <body>; a card that mounts after an interaction does not take focus from the view.
+test("keyboard recovery: the result is announced and focus stays on the card when its button goes (set GIWA_HOST_DOM_RUNTIME)", { skip: !runtime }, async () => {
+  const { createInProcessStocks, HARNESS_FRONTEND_ORIGIN } = (await import("./testing/in-process-stocks")) as typeof import("./testing/in-process-stocks")
+  const { createFakeEip1193Wallet } = (await import("./testing/fake-wallet")) as typeof import("./testing/fake-wallet")
+  const { createKnownHashStore } = (await import("../stocks-known-hash-recovery/store")) as typeof import("../stocks-known-hash-recovery/store")
+  const { JSDOM } = createRequire(runtime!)("jsdom")
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: HARNESS_FRONTEND_ORIGIN, pretendToBeVisual: true })
+  const w = dom.window
+  const globals: Record<string, unknown> = { window: w, document: w.document, navigator: w.navigator, HTMLElement: w.HTMLElement, SVGElement: w.SVGElement, Element: w.Element, Node: w.Node, Event: w.Event, MouseEvent: w.MouseEvent, MutationObserver: w.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: class { observe() {} unobserve() {} disconnect() {} } }
+  const previous = Object.fromEntries(Object.keys(globals).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
+  for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value })
+  const harness = await createInProcessStocks()
+  // Unmounted in finally too: a failed assertion must not leave the host provider (and its timers) running.
+  let unmount: (() => Promise<void>) | null = null
+  try {
+    const React = (await import("react")) as AnyModule
+    const { createRoot } = (await import("react-dom/client")) as AnyModule
+    const { StocksHostProvider, useGiwaStocksHost } = (await import("../stocks-host/StocksHostProvider")) as AnyModule
+    const { StocksExecutionProvider, StocksOrderExecution } = (await import("./StocksExecutionProvider")) as AnyModule
+    const { UserInteractionContext } = (await import("../stocks-investor/ui")) as AnyModule
+    const { getAddress } = (await import("viem")) as AnyModule
+    const { act, createElement: h, StrictMode, useRef } = React
+
+    const A = getAddress("0x000000000000000000000000000000000000a0d2")
+    const HASH = `0x${"6".repeat(64)}`
+    harness.seedCash(A, 1_000_000_000n)
+    const accepted = await harness.createOrder("BUY", harness.session(A))
+    const order = accepted.order as AnyModule
+    const store = createKnownHashStore()
+    // A test-only binding the server's request does not match, so the last explicit check blocks it (no action left).
+    assert.ok(store.remember({ claimId: "kept-keyboard", intentKey: "c".repeat(64), stage: "TRANSFER", transactionDigest: "e".repeat(64), side: "BUY", orderId: order.id, deploymentDigest: order.deploymentDigest, wallet: A, chainId: 91342, apiBase: harness.apiBase, origin: HARNESS_FRONTEND_ORIGIN, txHash: HASH }))
+    const wallet = createFakeEip1193Wallet(harness.chain, { account: A })
+    const source = { mode: "injected", provider: wallet }
+    // The next N recovery inspects are lost before they reach the server.
+    const lose = { inspects: 0 }
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (lose.inspects > 0 && (init?.method ?? "GET") === "GET" && /\/wallet-submissions\//.test(String(input))) {
+        lose.inspects--
+        throw new TypeError("network connection lost")
+      }
+      return harness.fetch(input, init)
+    }) as typeof globalThis.fetch
+    const clock = { now: () => Date.now(), monotonicNow: () => performance.now() }
+    let host: AnyModule | null = null
+    const element = document.createElement("div")
+    document.body.append(element)
+    const root = createRoot(element)
+    unmount = async () => {
+      unmount = null
+      await act(async () => root.unmount())
+      element.remove()
+    }
+    function Capture() {
+      host = useGiwaStocksHost()
+      return null
+    }
+    // Like the investor feature root: any key or pointer press inside marks the user interaction.
+    function Feature() {
+      const interacted = useRef(false)
+      const mark = () => {
+        interacted.current = true
+      }
+      return h(UserInteractionContext.Provider, { value: interacted }, h("section", { "data-testid": "feature", onKeyDownCapture: mark, onPointerDownCapture: mark }, h(Capture), h(StocksOrderExecution, { order: { ...order, side: "BUY", state: "BROKER_PENDING" }, observedAt: new Date().toISOString(), refreshing: false, onRefresh: () => undefined })))
+    }
+    await act(async () => {
+      root.render(
+        h(StrictMode, null,
+          h(StocksHostProvider, { context: { walletAddress: A, chainId: 91342, frontendOrigin: harness.frontendOrigin, apiBase: harness.apiBase, walletEpoch: "injected:a:keyboard" }, dependencies: harness.signInDependencies(), walletSource: source },
+            h(StocksExecutionProvider, { apiBase: harness.apiBase, fetch, clock, activeSource: () => source, knownHashes: store, origin: HARNESS_FRONTEND_ORIGIN }, h(Feature)))),
+      )
+      await sleep(0)
+    })
+    const card = () => element.querySelector<HTMLElement>('[data-testid="stocks-known-hash-recovery"]')
+    const region = () => card()?.querySelector('[data-testid="stocks-known-hash-announcement"]') ?? null
+    const button = () => card()?.querySelector<HTMLButtonElement>('button[data-action="record-known-hash"]') ?? null
+    // Element identity is compared with assert.ok: a failing assert.equal would inspect whole jsdom element graphs.
+    const focused = () => {
+      const active = document.activeElement
+      return active === null ? "nothing" : `${active.tagName}[${active.getAttribute("data-testid") ?? ""}] "${(active.textContent ?? "").slice(0, 40)}"`
+    }
+    const waitFor = async (predicate: () => boolean, label: string) => {
+      for (let i = 0; i < 300 && !predicate(); i++) await act(async () => sleep(10))
+      assert.ok(predicate(), `${label} (card ${card()?.dataset.state ?? "none"}: ${region()?.textContent ?? ""})`)
+    }
+
+    // An interaction happened (a key press inside the feature) and focus is on <body> when the card mounts after sign-in:
+    // the card does not take focus on mount (the view's own heading keeps that rescue).
+    element.querySelector("section")!.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Tab", bubbles: true }))
+    assert.ok(document.activeElement === document.body, `focus on ${focused()}`)
+    await act(async () => {
+      await host!.signIn()
+    })
+    await waitFor(() => card() !== null, "recovery card after sign-in")
+    await act(async () => sleep(20))
+    assert.ok(document.activeElement === document.body, `a card that mounts does not take focus (focus on ${focused()})`)
+
+    // The region is mounted, polite and empty before the first action.
+    assert.ok(region(), "status region before the first action")
+    assert.deepEqual([region()!.getAttribute("role"), region()!.getAttribute("aria-live"), region()!.getAttribute("aria-atomic"), region()!.textContent], ["status", "polite", "true", ""])
+    const said: string[] = []
+    const observer = new w.MutationObserver(() => said.push(region()?.textContent ?? ""))
+    observer.observe(element, { subtree: true, childList: true, characterData: true })
+
+    /** A browser turns Enter/Space on a focused button into a click; jsdom does not, so the click is dispatched. */
+    const press = async (target: HTMLButtonElement, key: string) => {
+      target.focus()
+      assert.ok(document.activeElement === target, `focus on ${focused()}`)
+      await act(async () => {
+        target.dispatchEvent(new w.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }))
+        target.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true, detail: 0 }))
+        target.dispatchEvent(new w.KeyboardEvent("keyup", { key, bubbles: true, cancelable: true }))
+        await sleep(0)
+      })
+    }
+    const requestsBefore = harness.requests.length
+
+    // 1. "Record this hash" with Enter; the inspect is lost: KEPT + FAILED is announced.
+    assert.equal(button()?.textContent, "Record this hash")
+    lose.inspects = 1
+    await press(button()!, "Enter")
+    await waitFor(() => button()?.textContent === "Check again" && !button()!.disabled, "Check again")
+    const once = region()!.textContent ?? ""
+    assert.ok(once.startsWith("Check finished. Your wallet returned this deposit transaction hash"), once)
+    assert.ok(once.includes("so it may or may not have recorded the hash. This did not open your wallet."), once)
+    assert.ok(card()!.contains(document.activeElement), "focus stays in the card while its button exists")
+
+    // 2. "Check again" with Space; the same failure again is announced again (the region text changes).
+    lose.inspects = 1
+    await press(button()!, " ")
+    await waitFor(() => button()?.textContent === "Check again" && !button()!.disabled && (region()!.textContent ?? "") !== "", "Check again, second result")
+    const twice = region()!.textContent ?? ""
+    assert.notEqual(twice, once, "a repeated identical result changes the region text")
+    assert.equal(twice.trimEnd(), once.trimEnd())
+    const submissions = () => harness.requests.slice(requestsBefore).filter((request) => /\/wallet-submissions\//.test(request.path))
+    assert.deepEqual(submissions(), [], "the lost inspects never reached the server")
+
+    // 3. "Check again" with Enter; the server's request does not match this test-only binding: BLOCKED, the button is
+    // gone. Focus lands on the card itself (tabIndex -1), not on <body> and not on any button.
+    await press(button()!, "Enter")
+    await waitFor(() => card()?.dataset.state?.startsWith("BLOCKED_") === true, "blocked")
+    await act(async () => sleep(20))
+    assert.ok(button() === null, "no action left")
+    assert.ok(document.activeElement === card(), `focus rescued onto the card (focus on ${focused()})`)
+    assert.equal(document.activeElement?.tagName, "DIV")
+    assert.equal(card()!.tabIndex, -1)
+    assert.equal(card()!.querySelectorAll("button, a, [role=button]").length, 0)
+    assert.equal((region()!.textContent ?? "").trimEnd(), "Check finished. The server's request for this order does not match this hash, so nothing was recorded.")
+    assert.deepEqual(submissions().map((request) => request.method), ["GET"], "one inspect; the focus change adds no request")
+    assert.equal(harness.requests.slice(requestsBefore).filter((request) => request.method !== "GET").length, 0, "no write of any kind")
+    assert.equal(wallet.calls.length, 0, "no wallet call of any kind")
+    observer.disconnect()
+    assert.ok(said.every((text) => !text.includes("Checking with the server") && !text.includes(HASH)), JSON.stringify(said))
+
+    await unmount()
+  } finally {
+    if (unmount) await unmount().catch(() => undefined)
+    await harness.close()
+    dom.window.close()
+    for (const key of Object.keys(globals)) {
+      const descriptor = previous[key]
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else Reflect.deleteProperty(globalThis, key)
+    }
+  }
+})

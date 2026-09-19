@@ -12,7 +12,7 @@ import {
 } from "./states"
 import { SubmissionDiagnosticsCard } from "./SubmissionDiagnostics"
 import type { AuditRow, BuyOrderDetail, DetailState, DiagnosticsState, OperationRow, OrderDetail, ProofSummary, SellOrderDetail } from "./types"
-import { Amount, Card, EmptyRow, Field, Fields, Mono, Pill, ResourceMeta, Time, toneOf } from "./ui"
+import { Amount, Card, EmptyRow, FOCUS_RING, Field, Fields, Mono, Pill, ResourceMeta, Time, toneOf } from "./ui"
 
 type Props = { detail: DetailState; diagnostics: DiagnosticsState; now: number; onRefresh: () => void; onRefreshDiagnostics: () => void }
 
@@ -25,14 +25,15 @@ export function OrderDetailView({ detail, diagnostics, now, onRefresh, onRefresh
       aria-labelledby={`${ids}-detail`}
       className="flex min-w-0 flex-col gap-3 rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-4 shadow-[var(--shadow-control)]"
     >
-      <h3 id={`${ids}-detail`} className="text-sm font-semibold text-[var(--color-arco-ink)]">
+      {/* Focus target after "Open detail" (the button that had focus unmounts with the Overview). */}
+      <h2 id={`${ids}-detail`} tabIndex={-1} data-order-detail-heading="" className={`text-sm font-semibold text-[var(--color-arco-ink)] ${FOCUS_RING}`}>
         Order detail
         {detail.orderId && (
           <span className="ml-2 font-normal">
             <Mono value={detail.orderId} short />
           </span>
         )}
-      </h3>
+      </h2>
       {detail.orderId === null ? (
         <EmptyRow>Select an order to see its funding or custody, operations, transaction hashes and audit trail.</EmptyRow>
       ) : (
@@ -94,7 +95,7 @@ function ProofFields({ proof }: { proof: ProofSummary }) {
 function BuySections({ detail }: { detail: BuyOrderDetail }) {
   return (
     <>
-      <Card title="Funding (BUY)" description="Finalized test cash deposits attributed to this order. Suspense rows are recorded but not credited.">
+      <Card headingLevel={3} title="Funding (BUY)" description="Finalized test cash deposits attributed to this order. Suspense rows are recorded but not credited.">
         {detail.funding.length === 0 ? (
           <EmptyRow>No funding recorded for this order.</EmptyRow>
         ) : (
@@ -121,7 +122,7 @@ function BuySections({ detail }: { detail: BuyOrderDetail }) {
           </ul>
         )}
       </Card>
-      <Card title="Mint holding" description="Finalized mint recorded for this order.">
+      <Card headingLevel={3} title="Mint holding" description="Finalized mint recorded for this order.">
         {detail.holdings.length === 0 ? (
           <EmptyRow>No finalized mint holding recorded for this order.</EmptyRow>
         ) : (
@@ -148,7 +149,7 @@ function BuySections({ detail }: { detail: BuyOrderDetail }) {
 function SellSections({ detail }: { detail: SellOrderDetail }) {
   return (
     <>
-      <Card title="Escrow custody (SELL)" description="Finalized stock escrow observed for this order.">
+      <Card headingLevel={3} title="Escrow custody (SELL)" description="Finalized stock escrow observed for this order.">
         {detail.custody.length === 0 ? (
           <EmptyRow>No escrow custody recorded for this order.</EmptyRow>
         ) : (
@@ -175,7 +176,7 @@ function SellSections({ detail }: { detail: SellOrderDetail }) {
           </ul>
         )}
       </Card>
-      <Card title="Cash reservations (SELL)" description="Test cash reserved for this order's payout. A reservation is not an extra asset.">
+      <Card headingLevel={3} title="Cash reservations (SELL)" description="Test cash reserved for this order's payout. A reservation is not an extra asset.">
         {detail.reservations.length === 0 ? (
           <EmptyRow>No cash reservation recorded for this order.</EmptyRow>
         ) : (
@@ -205,7 +206,7 @@ function SellSections({ detail }: { detail: SellOrderDetail }) {
 
 function Operations({ operations, side }: { operations: readonly OperationRow[]; side: "BUY" | "SELL" }) {
   return (
-    <Card title="Operations" description="Durable broker and chain operations. Unknown outcomes are looked up by their original identity; this console cannot retry or resubmit.">
+    <Card headingLevel={3} title="Operations" description="Durable broker and chain operations. Unknown outcomes are looked up by their original identity; this console cannot retry or resubmit.">
       {operations.length === 0 ? (
         <EmptyRow>No operations recorded for this order.</EmptyRow>
       ) : (
@@ -237,7 +238,7 @@ function Operations({ operations, side }: { operations: readonly OperationRow[];
 
 function AuditTimeline({ rows }: { rows: readonly AuditRow[] }) {
   return (
-    <Card title="Audit trail" description={`${rows.length} immutable entries for this order, oldest first, as returned by the server.`}>
+    <Card headingLevel={3} title="Audit trail" description={`${rows.length} immutable entries for this order, oldest first, as returned by the server.`}>
       {rows.length === 0 ? (
         <EmptyRow>No audit entries returned for this order.</EmptyRow>
       ) : (

@@ -24,7 +24,7 @@ export function AuditPanel({ audit, now, onRefresh }: Props) {
         audit.phase === "error" ? null : <EmptyRow>Loading audit history…</EmptyRow>
       ) : (
         <section aria-labelledby="stocks-audit-heading" className="flex min-w-0 flex-col gap-3 rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-4 shadow-[var(--shadow-control)]">
-          <h3 id="stocks-audit-heading" className="text-sm font-semibold text-[var(--color-arco-ink)]">Audit history</h3>
+          <h2 id="stocks-audit-heading" className="text-sm font-semibold text-[var(--color-arco-ink)]">Audit history</h2>
           <p className="text-xs leading-5 text-[var(--color-arco-text-soft)]">
             The server returned the latest {formatCount(String(rows.length))} immutable audit entries for this deployment (newest first, limit{" "}
             {AUDIT_LIST_LIMIT}).

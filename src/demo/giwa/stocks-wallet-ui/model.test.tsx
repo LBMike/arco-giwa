@@ -635,3 +635,89 @@ test("review 003B PANEL-2: a failed evidence read is explained on every screen t
     assert.doesNotMatch(quiet.paragraphs.join(" "), /could not be loaded/, `${snapshot.status}: no failure, no note`)
   }
 })
+
+test("after the deadline or once the order moved on, a sent approval is neither 'confirming' nor followed by a deposit/escrow step", () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    const s = setup(side === "BUY" ? "fixture-order-a-buy-1" : "fixture-order-a-sell-1")
+    const word = side === "BUY" ? "deposit" : "escrow"
+    const Word = side === "BUY" ? "Deposit" : "Escrow"
+    const later = Date.parse(s.plan.order.quoteExpiresAt) + 1_000
+    const expired: Partial<PanelInput> = { now: later, availability: executionAvailability({ configured: true, ports: s.f.ports, context: s.context, selection: s.selection, now: later }) }
+    const movedOn: Partial<PanelInput> = { serverOrder: { orderId: s.plan.order.id, side, state: side === "BUY" ? "BROKER_PENDING" : "LIQUIDITY_PENDING", observedAt: new Date(s.now).toISOString() } }
+    for (const error of [null, "RECEIPT_PENDING"]) {
+      const snapshot = s.snap("APPROVAL_SUBMITTED", "APPROVAL", APPROVAL_HASH, error)
+      // While the order still waits for it, the confirming screen keeps its promise of a separate step.
+      const open = s.model(snapshot)
+      assert.equal(open.title, "Approval submitted — confirming")
+      assert.equal(open.paragraphs[0], `The approval transaction was sent. The server verifies it on chain before the ${word} is offered; the ${word} is never sent automatically.`)
+      assert.deepEqual(open.steps.slice(0, 2).map((step) => step.detail), ["Confirming", "After approval"])
+      for (const [label, extra, blocked] of [
+        ["expired", expired, "Deadline passed"],
+        ["moved on", movedOn, "Not needed — order moved on"],
+      ] as const) {
+        const at = `${side}/${error}/${label}`
+        const model = s.model(snapshot, extra)
+        // Past the deadline this screen can no longer check the approval, so its title never asks for a check.
+        assert.equal(model.title, label === "expired" ? "Approval sent — quote deadline passed" : "Approval sent — check needed", at)
+        if (label === "expired") assert.doesNotMatch(model.title, /check needed/, at)
+        assert.equal(model.paragraphs[0], "The approval transaction was sent.", at)
+        assert.deepEqual(
+          model.steps.slice(0, 2).map((step) => [step.label, step.status, step.detail]),
+          [
+            ["Approve exact amount", "current", "Approval sent"],
+            [Word, "problem", blocked],
+          ],
+          at,
+        )
+        const shown = [...model.steps.map((step) => step.detail), model.title, ...model.paragraphs, model.announcement].join(" ")
+        assert.doesNotMatch(shown, /After approval|confirming/i, at)
+        assert.doesNotMatch(shown, new RegExp(`before the ${word} is offered|the ${word} is never sent automatically`), at)
+        assert.equal(model.txHash, APPROVAL_HASH, at)
+        // Buttons are unchanged: the read-only check only, disabled after the deadline.
+        assert.deepEqual(model.buttons.map((button) => [button.action, button.label, button.enabled, button.opensWallet]), [["prepare", "Check approval status", label !== "expired", false]], at)
+      }
+    }
+  }
+})
+
+test("a running check shows the approval step as being checked, never as 'Not checked'", () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    const s = setup(side === "BUY" ? "fixture-order-a-buy-1" : "fixture-order-a-sell-1")
+    const model = s.model(s.snap("CHECKING"))
+    assert.equal(model.kind, "CHECKING")
+    assert.deepEqual([model.steps[0]?.status, model.steps[0]?.detail], ["current", "Checking"], side)
+    assert.ok(!model.steps.some((step) => step.detail === "Not checked"), side)
+    assert.deepEqual([model.steps[1]?.status, model.steps[1]?.detail], ["todo", "After approval"], `${side}: the transfer step is unchanged`)
+    assert.equal(s.model(IDLE_SNAPSHOT).steps[0]?.detail, "Not checked", "an unchecked order still says so")
+  }
+})
+
+test("an approval stop screen describes the step; it never tells the user to approve", () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    const s = setup(side === "BUY" ? "fixture-order-a-buy-1" : "fixture-order-a-sell-1")
+    const exact = side === "BUY" ? "300 ARCO_TEST_USDC" : "0.123456789 NVDA"
+    const spender = side === "BUY" ? "the funding vault" : "the redemption escrow"
+    const later = Date.parse(s.plan.order.quoteExpiresAt) + 1_000
+    const variants: [string, Partial<PanelInput>, string][] = [
+      ["expired", { now: later, availability: executionAvailability({ configured: true, ports: s.f.ports, context: s.context, selection: s.selection, now: later }) }, "Quote deadline passed — do not approve"],
+      ["moved on", { serverOrder: { orderId: s.plan.order.id, side, state: "COMPLETED", observedAt: new Date(s.now).toISOString() } }, "Order moved on — do not approve"],
+      ["unavailable", { availability: { status: "UNAVAILABLE", code: "CURRENT_POLICY_REQUIRED" } }, "Approval unavailable"],
+    ]
+    for (const [label, extra, title] of variants) {
+      const at = `${side}/${label}`
+      const model = s.model(s.snap("APPROVAL_REQUIRED"), extra)
+      assert.equal(model.title, title, at)
+      for (const paragraph of model.paragraphs) assert.doesNotMatch(paragraph, /^Approve exactly/, at)
+      assert.equal(
+        model.paragraphs[model.paragraphs.length - 1],
+        `This step would approve exactly ${exact} for ${spender} of this Stocks deployment; the approval does not ${side === "SELL" ? "escrow the units" : "pay for the order"}.`,
+        at,
+      )
+      assert.doesNotMatch(model.announcement, /\. Approve exactly/, at)
+      assert.deepEqual(model.buttons.map((button) => [button.action, button.enabled]), [["approve", false]], at)
+    }
+    // The actionable screen keeps its call to action.
+    const open = s.model(s.snap("APPROVAL_REQUIRED"))
+    assert.equal(open.paragraphs[0], `Approve exactly ${exact} for ${spender} of this Stocks deployment. The approval does not ${side === "SELL" ? "escrow the units" : "pay for the order"}.`)
+  }
+})

@@ -550,3 +550,96 @@ test("diagnostics 404: whether a record is 'kept' follows the record the card ac
     }
   }
 })
+
+// ---------------------------------------------------------------- UI review 2026-09-19 (G4: layout, live region, headings)
+
+/** Heading outline in document order: "<level> <visible text>". */
+function outline(html: string): string[] {
+  return [...html.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/g)].map(([, level, inner]) => `${level} ${text(inner).trim()}`)
+}
+
+function assertGapless(headings: readonly string[], label: string) {
+  const levels = headings.map((heading) => Number(heading[0]))
+  assert.equal(levels.filter((level) => level === 1).length, 1, `${label}: exactly one h1 in ${headings.join(" | ")}`)
+  assert.equal(levels[0], 1, `${label}: the h1 comes first`)
+  for (let i = 1; i < levels.length; i++) assert.ok(levels[i] <= levels[i - 1] + 1, `${label}: "${headings[i - 1]}" → "${headings[i]}" skips a level`)
+}
+
+test("A1: a Pill's text may shrink inside the pill, so long state names wrap instead of running over the next column", () => {
+  const detail = BUY_DETAIL()
+  const htmls = [render(full(), "overview"), render({ ...full(), detail, diagnostics: diag("BUY", FIXTURE_IDS.buyFinality) }, "orders")]
+  let pills = 0
+  for (const html of htmls) {
+    for (const [, className, label] of html.matchAll(/radius-pill\)\] border px-2[^"]*"><svg[\s\S]*?<\/svg><span class="([^"]*)">((?:[^<]|<wbr\/>)*)<\/span>/g)) {
+      pills += 1
+      assert.deepEqual(className.split(" ").sort(), ["break-words", "min-w-0"], `pill ${label}`)
+    }
+  }
+  assert.ok(pills > 10, `every rendered pill was checked (${pills})`)
+  // A state name may break after each underscore; its text is unchanged.
+  assert.match(htmls[0], /<span class="min-w-0 break-words">MINT_<wbr\/>FINALITY_<wbr\/>PENDING<\/span>/)
+  assert.match(text(htmls[0]), /MINT_FINALITY_PENDING/)
+})
+
+test("A2: a busy Refresh stays focusable: aria-disabled and aria-busy, never the disabled attribute", () => {
+  const detail = { ...BUY_DETAIL(), phase: "loading" as const }
+  const html = render({ ...full(), detail, diagnostics: { ...diag("BUY", FIXTURE_IDS.buyFinality), phase: "loading" } }, "orders")
+  for (const what of ["orders", "order detail", "wallet submissions"]) {
+    const button = new RegExp(`<button type="button" aria-label="Refresh ${what}"([^>]*)>([\\s\\S]*?)</button>`).exec(html)
+    assert.ok(button, what)
+    const busy = what !== "orders"
+    assert.doesNotMatch(button[1], /\bdisabled=""/, `${what}: never natively disabled`)
+    assert.equal(/aria-disabled="true"/.test(button[1]), busy, `${what}: aria-disabled only while busy`)
+    assert.equal(/aria-busy="true"/.test(button[1]), busy, `${what}: aria-busy only while busy`)
+    assert.equal(text(button[2]).trim(), busy ? "Refreshing…" : "Refresh", what)
+    assert.match(button[1], /aria-disabled:cursor-not-allowed/)
+  }
+})
+
+test("A4: the diagnostics snapshot line is a status region, so a successful refresh is announced; the clock-driven loaded-at line is not", () => {
+  const html = render(snapshot({ detail: BUY_DETAIL(), diagnostics: diag("BUY", FIXTURE_IDS.buyFinality) }), "orders")
+  const inCard = html.slice(html.indexOf('data-testid="stocks-admin-diagnostics"'))
+  const status = /<p role="status"[^>]*>([\s\S]*?)<\/p>/.exec(inCard)
+  assert.ok(status, "the snapshot line is a status region")
+  assert.match(text(status[1]).trim(), new RegExp(`^Server snapshot ${FIXTURE_OBSERVED_AT} · loaded 2026-09-17 03:00:25 UTC$`))
+  const loading = render(snapshot({ detail: BUY_DETAIL(), diagnostics: { ...IDLE, phase: "loading", orderId: FIXTURE_IDS.buyFinality, side: "BUY" } }), "orders")
+  assert.match(loading, /<p role="status"[^>]*>Loading…<\/p>/)
+  // ResourceMeta's "Loaded … (Ns ago)" line changes every 15 s and must stay silent.
+  assert.doesNotMatch(html, /role="status"[^>]*>Loaded /)
+})
+
+test("A5: one h1 and a gapless heading outline on every section, the selected order and the access states", () => {
+  const selected = render({ ...full(), detail: BUY_DETAIL(), diagnostics: diag("BUY", FIXTURE_IDS.buyFinality, { approval: fixtureAttempt("APPROVAL", "CONFIRMED"), transfer: fixtureAttempt("TRANSFER", "SUBMITTED") }) }, "orders")
+  assert.deepEqual(outline(render(full(), "overview")), ["1 Stocks operations", "2 BUY orders by state", "2 SELL orders by state", "2 Unfinished orders"])
+  const buy = outline(selected)
+  assert.deepEqual(buy.map((heading) => heading.replace(/^(2 Order detail).*$/, "$1")), [
+    "1 Stocks operations",
+    "2 Orders",
+    "2 Order detail",
+    "3 Funding (BUY)",
+    "3 Mint holding",
+    "3 Operations",
+    "3 Audit trail",
+    "3 Wallet submissions (read only)",
+    "4 Approval APPROVAL",
+    "4 Deposit TRANSFER",
+  ])
+  const sell = outline(render({ ...full(), detail: SELL_DETAIL(), diagnostics: diag("SELL", FIXTURE_IDS.sellSettlement) }, "orders"))
+  assert.deepEqual(sell.slice(3), ["3 Escrow custody (SELL)", "3 Cash reservations (SELL)", "3 Operations", "3 Audit trail", "3 Wallet submissions (read only)", "4 Approval APPROVAL", "4 Escrow TRANSFER"])
+  const matched = outline(render(full(), "reconciliation"))
+  assert.ok(matched.some((heading) => /^3 Known wallet balances \(\d+\)$/.test(heading)), matched.join(" | "))
+  const cases: [string, string[]][] = [
+    ["overview", outline(render(full(), "overview"))],
+    ["orders (no selection)", outline(render(full(), "orders"))],
+    ["BUY detail", buy],
+    ["SELL detail", sell],
+    ["audit", outline(render(full(), "audit"))],
+    ...(Object.keys(FIXTURE_RECONCILIATIONS) as ReconciliationStatus[]).map((status): [string, string[]] => [
+      `reconciliation ${status}`,
+      outline(render(snapshot({ reconciliation: loaded(parseReconciliation(FIXTURE_RECONCILIATIONS[status])) }), "reconciliation")),
+    ]),
+    ...(["signed_out", "unauthorized", "forbidden", "disabled"] as const).map((access): [string, string[]] => [`access ${access}`, outline(render(snapshot({}, access), "overview", noop))]),
+  ]
+  for (const [label, headings] of cases) assertGapless(headings, label)
+  assert.deepEqual(outline(render(snapshot({}, "forbidden"), "overview")), ["1 Stocks operations", "2 No Stocks read permission (403)"])
+})

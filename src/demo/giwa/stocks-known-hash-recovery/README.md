@@ -62,7 +62,7 @@ Runs once per click:
    - its `claimId`, `intentKey`, `stage` and `transactionDigest` must equal the candidate (else `BINDING_MISMATCH`);
    - a different stored hash is a `CONFLICT` and is never overwritten;
    - a stored terminal status is reported as it is.
-4. Only when the server has no hash: `record({...binding, status: "SUBMITTED", txHash: original})`.
+4. Only when the server has no hash: `record({...binding, status: "SUBMITTED", txHash: original})`. When the inspect shows the server already has the same hash, nothing is recorded again and the candidate becomes `RECORDED` from that answer (a verified candidate is never overwritten).
 5. `reconcile(binding + hash)`. `CONFIRMED`/`REVERTED` come only from that server answer; `SUBMITTED` means the receipt is pending (`RECORDED_PENDING`).
 
 Throughout the run:
@@ -71,6 +71,7 @@ Throughout the run:
 
 Failures:
 - **Server errors and lost answers** (`FAILED`) keep the candidate. The user can check again explicitly: the next run inspects first, so it never records the same hash twice.
+- **A failed receipt check after the hash is on the server** (recorded by this run, or already there at the inspect) leaves the candidate `RECORDED`: only the receipt is still unknown.
 - **Conflicts.** The gate reports every non-2xx response as `SUBMISSION_HTTP_ERROR`, so a 409 conflict raced in after inspect shows as `FAILED` first. The next explicit run then reports it as `CONFLICT`.
 
 ## UI
@@ -81,7 +82,10 @@ Failures:
   - "Check the receipt again" while recorded but pending
   - nothing once verified or blocked
 
-  The verified copy says a receipt is not the order result: an approval does not fund the order, and only the order status shows the result.
+  The verified copy says a receipt is not the order result: an approval does not fund the order, only the order status shows the result, and the order's own next step (deposit for a buy, escrow for a sell) still follows its rules and deadline.
+- **Announcements and focus:**
+  - The card is a static notice, not a live region. Each card has one always-mounted polite status region (`sr-only`, `data-testid="stocks-known-hash-announcement"`). It is empty until the card's first result, then holds "Check finished." and only the result sentence(s): the state's first paragraph plus the failure or ended-session paragraph. It never holds the busy label or the hash. A new action clears it; a repeated identical result is announced again (alternating invisible trailing space).
+  - When a result removes the card's button (verified, blocked, session ended) and focus has fallen to `<body>`, focus moves onto the card itself (`tabIndex=-1`, focus ring), never onto a button. This uses `useRescueFocus`, so it happens only after a user interaction, and never when the card mounts (the heading of a view that just opened keeps that rescue).
 - **Card copy:**
   - Every state that offers an action says the transaction behind the hash was already sent and that this step (only this card's approval, deposit or escrow) must not be sent again. An approval card never tells the user not to send the deposit or escrow the order may still need.
   - A kept card says the order's own check may show the result as unknown until the hash is recorded.
@@ -100,8 +104,8 @@ Failures:
 | --- | --- |
 | `store.test.tsx` | Validation, scoping, first hash kept, final verified state, no expiry, busy lock, bounds; static check: memory only, no credentials, recovery never claims, opens the wallet or reads policy |
 | `capture.test.tsx` | Identical promise and error; candidate only after the original record failed; UNKNOWN, hashless, unclaimed or other bindings never kept |
-| `recover.test.tsx` | Real registry, controller, gate and ports against the real server plugins. Cases: BUY/SELL × APPROVAL/TRANSFER recovery with exact requests (inspect, outcome and reconcile only, all with the new session's token; 0 claims; 0 wallet calls of any kind); the original callback arriving after the same owner signed in again or while wallet B is signed in (no request with any token; kept for A only); quote expiry + pause (the server still refuses a new TRANSFER claim: 503 paused, 409 expired); original lost answer; completed original record; wallet error; a server row already CONFIRMED or REVERTED (1 inspect, 0 outcomes, 0 reconciles); conflict; no claim; binding mismatch; other owner; expired and rejected (401) sessions; server error; lost recovery answer; pending then confirmed; reverted; owner change during the inspect, the record and the reconcile answers; busy |
-| `KnownHashRecoveryCard.test.tsx` | Copy and actions of every state (static markup): never "nothing was sent", the never-again line while an action is offered, no completion claim, one action or none, busy. KEPT + FAILED vs RECORDED + FAILED for all four side/stage wordings and three failure codes: KEPT keeps the record uncertainty; RECORDED never contradicts the recorded hash and keeps "Check the receipt again" |
+| `recover.test.tsx` | Real registry, controller, gate and ports against the real server plugins. Cases: BUY/SELL × APPROVAL/TRANSFER recovery with exact requests (inspect, outcome and reconcile only, all with the new session's token; 0 claims; 0 wallet calls of any kind); the original callback arriving after the same owner signed in again or while wallet B is signed in (no request with any token; kept for A only); quote expiry + pause (the server still refuses a new TRANSFER claim: 503 paused, 409 expired); original lost answer; completed original record; wallet error; a server row already CONFIRMED or REVERTED (1 inspect, 0 outcomes, 0 reconciles); a server row already SUBMITTED with the kept hash and a lost receipt check (RECORDED + FAILED, 0 outcomes, no retry, card copy); conflict; no claim; binding mismatch; other owner; expired and rejected (401) sessions; server error; lost recovery answer; pending then confirmed; reverted; owner change during the inspect, the record and the reconcile answers; busy |
+| `KnownHashRecoveryCard.test.tsx` | Copy and actions of every state (static markup): never "nothing was sent", the never-again line while an action is offered, no completion claim, one action or none, busy. KEPT + FAILED vs RECORDED + FAILED for all four side/stage wordings and three failure codes: KEPT keeps the record uncertainty; RECORDED never contradicts the recorded hash and keeps "Check the receipt again". Verified approval names deposit (buy) or escrow (sell). Status region: mounted and empty before the first action, result sentence(s) only, never the busy label or hash; with `GIWA_HOST_DOM_RUNTIME`, a repeated identical result changes the text and a new action clears the previous one |
 | `../stocks-execution-host/scope.test.tsx` | Owner scope: the session wallet must be the shown wallet on chain 91342 with an API base and origin |
-| `../stocks-execution-host/known-hash.dom.test.tsx` | First-commit visibility across deployment, origin, API base, chain and wallet changes and A→B→A; moved-on unpinned order shows only the card; a card unmounted mid-recovery stores nothing; notice variants (including another network) |
+| `../stocks-execution-host/known-hash.dom.test.tsx` | First-commit visibility across deployment, origin, API base, chain and wallet changes and A→B→A; moved-on unpinned order shows only the card; a card unmounted mid-recovery stores nothing; notice variants (including another network). Keyboard only (Enter/Space): the status region announces each result (a repeated failure again), focus moves onto the card when a result removes its button, a mounting card takes no focus, one inspect and no write or wallet call |
 | `../stocks-execution-host/page.dom.test.tsx` | Scenarios 11–19 on the real `/stocks` page (see that module's README) |

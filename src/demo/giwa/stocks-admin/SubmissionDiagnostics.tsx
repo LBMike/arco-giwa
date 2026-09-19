@@ -62,6 +62,7 @@ export function SubmissionDiagnosticsCard({ diagnostics, detailReady, now, onRef
   const canRefresh = diagnostics.orderId !== null && diagnostics.side !== null
   return (
     <Card
+      headingLevel={3}
       title="Wallet submissions (read only)"
       description="The server's wallet submission journal for this order at one database snapshot. This view cannot claim, record, reconcile, sign, send again or change any state."
       actions={canRefresh ? <RefreshButton onClick={onRefresh} busy={diagnostics.phase === "loading"} what="wallet submissions" /> : undefined}
@@ -71,7 +72,8 @@ export function SubmissionDiagnosticsCard({ diagnostics, detailReady, now, onRef
           <EmptyRow>{detailReady ? "Loading wallet submissions…" : "Wallet submissions load after the order detail (the order's side comes from it)."}</EmptyRow>
         ) : (
           <>
-            <p className="text-[11px] leading-4 text-[var(--color-arco-text-soft)]">
+            {/* A status region, so a successful refresh is announced. It holds no clock-driven text. */}
+            <p role="status" className="text-[11px] leading-4 text-[var(--color-arco-text-soft)]">
               {value ? (
                 <>
                   Server snapshot{" "}

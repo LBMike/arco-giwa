@@ -160,6 +160,16 @@ test("operator wallet submission diagnostics against the real route (set GIWA_AD
     assert.ok(element, `missing: ${label}`)
     await act(async () => { element!.dispatchEvent(new w.MouseEvent("click", { bubbles: true })) })
   }
+  // Keyboard activation of the focused element as a browser does it: Enter clicks on keydown, Space on keyup, and a
+  // disabled button does not click.
+  const press = async (key: "Enter" | " ") => {
+    await act(async () => {
+      const target = w.document.activeElement as HTMLElement
+      const activate = () => { if (target.tagName === "BUTTON" && !(target as HTMLButtonElement).disabled) target.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true })) }
+      if (target.dispatchEvent(new w.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })) && key === "Enter") activate()
+      if (target.dispatchEvent(new w.KeyboardEvent("keyup", { key, bubbles: true, cancelable: true })) && key === " ") activate()
+    })
+  }
   const card = () => container.querySelector('[data-testid="stocks-admin-diagnostics"]')
   const phase = () => card()?.getAttribute("data-phase") ?? null
   const stages = () => [...container.querySelectorAll('[data-testid="stocks-admin-diagnostics-stage"]')].map((element) => `${element.getAttribute("data-stage")}:${element.getAttribute("data-status")}`)
@@ -474,13 +484,56 @@ test("operator wallet submission diagnostics against the real route (set GIWA_AD
         button!.dispatchEvent(new w.MouseEvent("click", { bubbles: true }))
       })
       await until(() => gate.seen, "refresh in flight")
-      assert.equal(refresh()?.hasAttribute("disabled"), true)
+      // Busy is announced, not a native disabled state: a focused Refresh must keep focus (UI review A2).
+      assert.equal(refresh()?.getAttribute("aria-disabled"), "true")
+      assert.equal(refresh()?.hasAttribute("disabled"), false)
       await click(refresh(), "click on the busy button")
       gate.release()
       await until(() => phase() === "ready", "refreshed")
       await settle()
       assert.equal(diagnosticsRequests().length, 2, "one refresh request for three clicks")
+      assert.equal(refresh()?.hasAttribute("aria-disabled"), false, "not busy after the read")
       assertReadOnly("double clicks")
+    })
+
+    await t.test("keyboard: Enter or Space on a focused Refresh reads once and focus stays on it while the read is held and after (wallet submissions, order detail)", async () => {
+      await reset()
+      await openConsole(baseProps(mint(OPERATOR_A)))
+      await showRecord(ID.buyFinality)
+      const detailPath = `/api/v1/admin/stocks/orders/${ID.buyFinality}`
+      const detailRefresh = () => container.querySelector('button[aria-label="Refresh order detail"]')
+      const targets: [string, () => Element | null, (path: string) => boolean][] = [
+        ["wallet submissions", refresh, (path) => path.includes("/wallet-submissions/")],
+        ["order detail", detailRefresh, (path) => path === detailPath],
+      ]
+      for (const [what, button, match] of targets) {
+        for (const key of ["Enter", " "] as const) {
+          const label = `${what} ${JSON.stringify(key)}`
+          const gate = hold(match)
+          const before = log.filter((entry) => match(entry.path)).length
+          const target = button()
+          assert.ok(target, label)
+          await act(async () => { (target as HTMLElement).focus() })
+          assert.ok(w.document.activeElement === target, `${label}: focused`)
+          await press(key)
+          await until(() => gate.seen, `${label}: read in flight`)
+          // Compared by identity: an AssertionError carrying jsdom nodes makes the reporter inspect the whole window.
+          assert.ok(w.document.activeElement === button(), `${label}: focus stays on the busy Refresh, not ${w.document.activeElement?.tagName}`)
+          assert.equal(button()?.getAttribute("aria-disabled"), "true", label)
+          assert.equal(button()?.getAttribute("aria-busy"), "true", label)
+          assert.equal(button()?.hasAttribute("disabled"), false, `${label}: never natively disabled`)
+          await press(key)
+          await press(key)
+          gate.release()
+          await until(() => !button()?.hasAttribute("aria-disabled"), `${label}: read finished`)
+          await settle()
+          assert.equal(log.filter((entry) => match(entry.path)).length, before + 1, `${label}: one read for three presses`)
+          assert.ok(w.document.activeElement === button(), `${label}: focus stays on Refresh after the read`)
+        }
+      }
+      assert.equal(phase(), "ready")
+      assert.deepEqual(stages(), ["APPROVAL:CONFIRMED", "TRANSFER:SUBMITTED"])
+      assertReadOnly("keyboard refresh")
     })
   } finally {
     await reset()

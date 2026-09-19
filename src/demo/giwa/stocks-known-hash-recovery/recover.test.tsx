@@ -7,6 +7,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import { getAddress } from "viem"
 
 import type { HostSession } from "../stocks-host/session"
@@ -17,6 +19,7 @@ import type { ActiveWalletSource } from "../stocks-wallet-source"
 import { createExecutionRegistry, type ExecutionHostView, type ExecutionOwner, type ExecutionRegistry } from "../stocks-execution-host/registry"
 import { createFakeEip1193Wallet, providerError } from "../stocks-execution-host/testing/fake-wallet"
 import { bearerFingerprint, createInProcessStocks, HARNESS_FRONTEND_ORIGIN } from "../stocks-execution-host/testing/in-process-stocks"
+import { KnownHashRecoveryCard } from "./KnownHashRecoveryCard"
 import { recoverKnownHash, type RecoverKnownHashOptions } from "./recover"
 import { createKnownHashStore, type KnownHashEntry, type KnownHashStore } from "./store"
 
@@ -482,7 +485,9 @@ test("an owner change while the record or the reconcile answer is outstanding st
     release()
     assert.deepEqual(await second, { kind: "STOPPED" })
     assert.equal(w.bodies("/outcomes").length, outcomes, "the same hash is not recorded again")
-    assert.deepEqual([w.store.get(entry.claimId)?.state.kind, w.store.get(entry.claimId)?.busy], ["KEPT", false], "not VERIFIED after the owner left")
+    // The inspect answered while the owner was still shown and had the same hash, so the entry is RECORDED from that
+    // server answer (UI review G3 K3); the reconcile answer that arrived after the owner left is not stored.
+    assert.deepEqual([w.store.get(entry.claimId)?.state.kind, w.store.get(entry.claimId)?.busy], ["RECORDED", false], "not VERIFIED after the owner left")
     w.setRewrite(null)
     assert.deepEqual(await w.recover(w.store.get(entry.claimId)!), { kind: "CONFIRMED" })
   })
@@ -507,6 +512,54 @@ test("a server row already CONFIRMED or REVERTED with the kept hash: one inspect
       assert.equal(w.bodies("/reconcile").length, reconciles)
       assert.equal(w.server("GET", `/wallet-submissions/${w.side}/${w.order.id}`).length, inspects + 1)
       assert.deepEqual(w.store.get(entry.claimId)?.state, { kind: "VERIFIED", status: revert ? "REVERTED" : "CONFIRMED" })
+    })
+  }
+})
+
+// UI review G3 K3: an inspect that shows the server already has the kept hash for the claim is a server answer that the
+// hash is recorded. When the receipt check then fails, the hash is RECORDED (not KEPT, "the server may not have it"),
+// nothing is recorded again, nothing retries, and the card offers only the explicit receipt check.
+test("the server already has the kept hash (SUBMITTED) and the receipt check is lost: RECORDED + FAILED, no outcome, no retry", async () => {
+  for (const [side, stage, step] of [["BUY", "APPROVAL", "approval"], ["SELL", "TRANSFER", "escrow"]] as const) {
+    await run(side, {}, async (w) => {
+      const { entry, hash } = await lateHash(w, stage)
+      w.signInAgain()
+      // Someone (another tab, operations tooling) already recorded the same hash; its receipt is not checked yet.
+      const gate = createSubmissionGate({ session: w.session, side, orderId: w.order.id, deploymentDigest: w.order.deploymentDigest, apiBase: w.h.apiBase, fetch: w.fetch, now: () => Date.now() + w.offsets.wall, monotonicNow: () => performance.now() + w.offsets.wall })
+      const row = stageRow(await gate.inspect(entry.intentKey), stage)
+      await gate.record({ claimId: row.claimId, intentKey: row.intentKey, stage: row.stage, transactionDigest: row.transactionDigest, status: "SUBMITTED", txHash: hash as `0x${string}` })
+      assert.deepEqual([stageRow(await w.journal(), stage).status, stageRow(await w.journal(), stage).txHash], ["SUBMITTED", hash])
+      assert.deepEqual(w.store.get(entry.claimId)?.state, { kind: "KEPT" })
+      const outcomes = w.bodies("/outcomes").length, reconciles = w.bodies("/reconcile").length, calls = w.wallet.calls.length
+      const inspects = w.server("GET", `/wallet-submissions/${side}/${w.order.id}`).length
+      // The receipt check is lost before it reaches the server.
+      const lostReceipt = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/reconcile")) throw new TypeError("network connection lost")
+        return w.fetch(input, init)
+      }) as typeof globalThis.fetch
+      const result = await w.recover(entry, { fetch: lostReceipt })
+      assert.deepEqual(result, { kind: "FAILED", code: "SUBMISSION_REQUEST_FAILED" })
+      assert.deepEqual([w.store.get(entry.claimId)?.state, w.store.get(entry.claimId)?.busy], [{ kind: "RECORDED" }, false])
+      assert.equal(w.bodies("/outcomes").length, outcomes, "0 outcomes: the same hash is not recorded again")
+      assert.equal(w.server("GET", `/wallet-submissions/${side}/${w.order.id}`).length, inspects + 1, "one inspect")
+      assert.equal(w.bodies("/reconcile").length, reconciles, "the lost receipt check never reached the server")
+      assert.equal(w.wallet.calls.length, calls, "no wallet call of any kind")
+      assert.deepEqual([stageRow(await w.journal(), stage).status, stageRow(await w.journal(), stage).txHash], ["SUBMITTED", hash])
+      // The card for exactly this entry and result: the hash stays recorded; only the explicit receipt check is offered.
+      const html = renderToStaticMarkup(createElement(KnownHashRecoveryCard, { entry: w.store.get(entry.claimId)!, lastResult: result, onRecover: () => undefined }))
+      const text = html.replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'")
+      assert.ok(text.includes(`The server has recorded this ${step} hash for the order's request.`), text)
+      assert.ok(text.includes(`The ${step} hash stays recorded on the server`), text)
+      assert.doesNotMatch(text, /may or may not|may not have (it|recorded)|could not be recorded/i)
+      assert.deepEqual([...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((match) => match[1]), ["Check the receipt again"])
+      // Nothing retries on its own (the journal reads above use the same GET path, so count from here); the explicit
+      // check verifies it without recording again.
+      const requests = w.h.requests.length
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      assert.equal(w.h.requests.length, requests, "no request without an explicit action")
+      assert.deepEqual(await w.recover(w.store.get(entry.claimId)!), { kind: "CONFIRMED" })
+      assert.equal(w.bodies("/outcomes").length, outcomes)
+      assert.deepEqual(w.store.get(entry.claimId)?.state, { kind: "VERIFIED", status: "CONFIRMED" })
     })
   }
 })

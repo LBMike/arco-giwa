@@ -85,9 +85,10 @@ export function GiwaStocksFeatureView({ state, actions, tab, onTabChange, detail
       <div className="flex w-full flex-col gap-6 px-4 py-6 md:px-8 md:py-8">
         <header className="flex flex-col gap-2">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h1 id="giwa-stocks-title" className="text-2xl font-medium text-[var(--color-arco-ink)]">
+            {/* A section of the host page (the /stocks page's h1 is the market section's "Stocks"). */}
+            <h2 id="giwa-stocks-title" className="text-2xl font-medium text-[var(--color-arco-ink)]">
               Stocks
-            </h1>
+            </h2>
             <p className="text-sm text-[var(--color-arco-text-soft)]" data-testid="giwa-stocks-session">
               {switching ? (
                 "Updating session…"

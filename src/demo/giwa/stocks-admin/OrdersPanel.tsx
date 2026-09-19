@@ -53,7 +53,7 @@ export function OrdersPanel({ orders, detail, diagnostics, now, onRefresh, onSel
   return (
     <div className="grid w-full min-w-0 gap-4 2xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
       <section aria-labelledby={`${ids}-list`} className="flex min-w-0 flex-col gap-3 rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-4 shadow-[var(--shadow-control)]">
-        <h3 id={`${ids}-list`} className="text-sm font-semibold text-[var(--color-arco-ink)]">Orders</h3>
+        <h2 id={`${ids}-list`} className="text-sm font-semibold text-[var(--color-arco-ink)]">Orders</h2>
         <ResourceMeta state={orders} now={now} onRefresh={onRefresh} what="orders" />
         {rows && (
           <>

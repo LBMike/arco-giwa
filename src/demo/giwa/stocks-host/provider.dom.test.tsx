@@ -177,6 +177,106 @@ test("host DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsdom packa
     await m.unmount()
   })
 
+  const UNAVAILABLE_COPY = "Stocks sign-in is not available on this page. Reload the page; if this continues, contact operations."
+  const section = (m: { element: HTMLElement }) => m.element.querySelector('section[aria-label="Stocks sign-in"]') as HTMLElement
+  const statusText = (m: { element: HTMLElement }) => section(m).querySelector('[role="status"]')?.textContent
+  const buttonNamed = (m: { element: HTMLElement }, name: string) => [...section(m).querySelectorAll("button")].find(b => b.textContent === name) ?? null
+  /** Keyboard activation: focus, Enter keydown, then the click a browser derives from it (jsdom does not). */
+  async function press(button: HTMLButtonElement | null, name: string) {
+    assert.ok(button, `missing ${name}`)
+    await act(async () => { button.focus(); button.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true })); button.click(); await flush() })
+  }
+  // Booleans only: an assertion diff of a jsdom node would serialize the whole window.
+  const focusedStatus = (m: { element: HTMLElement }) => {
+    const active = document.activeElement
+    return active !== null && section(m).contains(active) && active.tagName !== "BUTTON" && active.getAttribute("role") === "status"
+  }
+
+  await t.test("sign-in copy uses the readable soft tone and a host without a controller is not offered as a retry", async () => {
+    const f = fixture(); f.intercept(async () => { throw new Error("token=private") })
+    const m = await mount(f)
+    assert.ok(!section(m).outerHTML.includes("color-arco-muted"), "no low-contrast muted text in the sign-in section")
+    assert.ok([...section(m).querySelectorAll("p")].some(p => p.textContent === "Signing in does not authorize a transaction." && p.className.includes("text-[var(--color-arco-text-soft)]")))
+    await act(async () => { await m.host.signIn() })
+    assert.equal(statusText(m), "Stocks sign-in could not be completed. Try again.", "a real failure keeps its retry copy")
+    assert.ok(buttonNamed(m, "Retry Stocks sign-in") !== null)
+    f.intercept(undefined)
+    await m.render({ ...initial, apiBase: "https://private:secret@api.example" })
+    assert.equal(m.host.walletStatus, "ready")
+    assert.equal(m.host.snapshot.status, "error")
+    assert.equal(m.host.canSignIn, false)
+    assert.equal(statusText(m), UNAVAILABLE_COPY)
+    assert.ok(!section(m).textContent?.includes("Try again"))
+    assert.ok(!section(m).textContent?.includes("Retry"))
+    const button = buttonNamed(m, "Sign in to Stocks")
+    assert.ok(button !== null); assert.equal(button.disabled, true)
+    const calls = f.calls.length
+    await act(async () => { button.click(); await flush() })
+    assert.equal(f.calls.length, calls, "the unavailable host sends nothing")
+    assert.ok(!section(m).outerHTML.includes("color-arco-muted"))
+    await m.render(initial)
+    assert.equal(statusText(m), "Sign in to view your Stocks account.")
+    await m.unmount()
+  })
+
+  await t.test("after a keyboard sign-in, retry, cancel or sign-out the status text keeps focus; a button is never focused", async () => {
+    const f = fixture()
+    const m = await mount(f)
+    await press(buttonNamed(m, "Sign in to Stocks"), "Sign in to Stocks")
+    assert.equal(m.host.snapshot.status, "authenticated")
+    assert.equal(f.calls.length, 2)
+    assert.ok(focusedStatus(m), `after sign-in focus is on ${document.activeElement?.tagName}`)
+    await press(buttonNamed(m, "Sign out of Stocks"), "Sign out of Stocks")
+    assert.equal(m.host.snapshot.session, null)
+    assert.ok(focusedStatus(m), `after sign-out focus is on ${document.activeElement?.tagName}`)
+    assert.equal(f.calls.length, 2, "moving focus starts no sign-in")
+
+    const pending = deferred<Response>(); f.intercept(async () => pending.promise)
+    await press(buttonNamed(m, "Sign in to Stocks"), "Sign in to Stocks")
+    assert.equal(m.host.snapshot.status, "signing-in")
+    // The pressed button stays but turns into the disabled "Signing in…"; its stranded focus goes to the status text, from
+    // where the next Tab reaches "Cancel sign-in".
+    assert.ok(focusedStatus(m), `while the signature is pending focus is on ${document.activeElement?.tagName} ${document.activeElement?.textContent}`)
+    await press(buttonNamed(m, "Cancel sign-in"), "Cancel sign-in")
+    assert.equal(m.host.snapshot.status, "signed-out")
+    assert.ok(focusedStatus(m), `after cancel focus is on ${document.activeElement?.tagName}`)
+    pending.resolve(new Response("{}", { status: 500 })); await act(async () => { await flush() })
+
+    f.intercept(async () => { throw new Error("offline") })
+    await press(buttonNamed(m, "Sign in to Stocks"), "Sign in to Stocks")
+    assert.equal(m.host.snapshot.status, "error")
+    f.intercept(undefined)
+    await press(buttonNamed(m, "Retry Stocks sign-in"), "Retry Stocks sign-in")
+    assert.equal(m.host.snapshot.status, "authenticated")
+    assert.ok(focusedStatus(m), `after retry focus is on ${document.activeElement?.tagName}`)
+    const status = section(m).querySelector('[role="status"]') as HTMLElement
+    assert.equal(status.getAttribute("tabindex"), "-1", "reachable by script only, not a Tab stop")
+    assert.match(status.className, /focus-visible:outline-\[var\(--color-arco-ink\)\]/)
+    await m.unmount()
+  })
+
+  await t.test("focus is not moved on first render, without user interaction, or after the user worked elsewhere", async () => {
+    const f = fixture()
+    const outside = document.createElement("button"); outside.textContent = "Elsewhere"; document.body.append(outside)
+    try {
+      const m = await mount(f)
+      assert.ok(document.activeElement === document.body, "first render")
+      await act(async () => { await m.host.signIn() })
+      assert.equal(m.host.snapshot.status, "authenticated")
+      assert.ok(document.activeElement === document.body, "programmatic sign-in")
+      await act(async () => m.host.logout())
+      assert.ok(document.activeElement === document.body, "programmatic sign-out")
+      await press(buttonNamed(m, "Sign in to Stocks"), "Sign in to Stocks")
+      assert.ok(focusedStatus(m))
+      await act(async () => { outside.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true })); outside.focus(); outside.blur() })
+      assert.ok(document.activeElement === document.body)
+      await act(async () => m.host.logout())
+      assert.equal(m.host.snapshot.session, null)
+      assert.ok(document.activeElement === document.body, "the user left the section before the state changed")
+      await m.unmount()
+    } finally { outside.remove() }
+  })
+
   await t.test("pending owner unmount aborts HTTP and removes timers/listeners", async () => {
     const f = fixture(); const pending = deferred<Response>(); f.intercept(() => pending.promise)
     const m = await mount(f)

@@ -277,12 +277,19 @@ export function StocksWalletPanel(props: StocksWalletPanelProps) {
     }
   }, [armKey, armDelayMs])
 
+  // The state as the user perceives it. A commit that changes none of it (the countdown tick) is not a
+  // state change, so focus left on the page body (a press on text, a drag-selection) is not moved.
+  const stateKey = `${model.kind}|${model.title}|${model.buttons.map((button) => `${button.action}:${button.enabled}`).join(",")}|${pending ?? ""}`
+  const committedStateKey = useRef<string | null>(null)
+
   useIsomorphicLayoutEffect(() => {
+    const changed = committedStateKey.current !== stateKey
+    committedStateKey.current = stateKey
     if (!focusInside.current || typeof document === "undefined") return
     const active = document.activeElement as (Element & { disabled?: boolean }) | null
     const lost = active === null || active === document.body
     const stranded = active !== null && rootRef.current !== null && rootRef.current.contains(active) && active.tagName === "BUTTON" && active.disabled === true
-    if (lost || stranded) stateHeadingRef.current?.focus({ preventScroll: true })
+    if (stranded || (lost && changed)) stateHeadingRef.current?.focus({ preventScroll: true })
   })
 
   const activate = (button: PanelButton) => {
@@ -333,7 +340,7 @@ export function StocksWalletPanel(props: StocksWalletPanelProps) {
         </Notice>
         {model.txHash && model.txLabel ? <TransactionHash label={model.txLabel} hash={model.txHash} /> : null}
         {model.code ? (
-          <p className="text-xs text-[var(--color-arco-text-soft)]">
+          <p className="text-xs text-[var(--color-arco-text-soft)] [overflow-wrap:anywhere]">
             Code <span className="font-mono">{model.code}</span>
           </p>
         ) : null}
