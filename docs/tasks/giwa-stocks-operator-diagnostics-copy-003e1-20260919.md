@@ -1,5 +1,7 @@
 # Claude Code 구현 프롬프트 — GIWA-STOCKS-OPERATOR-DIAGNOSTICS-COPY-003E-1
 
+> 완료:003E-1은 독립 검증을 통과했습니다. [최종 인수 기록](../evidence/giwa-stocks-operator-diagnostics-copy-003e1-verified-20260919.md). 아래는 당시 전달한 과제의 원문입니다.
+
 당신은 GIWA Stocks UI 담당입니다. 003E의 독립 검증에서 발견된 안내 문구
 모순 1건만 수정하세요. 기능·권한·조회 전용 동작은 통과했습니다.
 

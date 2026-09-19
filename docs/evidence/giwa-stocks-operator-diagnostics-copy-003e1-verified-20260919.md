@@ -46,6 +46,21 @@ regressions therefore demonstrate the original issue, rather than only matching
 new implementation text. Narrow counts overlap the full frontend suite and are
 not added to its unique total.
 
+## Builder follow-up observed during verification
+
+Claude subsequently committed `6b98320dd7d4df76e5b0ea5d1fcf002b41c176b1`. It adds
+only tests: scope-mismatched records must use empty-state copy, an invalid
+refresh preserves the old record with an invalid marker, and additional error
+bodies are pinned. No production code changed. Root inspected and cherry-picked
+that commit as `b6646fd0ffd4418b0a6bd32eee5596dd673b66c9` (latest accepted code,
+tree `9b112232cd96eface7795a703f7025fc5d7190ea`).
+
+The updated views/store/DOM suite passed **58/58**,0skip. `followup-tests.log`
+records it. The748 full-frontend result below belongs to the preceding code;
+the final test set has750 tests, but a750-test full rerun is not claimed. The
+actual browser tested identical production code and was not repeated merely for
+test-only additions. Claude remained clean at6b98320 on the final source check.
+
 ## Root verification
 
 | Check | Result |
