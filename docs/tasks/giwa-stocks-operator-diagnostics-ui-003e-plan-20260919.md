@@ -75,3 +75,22 @@ Task prompt: `docs/tasks/giwa-stocks-operator-diagnostics-ui-003e-20260919.md`. 
 Full checks: typecheck, build, frontend (DOM + artifacts, and CI-like), server (the diagnostics plugin and service tests are part of `test:server`), security, design tokens (7 known) and stories, `git diff --check`.
 
 The real PostgreSQL, EVM, Chrome and operator login integration is Codex's; it is not replaced by these in-memory results.
+
+## Results (recorded at completion)
+
+- **Implemented as planned.** Only `src/demo/giwa/stocks-admin/**` changed. `StocksPages.tsx`, the server, the DB, Solidity, the registry, auth, the quote deadline, the wallet transfer path and the known-hash recovery UI are unchanged.
+- **One change after the visual check:** the claim id is shown in full instead of shortened, so an operator can match it with server records.
+- **Tests added: 30.**
+  - `store` +8, including X → Y → X late data and a late 403, added after mutation M03 survived round 1.
+  - `diagnostics-parse` 8: the client parser equals the server's own `publicSnapshot` on 64 BUY/SELL cases.
+  - `views` +5.
+  - Gated DOM suite 9: the real `stocksSubmissionDiagnosticsPlugin` and `stocksSessionResolvers` via `app.inject`, the real feature in StrictMode, a request log, and a `window.ethereum` read counter.
+  - 4 existing store tests now settle the new read; none was weakened.
+- **Mutation checks:** 20 mutations, all killed after round 2.
+- **Final checks at `0b5e050`:**
+  - frontend 743/743 with DOM + artifacts; CI-like 677 pass + 6 gate skips;
+  - server 330 pass + 72 DB skips (diagnostics files: 51 pass + 8 real-PG skips);
+  - typecheck, build, security, stories, `.mjs` DOM 23/23 and diff all pass;
+  - design tokens: the 7 known findings.
+- **Not real integration:** the reader and the other admin routes were fixtures. Real PostgreSQL, EVM, Chrome and operator login stay with Codex.
+- **Details:** `docs/evidence/giwa-stocks-operator-diagnostics-ui-003e-builder-20260919.md`.
