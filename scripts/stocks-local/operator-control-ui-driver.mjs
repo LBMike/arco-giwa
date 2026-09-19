@@ -245,10 +245,15 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
       { paused: true, expectedVersion: 0, idempotencyKey: randomUUID(), reason: 'B-only namespace audit entry' });
     let releaseControl;
     const heldControl = new Promise(resolve => { releaseControl = resolve; });
-    await interceptOnce(async route => {
-      assert.equal(route.request().method(), 'GET');
-      await heldControl; await route.continue();
-    });
+    // Reload/session replacement may abort and restart a read in StrictMode. Hold every matching GET,
+    // rather than only the first transport attempt, so the ordering is deterministic.
+    const holdStateReads = async route => {
+      try {
+        assert.equal(route.request().method(), 'GET');
+        await heldControl; await route.continue();
+      } catch { instrumentationErrors.push('CONTROL_HELD_READ_FAILED'); await route.abort('failed').catch(() => {}); }
+    };
+    await page.route(`${stack.apiBase}${root}`, holdStateReads);
     try {
       await page.reload(); await localAccount('operator'); await signIn(); operatorSession = session;
       await wait(async () => await history().getAttribute('data-phase') === 'ready', 'History A arrives before initial control');
@@ -263,7 +268,11 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
       assert.equal(await page.getByTestId('stocks-trading-control-event').count(), 1);
       assert.equal((await current()).state.deploymentDigest, digestB);
       await screenshot('control-history-first-namespace-b.png');
-    } finally { releaseControl(); stack.controlForHarness.faults.serviceOverride = null; }
+    } finally {
+      releaseControl();
+      await page.unroute(`${stack.apiBase}${root}`, holdStateReads);
+      stack.controlForHarness.faults.serviceOverride = null;
+    }
     await refresh();
     await wait(async () => await history().getAttribute('data-phase') === 'ready' && (await history().innerText()).includes('History fixture'), 'Original A history restored');
     assert.doesNotMatch(await history().innerText(), /B-only namespace audit entry/);
