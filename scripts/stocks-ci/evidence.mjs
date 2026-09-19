@@ -103,7 +103,12 @@ function verifyControlUi(result) {
   assert.equal(result.actualRoutes, true, 'Control UI must use product routes');
   assert.equal(result.strictMode, true, 'Control UI must run in StrictMode');
   assert.ok(Array.isArray(result.scenarios), 'Investor regressions are missing');
-  namedCoverage(result.scenarios.map(row => row?.name), 19, 'Investor regressions');
+  assert.equal(result.scenarios.length, 19, 'Investor regressions have incomplete coverage');
+  assert.ok(result.scenarios.every(row => object(row) && typeof row.name === 'string' && row.name.trim().length > 0), 'Investor regressions need named checks');
+  // The same action is tested at different balances/orders. Its title repeats legitimately;
+  // compare the complete evidence rows so copying one result cannot stand in for all cases.
+  assert.equal(new Set(result.scenarios.map(row => JSON.stringify(Object.fromEntries(Object.entries(row).sort())))).size, 19,
+    'Investor regressions contain duplicate evidence rows');
   const control = result.operatorControl;
   assert.ok(object(control), 'Operator control UI result is missing');
   assert.equal(control.result, 'PASS', 'Operator control UI did not pass');

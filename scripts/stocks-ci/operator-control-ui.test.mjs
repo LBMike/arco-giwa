@@ -39,6 +39,13 @@ test('operator-control UI accepts all required checks, real-route evidence, seve
   assert.equal(verify(fixture()).ready.ownerPid, 101);
 });
 
+test('investor regressions may repeat an action title for distinct orders or balances', () => {
+  const r = fixture();
+  r.scenarios[0] = { name: 'Browser portfolio matches chain', quantity: '2' };
+  r.scenarios[1] = { name: 'Browser portfolio matches chain', quantity: '1.5' };
+  assert.equal(verify(r).ready.ownerPid, 101);
+});
+
 test('operator-control UI rejects a plain investor report and incomplete or duplicate case identities', () => {
   for (const mutate of [
     r => { delete r.operatorControl; },
