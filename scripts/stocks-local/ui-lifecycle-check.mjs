@@ -1,7 +1,7 @@
 // Execute only against child-owned disposable services. Never discover or stop an existing service.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { connect } from 'node:net';
+import { assertPortClosed } from './assert-port-closed.mjs';
 import { existsSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
@@ -11,16 +11,7 @@ function alive(pid, group = false) {
   try { process.kill(group ? -pid : pid, 0); return true; }
   catch (error) { if (error.code === 'ESRCH') return false; throw error; }
 }
-async function listening(base) {
-  const url = new URL(base);
-  assert.equal(url.hostname, '127.0.0.1');
-  return new Promise(resolve => {
-    const socket = connect({ host: '127.0.0.1', port: Number(url.port) });
-    socket.setTimeout(1000);
-    const done = value => { socket.destroy(); resolve(value); };
-    socket.once('connect', () => done(true)); socket.once('error', () => done(false)); socket.once('timeout', () => done(false));
-  });
-}
+
 for (const mode of ['ready-SIGINT', 'active-SIGTERM', 'failure']) {
   const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/stocks-local/run.mjs'], { cwd: root,
     env: { ...process.env, STOCKS_LOCAL_UI: '1', STOCKS_LOCAL_STACK_CASE_PROBE: '', STOCKS_LOCAL_STACK_SIGNAL_PROBE: '',
@@ -54,7 +45,7 @@ for (const mode of ['ready-SIGINT', 'active-SIGTERM', 'failure']) {
   assert.equal(alive(stopped.nodeGroup, true), false); assert.equal(alive(stopped.postgresPid), false);
   assert.equal(existsSync(join(stopped.postgresData, 'postmaster.pid')), false);
   assert.equal(existsSync(join(stopped.socket, '.s.PGSQL.5432')), false);
-  assert.equal(await listening(ready.apiBase), false); assert.equal(await listening(ready.rpcUrl), false);
+  await assertPortClosed(ready.apiBase); await assertPortClosed(ready.rpcUrl);
   assert.ok(!/Private Key:|mnemonic/i.test(stdout + stderr));
   assert.ok(stopped.temp.startsWith('/private/tmp/stocks-local-stack-') || stopped.temp.startsWith('/tmp/stocks-local-stack-'));
   rmSync(stopped.temp, { recursive: true, force: true });

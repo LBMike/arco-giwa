@@ -67,6 +67,12 @@ The runner rejects:
 - missing lifecycle probes or unresolved operator diagnostic/control findings;
 - interruption, nonzero child exits or a test exceeding its 12-minute budget.
 
+Port cleanup requires an explicit `ECONNREFUSED` from each owned IPv4 loopback
+endpoint. A successful connection, timeout, permission/routing error, or socket
+closing without a result fails verification. The CI runner and browser/DOM
+lifecycle checks share this rule; inability to inspect a port cannot count as
+proof that the service stopped.
+
 The `operator-control-ui` job requires ten distinct stable check identities from
 the real driver, product routes and StrictMode, no page errors or known findings,
 zero control wallet sends, sign-in-only wallet methods and the ten reviewed POST

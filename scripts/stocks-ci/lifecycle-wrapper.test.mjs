@@ -30,6 +30,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) test(`lifecycle wrapper forwards ${s
   const cleanupFile = join(root, 'fake-cleanup-complete.json');
   mkdirSync(scripts, { recursive: true });
   copyFileSync(source, join(scripts, 'browser-lifecycle-check.mjs'));
+  copyFileSync(resolve(import.meta.dirname, '../stocks-local/assert-port-closed.mjs'), join(scripts, 'assert-port-closed.mjs'));
   writeFileSync(join(scripts, 'run.mjs'), `
 import { appendFileSync, writeFileSync } from 'node:fs';
 let stopping = false;

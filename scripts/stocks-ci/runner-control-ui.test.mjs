@@ -13,6 +13,7 @@ test('CI selects only the requested control UI harness, clears inherited modes/D
   try {
     for (const file of ['run.mjs', 'evidence.mjs']) copyFileSync(join(import.meta.dirname, file), join(ci, file));
     copyFileSync(join(import.meta.dirname, '../stocks-local/operator-control-ui-checks.mjs'), join(local, 'operator-control-ui-checks.mjs'));
+    copyFileSync(join(import.meta.dirname, '../stocks-local/assert-port-closed.mjs'), join(local, 'assert-port-closed.mjs'));
     writeFileSync(join(ci, 'package.json'), '{"name":"local-ci-boundary-fixture","private":true}');
     symlinkSync(join(import.meta.dirname, 'node_modules'), join(ci, 'node_modules'), 'dir');
     writeFileSync(join(local, 'run.mjs'), `

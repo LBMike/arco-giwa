@@ -2,7 +2,7 @@
 // Run after the browser runner is ready; no public network, installed user browser, existing DB or wallet.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { connect } from 'node:net';
+import { assertPortClosed } from './assert-port-closed.mjs';
 import { existsSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
@@ -15,19 +15,6 @@ function pid(value) {
 function alive(value, group = false) {
   try { process.kill(group ? -pid(value) : pid(value), 0); return true; }
   catch (error) { if (error.code === 'ESRCH') return false; throw error; }
-}
-async function listening(base) {
-  const url = new URL(base);
-  assert.equal(url.hostname, '127.0.0.1');
-  assert.equal(url.protocol, 'http:');
-  assert.ok(Number.isSafeInteger(Number(url.port)) && Number(url.port) > 0 && Number(url.port) <= 65535);
-  return new Promise(done => {
-    const socket = connect({ host: '127.0.0.1', port: Number(url.port) });
-    let settled = false;
-    const finish = value => { if (settled) return; settled = true; socket.destroy(); done(value); };
-    socket.setTimeout(1000);
-    socket.once('connect', () => finish(true)); socket.once('error', () => finish(false)); socket.once('timeout', () => finish(false));
-  });
 }
 
 // A CI wrapper signals this checker, not its nested runner. Forward shutdown
@@ -112,9 +99,9 @@ for (const mode of ['ready-SIGINT', 'held-SIGTERM', 'failure']) {
   assert.equal(alive(stopped.postgresPid), false, 'Owned PostgreSQL process exited');
   assert.equal(existsSync(join(stopped.postgresData, 'postmaster.pid')), false);
   assert.equal(existsSync(join(stopped.socket, '.s.PGSQL.5432')), false);
-  assert.equal(await listening(ready.apiBase), false, 'Owned API port closed');
-  assert.equal(await listening(ready.origin), false, 'Owned browser bridge/Vite port closed');
-  assert.equal(await listening(ready.rpcUrl), false, 'Owned local RPC port closed');
+  await assertPortClosed(ready.apiBase);
+  await assertPortClosed(ready.origin);
+  await assertPortClosed(ready.rpcUrl);
   assert.ok(!/Private Key:|mnemonic/i.test(stdout + stderr), 'No key material in child diagnostics');
   assert.ok(/^\/(?:private\/)?tmp\/stocks-local-stack-[A-Za-z0-9_-]+$/.test(stopped.temp), 'Only child-owned temporary stack directory may be removed');
   assert.equal(resolve(stopped.postgresData), join(stopped.temp, 'postgres'));

@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { connect } from 'node:net';
+import { assertPortClosed } from '../stocks-local/assert-port-closed.mjs';
 import { parseTap, verifyBrowser, verifyLifecycle, verifyOperatorControl } from './evidence.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -84,18 +84,6 @@ function assertGone(pid, group = false) {
   catch (error) { if (error.code === 'ESRCH') return; throw error; }
   assert.fail('An owned verification process is still running');
 }
-async function assertClosed(base) {
-  const url = new URL(base);
-  assert.equal(url.protocol, 'http:'); assert.equal(url.hostname, '127.0.0.1');
-  assert.ok(Number(url.port) > 0 && Number(url.port) <= 65535);
-  const open = await new Promise(done => {
-    const socket = connect({ host: '127.0.0.1', port: Number(url.port) });
-    const finish = value => { socket.destroy(); done(value); };
-    socket.once('connect', () => finish(true)); socket.once('error', () => finish(false));
-    socket.setTimeout(1000, () => finish(false));
-  });
-  assert.equal(open, false, 'An owned verification port is still listening');
-}
 
 try {
   if (scenario === 'postgres') {
@@ -103,7 +91,7 @@ try {
       'scripts/stocks-local/browser-server.test.mjs', 'scripts/stocks-local/local-wallet.test.mjs',
       'scripts/stocks-local/short-session.test.mjs', 'scripts/stocks-ci/evidence.test.mjs',
       'scripts/stocks-ci/operator-control-ui.test.mjs', 'scripts/stocks-ci/runner-control-ui.test.mjs',
-      'scripts/stocks-ci/postgres-harness.test.mjs', 'scripts/stocks-ci/lifecycle-wrapper.test.mjs']);
+      'scripts/stocks-ci/port-cleanup.test.mjs', 'scripts/stocks-ci/postgres-harness.test.mjs', 'scripts/stocks-ci/lifecycle-wrapper.test.mjs']);
     summary.harnessTests = parseTap(units);
     const frontend = await run('frontend', ['--import', 'tsx', '--test', '--test-reporter=tap', 'src/demo/giwa/**/*.test.tsx']);
     summary.frontendTests = parseTap(frontend);
@@ -155,7 +143,7 @@ try {
       assertGone(stopped.nodeGroup, true);
       assert.equal(existsSync(join(stopped.postgresData, 'postmaster.pid')), false);
       assert.equal(existsSync(join(stopped.socket, '.s.PGSQL.5432')), false);
-      await Promise.all([ready.apiBase, ready.origin, ready.rpcUrl].map(assertClosed));
+      await Promise.all([ready.apiBase, ready.origin, ready.rpcUrl].map(base => assertPortClosed(base)));
       if (scenario === 'operator-control-ui') assert.equal(existsSync(stopped.temp), false, 'Owned control UI scratch directory remains');
       summary.browser = { version: result.browserVersion, scenarioGroups: result.scenarios.length,
         diagnosticsCases: result.operatorDiagnostics?.cases.length, diagnosticsGroups: result.operatorDiagnostics?.checks.length,
