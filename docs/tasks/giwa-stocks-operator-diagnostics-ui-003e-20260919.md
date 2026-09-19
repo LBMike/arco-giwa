@@ -4,7 +4,7 @@
 
 ## 기준과 범위
 
-- 기준 저장소는 `/private/tmp/arco-giwa-known-hash-ui-integration-20260919`입니다. 시작 시 실제 HEAD와 clean 여부를 기록하고 별도 clone의 `codex/` 브랜치를 사용하세요. 이 기준의 `docs/evidence/giwa-stocks-known-hash-ui-integration-20260919.md`를 먼저 확인하세요.
+- 기준 저장소는 `/private/tmp/arco-giwa-known-hash-ui-verified-20260919`입니다. 시작 시 실제 HEAD와 clean 여부를 기록하고 별도 clone의 `codex/` 브랜치를 사용하세요. 이 기준의 `docs/evidence/giwa-stocks-known-hash-ui-copy-003d1-verified-20260919.md`를 먼저 확인하세요. Claude 003D-1 문구 수정과 Codex 실제 브라우저 재검증·테스트 시간 경계 보완을 포함한 기준입니다. 앞선 6455d4d 작업본으로 되돌아가지 마세요.
 - `CLAUDE.md`, `docs/contracts/stocks-submission-diagnostics-v1.md`, `server/src/stocks-submission-diagnostics/contracts.ts`, `public.ts`, 기존 `stocks-admin`의 client/store/parse/선택 주문 화면을 읽으세요.
 - `src/demo/giwa/stocks-admin/**`와 필요한 좁은 관리자 페이지 연결, 관련 테스트·문서만 수정하세요. 기존 사용자 복구 UI, 서버·DB schema·Solidity·registry·인증 정책·견적 기한·지갑 전송 경로는 그대로 사용합니다.
 - `.env*`(예외 `.env.example`)와 `.secrets`는 읽거나 수정하지 마세요. 공개 RPC·실지갑·배포·push는 이번 범위에 없습니다.
