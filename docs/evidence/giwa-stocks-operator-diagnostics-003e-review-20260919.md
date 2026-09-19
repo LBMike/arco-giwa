@@ -1,5 +1,7 @@
 # 003E independent integration review — DONE_WITH_CONCERNS
 
+> Latest:003E-1 closes the P3 below. See [independent acceptance](./giwa-stocks-operator-diagnostics-copy-003e1-verified-20260919.md). The original review is retained as historical evidence.
+
 2026-09-19. Functional, authorization, persistence and local browser integration
 checks passed. One low-priority UI copy finding remains for Claude 003E-1. No
 confirmed P0/P1/P2 issue was found in this scoped review. This is local test
