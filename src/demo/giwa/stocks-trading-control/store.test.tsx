@@ -453,3 +453,19 @@ test("start refuses at the version limit and when only the read time differs fro
   assert.equal(second.store.start({ paused: false, reason: REASON, reviewed: { ...reviewed(second.store), observedAt: "2026-09-19T08:59:59.000Z" } }), "stale_review")
   assert.equal(posts(transport).length + posts(second.transport).length, 0)
 })
+
+test("history: without a readable control state, an older page must still continue the same deployment's list", async () => {
+  const { store, transport } = setup()
+  const newest = Array.from({ length: 20 }, (_, i) => tcEvent(30 - i, (30 - i) % 2 === 0))
+  store.refresh()
+  transport.take("GET", TRADING_CONTROL_PATH).respond({ status: 503, body: tcError("TRADING_CONTROL_UNAVAILABLE") })
+  transport.take("GET", RUNTIME_STATUS_PATH).respond(ok(tcRuntime()))
+  transport.take("GET", HISTORY).respond(ok(tcHistory(newest, 11)))
+  await flush()
+  assert.equal(store.getSnapshot().control.value, null, "no digest to compare with")
+  store.loadHistory(11)
+  transport.take("GET", historyPath(11)).respond(ok(tcHistory([{ ...tcEvent(10, true), deploymentDigest: "e".repeat(64) }], null)))
+  await flush()
+  const history = store.getSnapshot().history
+  assert.deepEqual([history.phase, history.error?.kind, history.failedPage, history.items.length], ["error", "invalid", "older", 20])
+})
