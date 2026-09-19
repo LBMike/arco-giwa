@@ -522,9 +522,10 @@ test("diagnostics: every error kind keeps its own copy, and none says nothing is
     [ROUTE_ABSENT, "Wallet submission diagnostics are not available on this server (404)"],
     [{ kind: "server", status: 503, code: "SUBMISSION_DIAGNOSTICS_UNAVAILABLE" }, "Diagnostics unavailable (503) The server could not read a consistent snapshot. Nothing new is shown."],
     [{ kind: "network", status: null, code: null }, "Could not reach the API The request failed before a response arrived. Nothing new is shown."],
-    [{ kind: "invalid", status: 200, code: null }, "Response did not match the diagnostics contract"],
+    [{ kind: "invalid", status: 200, code: null }, "Response did not match the diagnostics contract The response was rejected and none of it is shown (wrong profile, order, side, deployment, wallet, fields or permission flags)."],
     [{ kind: "request", status: 400, code: "INVALID_SUBMISSION_DIAGNOSTICS_INPUT" }, "Request rejected (400) The server rejected the request. Nothing new is shown."],
-    [{ kind: "aborted", status: null, code: null }, "Request cancelled"],
+    [{ kind: "aborted", status: null, code: null }, "Request cancelled The request was cancelled before it finished."],
+    [{ kind: "configuration", status: null, code: null }, "Stocks admin API is not configured No request was sent."],
   ]
   for (const [error, copy] of kinds) {
     const t = card(render(snapshot({ detail, diagnostics: { ...earlier, phase: "error", error } }), "orders"))
@@ -532,5 +533,20 @@ test("diagnostics: every error kind keeps its own copy, and none says nothing is
     assert.ok(t.includes(EARLIER_LABEL), `${error.kind}: the kept record is labelled as earlier`)
     assert.ok(!/nothing is shown/i.test(t), `${error.kind}: ${t}`)
     assert.ok(t.includes(fixtureHash("d7")), `${error.kind}: the kept hash stays visible`)
+  }
+})
+
+test("diagnostics 404: whether a record is 'kept' follows the record the card actually shows (this order and side only)", () => {
+  // A value of another order or side is never rendered, so the notice must not claim a kept record either.
+  const detail = BUY_DETAIL()
+  const sell = diag("SELL", FIXTURE_IDS.sellSettlement)
+  for (const error of [NOT_FOUND, ROUTE_ABSENT]) {
+    for (const foreign of [{ ...sell, orderId: FIXTURE_IDS.buyFinality, side: "BUY" as const }, { ...diag("BUY", FIXTURE_IDS.buyFinality), side: "SELL" as const }]) {
+      const html = render(snapshot({ detail, diagnostics: { ...foreign, phase: "error", error } }), "orders")
+      const t = card(html)
+      assert.ok(t.includes("Nothing is shown."), `${error.kind}: ${t}`)
+      assert.ok(!t.includes("No new diagnostics were received") && !t.includes("earlier snapshot") && !t.includes("Server snapshot"), `${error.kind}: ${t}`)
+      assert.doesNotMatch(html, /data-testid="stocks-admin-diagnostics-stage"/)
+    }
   }
 })

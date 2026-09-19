@@ -538,3 +538,18 @@ test("diagnostics (003E-1): a 404 refresh (order or route) after a successful re
     assert.equal(snapshot.diagnostics.value, earlier, `${kind}: the earlier record is kept, not cleared`)
   }
 })
+
+test("diagnostics: an invalid answer to a refresh after a successful read keeps the earlier value, marked invalid", async () => {
+  const { store, transport } = setup()
+  await selectLoaded(store, transport, FIXTURE_IDS.buyFinality, FIXTURE_BUY_DETAIL)
+  transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality)).respond(ok(fixtureDiagnostics(FIXTURE_IDS.buyFinality)))
+  await flush()
+  const earlier = store.getSnapshot().diagnostics.value
+  assert.ok(earlier)
+  store.refreshDiagnostics()
+  transport.take(diagnosticsPathOf("BUY", FIXTURE_IDS.buyFinality)).respond(ok({ ...fixtureDiagnostics(FIXTURE_IDS.buyFinality), resubmissionAllowed: true }))
+  await flush()
+  const snapshot = store.getSnapshot().diagnostics
+  assert.deepEqual([snapshot.phase, snapshot.error?.kind], ["error", "invalid"])
+  assert.equal(snapshot.value, earlier, "the rejected answer is not shown; the earlier record stays, labelled by the view")
+})
