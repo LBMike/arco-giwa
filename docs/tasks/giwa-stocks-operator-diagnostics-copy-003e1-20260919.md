@@ -37,7 +37,7 @@
 - `not_found`와 `disabled` 각각에 대해 최초404(이전 값 없음), 정상 조회 후
   404(이전 값 있음)를 검사하세요. 성공→실패 회귀에서 실제 이전 hash와
   snapshot이 표시되며, 표시가 없다는 모순된 문구가 없음을 확인하세요.
--503·통신 실패의 기존 문구,404 구분, 과거 snapshot 표시, readOnly/권한
+- 503·통신 실패의 기존 문구,404 구분, 과거 snapshot 표시, readOnly/권한
   플래그, side/order/deployment/account 격리와 지갑 호출0을 유지하세요.
 - 변경 전 회귀 검사가 문제를 잡고 변경 후 통과하는지 확인하세요.
 - 집중 admin 검사·typecheck·build·security와 저장소의 요구 검사를 실행하고

@@ -90,7 +90,7 @@ explicit new isolated DB fixtures; business completion is never fabricated.
 
 During the post-login diagnostics interval:
 
--115 server API requests (including CORS preflights) were reads only.
+- 115 server API requests (including CORS preflights) were reads only.
 - Browser attempts to `/__local/wallet`:0, including attempts the operator bridge
   would reject before its own forwarded-call counter.
 - Forwarded wallet calls:0; wallet sends:0; API mutations:0; request bodies:0.
@@ -105,7 +105,7 @@ During the post-login diagnostics interval:
   This check does not assert delivery of an already cancelled late response;
   delayed-response protection is separately covered by store/DOM tests.
 - Native Enter and Space each produced exactly one refresh request.
--375/768/1440px checks found no horizontal overflow; full-page screenshots saved.
+- 375/768/1440px checks found no horizontal overflow; full-page screenshots saved.
 - A permanently stopped local runtime still served an expired order. The runtime
   reported STOPPED, newOrdersPaused=true, configuredPause=false. This is not a
   configured-pause transition test.
