@@ -125,14 +125,44 @@ export async function runKnownHashUiScenario(h) {
       assert.deepEqual(await facts(order.id), beforeIsolation);
       passed(`${label}: A → B → A in same tab hides other owner's candidate; API restart preserves original binding`);
 
-      const callsBefore = wallet.calls.length, requestsBefore = submissionRequests.length;
+      const callsBefore = wallet.calls.length;
+      let recordAction = 'Record this hash';
+      if (side === 'BUY' && stage === 'APPROVAL') {
+        const beforeInspect = submissionRequests.length;
+        let inspectAborted = 0;
+        await page.route(`${submissionPrefix}${side}/${order.id}`, async route => {
+          inspectAborted++; await route.abort('failed');
+        }, { times: 1 });
+        await card(stage).getByRole('button', { name: recordAction, exact: true }).dblclick();
+        await wait(async () => await card(stage).getAttribute('data-state') === 'KEPT' &&
+          await card(stage).getByRole('button', { name: 'Check again', exact: true }).isEnabled(), 'KEPT failure stays uncertain');
+        assert.equal(inspectAborted, 1);
+        const text = await card(stage).innerText();
+        assert.match(text, /may or may not have recorded the hash/);
+        assert.doesNotMatch(text, /stays recorded|The server has recorded/);
+        assert.deepEqual(await facts(order.id), beforeIsolation, 'failed inspect writes no hash, claim or proof');
+        assert.equal(wallet.calls.length, callsBefore);
+        const failedRequests = submissionRequests.slice(beforeInspect);
+        assert.deepEqual(failedRequests.map(r => [r.method, r.path]), [['GET', `${side}/${order.id}`]]);
+        assert.ok(failedRequests.every(r => r.bearer === `Bearer ${current.token}`));
+        recordAction = 'Check again';
+        passed('KEPT + failed inspect retains uncertainty; zero outcomes, claims and wallet calls');
+      }
+      const requestsBefore = submissionRequests.length;
       let aborted = 0;
       const abortFirstReceipt = async route => { aborted++; await route.abort('failed'); };
       await page.route(`${submissionPrefix}reconcile`, abortFirstReceipt, { times: 1 });
-      await card(stage).getByRole('button', { name: 'Record this hash', exact: true }).dblclick();
+      await card(stage).getByRole('button', { name: recordAction, exact: true }).dblclick();
       await wait(async () => await card(stage).getAttribute('data-state') === 'RECORDED' &&
         await card(stage).getByRole('button', { name: 'Check the receipt again', exact: true }).isEnabled(), 'explicit receipt retry after lost request');
       assert.equal(aborted, 1);
+      const step = stage === 'APPROVAL' ? 'approval' : side === 'BUY' ? 'deposit' : 'escrow';
+      const recordedText = await card(stage).innerText();
+      assert.ok(recordedText.includes(`The server has recorded this ${step} hash`));
+      assert.ok(recordedText.includes(`The ${step} hash stays recorded on the server`));
+      assert.match(recordedText, /The receipt check could not be completed/);
+      assert.doesNotMatch(recordedText, /may or may not|may not have (it|recorded)|could not be recorded/i);
+      assert.ok(recordedText.includes(`Do not send this ${step} again`));
       const recorded = await facts(order.id);
       assert.equal(recorded.claims.find(r => r.stage === stage).txHash, knownHash);
       assert.equal(recorded.claims.find(r => r.stage === stage).status, 'SUBMITTED');

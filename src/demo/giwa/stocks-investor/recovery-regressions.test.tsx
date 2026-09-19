@@ -104,16 +104,22 @@ for (const committed of [false, true]) test(`unknown SELL with mutable refusal k
   } finally { h.controller.suspend() }
 })
 
-for (const delay of [10_000, 60_000, 61_000]) test(`quote deadline subtracts ${delay}ms transit and never restarts on receipt`, async () => {
+for (const serverElapsed of [0, 1]) for (const delay of [10_000, 60_000, 61_000]) test(`quote deadline subtracts ${delay}ms transit and ${serverElapsed}ms server observation age; never restarts on receipt`, async () => {
   const h = createHarness()
+  // The device clock is already controlled. Control the fixture's server clock
+  // too: creation and observedAt may differ by 1ms, which must reduce validity.
+  // Real Date.now() here made the old exact 60000ms expectation intermittent.
+  let serverNow = Date.parse("2026-09-19T00:00:00.000Z")
+  h.controls.setWallClock(() => { const value = serverNow; serverNow += serverElapsed; return value })
   try {
     await h.enter(WALLET_A); h.controls.holdNext("quote")
     h.controller.setQuantity("1"); const pending = h.controller.requestQuote(); await flush()
     h.advanceDevice(delay); h.controls.advanceTime(delay); h.controls.releaseHeld("quote"); await pending
     const quote = h.controller.getState().quote
     assert.ok(quote.status === "ready" || quote.status === "expired")
-    assert.equal(quote.deadlineMs - h.controller.getState().nowMs, 60_000 - delay)
-    if (delay < 60_000) { h.advanceDevice(60_000 - delay); h.controller.tick() }
+    const remaining = 60_000 - serverElapsed - delay
+    assert.equal(quote.deadlineMs - h.controller.getState().nowMs, remaining)
+    if (remaining > 0) { h.advanceDevice(remaining); h.controller.tick() }
     assert.equal(h.controller.getState().quote.status, "expired")
     await h.controller.placeOrder()
     assert.equal(h.requests("POST", "/orders").length, 0)
