@@ -621,7 +621,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
         if (wallet === WALLET.controlB) {
           // A same-key retry is the positive evidence the page can get: here a version conflict proves the key was never recorded.
           await click("Retry the same command")
-          await until(() => outcome() === "conflict", "retry settles it")
+          await until(() => outcome() === "conflict", "the retry is answered 409")
           assert.match(q("stocks-trading-control-outcome")!.textContent!, /the one this command was reviewed for, it also shows that the earlier attempt with this key was not recorded there: the server checks the key before the version\./)
           assert.deepEqual([postsLogged().map((entry) => entry.status), memory.events.map((event) => event.idempotencyKey)], [[null, 409], [key]])
         } else {

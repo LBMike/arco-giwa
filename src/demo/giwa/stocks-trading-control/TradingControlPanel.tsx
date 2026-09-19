@@ -702,7 +702,7 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
                 earlier attempt with this key was not recorded there: the server checks the key before the version. The answer does not name the deployment that
                 gave it, and no read can tell, so whether the earlier attempt was recorded stays unresolved: closing this or starting a new command keeps it as an
                 unresolved note.
-                {shown !== null && shown.deploymentDigest !== command.basis.deploymentDigest && " The state read after it is for another deployment."}
+                {shown !== null && shown.deploymentDigest !== command.basis.deploymentDigest && " The state shown above is for another deployment."}
               </>
             )}{" "}
             {rereading} Review it and start a new command if a change is still needed; this command will not be resent.
@@ -783,9 +783,9 @@ function CommandOutcome({ id, snapshot, command, reasonsLeft, onRetry, onDiscard
                   {(readiness === null || readiness === "read_first") && snapshot.control.error?.kind !== "disabled" && (
                     <>
                       {" "}
-                      A retry of this command settles only this one: its own event in the answer (accepted or replayed) means this command is recorded; a version
-                      conflict (409) from the deployment it was reviewed for means it was not, and the entry at version {command.command.expectedVersion + 1} may then be
-                      the earlier command's or anyone else's.
+                      A retry of this command can confirm only this one: its own event in the answer (accepted or replayed) means this command is recorded. A
+                      version conflict (409) names no deployment and leaves it unresolved, and the entry at version {command.command.expectedVersion + 1} may be the earlier
+                      command's or anyone else's.
                     </>
                   )}
                 </>

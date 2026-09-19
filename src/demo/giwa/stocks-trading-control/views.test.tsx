@@ -324,7 +324,7 @@ test("a refused retry, a changed deployment and an abandoned command stay unknow
   const conflicted = text(render(snapshot({ command: command("conflict", { attempts: 2, error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) })))
   assert.match(conflicted, /If this answer came from deployment 5f0c2b…a2c4 ?5f0c2b7d9e41a3c6b8d0f2e4a6c8b0d2f4e6a8c0b2d4f6e8a0c2e4b6d8f0a2c4 ?, the one this command was reviewed for, it also shows that the earlier attempt with this key was not recorded there: the server checks the key before the version\./)
   assert.match(conflicted, /The answer does not name the deployment that gave it, and no read can tell, so whether the earlier attempt was recorded stays unresolved: closing this or starting a new command keeps it as an unresolved note\./)
-  assert.doesNotMatch(conflicted, /The state read after it is for another deployment/)
+  assert.doesNotMatch(conflicted, /The state shown above is for another deployment/)
   // A first attempt's 409 changed nothing anywhere: no doubt about an earlier attempt.
   assert.doesNotMatch(text(render(snapshot({ command: command("conflict", { error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) }))), /earlier attempt|unresolved note/)
 })
@@ -396,7 +396,7 @@ test("a disabled feature says a retry and the history check are impossible; a sh
   assert.match(t, /The state below is from an earlier read at 2026-09-19T09:00:00\.000Z, before the routes became unavailable\./)
   const note = { paused: false, expectedVersion: 0, idempotencyKey: "tc-test-key-0000", reason: "Verified local reconciliation", sinceSeq: 1, deploymentDigest: state(0, true).deploymentDigest }
   const shared = text(render(snapshot({ controlReadSeq: 3, abandoned: note, command: command("unknown", { unknownSeq: 2, error: failed("network") }) })))
-  // 003F-1 P2-01: neither command is identified by the history; a retry settles only the current one.
-  assert.match(shared, /The earlier unresolved command \(note above\) has the same version, action and reason; the history cannot tell the two apart\. A retry of this command settles only this one: its own event in the answer \(accepted or replayed\) means this command is recorded; a version conflict \(409\) from the deployment it was reviewed for means it was not, and the entry at version 1 may then be the earlier command's or anyone else's\./)
+  // 003F-1 P2-01: neither command is identified by the history; a retry can confirm only the current one (a 409 names no deployment).
+  assert.match(shared, /The earlier unresolved command \(note above\) has the same version, action and reason; the history cannot tell the two apart\. A retry of this command can confirm only this one: its own event in the answer \(accepted or replayed\) means this command is recorded\. A version conflict \(409\) names no deployment and leaves it unresolved, and the entry at version 1 may be the earlier command's or anyone else's\./)
   assert.doesNotMatch(shared, /shows only that one of the two was recorded|means the earlier one|means it was recorded/)
 })

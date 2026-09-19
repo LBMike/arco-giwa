@@ -90,7 +90,7 @@ test("P2-01: a different action or reason at version N+1 may exclude the command
   assert.match(t, /If the entry at version 1 is a different action or has a different reason than “ ?Verified local reconciliation ?”, this command was not recorded, and it can no longer be\./)
 })
 
-test("P2-01: an earlier unresolved command in the same slot — neither is identified by the history; a retry settles only this one", async () => {
+test("P2-01: an earlier unresolved command in the same slot — neither is identified by the history; a retry can confirm only this one", async () => {
   const { store, transport } = setup(["operator-a-first-key", "operator-a-second-key"])
   await firstRead(store, transport)
   const basis = store.getSnapshot().control.value!
@@ -108,8 +108,10 @@ test("P2-01: an earlier unresolved command in the same slot — neither is ident
   await flush()
   const t = text(render(store))
   assert.doesNotMatch(t, FALSE_CERTAINTY)
+  // A 409 never settles a command (it names no deployment): the same-slot text never says a retry settles it.
+  assert.doesNotMatch(t, /settles/)
   assert.match(t, /The earlier unresolved command \(note above\) has the same version, action and reason; the history cannot tell the two apart\./)
-  assert.match(t, /A retry of this command settles only this one: its own event in the answer \(accepted or replayed\) means this command is recorded; a version conflict \(409\) from the deployment it was reviewed for means it was not, and the entry at version 1 may then be the earlier command's or anyone else's\./)
+  assert.match(t, /A retry of this command can confirm only this one: its own event in the answer \(accepted or replayed\) means this command is recorded\. A version conflict \(409\) names no deployment and leaves it unresolved, and the entry at version 1 may be the earlier command's or anyone else's\./)
 })
 
 // ---------------------------------------------------------------- P2-02
@@ -281,14 +283,14 @@ test("P2-01: the shared-slot retry sentence is left out when this command cannot
     )
   const refused = withSlot({}, { retryRefused: true, attempts: 2, error: { kind: "request", status: 400, code: "INVALID_TRADING_CONTROL_INPUT" } })
   assert.match(refused, /the history cannot tell the two apart\./)
-  assert.doesNotMatch(refused, /A retry of this command settles/)
+  assert.doesNotMatch(refused, /A retry of this command can confirm/)
   const moved = withSlot({ control: { phase: "ready", value: { ...unknownSnapshot().control.value!, data: { ...unknownSnapshot().control.value!.data, deploymentDigest: B } }, error: null } }, {})
-  assert.doesNotMatch(moved, /A retry of this command settles/)
+  assert.doesNotMatch(moved, /A retry of this command can confirm/)
   // Routes gone (404) after the unknown outcome: retrying is impossible from this page, so no retry is offered as a way to settle it.
   const disabled = withSlot({ control: { phase: "error", value: unknownSnapshot().control.value, error: { kind: "disabled", status: 404, code: null } }, controlReadSeq: 1 }, {})
   assert.match(disabled, /cannot be retried from this page/)
-  assert.doesNotMatch(disabled, /A retry of this command settles/)
-  assert.match(withSlot({}, {}), /A retry of this command settles only this one/)
+  assert.doesNotMatch(disabled, /A retry of this command can confirm/)
+  assert.match(withSlot({}, {}), /A retry of this command can confirm only this one/)
 })
 
 test("P2-02: entries confirmed for another deployment than the shown state are not shown", () => {
@@ -373,7 +375,7 @@ test("COPY-003F1-01: a 409 on a retry is conditional on the reviewed deployment;
   const t = text(render(store))
   assert.match(t, /If this answer came from deployment 5f0c2b…a2c4 ?5f0c2b7d9e41a3c6b8d0f2e4a6c8b0d2f4e6a8c0b2d4f6e8a0c2e4b6d8f0a2c4 ?, the one this command was reviewed for, it also shows that the earlier attempt with this key was not recorded there/)
   assert.match(t, UNRESOLVED_409)
-  assert.match(t, /The state read after it is for another deployment\./)
+  assert.match(t, /The state shown above is for another deployment\./)
   assert.doesNotMatch(t, /Because the server checks the key before the version, this also shows/)
   assert.equal(store.discard(), true)
   const note = store.getSnapshot().abandoned
@@ -390,9 +392,11 @@ test("round 3 (LC-01/LC-02/F3): no read settles a retry's 409 — not one of the
   same.transport.take("GET", RUNTIME_STATUS_PATH).respond(ok({ ...tcRuntime({ operatorControl: { status: "PAUSED", version: 2 } }), deploymentDigest: B }))
   await flush()
   assert.match(text(render(same.store)), UNRESOLVED_409)
-  assert.doesNotMatch(text(render(same.store)), /The state read after it is for another deployment/)
+  assert.doesNotMatch(text(render(same.store)), /The state shown above is for another deployment/)
   same.store.discard()
   assert.equal(same.store.getSnapshot().abandoned?.idempotencyKey, "operator-a-own-command")
+  // The note counts reads from the 409 on: the state read after it is not flagged as read before an unresolved command.
+  assert.doesNotMatch(text(render(same.store)), /Read before a command whose result is unknown/)
   // Another deployment read while the retry was in flight, then the reviewed one after the 409.
   const during = await retryReady()
   during.store.loadControl()
