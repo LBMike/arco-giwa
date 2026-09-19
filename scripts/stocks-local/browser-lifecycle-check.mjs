@@ -30,7 +30,22 @@ async function listening(base) {
   });
 }
 
+// A CI wrapper signals this checker, not its nested runner. Forward shutdown
+// only to the currently owned child and keep its pipes open until close so the
+// runner can finish its DB/EVM/Chrome cleanup and we can preserve its evidence.
+let activeChild, interrupted;
+const interrupt = signal => {
+  if (interrupted) return;
+  interrupted = signal;
+  process.exitCode = signal === 'SIGINT' ? 130 : 143;
+  activeChild?.kill('SIGTERM');
+};
+const onInt = () => interrupt('SIGINT'), onTerm = () => interrupt('SIGTERM');
+process.on('SIGINT', onInt); process.on('SIGTERM', onTerm);
+
+try {
 for (const mode of ['ready-SIGINT', 'held-SIGTERM', 'failure']) {
+  if (interrupted) break;
   const probe = mode === 'failure' ? 'failure' : mode === 'held-SIGTERM' ? 'held' : 'ready';
   const child = spawn(process.execPath, ['scripts/stocks-local/run.mjs'], {
     cwd: root,
@@ -38,6 +53,7 @@ for (const mode of ['ready-SIGINT', 'held-SIGTERM', 'failure']) {
       STOCKS_LOCAL_UI: '', STOCKS_LOCAL_UI_FAILURE_PROBE: '', STOCKS_LOCAL_STACK_CASE_PROBE: '', STOCKS_LOCAL_STACK_SIGNAL_PROBE: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  activeChild = child;
   let ready, held, resources, stopped, failure, signalled = false, stdout = '', stderr = '', pending = '';
   const signal = mode === 'ready-SIGINT' ? 'SIGINT' : 'SIGTERM';
   const timer = setTimeout(() => {
@@ -57,7 +73,7 @@ for (const mode of ['ready-SIGINT', 'held-SIGTERM', 'failure']) {
           if (record.kind === 'LOCAL_BROWSER_OWNED_SERVICES_STOPPED') stopped = record;
         }
         const trigger = mode === 'ready-SIGINT' ? Boolean(ready) : mode === 'held-SIGTERM' && Boolean(ready && held);
-        if (trigger && !signalled) { signalled = true; assert.equal(child.kill(signal), true, 'Owned child accepted stop signal'); }
+        if (trigger && !signalled && !interrupted) { signalled = true; assert.equal(child.kill(signal), true, 'Owned child accepted stop signal'); }
       } catch (error) { failure = error; child.kill('SIGTERM'); }
     }
   });
@@ -67,15 +83,18 @@ for (const mode of ['ready-SIGINT', 'held-SIGTERM', 'failure']) {
     result = await new Promise((done, fail) => {
       child.once('error', fail); child.once('close', (code, killedBy) => done({ code, killedBy }));
     });
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); activeChild = undefined; }
   // Retain all owned-child diagnostics even when shutdown assertions fail.
   const artifacts = process.env.STOCKS_LOCAL_BROWSER_EVIDENCE;
   if (artifacts) {
     mkdirSync(artifacts, { recursive: true });
     writeFileSync(join(artifacts, `${mode}.stdout.log`), stdout, { mode: 0o600 });
     writeFileSync(join(artifacts, `${mode}.stderr.log`), stderr, { mode: 0o600 });
-    writeFileSync(join(artifacts, `${mode}.lifecycle.json`), JSON.stringify({ mode, childPid: child.pid, result, ready, held, resources, stopped, signalled, failure: failure?.message }, null, 2) + '\n', { mode: 0o600 });
+    writeFileSync(join(artifacts, `${mode}.lifecycle.json`), JSON.stringify({ mode, childPid: child.pid, result, ready, held, resources, stopped, signalled, interrupted, failure: failure?.message }, null, 2) + '\n', { mode: 0o600 });
   }
+  // An externally interrupted probe is never a completed lifecycle assertion,
+  // even if its shutdown happens to have the expected signal exit code.
+  if (interrupted) break;
   if (failure) throw failure;
   assert.ok(ready && resources && stopped, `${mode}: missing owned browser resource evidence; result=${JSON.stringify(result)}; ready=${Boolean(ready)} resources=${Boolean(resources)} stopped=${Boolean(stopped)}; ${stderr.slice(-1800)}`);
   assert.equal(ready.ownerPid, child.pid); assert.equal(stopped.ownerPid, child.pid);
@@ -104,4 +123,7 @@ for (const mode of ['ready-SIGINT', 'held-SIGTERM', 'failure']) {
   console.log(JSON.stringify({ kind: 'LOCAL_BROWSER_LIFECYCLE_PASS', mode, ...result, ownerPid: child.pid,
     chromePid: ready.chromePid, chromeExited: true, apiClosed: true, bridgeClosed: true, rpcClosed: true,
     nodeGroup: stopped.nodeGroup, nodeGroupAbsent: true, postgresPid: stopped.postgresPid, postgresPidFileAbsent: true, pgSocketAbsent: true }));
+}
+} finally {
+  process.off('SIGINT', onInt); process.off('SIGTERM', onTerm);
 }

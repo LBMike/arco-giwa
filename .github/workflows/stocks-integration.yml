@@ -1,0 +1,72 @@
+name: Stocks integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-integration:
+    name: Stocks / ${{ matrix.scenario }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [postgres, operator-diagnostics, known-hash-ui, browser-lifecycle]
+    defaults:
+      run:
+        shell: bash
+    env:
+      TMPDIR: /tmp
+      STOCKS_PG_BIN: /usr/lib/postgresql/16/bin
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      DOTENV_CONFIG_PATH: /dev/null
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # Latest 22.x; DOM tests require >=22.15.
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            scripts/stocks-ci/package-lock.json
+
+      - name: Install locked dependencies
+        run: |
+          npm ci
+          npm ci --prefix scripts/stocks-ci --ignore-scripts
+          corepack yarn --cwd packages/contracts install --immutable
+
+      - name: Prepare PostgreSQL binaries
+        run: |
+          if [[ ! -x "$STOCKS_PG_BIN/initdb" ]]; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y postgresql-16
+          fi
+          "$STOCKS_PG_BIN/initdb" --version
+
+      - name: Build generated client, server and contract artifacts
+        run: |
+          npm run prisma:generate
+          npm run build:server
+          corepack yarn --cwd packages/contracts compile
+
+      - name: Install pinned Chromium and system libraries
+        if: matrix.scenario != 'postgres'
+        run: node scripts/stocks-ci/node_modules/playwright/cli.js install --with-deps chromium
+
+      - name: Verify real local services and cleanup
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: node scripts/stocks-ci/run.mjs "$SCENARIO" "$RUNNER_TEMP/stocks-ci-evidence"
+
+      # Reports and screenshots stay on the runner. External artifact upload is
+      # intentionally not configured; it requires separate authorization.
