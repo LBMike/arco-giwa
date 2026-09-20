@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom"
-import { ChartCandlestick, ChartPie, House, Layers, PiggyBank, Send, ShieldCheck, type LucideIcon } from "lucide-react"
+import { ChartCandlestick, ChartPie, ChevronDown, ChevronRight, House, Layers, PiggyBank, Send, ShieldCheck, type LucideIcon } from "lucide-react"
+import { SAVINGS_CATEGORIES, savingsCategoryFromSearch, savingsCategoryPath } from "./savings-category"
 import { investorNavSections, isNavItemActive, type InvestorNavItemId } from "./investor-nav"
 
 // Investor shell navigation (desktop sidebar from xl, mobile drawer below). Routes are real links
@@ -19,7 +20,8 @@ const FOCUS =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
 
 export function GiwaSidebarNav({ isAdmin, onNavigate }: { isAdmin: boolean; onNavigate?: () => void }) {
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
+  const savingsCategory = savingsCategoryFromSearch(new URLSearchParams(search))
   return (
     <nav aria-label="Main" className="flex flex-col gap-5">
       {investorNavSections(isAdmin).map((section) => (
@@ -62,7 +64,16 @@ export function GiwaSidebarNav({ isAdmin, onNavigate }: { isAdmin: boolean; onNa
                   >
                     <Icon aria-hidden="true" size={18} className="shrink-0" />
                     <span>{item.label}</span>
+                    {item.id === "savings" && (active ? <ChevronDown aria-hidden="true" className="ml-auto size-4" /> : <ChevronRight aria-hidden="true" className="ml-auto size-4" />)}
                   </Link>
+                  {item.id === "savings" && active && <ul aria-label="Savings categories" className="ml-5 mt-1 space-y-1 border-l border-[var(--color-arco-border)] pl-3">
+                    {SAVINGS_CATEGORIES.map(category => <li key={category.id}>
+                      <Link to={savingsCategoryPath(category.id)} onClick={onNavigate} aria-current={savingsCategory === category.id ? "location" : undefined}
+                        className={`flex min-h-10 items-center rounded-lg px-3 text-sm ${FOCUS} ${savingsCategory === category.id ? "bg-[var(--color-arco-chip)] font-medium text-[var(--color-arco-ink)]" : "text-[var(--color-arco-text-soft)] hover:bg-[var(--color-row-hover-weak)]"}`}>
+                        {category.label}
+                      </Link>
+                    </li>)}
+                  </ul>}
                 </li>
               )
             })}
