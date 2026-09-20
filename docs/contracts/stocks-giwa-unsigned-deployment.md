@@ -38,3 +38,24 @@ Every step includes a `CREATE` label, `to: null`, zero native value, exact chain
 There is deliberately no broadcaster or automatic retry here. If a transaction's outcome is unknown, resolve its original nonce/hash before sending any later step. If another transaction consumes a reserved nonce, stop. Do not silently shift nonces or rebuild the remaining transactions: the stock/controller/vault/escrow constructor relationships depend on the original five predicted addresses. A partial failure needs explicit review of the original receipts and exact surviving code.
 
 After all five finalized creations match the plan, the runtime activation still needs an actual chain checkpoint, deployment/network identity, code hashes, ABI digest and the existing `verifyStocksDeployment` check. An unsigned plan is not a completed deployment manifest. Existing Savings/Funds deployments and their registry are outside this workflow.
+
+## Public file boundaries
+
+The preparation and verification CLIs share a bounded public JSON reader/writer.
+Explicit input files must be regular, valid UTF-8 JSON, at most 1MiB. The reader
+also bounds reads if the file grows after its size is checked, and rejects pipes
+without waiting for a writer. Both supplied and resolved paths reject `.env*`
+components and `.secrets`; environment and key discovery are never attempted.
+Compiled artifact/build-info reads remain limited to the planner's existing
+named artifact set and are not treated as caller-supplied deployment input.
+
+Output is limited to 1MiB, created exclusively with mode0600 under a validated
+existing parent. Existing files and symlinks are never overwritten. A write failure
+may leave a partial new file; inspect it and choose a new output path. File errors
+use fixed `INVALID_PUBLIC_DEPLOYMENT_JSON` or `PUBLIC_DEPLOYMENT_JSON_NOT_WRITTEN`
+messages without the original input text or filesystem path.
+
+The `Stocks / isolated-contracts` CI job runs the entire Stocks contract suite,
+including offline planning, finalized creation verification and malformed transport
+and file cases, through `hardhat.stocks.config.ts`. It uses only an isolated local
+chain, with no public network or key configuration.

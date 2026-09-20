@@ -1,6 +1,7 @@
 import { createHash } from "crypto"
-import { readFile, writeFile } from "fs/promises"
+import { readFile } from "fs/promises"
 import path from "path"
+import { readPublicDeploymentJson, writePublicDeploymentJson } from "./public-deployment-json"
 import { constants, ContractFactory, utils } from "ethers"
 import type { Artifact, Artifacts, BuildInfo } from "hardhat/types"
 
@@ -333,10 +334,10 @@ async function main() {
       path.isAbsolute(args[3]),
     "Usage: prepare-deployment.ts --input /absolute/public-roles.json --output /absolute/unsigned-plan.json",
   )
-  const input = JSON.parse(await readFile(args[1], "utf8"))
+  const input = await readPublicDeploymentJson(args[1])
   const artifacts = filesystemStocksArtifacts(path.resolve(__dirname, "../../artifacts/stocks"))
   const plan = await prepareStocksDeployment(input, artifacts)
-  await writeFile(args[3], JSON.stringify(plan, null, 2) + "\n", { flag: "wx", mode: 0o600 })
+  await writePublicDeploymentJson(args[3], plan)
   console.log(`Unsigned GIWA testnet plan prepared: ${plan.planDigest}`)
   console.log(
     "No transaction was signed or broadcast; fees, external signer and finalized deployment evidence remain required.",

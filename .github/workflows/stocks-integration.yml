@@ -10,6 +10,35 @@ permissions:
   contents: read
 
 jobs:
+  contracts:
+    name: Stocks / isolated-contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/contracts
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      DOTENV_CONFIG_PATH: /dev/null
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack yarn install --immutable
+      - name: Typecheck deployment tools and boundary tests
+        run: >-
+          corepack yarn tsc --noEmit --target ES2020 --module commonjs
+          --esModuleInterop --strict --skipLibCheck --types node,mocha
+          scripts/stocks/deployment-http.ts scripts/stocks/public-deployment-json.ts
+          scripts/stocks/prepare-deployment.ts scripts/stocks/verify-deployment.ts
+          test/stocks/deployment-http.test.ts test/stocks/public-deployment-json.test.ts
+      # Isolated config: no dotenv, public network, keystore or existing registry.
+      - run: corepack yarn hardhat --config hardhat.stocks.config.ts test
+      - run: git diff --exit-code -- yarn.lock
+
   local-integration:
     name: Stocks / ${{ matrix.scenario }}
     runs-on: ubuntu-24.04

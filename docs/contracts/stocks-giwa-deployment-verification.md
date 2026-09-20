@@ -37,3 +37,24 @@ The RPC URL is mandatory. HTTPS is required; username/password, query-string and
 The verifier checks success status, transaction/receipt hash identity, sender, chain, original nonce, byte-for-byte init calldata, zero native value, null CREATE destination, predicted address, transaction order and exact inclusion in each canonical block. It checks all five runtime hashes and every immutable public getter at one finalized block, plus 6/9 token scales and pristine supplies, then rechecks all creation blocks and the finalized cutoff before returning.
 
 The emitted file provides verified deployment evidence. It does not start runtime workers, unpause trading, fund a faucet, publish a registry entry or approve a signer. Those remain the commander's separately controlled activation steps using the existing runtime preflight.
+
+## Bounded external responses and public files
+
+Each HTTPS RPC call has a single 10-second deadline covering headers, body streaming
+and JSON parsing. Actual decoded bytes are limited to 4MiB even when Content-Length
+is missing or understated. Invalid UTF-8, oversized bodies, late results, redirects
+and foreign response URLs are rejected. Failed or unused streams are cancelled;
+the caller never waits for a broken cancellation callback. There is no automatic
+retry. These are per-request limits, not a deadline for the complete multi-request
+verification. A transport failure prevents manifest output.
+
+Transport errors return `DEPLOYMENT_RPC_UNAVAILABLE`; malformed RPC envelopes return
+`DEPLOYMENT_RPC_RESPONSE_INVALID`. Original response bodies, provider errors and
+URLs are not included. URL parsing failures use `EXPLICIT_HTTPS_READ_RPC_REQUIRED`.
+The transport remains read-only and preserves JSON-RPC request/response ID binding.
+
+Input evidence and output manifests use the same
+[public file boundaries](stocks-giwa-unsigned-deployment.md#public-file-boundaries)
+as the unsigned planner: explicit absolute paths, 1MiB JSON limit, strict UTF-8,
+regular input files, blocked credential paths and no output overwrite. No finalized
+receipt, nonce, code-hash or constructor validation was relaxed by these limits.

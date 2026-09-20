@@ -1,20 +1,13 @@
-import { createHash, randomUUID } from "crypto"
-import { readFile, writeFile } from "fs/promises"
+import { createHash } from "crypto"
 import path from "path"
 import { utils } from "ethers"
 import type { Artifacts } from "hardhat/types"
 import { filesystemStocksArtifacts, verifyPreparedDeployment } from "./prepare-deployment"
 
-export type DeploymentReadRpc = (method: string, params: unknown[]) => Promise<unknown>
+import { deploymentHttpsRpc, type DeploymentReadRpc } from "./deployment-http"
+import { readPublicDeploymentJson, writePublicDeploymentJson } from "./public-deployment-json"
+export { deploymentHttpsRpc, type DeploymentReadRpc } from "./deployment-http"
 type ArtifactReader = Pick<Artifacts, "readArtifact" | "getBuildInfo">
-const reads = new Set([
-  "eth_chainId",
-  "eth_getBlockByNumber",
-  "eth_getTransactionByHash",
-  "eth_getTransactionReceipt",
-  "eth_getCode",
-  "eth_call",
-])
 function check(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message)
 }
@@ -278,43 +271,6 @@ export async function verifyStocksDeploymentEvidence(
   }
 }
 
-/** Explicit HTTPS-only read transport. It never exposes a send/sign method. */
-export function deploymentHttpsRpc(
-  endpoint: string,
-  request: typeof fetch = fetch,
-): DeploymentReadRpc {
-  const target = new URL(endpoint)
-  check(
-    target.protocol === "https:" &&
-      !target.username &&
-      !target.password &&
-      !target.search &&
-      !target.hash,
-    "EXPLICIT_HTTPS_READ_RPC_REQUIRED",
-  )
-  return async (method, params) => {
-    check(reads.has(method), "READ_ONLY_DEPLOYMENT_RPC")
-    const id = randomUUID()
-    const response = await request(target, {
-      method: "POST",
-      redirect: "error",
-      signal: AbortSignal.timeout(10000),
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-    })
-    check(response.ok, "DEPLOYMENT_RPC_UNAVAILABLE")
-    const row = object(await response.json())
-    check(
-      row.jsonrpc === "2.0" &&
-        row.id === id &&
-        !row.error &&
-        Object.prototype.hasOwnProperty.call(row, "result"),
-      "DEPLOYMENT_RPC_RESPONSE_INVALID",
-    )
-    return row.result
-  }
-}
-
 async function main() {
   const args = process.argv.slice(2)
   check(
@@ -327,18 +283,10 @@ async function main() {
     "Usage: verify-deployment.ts --input /absolute/creation-evidence.json --rpc https://explicit-rpc --output /absolute/manifest.json",
   )
   const rpc = deploymentHttpsRpc(args[3])
-  let input: unknown
-  try {
-    input = JSON.parse(await readFile(args[1], "utf8"))
-  } catch {
-    throw new Error("INVALID_PUBLIC_DEPLOYMENT_EVIDENCE_FILE")
-  }
+  const input = await readPublicDeploymentJson(args[1])
   const artifacts = filesystemStocksArtifacts(path.resolve(__dirname, "../../artifacts/stocks"))
   const result = await verifyStocksDeploymentEvidence(input, artifacts, rpc)
-  await writeFile(args[5], JSON.stringify(result.manifest, null, 2) + "\n", {
-    flag: "wx",
-    mode: 0o600,
-  })
+  await writePublicDeploymentJson(args[5], result.manifest)
   console.log(`Verified GIWA testnet deployment: ${result.manifest.deploymentId}`)
   console.log(
     `Finalized cutoff ${result.evidence.finalizedCutoff.number}; no transaction signed or broadcast.`,

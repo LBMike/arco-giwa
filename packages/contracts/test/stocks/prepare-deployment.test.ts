@@ -308,7 +308,7 @@ describe("GIWA Stocks unsigned deployment preparation", () => {
         encoding: "utf8",
       })
       assert.equal(duplicate.status, 1)
-      assert.match(duplicate.stderr, /EEXIST/)
+      assert.match(duplicate.stderr, /PUBLIC_DEPLOYMENT_JSON_NOT_WRITTEN/)
     } finally {
       await rm(temp, { recursive: true, force: true })
     }
