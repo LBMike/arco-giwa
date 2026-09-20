@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, append
 import { isAbsolute, join, resolve } from 'node:path';
 import { assertPortClosed } from '../stocks-local/assert-port-closed.mjs';
 import { parseTap, verifyBrowser, verifyLifecycle, verifyOperatorControl } from './evidence.mjs';
+import { postgresSuites } from '../stocks-submissions/postgres-suites.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const [scenario, destination, ...extra] = process.argv.slice(2);
@@ -91,6 +92,7 @@ try {
       'scripts/stocks-local/browser-server.test.mjs', 'scripts/stocks-local/local-wallet.test.mjs',
       'scripts/stocks-local/owner.test.mjs',
       'scripts/stocks-local/startup-chain.test.mjs',
+      'scripts/stocks-submissions/backup-state.test.mjs',
       'scripts/stocks-local/short-session.test.mjs', 'scripts/stocks-ci/evidence.test.mjs',
       'scripts/stocks-ci/operator-control-ui.test.mjs', 'scripts/stocks-ci/runner-control-ui.test.mjs',
       'scripts/stocks-ci/port-cleanup.test.mjs', 'scripts/stocks-ci/postgres-harness.test.mjs', 'scripts/stocks-ci/lifecycle-wrapper.test.mjs']);
@@ -98,21 +100,22 @@ try {
     const frontend = await run('frontend', ['--import', 'tsx', '--test', '--test-reporter=tap', 'src/demo/giwa/**/*.test.tsx']);
     summary.frontendTests = parseTap(frontend);
     const pgEvidence = join(destination, 'postgres'); mkdirSync(pgEvidence);
-    const postgres = await run('postgres', ['scripts/stocks-submissions/test-postgres.mjs',
-      'server/dist/stocks/stocks.postgres.test.js', 'server/dist/stocks/order-recovery.postgres.test.js',
-      'server/dist/stocks-execution/service.postgres.test.js', 'server/dist/stocks-preflight/database.postgres.test.js',
-      'server/dist/stocks-submissions/session-recovery.postgres.test.js',
-      'server/dist/stocks-submission-diagnostics/service.postgres.test.js',
-      'server/dist/stocks-trading-control/service.postgres.test.js',
-      'scripts/stocks-submissions-integration/client-roundtrip.test.mjs'],
+    const postgres = await run('postgres', ['scripts/stocks-submissions/test-postgres.mjs', ...postgresSuites],
     { STOCKS_SUBMISSIONS_EVIDENCE_DIR: pgEvidence });
     summary.postgresTests = parseTap(postgres);
     assert.ok(postgres.includes('PROCESS_AND_POSTGRES_RESTART_PERSISTENCE_PASS'));
     assert.ok(postgres.includes('BUY_SELL_ORDER_RECOVERY_AFTER_RESTART_PASS'));
     assert.ok(postgres.includes('TRADING_CONTROL_STATE_HISTORY_AND_IDEMPOTENCY_AFTER_RESTART_PASS'));
+    assert.ok(postgres.includes('DATABASE_BACKUP_RESTORE_PERSISTENCE_PASS'));
+    assert.ok(postgres.includes('STOCKS_BACKUP_RESTORE_SNAPSHOT_PASS'));
     const proof = JSON.parse(readFileSync(join(pgEvidence, 'harness-evidence.json'), 'utf8'));
     assert.equal(proof.started, true); assert.equal(proof.stopped, true); assert.equal(proof.restarts, 1);
     assert.equal(proof.testsPassed, true); assert.equal(proof.restartVerified, true); assert.equal(proof.interruptedBy, null);
+    for (const field of ['created', 'restored', 'sourceRemoved', 'verified', 'archiveRemoved']) assert.equal(proof.backup?.[field], true);
+    assert.match(proof.backup.sha256, /^[a-f0-9]{64}$/);
+    assert.ok(Number.isSafeInteger(proof.backup.bytes) && proof.backup.bytes > 5);
+    assert.equal(existsSync(join(proof.temp, 'database.dump')), false);
+    summary.databaseBackupRestore = { ...proof.backup };
     assert.deepEqual(proof.stopVerification, { pidFileAbsent: true, socketAbsent: true, recordedPidsExited: true });
     assert.ok(proof.pids.length === 2);
     for (const pid of proof.pids) assertGone(pid);

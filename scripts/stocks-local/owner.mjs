@@ -3,6 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { postgresSuites } from '../stocks-submissions/postgres-suites.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const pgCommands = ['postgres', 'initdb', 'pg_ctl', 'createdb', 'psql'];
@@ -51,8 +52,8 @@ export function checkWorkspace({ directory = root, source = process.env, node = 
 
 export async function main(args = process.argv.slice(2)) {
   const [command, ...extra] = args;
-  if (extra.length || !['check', 'setup', 'start'].includes(command)) {
-    console.error('사용법: npm run stocks:setup | npm run stocks:doctor | npm run stocks:dev');
+  if (extra.length || !['check', 'setup', 'start', 'recovery'].includes(command)) {
+    console.error('사용법: npm run stocks:setup | npm run stocks:doctor | npm run stocks:dev | npm run stocks:recovery:check');
     return 2;
   }
   const env = ownerEnvironment();
@@ -87,7 +88,17 @@ export async function main(args = process.argv.slice(2)) {
     console.log(JSON.stringify(report, null, 2));
     if (!report.ready || command === 'check') return report.ready ? 0 : 1;
     env.STOCKS_PG_BIN = report.postgresBin;
+    if (command === 'recovery' && !['pg_dump', 'pg_restore', 'dropdb'].every(name => existsSync(join(report.postgresBin, name)))) {
+      console.error('복원 검증에는 PostgreSQL의 pg_dump, pg_restore, dropdb 도구가 필요합니다.');
+      return 1;
+    }
     if (!await run('npm', ['run', 'build:server'])) return interrupted === 'SIGINT' ? 130 : interrupted ? 143 : 1;
+    if (command === 'recovery') {
+      if (!await run('corepack', ['yarn', 'compile'], join(root, 'packages/contracts'))) return interrupted === 'SIGINT' ? 130 : interrupted ? 143 : 1;
+      console.log('별도 임시 DB에서 백업·복원을 검증합니다. 현재 실행 중인 제품 데이터는 사용하지 않습니다.');
+      const ok = await run(process.execPath, ['scripts/stocks-submissions/test-postgres.mjs', ...postgresSuites]);
+      return interrupted === 'SIGINT' ? 130 : interrupted ? 143 : ok ? 0 : 1;
+    }
     console.log('로컬 테스트 제품을 준비합니다. 종료는 Ctrl+C. 매 실행마다 새 테스트 자산으로 시작합니다.');
     const ok = await run(process.execPath, ['scripts/stocks-local/run.mjs']);
     return interrupted === 'SIGINT' ? 130 : interrupted ? 143 : ok ? 0 : 1;

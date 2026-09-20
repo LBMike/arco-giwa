@@ -35,6 +35,16 @@ if (command === 'createdb' && process.env.FIXTURE_MODE.startsWith('signal')) {
   console.log('FIXTURE_CHILD_READY ' + process.pid);
   setInterval(() => {}, 1000);
 }
+if (command === 'pg_dump') {
+  fs.writeFileSync(args[args.indexOf('-f') + 1], process.env.FIXTURE_MODE === 'bad-archive' ? 'invalid' : 'PGDMPfixture archive');
+  if (process.env.FIXTURE_MODE === 'dump-fail') process.exitCode = 1;
+}
+if (command === 'pg_restore' && process.env.FIXTURE_MODE === 'restore-fail') process.exitCode = 1;
+if (command === 'dropdb' && process.env.FIXTURE_MODE === 'drop-fail') process.exitCode = 1;
+if (command === 'pg_restore' && process.env.FIXTURE_MODE === 'backup-signal') {
+  console.log('FIXTURE_CHILD_READY ' + process.pid);
+  setInterval(() => {}, 1000);
+}
 if (command === 'pg_ctl') {
   const socket = path.join(path.dirname(data), 'socket', '.s.PGSQL.5432');
   if (args.at(-1) === 'start') {
@@ -55,13 +65,21 @@ if (command === 'pg_ctl') {
   }
 }
 `;
-  for (const name of ['initdb', 'pg_ctl', 'createdb', 'psql']) writeFileSync(join(bin, name), command, { mode: 0o755 });
+  for (const name of ['initdb', 'pg_ctl', 'createdb', 'psql', 'pg_dump', 'pg_restore', 'dropdb']) writeFileSync(join(bin, name), command, { mode: 0o755 });
   writeFileSync(join(tests, 'postgres.test.js'), `const test = require('node:test'); test('database fixture', () => { if (process.env.FIXTURE_MODE === 'test-fail') throw new Error('intentional failure'); });`);
   writeFileSync(join(tests, 'receipts.postgres.test.js'), `const test = require('node:test'); test('receipt fixture', () => {});`);
   writeFileSync(join(scripts, 'restart-probe.mjs'), `import { appendFileSync, writeFileSync, readFileSync } from 'node:fs';
 appendFileSync(process.env.FIXTURE_LOG, JSON.stringify({ probe: process.argv[2] }) + '\\n');
 if (process.argv[2] === 'seed') writeFileSync(process.env.STOCKS_SUBMISSIONS_RESTART_FILE, 'private restart fixture');
 else if (readFileSync(process.env.STOCKS_SUBMISSIONS_RESTART_FILE, 'utf8') !== 'private restart fixture') throw new Error('RESTART_FIXTURE_MISSING');
+`);
+  writeFileSync(join(scripts, 'backup-probe.mjs'), `import assert from 'node:assert/strict';
+import { appendFileSync, writeFileSync, readFileSync } from 'node:fs';
+const phase = process.argv[2];
+appendFileSync(process.env.FIXTURE_LOG, JSON.stringify({ backupProbe: phase }) + '\\n');
+assert.equal(new URL(process.env.STOCKS_SUBMISSIONS_TEST_DATABASE_URL).pathname, phase === 'capture' ? '/submissions_test' : '/submissions_restored');
+if (phase === 'capture') writeFileSync(process.env.STOCKS_SUBMISSIONS_TEST_BACKUP_FILE, 'snapshot');
+else { assert.equal(readFileSync(process.env.STOCKS_SUBMISSIONS_TEST_BACKUP_FILE, 'utf8'), 'snapshot'); if(process.env.FIXTURE_MODE === 'verify-fail') throw Error('snapshot mismatch'); }
 `);
   const env = { PATH: overrideBin ? '' : bin, TMPDIR: runtime, TMP: runtime, TEMP: runtime, FIXTURE_MODE: mode, FIXTURE_LOG: join(root, 'commands.jsonl'), STOCKS_SUBMISSIONS_EVIDENCE_DIR: artifacts };
   if (overrideBin) env.STOCKS_PG_BIN = bin;
@@ -110,6 +128,10 @@ for (const overrideBin of [false, true]) test(`portable PG lookup via ${override
   assert.equal(result.evidence.restartVerified, true);
   assert.equal(result.evidence.restarts, 1);
   assert.equal(result.evidence.interruptedBy, null);
+  assert.deepEqual(Object.fromEntries(['created', 'restored', 'sourceRemoved', 'verified', 'archiveRemoved'].map(key => [key, result.evidence.backup[key]])),
+    { created: true, restored: true, sourceRemoved: true, verified: true, archiveRemoved: true });
+  assert.match(result.evidence.backup.sha256, /^[a-f0-9]{64}$/);
+  assert.match(result.stdout, /DATABASE_BACKUP_RESTORE_PERSISTENCE_PASS/);
   assert.equal(result.evidence.temp.startsWith(setup.runtime + '/'), true);
   assert.deepEqual(readdirSync(setup.artifacts), ['harness-evidence.json']);
   assert.match(result.stdout, /TAP version 13/);
@@ -118,7 +140,13 @@ for (const overrideBin of [false, true]) test(`portable PG lookup via ${override
   assert.match(result.stdout, /OWNED_PG_READY /);
   assert.match(result.stdout, /OWNED_PG_EVIDENCE /);
   const protocol = result.commands.filter(entry => entry.command === 'pg_ctl' || entry.probe).map(entry => entry.probe ?? entry.args.at(-1));
-  assert.deepEqual(protocol, ['start', 'seed', 'stop', 'start', 'verify', 'stop']);
+  assert.deepEqual(protocol, ['start', 'seed', 'stop', 'start', 'verify', 'verify', 'stop']);
+  const restoreProtocol = result.commands.filter(entry => ['pg_dump', 'pg_restore', 'dropdb'].includes(entry.command) || entry.backupProbe)
+    .map(entry => entry.backupProbe ?? entry.command);
+  assert.deepEqual(restoreProtocol, ['capture', 'pg_dump', 'pg_restore', 'dropdb', 'verify']);
+  const restore = result.commands.find(entry => entry.command === 'pg_restore');
+  assert.ok(restore.args.includes('--exit-on-error') && restore.args.includes('--single-transaction'));
+  assert.equal(restore.args[restore.args.indexOf('-d') + 1], 'submissions_restored');
 });
 
 test('failed database tests stop owned PG and publish failure evidence without claiming restart', { timeout: 20000 }, async t => {
@@ -167,4 +195,23 @@ test('repeated cancellation during cleanup does not interrupt the single owned s
   assertStopped(result.evidence);
   assert.equal(result.evidence.interruptedBy, 'SIGTERM');
   assert.equal(result.commands.filter(entry => entry.command === 'pg_ctl' && entry.args.at(-1) === 'stop').length, 1);
+});
+
+for (const mode of ['dump-fail', 'bad-archive', 'restore-fail', 'drop-fail', 'verify-fail'])
+  test(`${mode} never reports successful restore, stops PG and removes the archive`, { timeout: 20000 }, async t => {
+    const result = await runFixture(t, fixture(t, mode));
+    assert.equal(result.code, 1); assertStopped(result.evidence);
+    assert.equal(result.evidence.backup.verified, false);
+    assert.equal(result.evidence.backup.archiveRemoved, true);
+    assert.doesNotMatch(result.stdout, /DATABASE_BACKUP_RESTORE_PERSISTENCE_PASS/);
+    assert.deepEqual(readdirSync(join(result.evidence.temp)).filter(name => name === 'database.dump'), []);
+    if (['dump-fail', 'bad-archive', 'restore-fail'].includes(mode)) assert.equal(result.commands.some(row => row.command === 'dropdb'), false);
+  });
+
+test('cancellation during restore terminates the child, removes the archive and stops PG', { timeout: 20000 }, async t => {
+  const result = await runFixture(t, fixture(t, 'backup-signal'), 'SIGTERM');
+  assert.equal(result.code, 143); assertStopped(result.evidence);
+  assert.equal(result.evidence.backup.verified, false); assert.equal(result.evidence.backup.archiveRemoved, true);
+  assert.equal(result.commands.some(row => row.command === 'dropdb'), false);
+  assert.throws(() => process.kill(result.workerPid, 0), { code: 'ESRCH' });
 });

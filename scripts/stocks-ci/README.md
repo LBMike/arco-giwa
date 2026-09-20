@@ -9,7 +9,7 @@ The existing general CI job remains in place.
 | Scenario | Checks |
 | --- | --- |
 | `owner-workspace` | Owner launch command, real operator resume/pause, BUY/SELL through product buttons, API restart persistence, and independent cleanup after the owner stop button |
-| `postgres` | Harness boundary/acceptance tests, all frontend tests with jsdom and compiled ABI enabled, nine server PG suites plus the browser-adapter suite, then actual PostgreSQL and Node restart persistence |
+| `postgres` | Harness boundary/acceptance tests, all frontend tests with jsdom and compiled ABI enabled, nine server PG suites plus the browser-adapter suite, PostgreSQL/Node restart persistence, then a real dump/restore into a new DB with original DB removed |
 | `operator-control` | Real local HTTP/SIWE, DB and EVM trading; persistent pause/resume, concurrency policy, original signer/receipt recovery, BUY/SELL conservation and owned-service cleanup; no browser required |
 | `operator-control-ui` | Product operator control screen: ten required checks for signed permissions, single submission, lost-response retry, conflicting operators, unresolved results, history paging and deployment isolation, unavailable routes; then the existing nineteen investor browser checks and independent cleanup |
 | `operator-diagnostics` | Ordinary investor Chrome/Chromium trade flow, followed by the 24 operator diagnostic fixtures and read-only assertions |
@@ -96,6 +96,15 @@ database tests run sequentially because the preflight suite intentionally change
 its own migration-history fixture. The PG harness exports only ownership and
 shutdown metadata, including whether tests and restart verification completed.
 It keeps raw database state in its own temporary directory, outside CI evidence.
+
+The same PG job now requires the backup/restore rehearsal to pass. It compares
+every Stocks row and migration-history row, database rules and column/sequence
+metadata, then repeats the order, receipt and trading-control recovery probes on
+the restored database after deleting only its own original test database. Dump,
+restore, verification or cleanup failures cannot count as success. The private
+archive is removed on success, failure and handled interruption; evidence keeps
+only its digest, byte size and verified stage flags. See the
+[rehearsal guide](../../docs/contracts/stocks-backup-restore-rehearsal.md).
 
 Logs, result/summary JSON and screenshots are stored in the selected evidence
 directory. GitHub artifact upload is **not configured**: separate authorization

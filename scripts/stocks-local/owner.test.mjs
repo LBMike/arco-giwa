@@ -8,6 +8,7 @@ test('owner environment excludes inherited live credentials, database, hooks and
     STOCKS_LOCAL_BROWSER: '1', STOCKS_LOCAL_UI: '1', STOCKS_LOCAL_BROWSER_PROBE: 'failure',
     STOCKS_MODE: 'DEMO_TESTNET', STOCKS_CONFIG_PATH: '/live/config', STOCKS_SIGNER_TOKEN: 'private',
     DATABASE_URL: 'private-db', DIRECT_URL: 'private-db', PGHOST: 'remote',
+    STOCKS_SUBMISSIONS_TEST_DATABASE_URL: 'private-db', STOCKS_SUBMISSIONS_EVIDENCE_DIR: '/private/export',
     GIWA_REQUIRE_KEYSTORE: '1', GIWA_KEYSTORE_PASSWORD: 'private', VITE_ARCO_API_BASE: 'https://remote',
     NODE_OPTIONS: '--import private-hook', DOTENV_CONFIG_PATH: '/private/env', TMPDIR: '/very-long/socket/path' });
   assert.deepEqual(env, { PATH: `${dirname(process.execPath)}${delimiter}/usr/bin`, HOME: '/test-home', LANG: 'ko_KR.UTF-8',
@@ -57,6 +58,6 @@ test('doctor refuses unsupported PostgreSQL rather than promising a runnable wor
 });
 
 test('owner CLI rejects remote targets and unknown commands before starting work', async () => {
-  for (const args of [[], ['start', 'https://example.com'], ['deploy'], ['reset', '--force']])
+  for (const args of [[], ['start', 'https://example.com'], ['recovery', 'postgresql://remote/database'], ['deploy'], ['reset', '--force']])
     assert.equal(await main(args), 2);
 });

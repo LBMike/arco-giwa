@@ -1,4 +1,5 @@
-import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, realpathSync, statSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, realpathSync, statSync, copyFileSync, chmodSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve, relative } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -14,7 +15,9 @@ const temp = mkdtempSync(join(tmpdir(), 'stocks-submissions-pg-'));
 const data = join(temp, 'data'), socket = join(temp, 'socket');
 mkdirSync(socket);
 const evidencePath = join(temp, 'harness-evidence.json');
-const evidence = { temp, data, socket, tcp: false, started: false, stopped: false, testsPassed: false, restartVerified: false, restarts: 0, pids: [], interruptedBy: null };
+const evidence = { temp, data, socket, tcp: false, started: false, stopped: false, testsPassed: false, restartVerified: false, restarts: 0, pids: [], interruptedBy: null,
+  backup: { created: false, restored: false, sourceRemoved: false, verified: false, archiveRemoved: false } };
+const archive = join(temp, 'database.dump');
 let activeChild;
 let cleaningUp = false;
 
@@ -100,11 +103,34 @@ try {
   evidence.restarts++;
   await run(process.execPath, ['scripts/stocks-submissions/restart-probe.mjs', 'verify'], env);
   evidence.restartVerified = true;
+  // All test clients have exited. Back up only this harness-owned database and
+  // restore into a new database; no caller-supplied database target is accepted.
+  env.STOCKS_SUBMISSIONS_TEST_BACKUP_FILE = join(temp, 'backup-baseline.json');
+  await run(process.execPath, ['scripts/stocks-submissions/backup-probe.mjs', 'capture'], env);
+  await pg('pg_dump', ['-h', socket, '-U', 'submissions_harness', '-d', 'submissions_test', '--format=custom', '--no-owner', '--no-privileges', '-f', archive]);
+  chmodSync(archive, 0o600);
+  const bytes = readFileSync(archive);
+  if (bytes.subarray(0, 5).toString() !== 'PGDMP') throw new Error('INVALID_BACKUP_ARCHIVE');
+  Object.assign(evidence.backup, { created: true, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
+  await pg('createdb', ['-h', socket, '-U', 'submissions_harness', 'submissions_restored']);
+  await pg('pg_restore', ['-h', socket, '-U', 'submissions_harness', '-d', 'submissions_restored', '--exit-on-error', '--single-transaction', '--no-owner', '--no-privileges', archive]);
+  evidence.backup.restored = true;
+  await pg('dropdb', ['-h', socket, '-U', 'submissions_harness', 'submissions_test']);
+  evidence.backup.sourceRemoved = true;
+  const restoredEnv = { ...env, STOCKS_SUBMISSIONS_TEST_DATABASE_URL: `postgresql://submissions_harness@localhost/submissions_restored?host=${encodeURIComponent(socket)}` };
+  restoredEnv.STOCKS_TEST_DATABASE_URL = restoredEnv.STOCKS_SUBMISSIONS_TEST_DATABASE_URL;
+  await run(process.execPath, ['scripts/stocks-submissions/backup-probe.mjs', 'verify'], restoredEnv);
+  await run(process.execPath, ['scripts/stocks-submissions/restart-probe.mjs', 'verify'], restoredEnv);
+  evidence.backup.verified = true;
+  console.log('DATABASE_BACKUP_RESTORE_PERSISTENCE_PASS');
 } catch (error) {
   failure = error;
 } finally {
   cleaningUp = true;
   try { await stop(); } catch (error) { failure = error; }
+  // A rehearsal archive is not a retained operational backup. Never export it.
+  try { rmSync(archive, { force: true }); evidence.backup.archiveRemoved = !existsSync(archive); }
+  catch { failure = new Error('BACKUP_ARCHIVE_CLEANUP_FAILED'); }
   // SIGKILL or host loss cannot run this finally block. Publish only the small
   // ownership/cleanup record; the DB, fixture state and logs stay in the temp dir.
   try {

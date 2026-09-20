@@ -100,6 +100,16 @@ Claude의 제품 UI 담당 범위는 유지하며, Codex는 백엔드·실행 �
 
 ## 수정 후 확인
 
+별도 시험 DB의 백업·복원도 직접 확인할 수 있습니다.
+
+```sh
+npm run stocks:recovery:check
+```
+
+현재 사용 중인 거래 기록을 백업하는 명령은 아닙니다. 새 테스트 DB를 만들어 복원 후
+주문·거래 증거·운영자 이력 유지와 중복 방지를 확인합니다.
+절차와 범위는 [백업·복원 리허설](contracts/stocks-backup-restore-rehearsal.md)에 정리했습니다.
+
 ```sh
 npm run typecheck
 npm run build
