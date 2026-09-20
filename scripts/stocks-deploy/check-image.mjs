@@ -61,6 +61,7 @@ try {
     }
   `]);
   docker(['exec', running, 'node', 'scripts/stocks-preflight/run.mjs', '--help']);
+  docker(['exec', running, 'node', 'scripts/stocks-preflight/check-connection.mjs', '--help']);
   docker(['stop', '--time', '15', running]);
   assert.equal(inspect(running).State.ExitCode, 0, 'SIGTERM must drain and exit normally');
   for (const env of [[], [...fixture, 'STOCKS_MODE=DEMO_TESTNET']]) {

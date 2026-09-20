@@ -57,6 +57,10 @@ HTTPS 프록시와 명시적인 포트 노출 설정이 필요합니다. 이미�
 실행하면 기존 읽기 전용 배포 전 검사를 사용할 수 있습니다. 기본 실행 명령은
 `node server/dist/index.js`이며, 매 시작마다 다시 빌드하지 않습니다.
 
+실행 후 외부에서 [API·UI 연결 점검](stocks-connection-check.md)을 수행할 수 있습니다.
+동일 이미지에도 `node scripts/stocks-preflight/check-connection.mjs --api https://api.example --origin https://app.example`
+명령이 포함됩니다. 접속할 실제 주소를 직접 지정하며 지갑 인증값은 필요하지 않습니다.
+
 ## 상태 확인과 종료
 
 컨테이너의 `/health` 검사는 **API 프로세스가 응답하는지만** 확인합니다. Stocks 거래 가능,

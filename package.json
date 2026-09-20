@@ -14,6 +14,7 @@
     "stocks:dev": "node scripts/stocks-local/owner.mjs start",
     "stocks:recovery:check": "node scripts/stocks-local/owner.mjs recovery",
     "stocks:integration:prepare": "node scripts/stocks-preflight/prepare-integration.mjs",
+    "stocks:connection:check": "node scripts/stocks-preflight/check-connection.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "build:server": "tsc -p server/tsconfig.json",

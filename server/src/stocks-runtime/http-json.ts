@@ -15,6 +15,13 @@ type Options = {
 };
 
 export async function stocksHttpJson(target: URL, init: Omit<RequestInit, 'signal' | 'redirect'>, options: Options): Promise<unknown> {
+  return (await stocksHttpResponse(target, init, options)).body;
+}
+
+/** Bounded infrastructure probes may inspect expected non-2xx JSON or headers only. */
+export async function stocksHttpResponse(target: URL, init: Omit<RequestInit, 'signal' | 'redirect'>,
+  options: Options & { acceptedStatuses?: readonly number[]; body?: 'json' | 'none' },
+): Promise<{ status: number; headers: Headers; body: unknown }> {
   const { maxBytes, errorCode, allowNotFound = false, request = fetch, timeoutMs = STOCKS_HTTP_TIMEOUT_MS,
     now = () => performance.now() } = options;
   const unavailable = () => new Error(errorCode);
@@ -37,8 +44,11 @@ export async function stocksHttpJson(target: URL, init: Omit<RequestInit, 'signa
     try {
       current();
       if (response.redirected || (response.url && response.url !== target.href)) throw unavailable();
-      if (allowNotFound && response.status === 404) return null;
-      if (!response.ok || !response.body) throw unavailable();
+      const result = (body: unknown) => ({ status: response.status, headers: response.headers, body });
+      if (allowNotFound && response.status === 404) return result(null);
+      if (!(options.acceptedStatuses ? options.acceptedStatuses.includes(response.status) : response.ok)) throw unavailable();
+      if (options.body === 'none') return result(null);
+      if (!response.body) throw unavailable();
       const length = response.headers.get('content-length');
       if (length !== null && (!/^\d{1,16}$/.test(length) || Number(length) > maxBytes)) throw unavailable();
       reader = response.body.getReader();
@@ -58,9 +68,9 @@ export async function stocksHttpJson(target: URL, init: Omit<RequestInit, 'signa
         }
         bytes.set(item.value, total); total = next;
       }
-      const result: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total)));
+      const decoded: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, total)));
       current();
-      return result;
+      return result(decoded);
     } finally {
       // Do not wait for a broken provider's cancellation callback. A late fetch
       // is still discarded and cancelled after the caller's deadline has won.

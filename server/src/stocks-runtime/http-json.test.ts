@@ -1,10 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { stocksHttpJson } from './http-json.js';
+import { stocksHttpJson, stocksHttpResponse } from './http-json.js';
 
 const target = new URL('https://provider.example.test/private-path');
 const options = { maxBytes: 64, errorCode: 'STOCKS_RPC_UNAVAILABLE' as const };
 const rejected = /^Error: STOCKS_RPC_UNAVAILABLE$/;
+
+test('probe may explicitly accept error JSON without widening ordinary RPC/signing responses', async () => {
+  const request: typeof fetch = async () => new Response('{"ok":false}', { status: 503, headers: { 'cache-control': 'no-store' } });
+  const result = await stocksHttpResponse(target, {}, { ...options, acceptedStatuses: [200, 503], request });
+  assert.equal(result.status, 503); assert.equal(result.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(result.body, { ok: false });
+  await assert.rejects(stocksHttpJson(target, {}, { ...options, request }), rejected);
+  await assert.rejects(stocksHttpResponse(target, {}, { ...options, acceptedStatuses: [200], request }), rejected);
+});
+
+test('headers-only probe cancels an unread endless body without waiting for cancellation', async () => {
+  let cancelled = false;
+  const result = await stocksHttpResponse(target, { method: 'OPTIONS' }, { ...options, body: 'none', acceptedStatuses: [200],
+    request: async () => new Response(new ReadableStream({ cancel() { cancelled = true; return new Promise(() => {}); } }),
+      { headers: { 'access-control-allow-origin': 'https://ui.example.test', 'content-length': '999999999' } }),
+  });
+  assert.equal(result.body, null); assert.equal(result.status, 200); assert.equal(cancelled, true);
+  assert.equal(result.headers.get('access-control-allow-origin'), 'https://ui.example.test');
+});
 
 test('bounded reader accepts the exact UTF-8 byte limit, including split multibyte characters', async () => {
   const bytes = new TextEncoder().encode('{"name":"한글"}');
