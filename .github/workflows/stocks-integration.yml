@@ -97,6 +97,12 @@ jobs:
       - name: Confirm dependency locks were not rewritten
         run: git diff --exit-code -- package-lock.json scripts/stocks-ci/package-lock.json packages/contracts/yarn.lock
 
+      - name: Verify idle database failure and reconnect in an owned database
+        if: matrix.scenario == 'operator-control'
+        env:
+          STOCKS_SUBMISSIONS_EVIDENCE_DIR: ${{ runner.temp }}/stocks-database-failure
+        run: node scripts/stocks-submissions/test-postgres.mjs server/dist/stocks-runtime/database-failure.postgres.test.js
+
       - name: Install pinned Chromium and system libraries
         if: matrix.scenario != 'postgres' && matrix.scenario != 'operator-control'
         run: node scripts/stocks-ci/node_modules/playwright/cli.js install --with-deps chromium

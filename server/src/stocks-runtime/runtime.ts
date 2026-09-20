@@ -19,6 +19,7 @@ import { createDeploymentEvidence } from '../stocks-execution/deployment.js';
 import { StocksExecutionService } from '../stocks-execution/service.js';
 import { StocksTradingControlService } from '../stocks-trading-control/service.js';
 import { StocksTradingControlPolicy } from '../stocks-trading-control/policy.js';
+import { watchStocksPoolErrors } from './database-failure.js';
 
 export type StocksRuntimeConfig = {
   profile: 'DEMO_TESTNET'; manifest: Manifest & { schemaVersion: 2; redemptionEscrow: `0x${string}` };
@@ -51,12 +52,15 @@ export async function configuredStocksRuntime(env: NodeJS.ProcessEnv, fallbackDa
   ensure(env.STOCKS_MODE === 'DEMO_TESTNET' && env.STOCKS_CONFIG_PATH && env.STOCKS_SIGNER_TOKEN, 'STOCKS_CONFIGURATION_REQUIRED');
   const config = parseStocksRuntimeConfig(await readStocksPublicJson(env.STOCKS_CONFIG_PATH));
   const require = createRequire(import.meta.url);
-  const { Pool } = require('pg') as { Pool: new (options: unknown) => SqlPool & { end(): Promise<void> } };
+  const { Pool } = require('pg') as { Pool: new (options: unknown) => SqlPool & { end(): Promise<void>; on(event: 'error', listener: () => void): unknown } };
   const pool = new Pool({ connectionString: env.STOCKS_DATABASE_URL ?? fallbackDatabaseUrl, max: 8, connectionTimeoutMillis: 10000, statement_timeout: 30000 });
+  let runtime: Awaited<ReturnType<typeof createStocksRuntime>> | undefined;
+  watchStocksPoolErrors(pool, () => runtime);
   try {
     const transport = httpStocksRpc(config.rpcUrl);
     const signer = externalStocksSigner({ url: config.signerUrl, authorization: env.STOCKS_SIGNER_TOKEN, deploymentDigest: manifestDigest(config.manifest), manifest: config.manifest });
-    return await createStocksRuntime({ manifest: config.manifest, pool, transport, signer, autodispatch, paused: config.paused, operators: config.operators, operatorControls: config.operatorControls });
+    runtime = await createStocksRuntime({ manifest: config.manifest, pool, transport, signer, autodispatch, paused: config.paused, operators: config.operators, operatorControls: config.operatorControls });
+    return runtime;
   } catch (error) { await pool.end(); throw error; }
 }
 // Trusted composition port, shared by the configured server and real local
@@ -82,6 +86,11 @@ export async function createStocksRuntime(options: {
   await verifyStocksDeployment(manifest, rpc, transport);
   await signer.probe();
   const health = new StocksObservationHealth();
+  let databaseFailureVersion = 0;
+  const notifyDatabaseFailure = () => {
+    databaseFailureVersion++;
+    health.record('UNAVAILABLE_OR_REVIEW_REQUIRED');
+  };
   let stopped = false;
   let closing: Promise<void> | null = null;
   const repo = new StocksRepository(pool, digest);
@@ -108,6 +117,7 @@ export async function createStocksRuntime(options: {
   let current: Promise<void> | null = null;
   const tick = () => {
     if (!autodispatch || stopped || current) return current ?? Promise.resolve();
+    const databaseVersion = databaseFailureVersion;
     current = (async () => {
       try {
         // Refresh diagnostics even while another gate blocks new admissions.
@@ -116,7 +126,9 @@ export async function createStocksRuntime(options: {
         await service.sell.expireReservations();
         for (let n = 0; n < 20 && !stopped; n++) if (!(await worker.runOne())) break;
         const observed = await observer.runOnce();
-        if (!stopped) health.record(observed);
+        // An idle connection can fail during otherwise successful work. Only a
+        // complete subsequent tick may restore CURRENT after that failure.
+        if (!stopped && databaseVersion === databaseFailureVersion) health.record(observed);
       } catch { if (!stopped) health.record('UNAVAILABLE_OR_REVIEW_REQUIRED'); }
     })().finally(() => { current = null; });
     return current;
@@ -128,6 +140,7 @@ export async function createStocksRuntime(options: {
     control,
     status: () => runtimeSnapshot({ deploymentId: manifest.deploymentId, deploymentDigest: digest, autodispatch, configuredPause: paused, stopped, tickInFlight: current !== null, health: health.snapshot(), ...(control ? { operatorControl: control.snapshot() } : {}) }),
     tick,
+    notifyDatabaseFailure,
     stop,
     close() {
       stop();

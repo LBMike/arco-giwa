@@ -12,6 +12,7 @@ import { freezeManifest, manifestDigest } from '../../server/dist/stocks/contrac
 import { createStocksRpcPort } from '../../server/dist/stocks/rpc.js';
 import { reconcileStocks } from '../../server/dist/stocks/reconciliation.js';
 import { createStocksRuntime } from '../../server/dist/stocks-runtime/runtime.js';
+import { watchStocksPoolErrors } from '../../server/dist/stocks-runtime/database-failure.js';
 import { stocksSessionResolvers } from '../../server/dist/stocks-runtime/session.js';
 import { httpStocksRpc, externalStocksSigner } from '../../server/dist/stocks-runtime/transport.js';
 import { StocksSubmissionsService } from '../../server/dist/stocks-submissions/service.js';
@@ -109,6 +110,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
   const reloadAbort = new AbortController();
   // Each runtime can be retired without closing the owner's shared database.
   const runtimePool = { query: (...args) => pool.query(...args), connect: () => pool.connect(), end: async () => {} };
+  watchStocksPoolErrors(pool, () => runtime);
   let closed = false, processing = false, port = 0, apiBase;
   const testCash = ownerWorkspace ? createTestCashTopUp({
     closed: () => closed,

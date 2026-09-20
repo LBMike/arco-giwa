@@ -7,5 +7,6 @@ export const postgresSuites = Object.freeze([
   'server/dist/stocks-submissions/session-recovery.postgres.test.js',
   'server/dist/stocks-submission-diagnostics/service.postgres.test.js',
   'server/dist/stocks-trading-control/service.postgres.test.js',
+  'server/dist/stocks-runtime/database-failure.postgres.test.js',
   'scripts/stocks-submissions-integration/client-roundtrip.test.mjs',
 ]);
