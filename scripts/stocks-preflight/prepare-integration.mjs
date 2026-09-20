@@ -3,7 +3,7 @@ import { open, realpath, mkdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
 function publicPath(value) {
-  if (typeof value !== 'string' || !isAbsolute(value) || value.split(/[\\/]/).some(p => p.startsWith('.env') || p === '.secrets')) throw new Error('PUBLIC_PATH_REQUIRED');
+  if (typeof value !== 'string' || !isAbsolute(value) || value.split(/[\\/]/).some(p => p.toLowerCase().startsWith('.env') || p.toLowerCase() === '.secrets')) throw new Error('PUBLIC_PATH_REQUIRED');
   return value;
 }
 async function readPublicJson(path) {

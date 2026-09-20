@@ -106,7 +106,7 @@ test('CLI emits private-permission files without inherited secrets, rejects over
     assert.equal(statSync(output).mode & 0o777, 0o700);
     assert.equal(invoke(args).status, 1); assert.equal(readFileSync(join(output, 'runtime-config.json'), 'utf8'), original);
     for (const bad of [[], [...args, '--token=NEVER_COPY_THIS'], ['--manifest', join(temp, '.env'), ...args.slice(2)],
-      [...args.slice(0, 5), join(temp, '.secrets', 'output')]]) {
+      [...args.slice(0, 5), join(temp, '.secrets', 'output')], [...args.slice(0, 5), join(temp, '.ENV-copy')]]) {
       const result = invoke(bad); assert.equal(result.status, 1); assert.ok(!result.stdout.includes('NEVER_COPY_THIS')); assert.equal(result.stderr, '');
     }
     const invalid = join(temp, 'invalid.json'), fresh = join(temp, 'fresh');
