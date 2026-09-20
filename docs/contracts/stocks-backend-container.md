@@ -1,0 +1,68 @@
+# 백엔드 컨테이너 실행
+
+이 이미지는 기존 GIWA API와 선택적 Stocks 백엔드의 실행 패키지입니다. UI 정적 사이트,
+인덱서, DB, 외부 서명 서비스는 별도로 준비합니다. 컨트랙트 배포·DB 마이그레이션·거래 재개를
+자동 수행하지 않습니다. 기존 Render 설정은 그대로 사용할 수 있습니다.
+
+## 빌드와 확인
+
+Docker 실행 엔진이 켜진 환경에서 저장소 루트에서 실행합니다.
+
+```sh
+npm run stocks:container:build
+npm run stocks:container:check
+```
+
+Node22 Debian 기반 이미지와 잠금 파일의 의존성을 다운로드해 서버와 Prisma 클라이언트를
+빌드합니다. 빌드에 DB·RPC·서명 서비스의 연결 정보는 필요하지 않습니다. Node 기반 태그는
+업데이트될 수 있으므로 실제 배포에서는 검증한 최종 이미지 digest를 고정하세요.
+
+검사 명령은 만든 로컬 이미지에만 접근합니다. 외부 네트워크·포트 공개를 끄고, 읽기 전용 파일
+시스템과 비관리자 사용자로 API를 실행합니다. 테스트용 설정으로 기동, Stocks 기본 비활성,
+잘못된 설정의 시작 실패, SIGTERM 종료를 검사한 뒤 자신이 만든 컨테이너만 삭제합니다.
+DB 연결과 실제 Stocks 거래가 가능한지를 검사하는 명령은 아닙니다.
+
+GitHub의 **Backend image** 작업도 같은 이미지를 빌드하고 같은 검사를 실행합니다.
+이미지를 저장소에 게시하거나 외부 서버에 배포하지 않습니다.
+
+## 실행 설정
+
+기본값은 `STOCKS_MODE=DISABLED`, `STOCKS_AUTODISPATCH=0`, `PORT=8080`입니다.
+실행에 필요한 값은 배포 플랫폼의 비밀정보 관리 기능으로 주입합니다. Dockerfile·빌드 인자·
+이미지에 비밀값을 넣지 마세요. `.dockerignore`는 필요한 빌드 입력만 허용하며 로컬 환경 파일,
+개인키 디렉터리, Git 이력, 테스트 기록과 기존 node_modules를 빌드 문맥에서 제외합니다.
+
+| 설정 | 용도 |
+| --- | --- |
+| `DATABASE_URL`, `DIRECT_URL` | 기존 API용 PostgreSQL 연결 |
+| `INDEXER_RPC_URL` | 기존 API의 서버용 RPC 연결 |
+| `AUTH_JWT_SECRET`, `ADMIN_OPERATOR_TOKEN` | 기존 API 인증 설정 |
+| `CORS_ALLOWED_ORIGINS` | 허용할 UI 원점 목록 |
+| `STOCKS_MODE=DEMO_TESTNET` | Stocks를 명시적으로 활성화할 때만 지정 |
+| `STOCKS_CONFIG_PATH` | 읽기 전용으로 마운트한 검토된 공개 설정 JSON 경로 |
+| `STOCKS_SIGNER_TOKEN` | 별도 서명 서비스 인증 토큰 |
+| `STOCKS_DATABASE_URL` | Stocks DB를 분리할 때 지정 |
+| `STOCKS_AUTODISPATCH=1` | 중지 상태에서도 기존 전송 관찰이 필요할 때 명시적으로 지정 |
+
+Stocks 설정은 [연결 설정 생성 도구](stocks-integration-bundle.md)로 준비합니다. 컨테이너의
+`node` 사용자는 UID1000이므로 마운트된 설정을 읽을 수 있도록 소유권·읽기 권한을 맞춰야 합니다.
+설정 폴더 전체를 공개 웹 파일로 제공하지 마세요. 외부 DB에는 먼저 검토된 마이그레이션을
+별도로 적용합니다. 컨테이너 시작이 DB 구조를 변경하지는 않습니다.
+
+실행 플랫폼에서는 읽기 전용 루트 파일 시스템, `/tmp` 임시 쓰기 공간, 불필요한 Linux 권한
+제거를 유지할 수 있습니다. 이미지 안의 API는8080포트에서 수신합니다. 공개 접근에는 별도의
+HTTPS 프록시와 명시적인 포트 노출 설정이 필요합니다. 이미지만 빌드하면 외부에 공개되지 않습니다.
+
+공개 설정과 비밀값을 주입한 동일 이미지에서 `node scripts/stocks-preflight/run.mjs --online`을
+실행하면 기존 읽기 전용 배포 전 검사를 사용할 수 있습니다. 기본 실행 명령은
+`node server/dist/index.js`이며, 매 시작마다 다시 빌드하지 않습니다.
+
+## 상태 확인과 종료
+
+컨테이너의 `/health` 검사는 **API 프로세스가 응답하는지만** 확인합니다. Stocks 거래 가능,
+DB 연결 정상, 최신 체인 관찰을 의미하지 않습니다. `/ready`는 기존 GIWA 준비 상태 검사이며,
+Stocks의 거래 상태는 권한이 있는 운영자 화면에서 관찰 상태·설정 중지·운영자 중지를 함께 확인하세요.
+
+SIGTERM으로 신규 처리를 중지하고 진행 중 작업과 DB 연결 정리를 기다립니다. 실제 환경의 종료
+유예 시간은 DB·RPC·서명 서비스의 작업 시간을 고려해 설정하세요. 컨테이너 재생성 시에도 같은
+검토된 배포 명세, 외부 DB와 서명 서비스의 영속 작업 이력을 유지해야 합니다.

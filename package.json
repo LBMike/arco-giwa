@@ -7,6 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
+    "stocks:container:build": "docker build --tag arco-giwa-api:local .",
+    "stocks:container:check": "node scripts/stocks-deploy/check-image.mjs",
     "stocks:setup": "node scripts/stocks-local/owner.mjs setup",
     "stocks:doctor": "node scripts/stocks-local/owner.mjs check",
     "stocks:dev": "node scripts/stocks-local/owner.mjs start",

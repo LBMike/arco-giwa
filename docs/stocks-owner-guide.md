@@ -154,6 +154,10 @@ npm run test:server
 
 ## 현재 공개 서비스와의 차이
 
+백엔드 실행 이미지는 `npm run stocks:container:build`로 만들 수 있습니다.
+[컨테이너 실행 안내](contracts/stocks-backend-container.md)에 빌드·시작·종료와 외부 설정 주입
+방법을 정리했습니다. 이미지 생성은 공개 배포나 DB·서명 서비스 생성을 수행하지 않습니다.
+
 외부 배포 명세와 서버 주소를 준비한 후에는 `stocks:integration:prepare`로
 중지 상태의 백엔드 설정과 UI 연결 설정을 함께 만들 수 있습니다.
 [연결 설정 준비 안내](contracts/stocks-integration-bundle.md)에 입력·실행·적용 순서를 정리했습니다.
