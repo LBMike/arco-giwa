@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
+import { enableOwnerIntervalMining } from './startup-chain.mjs';
 
 assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1', 'Explicit STOCKS_LOCAL_STACK_ONLY=1 is required');
 const uiMode = process.env.STOCKS_LOCAL_UI === '1';
@@ -111,6 +112,20 @@ try {
     await delay(100);
   }
   assert.ok(ready, 'Local EVM did not become ready');
+  if (ownerMode) {
+    // rpcUrl is the loopback port of our newly spawned child, never user input.
+    // The interval belongs to that child and ends with existing process cleanup.
+    await enableOwnerIntervalMining(async (method, params) => {
+      checkRunning();
+      const response = await fetch(rpcUrl, { method: 'POST', redirect: 'error',
+        headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5000),
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+      assert.ok(response.ok, 'Owner mining RPC unavailable');
+      const row = await response.json();
+      assert.equal(row.id, 1); assert.ok(!row.error, 'Owner mining RPC rejected');
+      return row.result;
+    });
+  }
   const bundlePath = join(temp, 'deployment.json');
   run('corepack', ['yarn', 'hardhat', '--config', 'hardhat.stocks.config.ts', 'run', '--no-compile', 'scripts/stocks/deploy-local.ts', '--network', 'stocksLocal'],
     { cwd: contractsRoot, env: { ...process.env, STOCKS_LOCAL_RPC_PORT: String(port), STOCKS_ABI_DIGEST: ABI_DIGEST, STOCKS_MANIFEST_OUTPUT: bundlePath } });

@@ -147,7 +147,7 @@ try {
       const result = JSON.parse(readFileSync(join(browserEvidence, 'owner-result.json'), 'utf8'));
       assert.equal(result.result, 'PASS'); assert.equal(result.cleanupVerified, true);
       assert.deepEqual(result.pageErrors, []);
-      assert.equal(result.checks.length, 10); assert.equal(new Set(result.checks).size, 10);
+      assert.equal(result.checks.length, 11); assert.equal(new Set(result.checks).size, 11);
       assert.ok(result.checks.every(name => typeof name === 'string' && name.trim()));
       assert.equal(result.final.sends, 4); assert.equal(result.final.claimCount, 4);
       assert.deepEqual(result.backendReload, { generation: 2, sessionRetained: true, stateRetained: true });

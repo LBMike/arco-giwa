@@ -43,6 +43,23 @@ try {
   const ready = records().find(row => row.kind === 'LOCAL_OWNER_READY');
   assert.ok(ready?.initialPaused && ready.persistentAcrossRestart === false);
   report.ready = ready;
+  const readHead = async () => {
+    const response = await fetch(ready.rpcUrl, { method: 'POST', redirect: 'error',
+      headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5000),
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBlockByNumber', params: ['finalized', false] }) });
+    assert.equal(response.status, 200);
+    const row = await response.json(); assert.ok(!row.error && row.result);
+    return row.result;
+  };
+  const idleHead = await readHead();
+  await until(async () => {
+    const head = await readHead();
+    if (BigInt(head.number) < BigInt(idleHead.number) + 2n) return false;
+    assert.deepEqual(head.transactions, [], 'Idle owner blocks must not create wallet transactions');
+    assert.ok(Math.abs(Date.now() / 1000 - Number(BigInt(head.timestamp))) < 30);
+    return true;
+  }, 'idle owner chain advances without any wallet interaction', 30000);
+  passed('owned chain keeps finalized blocks fresh while idle, before any browser or wallet action');
   browser = await chromium.launch({ executablePath, headless: true,
     handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false });
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });

@@ -14,3 +14,15 @@ export async function assertLocalStartupChain(rpc) {
   }
   assert.equal(chain, '0x164ce', 'Local startup chain must be GIWA test chain 91342');
 }
+
+// Only the owner launcher calls this, against the Hardhat child it just spawned.
+// Automining alone makes an idle workspace stale after one hour. Empty blocks
+// keep local observation current; they do not bypass the runtime freshness gate.
+export async function enableOwnerIntervalMining(rpc) {
+  assert.equal(await rpc('eth_chainId', []), '0x164ce');
+  const metadata = await rpc('hardhat_metadata', []);
+  assert.equal(metadata?.chainId, 91342);
+  assert.match(metadata?.instanceId ?? '', /^0x[0-9a-f]{64}$/);
+  assert.ok(!metadata.forkedNetwork, 'Owner mining must not use a fork');
+  assert.equal(await rpc('evm_setIntervalMining', [10000]), true, 'Owner interval mining was not enabled');
+}
