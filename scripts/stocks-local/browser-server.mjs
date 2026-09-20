@@ -75,7 +75,7 @@ export async function createLocalBrowserHost({ root, resourceDir, ownerWorkspace
     if (request.method === 'POST' && !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(request.headers['content-type'] ?? ''))
       throw failure(415, 'LOCAL_JSON_REQUIRED');
   }
-  const config = () => ({ apiBase: stack.apiBase, frontendOrigin: origin, ownerWorkspace,
+  const config = () => ({ apiBase: stack.apiBase, frontendOrigin: origin, ownerWorkspace, backendReload: ownerWorkspace && typeof stack.reloadBackend === 'function',
     knownHashRecovery: typeof stack.armShortSession === 'function',
     accounts: { holder: stack.accounts.holder, otherHolder: stack.accounts.otherHolder,
       ...(stack.operatorDiagnostics ? { operator: stack.accounts.operator } : {}) }, account: wallet.account,
@@ -86,7 +86,7 @@ export async function createLocalBrowserHost({ root, resourceDir, ownerWorkspace
     const snapshot = await stack.snapshot();
     requireReady();
     return { account: wallet.account, holdArmed: !!held && !held.waiting, holdWaiting: !!held?.waiting,
-      calls: wallet.calls.length, sends: wallet.sends.map(({ outcome }) => ({ outcome })),
+      backendGeneration: stack.backendGeneration ?? 0, calls: wallet.calls.length, sends: wallet.sends.map(({ outcome }) => ({ outcome })),
       snapshot: { buyOrders: snapshot.buyOrders.map(({ id, state }) => ({ id, state })),
         sellOrders: snapshot.sellOrders.map(({ id, state }) => ({ id, state })), claimCount: snapshot.claims.length,
         proofCount: snapshot.proofs.length, ...snapshot.chain,
@@ -118,6 +118,9 @@ export async function createLocalBrowserHost({ root, resourceDir, ownerWorkspace
       case 'stopProcessing': await stack.stopProcessing(); return;
       case 'startProcessing': await stack.startProcessing(); return;
       case 'restartApi': await stack.restartApi(); return;
+      case 'reloadBackend':
+        if (!ownerWorkspace || typeof stack.reloadBackend !== 'function') throw failure(403, 'LOCAL_BACKEND_RELOAD_DISABLED');
+        await stack.reloadBackend(); return;
       case 'topUpTestCash':
         if (!ownerWorkspace || typeof stack.topUpTestCash !== 'function') throw failure(403, 'LOCAL_TEST_CASH_DISABLED');
         await stack.topUpTestCash(); return;

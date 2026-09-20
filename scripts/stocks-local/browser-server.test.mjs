@@ -59,6 +59,7 @@ async function fixture(t, recovery = false, operatorDiagnostics = false, ownerWo
   const stack = { apiBase: 'http://127.0.0.1:12345', frontendOrigin: host.origin, accounts: { holder: A, otherHolder: B, operator: `0x${'4'.repeat(40)}` }, manifest: { fixture: true },
     operatorDiagnostics,
     armShortSession: recovery ? () => controls.push('short-session') : undefined,
+    async reloadBackend() { controls.push('reload'); },
     async topUpTestCash() { controls.push('test-cash'); },
     async snapshot() { return { buyOrders: [], sellOrders: [], claims: [], proofs: [], chain: { holderStock: '0', holderCash: '2' } }; },
     async stopProcessing() { controls.push('stop'); }, async startProcessing() { controls.push('start'); }, async restartApi() { controls.push('restart'); },
@@ -132,6 +133,23 @@ test('cash top-up is owner-only and rejects altered targets and unauthorized req
   assert.deepEqual(enabled.controls, []);
   assert.equal((await enabled.post('/__local/control', { action: 'topUpTestCash' })).status, 200);
   assert.deepEqual(enabled.controls, ['test-cash']);
+});
+
+test('backend reload accepts only the fixed owner action with same-origin capability', async t => {
+  const originalFlag = process.env.STOCKS_LOCAL_STACK_ONLY;
+  const disabled = await fixture(t);
+  assert.equal(disabled.config.backendReload, false);
+  assert.equal((await disabled.post('/__local/control', { action: 'reloadBackend' })).status, 403);
+  const enabled = await fixture(t, false, false, true);
+  t.after(() => { if (originalFlag === undefined) delete process.env.STOCKS_LOCAL_STACK_ONLY; else process.env.STOCKS_LOCAL_STACK_ONLY = originalFlag; });
+  assert.equal(enabled.config.backendReload, true);
+  for (const extra of [{ command: 'arbitrary' }, { root: '/other' }, { module: 'other.js' }])
+    assert.equal((await enabled.post('/__local/control', { action: 'reloadBackend', ...extra })).status, 400);
+  for (const headers of [{ origin: 'http://foreign.test' }, { 'x-stocks-local-capability': '' }])
+    assert.equal((await enabled.post('/__local/control', { action: 'reloadBackend' }, headers)).status, 403);
+  assert.deepEqual(enabled.controls, []);
+  assert.equal((await enabled.post('/__local/control', { action: 'reloadBackend' })).status, 200);
+  assert.deepEqual(enabled.controls, ['reload']);
 });
 
 test('short-session control is absent by default and available only in the explicit recovery fixture', async t => {

@@ -14,9 +14,9 @@ import { createLocalSessionReport } from '../session-report.mjs';
 import '../../../src/index.css';
 import '../../../src/demo/theme.css';
 
-type Config = { apiBase: string; frontendOrigin: string; accounts: { holder: string; otherHolder: string; operator?: string }; account: string | null; capability: string; knownHashRecovery: boolean; operatorDiagnostics: boolean; ownerWorkspace: boolean };
-type State = { account: string | null; holdWaiting: boolean; holdArmed: boolean; calls: number; sends: { outcome: string }[]; holderCash: string };
-type Control = { action: 'account'; account: 'A' | 'B' | 'operator' } | { action: 'holdNextSend' | 'releaseHeld' | 'dropHeld' | 'stopProcessing' | 'startProcessing' | 'restartApi' | 'armShortSession' | 'topUpTestCash' };
+type Config = { apiBase: string; frontendOrigin: string; accounts: { holder: string; otherHolder: string; operator?: string }; account: string | null; capability: string; knownHashRecovery: boolean; operatorDiagnostics: boolean; ownerWorkspace: boolean; backendReload: boolean };
+type State = { account: string | null; holdWaiting: boolean; holdArmed: boolean; calls: number; sends: { outcome: string }[]; holderCash: string; backendGeneration: number };
+type Control = { action: 'account'; account: 'A' | 'B' | 'operator' } | { action: 'holdNextSend' | 'releaseHeld' | 'dropHeld' | 'stopProcessing' | 'startProcessing' | 'restartApi' | 'armShortSession' | 'topUpTestCash' | 'reloadBackend' };
 type Request = { method: string; params?: unknown[] };
 type Listener = (...args: unknown[]) => void;
 const address = /^0x[0-9a-fA-F]{40}$/;
@@ -34,7 +34,7 @@ function configOf(value: unknown): Config {
   const operator = row.operatorDiagnostics === true && typeof accounts.operator === 'string' && address.test(accounts.operator) ? accounts.operator : undefined;
   if (row.operatorDiagnostics === true && !operator) throw Error('LOCAL_OPERATOR_INVALID');
   if (row.account !== null && (typeof row.account !== 'string' || ![accounts.holder.toLowerCase(), accounts.otherHolder.toLowerCase(), operator?.toLowerCase()].includes(row.account.toLowerCase()))) throw Error('LOCAL_ACCOUNT_INVALID');
-  return { apiBase: row.apiBase, frontendOrigin: row.frontendOrigin, capability: row.capability, accounts: { holder: accounts.holder, otherHolder: accounts.otherHolder, operator }, account: row.account as string | null, knownHashRecovery: row.knownHashRecovery === true, operatorDiagnostics: row.operatorDiagnostics === true, ownerWorkspace: row.ownerWorkspace === true };
+  return { apiBase: row.apiBase, frontendOrigin: row.frontendOrigin, capability: row.capability, accounts: { holder: accounts.holder, otherHolder: accounts.otherHolder, operator }, account: row.account as string | null, knownHashRecovery: row.knownHashRecovery === true, operatorDiagnostics: row.operatorDiagnostics === true, ownerWorkspace: row.ownerWorkspace === true, backendReload: row.ownerWorkspace === true && row.backendReload === true };
 }
 function stateOf(value: unknown, config: Config): State {
   const row = object(value);
@@ -47,7 +47,7 @@ function stateOf(value: unknown, config: Config): State {
     if (typeof send.outcome !== 'string') throw Error('LOCAL_STATE_INVALID');
     return { outcome: send.outcome };
   });
-  return { account: row.account as string | null, holdWaiting: row.holdWaiting, holdArmed: row.holdArmed, calls: Number(row.calls), sends, holderCash: snapshot.holderCash };
+  return { account: row.account as string | null, holdWaiting: row.holdWaiting, holdArmed: row.holdArmed, calls: Number(row.calls), sends, holderCash: snapshot.holderCash, backendGeneration: Number.isSafeInteger(row.backendGeneration) && Number(row.backendGeneration) >= 0 ? Number(row.backendGeneration) : 0 };
 }
 async function json(response: Response): Promise<unknown> {
   if (!response.ok) throw Error('LOCAL_REQUEST_FAILED');
@@ -121,10 +121,17 @@ async function start() {
     }
     async function control(body: Control) {
       if (busy) return; setBusy(true);
+      if (body.action === 'reloadBackend') setMessage('백엔드 코드를 빌드하고 있습니다. 기존 거래 기록은 유지됩니다.');
       try {
-        await fetch('/__local/control', { method: 'POST', headers, body: JSON.stringify(body), credentials: 'omit', cache: 'no-store', redirect: 'error' }).then(json);
-        acceptState(await readState()); setMessage(body.action === 'topUpTestCash' ? 'Account A 테스트 현금 보충을 확인했습니다. 기존 거래 기록은 유지됩니다.' : `테스트 제어 완료: ${body.action}`);
-      } catch { setMessage(body.action === 'topUpTestCash' ? 'LOCAL_CONTROL_FAILED · 보충 결과를 확인하지 못했습니다. 현재 테스트 잔액을 확인하세요. 자동 재전송은 하지 않습니다.' : 'LOCAL_CONTROL_FAILED'); }
+        await fetch('/__local/control', { method: 'POST', headers, body: JSON.stringify(body), credentials: 'omit', cache: 'no-store', redirect: 'error' }).then(async response => {
+          if (!response.ok) {
+            const result = await response.json();
+            const code = result?.error?.code;
+            throw Error(typeof code === 'string' && /^LOCAL_BACKEND_[A-Z_]+$/.test(code) ? code : 'LOCAL_CONTROL_FAILED');
+          }
+        });
+        acceptState(await readState()); setMessage(body.action === 'reloadBackend' ? '백엔드 변경을 적용했습니다. 로그인·거래 기록·운영자 중지 설정은 유지됩니다.' : body.action === 'topUpTestCash' ? 'Account A 테스트 현금 보충을 확인했습니다. 기존 거래 기록은 유지됩니다.' : `테스트 제어 완료: ${body.action}`);
+      } catch (error) { setMessage(body.action === 'reloadBackend' ? (error instanceof Error && error.message === 'LOCAL_BACKEND_BUILD_FAILED' ? 'LOCAL_BACKEND_BUILD_FAILED · 빌드 오류로 적용하지 않았습니다. 기존 서버는 유지됩니다. 실행 터미널에서 오류를 수정한 뒤 다시 적용하세요.' : 'LOCAL_BACKEND_RELOAD_FAILED · 적용 결과를 확인하지 못했습니다. 상태를 새로고침하고 실행 터미널을 확인하세요.') : body.action === 'topUpTestCash' ? 'LOCAL_CONTROL_FAILED · 보충 결과를 확인하지 못했습니다. 현재 테스트 잔액을 확인하세요. 자동 재전송은 하지 않습니다.' : 'LOCAL_CONTROL_FAILED'); }
       finally { setBusy(false); }
     }
     async function exportSummary() {
@@ -163,6 +170,7 @@ async function start() {
     ];
     if (config.operatorDiagnostics) buttons.push({ label: 'Operator (sign-in only)', body: { action: 'account', account: 'operator' } });
     if (config.knownHashRecovery) buttons.push({ label: 'Next login: 30s JWT (test only)', body: { action: 'armShortSession' } });
+    if (config.backendReload) buttons.push({ label: '백엔드 변경 적용', body: { action: 'reloadBackend' } });
     if (config.ownerWorkspace) buttons.push({ label: 'Account A 현금 2,000까지 보충', body: { action: 'topUpTestCash' } });
     return <div className="arco-demo" style={{ width: '100%', maxWidth: 1280, minHeight: '100vh', margin: '0 auto', padding: '16px', boxSizing: 'border-box', overflowWrap: 'anywhere', background: 'var(--color-arco-page)', color: 'var(--color-arco-ink)' }}>
       <aside aria-label="Local test controls" data-testid="local-test-controls" style={{ width: '100%', padding: 16, marginBottom: 24, border: '1px solid var(--color-arco-border)', borderRadius: 16, background: 'var(--color-arco-surface-muted)' }}>
@@ -175,6 +183,7 @@ async function start() {
           {config.ownerWorkspace && <button type="button" style={buttonStyle} disabled={busy || stopped} data-local-action="finish" onClick={() => { void finish(); }}>로컬 실행 종료</button>}
         </div>
         {config.ownerWorkspace && <p style={{ marginTop: 10, fontSize: 13 }}>Account A 테스트 현금 (최근 조회): <span data-testid="local-test-cash">{(Number(state.holderCash) / 1_000_000).toLocaleString('ko-KR', { maximumFractionDigits: 2 })}</span> ARCO_TEST_USDC · Refresh test state로 갱신</p>}
+        {config.backendReload && <p style={{ marginTop: 8, fontSize: 13 }}>적용된 백엔드 버전: <span data-testid="local-backend-generation">{state.backendGeneration}</span> · server/src 수정 후 백엔드 변경 적용</p>}
         <p data-testid="local-test-state" style={{ marginTop: 10, fontSize: 13 }}>
           Account {same(state.account, config.accounts.holder) ? 'A' : same(state.account, config.accounts.otherHolder) ? 'B' : config.accounts.operator && same(state.account, config.accounts.operator) ? 'Operator' : 'disconnected'}
           {' · '}Wallet calls: <span data-testid="local-wallet-calls">{state.calls}</span>

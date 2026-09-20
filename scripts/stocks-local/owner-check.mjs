@@ -53,7 +53,7 @@ try {
   page.on('response', response => { if (response.status() >= 400) report.rejectedRequests.push({ at: Date.now(), status: response.status(), path: new URL(response.url()).pathname }); });
   const local = async action => {
     await page.locator(`[data-local-action="${action}"]`).click();
-    await until(async () => !await page.locator('[data-local-action="refresh"]').isDisabled(), action);
+    await until(async () => !await page.locator('[data-local-action="refresh"]').isDisabled(), action, action === 'reloadBackend' ? 90000 : 20000);
     assert.doesNotMatch(await page.getByTestId('local-test-message').innerText(), /FAILED/);
   };
   const signIn = async () => {
@@ -88,6 +88,19 @@ try {
   assert.equal((await state()).sends.length, 0);
   await page.screenshot({ path: join(evidence, 'owner-admin.png'), fullPage: true });
   passed('operator signs in and resumes through the product UI without a wallet transaction');
+
+  await local('reloadBackend');
+  assert.equal((await state()).backendGeneration, 1);
+  assert.equal(await page.getByTestId('local-backend-generation').innerText(), '1');
+  const refreshed = page.waitForResponse(r => new URL(r.url()).pathname === '/api/v1/admin/stocks/trading-control');
+  void refreshed.catch(() => {});
+  await page.getByRole('button', { name: 'Refresh trading control', exact: true }).click();
+  const refreshedResponse = await refreshed;
+  assert.equal(refreshedResponse.status(), 200, 'Existing signed operator session survives code reload');
+  assert.equal(refreshedResponse.headers()['x-stocks-local-backend-generation'], '1');
+  await until(async () => await gate().getAttribute('data-phase') === 'ready', 'resumed after code reload');
+  assert.match(await gate().innerText(), /Resumed/);
+  passed('fresh backend generation retains the signed session and resumed gate before actual trades');
 
   await local('account-A'); await page.goto(ready.investorUrl); await signIn();
   await page.getByText('시세 연결 준비 중', { exact: true }).first().waitFor();
@@ -148,6 +161,17 @@ try {
   await until(async () => await gate().getAttribute('data-phase') === 'ready', 'pause after restart');
   assert.match(await gate().innerText(), /Paused/);
   passed('operator pause survives API restart');
+  const beforeReload = await state();
+  await local('reloadBackend');
+  const afterReload = await state();
+  assert.equal(afterReload.backendGeneration, 2);
+  assert.deepEqual(afterReload.snapshot, beforeReload.snapshot);
+  assert.equal(afterReload.sends.length, beforeReload.sends.length);
+  await page.getByRole('button', { name: 'Refresh trading control', exact: true }).click();
+  await until(async () => await gate().getAttribute('data-phase') === 'ready', 'paused after code reload');
+  assert.match(await gate().innerText(), /Paused/);
+  report.backendReload = { generation: afterReload.backendGeneration, sessionRetained: true, stateRetained: true };
+  passed('backend code reload after BUY and SELL retains balances, orders, sends and manual pause');
   await local('topUpTestCash');
   assert.equal(await page.getByTestId('local-test-cash').innerText(), '2,000');
   const toppedUp = await state();

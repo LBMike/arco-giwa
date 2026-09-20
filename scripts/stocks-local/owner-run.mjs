@@ -40,7 +40,7 @@ export async function runStack(options) {
     console.log(`\n투자자 화면: ${investorUrl}\n운영자 화면: ${adminUrl}\n` +
       '운영자 화면에서 Operator (sign-in only) → Sign in → 거래 재개 후 Account A로 매수·매도하세요.\n' +
       '테스트 현금 2,000 / NVDA 고정 모의 가격 120. 실제 자산이 아닙니다.\n' +
-      '코드 수정 후 새로고침하세요. 서버 코드는 종료 후 다시 실행하세요. Ctrl+C로 소유 서비스를 정리합니다.\n');
+      '코드 수정 후 새로고침하세요. 서버 코드는 백엔드 변경 적용 버튼으로 기록을 유지하며 반영하세요. Ctrl+C로 소유 서비스를 정리합니다.\n');
     const result = await host.finished;
     assert.equal(result.ok, true, 'LOCAL_OWNER_SESSION_ENDED_WITHOUT_FINISH');
     return { result: 'LOCAL_SESSION_CLOSED', execution: 'LOCAL_OWNER_WORKSPACE_ONLY' };

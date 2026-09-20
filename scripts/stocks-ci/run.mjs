@@ -91,6 +91,7 @@ try {
     const units = await run('harness-unit', ['--test', '--test-reporter=tap',
       'scripts/stocks-local/browser-server.test.mjs', 'scripts/stocks-local/local-wallet.test.mjs',
       'scripts/stocks-local/owner.test.mjs',
+      'scripts/stocks-local/backend-build.test.mjs',
       'scripts/stocks-local/test-cash.test.mjs',
       'scripts/stocks-local/session-report.test.mjs',
       'scripts/stocks-local/startup-chain.test.mjs',
@@ -145,9 +146,10 @@ try {
       const result = JSON.parse(readFileSync(join(browserEvidence, 'owner-result.json'), 'utf8'));
       assert.equal(result.result, 'PASS'); assert.equal(result.cleanupVerified, true);
       assert.deepEqual(result.pageErrors, []);
-      assert.equal(result.checks.length, 8); assert.equal(new Set(result.checks).size, 8);
+      assert.equal(result.checks.length, 10); assert.equal(new Set(result.checks).size, 10);
       assert.ok(result.checks.every(name => typeof name === 'string' && name.trim()));
       assert.equal(result.final.sends, 4); assert.equal(result.final.claimCount, 4);
+      assert.deepEqual(result.backendReload, { generation: 2, sessionRetained: true, stateRetained: true });
       assert.equal(result.final.holderStock, '1500000000'); assert.equal(result.final.holderCash, '1820000000');
       assert.equal(result.final.vaultCash, '180000000'); assert.equal(result.final.escrowStock, '0');
       assert.equal(result.final.reconciliationStatus, 'MATCHED_AT_CUTOFF');

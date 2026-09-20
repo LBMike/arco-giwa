@@ -3,6 +3,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+import { compileBackend, loadBackend, backendFailure } from './backend-build.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { encodeFunctionData, parseAbi } from 'viem';
 import { buildApp } from '../../server/dist/app.js';
@@ -23,7 +25,7 @@ import { createTestCashTopUp } from './test-cash.mjs';
 const { Pool } = createRequire(import.meta.url)('pg');
 const faucetAbi = parseAbi(['function faucet(address,uint256)']);
 
-export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test', knownHashRecovery = false, operatorDiagnostics = false, operatorControls = false, ownerWorkspace = false }) {
+export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test', knownHashRecovery = false, operatorDiagnostics = false, operatorControls = false, ownerWorkspace = false, resourceDir }) {
   assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1');
   assert.equal(typeof knownHashRecovery, 'boolean');
   assert.equal(typeof operatorDiagnostics, 'boolean');
@@ -92,14 +94,21 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
   assert.ok(accountSet.has(manifest.signerAddress));
   const pool = new Pool({ connectionString: databaseUrl, max: 10, connectionTimeoutMillis: 10000, statement_timeout: 30000 });
   const readTransport = httpStocksRpc(rpcUrl, true);
-  const transport = (method, params) => {
+  const traceTransport = read => (method, params) => {
     rpcTrace.push({ ...event(), method });
     if (operatorControls && controlFaults.observerUnavailable) return Promise.reject(Error('LOCAL_OBSERVER_UNAVAILABLE'));
-    return readTransport(method, params);
+    return read(method, params);
   };
+  const transport = traceTransport(readTransport);
   const chain = createStocksRpcPort(transport, manifest);
   const requests = [], processingErrors = [];
-  let runtime, signerServer, app, timer, activeTick, closing, restarting;
+  let runtime, signerServer, app, timer, activeTick, closing, restarting, reloading;
+  let backend = { buildApp, createStocksRuntime, stocksSessionResolvers, externalStocksSigner, httpStocksRpc,
+    StocksSubmissionsService, StocksSubmissionDiagnosticsService, createStocksMarketDataService, reconcileStocks };
+  let generation = 0;
+  const reloadAbort = new AbortController();
+  // Each runtime can be retired without closing the owner's shared database.
+  const runtimePool = { query: (...args) => pool.query(...args), connect: () => pool.connect(), end: async () => {} };
   let closed = false, processing = false, port = 0, apiBase;
   const testCash = ownerWorkspace ? createTestCashTopUp({
     closed: () => closed,
@@ -115,7 +124,6 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
     ...(operatorControls ? [{ wallet: accounts.otherHolder, operatorId: 'local-read-only', permissions: ['stocks:read'] },
       { wallet: accounts.faucetOperator, operatorId: 'local-second-operator', permissions: ['stocks:read', 'stocks:control'] }] : [])];
   const controlFaults = { unavailable: false, disabled: false, observerUnavailable: false, serviceOverride: null };
-  const resolvers = stocksSessionResolvers(authSecret, [domain], operators);
   const nonceStore = new Map();
   const legacy = {
     arco: {
@@ -151,6 +159,9 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
     processing = false; clearInterval(timer); timer = undefined; await activeTick;
   }
   async function listen() {
+    const { buildApp, stocksSessionResolvers, createStocksMarketDataService, StocksSubmissionsService,
+      StocksSubmissionDiagnosticsService } = backend;
+    const resolvers = stocksSessionResolvers(authSecret, [domain], operators);
     const controlPort = runtime.control && {
       read: () => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : (controlFaults.serviceOverride ?? runtime.control).read(),
       history: (...args) => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : (controlFaults.serviceOverride ?? runtime.control).history(...args),
@@ -166,6 +177,9 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
       stocksSubmissions: { service: new StocksSubmissionsService(runtime.service, runtime.submissionReceipts), ...resolvers },
       stocksRuntimeStatus: { getSnapshot: runtime.status, ...resolvers },
       stocksSubmissionDiagnostics: { service: new StocksSubmissionDiagnosticsService(runtime.service), ...resolvers },
+    });
+    if (ownerWorkspace) next.addHook('onSend', async (_request, reply, payload) => {
+      reply.header('x-stocks-local-backend-generation', String(generation)); return payload;
     });
     if (shortSession) next.addHook('onSend', async (request, reply, payload) =>
       shortSession.restrict(request.url, reply.statusCode, payload));
@@ -186,6 +200,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
     } catch (error) { await next.close(); throw error; }
   }
   async function restartApi() {
+    if (reloading) throw backendFailure('LOCAL_BACKEND_BUSY');
     assert.ok(!closed, 'LOCAL_UI_STACK_CLOSED');
     return restarting ??= (async () => {
       await app?.close(); app = undefined;
@@ -193,17 +208,61 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
       return apiBase;
     })().finally(() => { restarting = undefined; });
   }
+  async function makeRuntime(modules) {
+    const signer = modules.externalStocksSigner({ url: signerServer.url, authorization: signerToken,
+      deploymentDigest: digest, manifest, localHarness: true });
+    return modules.createStocksRuntime({ manifest, pool: runtimePool, transport: traceTransport(modules.httpStocksRpc(rpcUrl, true)), signer, autodispatch: true,
+      paused: false, operators, operatorControls });
+  }
+  function reloadBackend() {
+    assert.ok(ownerWorkspace && resourceDir && !closed, 'LOCAL_BACKEND_RELOAD_DISABLED');
+    if (restarting) return Promise.reject(backendFailure('LOCAL_BACKEND_BUSY'));
+    return reloading ??= (async () => {
+      let candidate;
+      const previous = { backend, runtime, generation };
+      let quiesced = false, switched = false, wasProcessing;
+      try {
+        const build = await compileBackend({ root: resolve(import.meta.dirname, '../..'), resourceDir, signal: reloadAbort.signal });
+        const modules = await loadBackend(build);
+        if (closed) throw backendFailure('LOCAL_BACKEND_CLOSED');
+        candidate = await makeRuntime(modules); // Validate contracts and DB before disturbing the serving runtime.
+        if (closed) throw backendFailure('LOCAL_BACKEND_CLOSED');
+        wasProcessing = processing; quiesced = true;
+        await stopProcessing();
+        await app.close(); app = undefined; // Drain admitted HTTP work before changing services.
+        if (closed) throw backendFailure('LOCAL_BACKEND_CLOSED');
+        backend = modules; runtime = candidate; generation++;
+        await listen();
+        if (closed) throw backendFailure('LOCAL_BACKEND_CLOSED');
+        switched = true;
+        await previous.runtime.close();
+        if (wasProcessing) await startProcessing();
+        console.log(JSON.stringify({ kind: 'LOCAL_BACKEND_RELOADED', generation, apiBase }));
+      } catch (error) {
+        if (!switched) {
+          await candidate?.close();
+          backend = previous.backend; runtime = previous.runtime; generation = previous.generation;
+          if (quiesced && !closed) {
+            try { await app?.close(); app = undefined; await listen(); if (wasProcessing) await startProcessing(); }
+            catch { throw backendFailure('LOCAL_BACKEND_UNAVAILABLE'); }
+          }
+        }
+        if (error?.code === 'LOCAL_BACKEND_BUILD_FAILED') throw error;
+        throw backendFailure('LOCAL_BACKEND_RELOAD_FAILED');
+      }
+    })().finally(() => { reloading = undefined; });
+  }
   function close() {
     if (closing) return closing;
-    closed = true;
+    closed = true; reloadAbort.abort();
     // Final shutdown prevents another dispatch in an already-running tick.
     // The reversible stopProcessing path intentionally does not stop runtime.
     runtime?.stop();
     closing = (async () => {
       const failures = [];
-      for (const cleanup of [stopProcessing, async () => { await testCash?.drain(); }, async () => { await restarting; }, async () => { await app?.close(); },
+      for (const cleanup of [stopProcessing, async () => { await reloading?.catch(() => {}); }, async () => { await testCash?.drain(); }, async () => { await restarting; }, async () => { await app?.close(); },
         async () => { if (runtime) await runtime.close(); }, async () => { await signerServer?.close(); },
-        async () => { if (!runtime) await pool.end(); }]) {
+        async () => { await pool.end(); }]) {
         try { await cleanup(); } catch (error) { failures.push(error); }
       }
       nonceStore.clear();
@@ -213,8 +272,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
   }
   try {
     signerServer = await localSigner({ pool, rpc, manifest, deploymentDigest: digest, token: signerToken });
-    const signer = externalStocksSigner({ url: signerServer.url, authorization: signerToken, deploymentDigest: digest, manifest, localHarness: true });
-    runtime = await createStocksRuntime({ manifest, pool, transport, signer, autodispatch: true, paused: false, operators, operatorControls });
+    runtime = await makeRuntime(backend);
     const initial = await chain.block('finalized');
     assert.equal(await chain.tokenBalance(manifest.stockToken, accounts.holder, initial.number), '0');
     assert.equal(await chain.tokenBalance(manifest.cashToken, accounts.holder, initial.number), '0');
@@ -228,10 +286,10 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
     assert.equal(await chain.tokenBalance(manifest.cashToken, accounts.holder, (await chain.block('finalized')).number), '2000000000');
     await listen(); await startProcessing();
     assert.equal(runtime.status().newOrdersPaused, operatorControls, 'Initial observer current; explicit controls start paused');
-    const repo = runtime.service.repo;
     async function snapshot() {
       assert.ok(!closed, 'LOCAL_UI_STACK_CLOSED');
       // Diagnostic evidence only: each query is real; not an atomic DB+chain snapshot.
+      const current = runtime, repo = current.service.repo, reconcile = backend.reconcileStocks;
       const actorId = `evm:${accounts.holder}`;
       const rows = async table => (await pool.query(`SELECT * FROM arco_evm."${table}" WHERE "deploymentDigest"=$1`, [digest])).rows;
       const [buyOrders, sellOrders, claims, proofs, audits, portfolio, jobs] = await Promise.all([
@@ -247,17 +305,22 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
       const operations = (await pool.query('SELECT id, deployment_digest, call_digest, nonce, state, tx_hash FROM stocks_local_harness.signer_operations ORDER BY nonce')).rows;
       return { buyOrders, sellOrders, claims, proofs, audits, portfolio, jobs, rpcTrace: structuredClone(rpcTrace), requests: structuredClone(requests),
         chain: { blockNumber: block.number, blockHash: block.hash, holderCash, holderStock, vaultCash, escrowStock, stockSupply },
-        reconciliation: await reconcileStocks(runtime.service, runtime.reconciliationCoverage), runtimeStatus: runtime.status(),
+        reconciliation: await reconcile(current.service, current.reconciliationCoverage), runtimeStatus: current.status(),
         workerErrors: { processing: [...processingErrors], reviewJobs: jobs.filter(job => job.status === 'REVIEW') },
         signer: { ...signerServer.controls, operations } };
     }
-    return { apiBase, frontendOrigin, accounts, manifest, digest, rpc, chain, pool, service: runtime.service, repo,
+    return { apiBase, frontendOrigin, accounts, manifest, digest, rpc, chain, pool, get service() { return runtime.service; }, get repo() { return runtime.service.repo; },
       operatorDiagnostics: operatorDiagnostics || operatorControls,
       operatorControls,
+      reloadBackend: ownerWorkspace ? reloadBackend : undefined,
+      get backendGeneration() { return generation; },
       topUpTestCash: testCash ? () => testCash.topUp() : undefined,
-      controlForHarness: operatorControls ? { service: runtime.control, faults: controlFaults, runtime } : undefined,
+      get controlForHarness() { return operatorControls ? { service: runtime.control, faults: controlFaults, runtime } : undefined; },
       stopRuntime: operatorDiagnostics ? async () => { await stopProcessing(); runtime.stop(); } : undefined,
       armShortSession: shortSession ? () => { assert.ok(!closed); shortSession.arm(); } : undefined,
-      observer: { coverage: runtime.reconciliationCoverage }, requests, rpcTrace, startProcessing, stopProcessing, restartApi, snapshot, close };
+      observer: { coverage: () => runtime.reconciliationCoverage() }, requests, rpcTrace,
+      startProcessing: () => { if (reloading) throw backendFailure('LOCAL_BACKEND_BUSY'); return startProcessing(); },
+      stopProcessing: () => { if (reloading) throw backendFailure('LOCAL_BACKEND_BUSY'); return stopProcessing(); },
+      restartApi, snapshot, close };
   } catch (error) { await close().catch(() => {}); throw error; }
 }
