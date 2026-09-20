@@ -8,6 +8,7 @@ import { FEED_LABELS } from "./display"
 import { FOCUS, knownWithoutCatalog, NotFoundDetail, scrollBehavior, SecurityDetail, UnavailableDetail } from "./MarketDetail"
 import { useStocksSelection, type StocksSelection } from "./selection"
 import { DEFAULT_TABLE_VIEW, MarketStatus as Status, StocksMarketTable, useOrderCapabilities, type Capabilities, type OrdersCatalogClient, type TableView } from "./StocksMarketTable"
+import { useMarketRows } from "./useMarketRows"
 import { useOwnedRead } from "./useOwnedRead"
 
 export type StocksAsideView = {
@@ -99,15 +100,14 @@ function MarketCatalog({ client, response, capabilities, selection, anchor, onCh
   const load = useCallback((signal: AbortSignal) => client.quotes(names, signal), [client, names])
   const quotes = useOwnedRead(JSON.stringify([client.baseUrl, names]), load)
   const bySymbol = new Map(quotes.phase === "ready" ? (quotes.value.data ?? []).map(item => [item.symbol, item]) : [])
-  // 1D charts the detail view already loaded; rows never request charts of their own.
-  const [series, setSeries] = useState<Readonly<Record<string, Chart>>>({})
+  const [detailSeries, setSeries] = useState<Readonly<Record<string, Chart | null>>>({})
+  const series = Object.fromEntries(Object.entries(detailSeries).filter((entry): entry is [string, Chart] => entry[1] !== null))
   // A finished 1D read either stores its series or clears the symbol's entry, so a later failed/stale read never leaves an old chart.
   const report = useCallback((symbol: string, chart: Chart | null) => setSeries(current => {
     if (chart) return current[symbol] === chart ? current : { ...current, [symbol]: chart }
-    if (!(symbol in current)) return current
-    const { [symbol]: _removed, ...rest } = current
-    return rest
+    return { ...current, [symbol]: null }
   }), [])
+  const overview = useMarketRows(client, names, true, report)
   const [view, setView] = useState<TableView>(DEFAULT_TABLE_VIEW)
   const table = useRef<HTMLDivElement>(null)
   const symbol = selection.symbol
@@ -123,7 +123,7 @@ function MarketCatalog({ client, response, capabilities, selection, anchor, onCh
   }, [symbol, isListed, selectedQuote, onChecked])
   if (symbol === null) return <ListFrame selection={selection} settled table={table}>
     <div className="mb-4">{quotes.phase !== "ready" ? <Status status={quotes.phase} /> : <><DemoDetails><p className="text-xs text-[var(--color-arco-text-soft)]">Massive · {FEED_LABELS[quotes.value.feedDelay]}</p></DemoDetails>{quotes.value.status !== "AVAILABLE" && <Status status={quotes.value.status} />}</>}</div>
-    <div ref={table} className="min-w-0 scroll-mt-24"><StocksMarketTable variant="full" catalog={catalog} quotes={quotes} capabilities={capabilities} series={series} view={view} onViewChange={setView} onSelect={name => selection.openDetail(name, "row")} /></div>
+    <div ref={table} className="min-w-0 scroll-mt-24"><StocksMarketTable variant="full" catalog={catalog} quotes={quotes} capabilities={capabilities} series={series} profiles={overview.profiles} view={view} onViewChange={setView} onSelect={name => selection.openDetail(name, "row")} /></div>
   </ListFrame>
   // NVDA is the tradable symbol, so its detail opens even when the market catalog does not list it.
   const security: Security | null = listed ?? (symbol === "NVDA" ? { symbol, name: curatedStock(symbol)?.name ?? symbol } : null)

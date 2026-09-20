@@ -9,7 +9,7 @@ export interface DisplayCatalog { securities: readonly Security[]; provenance: P
 export interface Availability { status: DataStatus; reason: DataReason; fetchedAt: string | null; cacheAgeMs: number | null; feedDelay: FeedDelay }
 export type MarketResponse<T> = typeof MARKET_CONTEXT & Availability & { data: T | null };
 export interface Quote { symbol: string; currency: 'USD'; price: string | null; change: string | null; changePercent: string | null; sessionVolume: string | null; previousClose: string | null; sourceTimestamp: string | null; observationAgeMs: number | null; priceSource: 'LAST_TRADE' | 'MINUTE_CLOSE' | null; status: DataStatus; reason: DataReason }
-export interface CompanyProfile { symbol: string; name: string; description: string | null; exchange: string | null; securityType: string | null; currency: 'USD'; marketCap: string | null; website: string | null; industry: string | null; logoUrl: string | null; sourceDate: string | null }
+export interface CompanyProfile { symbol: string; name: string; description: string | null; exchange: string | null; securityType: string | null; currency: 'USD'; marketCap: string | null; aum?: string | null; aumAsOf?: string | null; website: string | null; industry: string | null; logoUrl: string | null; sourceDate: string | null }
 export interface Bar { timestamp: string; open: string; high: string; low: string; close: string; volume: string }
 export interface Chart { symbol: string; currency: 'USD'; range: ChartRange; interval: '5m' | '1h' | '1d'; adjustedForSplits: true; from: string; to: string; bars: Bar[]; history: 'RETURNED_WINDOW' | 'TRUNCATED' | 'EMPTY'; complete: boolean }
 export interface Logo { bytes: Uint8Array; contentType: 'image/png' | 'image/jpeg' | 'image/webp' }

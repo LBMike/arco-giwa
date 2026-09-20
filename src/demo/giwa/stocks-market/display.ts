@@ -89,3 +89,11 @@ export function axisTicks(values: readonly number[], count = 5): number[] {
   for (let cent = start; cent <= end; cent += step) ticks.push(cent / 100)
   return ticks
 }
+
+/** Estimated session turnover, not an exchange-reported sum of executions. Keep exact decimal arithmetic. */
+export function volumeDollars(price: string | null, shares: string | null): string | null {
+  if (price === null || shares === null) return null
+  const units = scaled(price) * scaled(shares) / 10n ** 18n
+  const fraction = String(units % (10n ** 18n)).padStart(18, "0").replace(/0+$/, "")
+  return `${units / (10n ** 18n)}${fraction ? `.${fraction}` : ""}`
+}

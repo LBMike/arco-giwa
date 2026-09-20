@@ -190,3 +190,49 @@ test('optional plugin validates route/query boundaries and never accepts arbitra
     const logo = await app.inject('/api/v1/stocks/market/NVDA/logo'); assert.equal(logo.statusCode, 404); assert.equal(logo.json().purpose, 'DISPLAY_ONLY');
   } finally { await app.close(); }
 });
+
+test('ETF profiles read exact AUM from ETF Global, keep market cap separate, and cache the result', async () => {
+  const calls: string[] = [];
+  const service = createStocksMarketDataService({ apiKey: 'fixture', now: () => TIME, catalog: catalog(['SOXL']), fetch: async url => {
+    const path = new URL(String(url)); calls.push(path.pathname);
+    if (path.pathname.endsWith('/SOXL')) return json(JSON.stringify({ status: 'OK', results: { ticker: 'SOXL', locale: 'us', market: 'stocks', currency_name: 'usd', name: 'SOXL', type: 'ETF', market_cap: 999 } }));
+    assert.equal(path.searchParams.get('composite_ticker'), 'SOXL');
+    assert.equal(path.searchParams.get('sort'), 'effective_date.desc');
+    return json('{"status":"OK","results":[{"composite_ticker":"SOXL","product_type":"etf","aum":12345678901.123456789,"effective_date":"2026-09-16"}]}');
+  } });
+  const response = await service.profile('SOXL');
+  assert.equal(response.data?.aum, '12345678901.123456789');
+  assert.equal(response.data?.marketCap, '999');
+  assert.equal(response.data?.aumAsOf, '2026-09-16');
+  await service.profile('SOXL');
+  assert.equal(calls.length, 2);
+});
+test('ETF AUM permission failure preserves ticker profile without relabeling market cap as AUM', async () => {
+  const service = createStocksMarketDataService({ apiKey: 'fixture', now: () => TIME, catalog: catalog(['SOXL']), fetch: async url => String(url).includes('/etf-global/') ? json('{}', 403) : json(JSON.stringify({ status: 'OK', results: { ticker: 'SOXL', locale: 'us', market: 'stocks', currency_name: 'usd', name: 'SOXL', type: 'ETF', market_cap: 999 } })) });
+  const response = await service.profile('SOXL');
+  assert.equal(response.status, 'AVAILABLE');
+  assert.equal(response.data?.aum, null);
+  assert.equal(response.data?.marketCap, '999');
+});
+
+test('ETF AUM budget exhaustion stays retryable while preserving the base profile', async () => {
+  let now = TIME;
+  let calls = 0;
+  const service = createStocksMarketDataService({ apiKey: 'fixture', requestsPerMinute: 1, now: () => now, catalog: catalog(['SOXL']), fetch: async url => {
+    calls++;
+    return String(url).includes('/etf-global/')
+      ? json('{"status":"OK","results":[{"composite_ticker":"SOXL","product_type":"etf","aum":12000000,"effective_date":"2026-09-16"}]}')
+      : json(JSON.stringify({ status: 'OK', results: { ticker: 'SOXL', locale: 'us', market: 'stocks', currency_name: 'usd', name: 'SOXL', type: 'ETF', market_cap: 999 } }));
+  } });
+  const limited = await service.profile('SOXL');
+  assert.equal(limited.status, 'AVAILABLE');
+  assert.equal(limited.reason, 'REQUEST_BUDGET_EXHAUSTED');
+  assert.equal(limited.data?.aum, null);
+  assert.equal(limited.data?.marketCap, '999');
+  assert.equal(calls, 1);
+  now += 60001;
+  const recovered = await service.profile('SOXL');
+  assert.equal(recovered.reason, null);
+  assert.equal(recovered.data?.aum, '12000000');
+  assert.equal(calls, 2);
+});

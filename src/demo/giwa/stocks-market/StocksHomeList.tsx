@@ -5,10 +5,11 @@ import { createMarketClient, type MarketClient } from "./client"
 import type { Catalog, Envelope } from "./contracts"
 import { StocksPageEnvironment, usePageApiBase } from "./environment"
 import { MarketStatus, StocksMarketTable, useOrderCapabilities, type OrdersCatalogClient } from "./StocksMarketTable"
+import { useMarketRows } from "./useMarketRows"
 import { useOwnedRead } from "./useOwnedRead"
 const NO_SERIES = Object.freeze({})
 const stockHref = (symbol: string) => `${GIWA_STOCKS_ROUTE}?symbol=${encodeURIComponent(symbol)}`
-/** Home preview: the server catalog's first 10 by rank, linking to /stocks?symbol=…; catalog, quotes and capabilities only. */
+/** Home preview: the server catalog's first 10 by rank, linking to /stocks?symbol=…; catalog, quotes, profiles and capabilities. */
 export function StocksHomeList() {
   const environment = useContext(StocksPageEnvironment)
   const apiBase = usePageApiBase()
@@ -33,9 +34,11 @@ function HomeTable({ client, ordersClient, response }: { client: MarketClient; o
   const load = useCallback((signal: AbortSignal) => client.quotes(names, signal), [client, names])
   const quotes = useOwnedRead(JSON.stringify([client.baseUrl, names]), load)
   const capabilities = useOrderCapabilities(ordersClient)
+  const first = [...catalog.securities].sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity)).slice(0, 10).map(item => item.symbol)
+  const overview = useMarketRows(client, first, false)
   // Its own surface card: the pinned # and Asset Name cells are opaque surface while the table scrolls sideways.
   return <div className="w-full min-w-0 space-y-3 rounded-[var(--radius-strategy)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-4 sm:p-6">
     {quotes.phase !== "ready" ? <MarketStatus status={quotes.phase} /> : quotes.value.status !== "AVAILABLE" && <MarketStatus status={quotes.value.status} />}
-    <StocksMarketTable variant="home" limit={10} rowHref={stockHref} catalog={catalog} quotes={quotes} capabilities={capabilities} series={NO_SERIES} />
+    <StocksMarketTable variant="home" limit={10} rowHref={stockHref} catalog={catalog} quotes={quotes} capabilities={capabilities} series={NO_SERIES} profiles={overview.profiles} />
   </div>
 }

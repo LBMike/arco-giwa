@@ -10,7 +10,7 @@ Optional Fastify plugin, routes under `/api/v1/stocks/market`:
 
 - `GET /catalog`: selected display securities and provenance. Start with NVDA explicitly labeled PILOT, not SEIBro verified. Accept a server-injected validated catalog of up to 40; each entry has symbol, name, and optional exchange/ISIN/rank. Provenance identifies PILOT or CURATED selection and verification status; source URL, ranking metric, period and as-of date are optional context for a supplied selection, never an instruction to fetch SEIBro. No user-supplied arbitrary ticker universe.
 - `GET /quotes`: one bounded batched snapshot call for the catalog. Return each requested symbol including explicit unavailable items when omitted by the provider. No query permits arbitrary symbols or all-market enumeration.
-- `GET /:symbol/profile`: company name, description, exchange, type (stock/ETF/etc), currency, market cap, website, industry, and a same-origin icon URL when safely available. Missing fields are null. No vendor URL containing credentials.
+- `GET /:symbol/profile`: company name, description, exchange, type (stock/ETF/etc), currency, market cap, optional ETF AUM (`aum`) and AUM date (`aumAsOf`), website, industry, and a same-origin icon URL when safely available. Missing fields are null. No vendor URL containing credentials.
 - `GET /:symbol/chart?range=1D|1W|1M|3M|1Y`: normalized ascending OHLCV bars, range and interval, split-adjusted basis, bar timestamps, complete/truncated result indication. No invented continuity or timestamps. Bounded date ranges computed server-side; no arbitrary date or interval amplification. Missing/partial history explicit.
 - `GET /:symbol/logo`: bounded cached safe raster icon proxy, or 404 if missing; no SVG/HTML, no arbitrary remote URL. No credential-bearing redirects.
 
@@ -103,3 +103,26 @@ Options: `apiKey?`, `catalog?`, `feedDelay?`, `requestsPerMinute?` (1–300, def
 `/chart` returns `{symbol,currency,range,interval,adjustedForSplits,from,to,bars,history,complete}`. Each bar contains `timestamp,open,high,low,close,volume`. The range is rolling elapsed time: 1D=24h/5m bars, 1W=7d/1h, 1M=31d/1d, 3M=93d/1d, 1Y=366d/1d. `history` is RETURNED_WINDOW, TRUNCATED or EMPTY. `complete` means no explicit next-page/50,000-base-aggregate truncation signal was observed; it does not certify that the vendor plan covers all history or that every exchange observation exists. Chart windows include provider aggregation-boundary expansion and timestamps represent bar starts.
 
 Cache policy: quotes 15s, fallback max 5m; charts 60s, fallback max 15m; profiles/icons 24h, fallback max 7d. Failure retry cooldown is 30s per resource; provider 429 cools down all calls for 30–300s. Budget defaults to 5 requests/minute across all resource types, which does not grant access to snapshots or intraday plans. Queries are batched by catalog; profiles/charts/icons load on demand. Fixed ranges and at most 40 symbols bound keys. Chart bar counts are also limited by range/interval, with daily spacing allowing daylight-saving changes. Cache is process-local and clears on restart; use a separately scoped shared cache/rate-limit solution for multiple replicas. No stale cache value is used for settlement.
+
+## ETF AUM and list loading extension (2026-09-20)
+
+`CompanyProfile` / browser `Profile` add optional nullable `aum` (exact USD decimal
+string) and `aumAsOf` (provider effective date). Older profile responses remain valid.
+The existing profile endpoint keeps stock market capitalization separate from ETF AUM.
+For ticker type ETF, the service queries
+`/etf-global/v1/profiles?composite_ticker=SYMBOL&sort=effective_date.desc&limit=1`
+through the same authenticated, bounded transport and request budget. Only the matching
+ETF ticker is accepted; absent/unauthorized/invalid AUM remains null, preserving the base
+profile. Rate/budget reasons propagate even with an available base profile so callers can
+retry the enrichment. This does not enable or purchase a provider entitlement.
+
+Source: [Massive ETF Global profiles](https://www.massive.com/docs/rest/partners/etf-global/profiles)
+(accessed 2026-09-20); AUM uses the provider's effective date and can lag current quotes.
+
+The investor list now loads up to 40 profiles and 1D charts, with concurrency capped at
+three and a 60-second pause on request-budget/rate-limit responses. The server's default
+five requests/minute stays unchanged. Unmount aborts outstanding work and retry timers;
+no periodic refresh is added. Available per-symbol bars only feed list sparklines, with
+failed/stale detail rereads clearing them and subsequent successful reads restoring them.
+USD volume is calculated with bigint from session shares × displayed price, explicitly
+an estimate rather than exact executed turnover. It does not enter execution or settlement.

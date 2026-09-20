@@ -2,9 +2,9 @@ import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 import { useCallback, useId, useMemo, useState, type MouseEvent, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { CirclePause, Search } from "lucide-react"
-import type { Catalog, Chart, Envelope, Quote } from "./contracts"
+import type { Catalog, Chart, Envelope, Profile, Quote } from "./contracts"
 import { CURATED_SELECTION, curatedStock, matchesCuratedSelection, type CuratedStock } from "./curated"
-import { changeParts, chartPoints, dollars, exact, FEED_LABELS, priceLabel, windowChange } from "./display"
+import { changeParts, chartPoints, dollars, compactDollars, volumeDollars, FEED_LABELS, priceLabel, windowChange } from "./display"
 import { StockLogo } from "./StockLogo"
 import { useOwnedRead, type ReadState } from "./useOwnedRead"
 import { scaled } from "./validate"
@@ -22,7 +22,7 @@ export function useOrderCapabilities(client: OrdersCatalogClient | null): Capabi
 /** The full table's toolbar state. The /stocks page keeps it above the list so it survives a detail visit; absent, the table keeps its own. */
 export type TableView = { filter: TableFilter; query: string; sort: TableSort }
 export const DEFAULT_TABLE_VIEW: TableView = Object.freeze({ filter: "ALL", query: "", sort: "rank" })
-export type StocksMarketTableProps = { catalog: Catalog; quotes: ReadState<Envelope<Quote[]>>; capabilities: Capabilities; series: Readonly<Record<string, Chart>>; variant: "full" | "home"; selectedSymbol?: string; onSelect?: (symbol: string) => void; rowHref?: (symbol: string) => string; limit?: number; view?: TableView; onViewChange?: (view: TableView) => void }
+export type StocksMarketTableProps = { catalog: Catalog; quotes: ReadState<Envelope<Quote[]>>; capabilities: Capabilities; series: Readonly<Record<string, Chart>>; profiles?: Readonly<Record<string, Profile>>; variant: "full" | "home"; selectedSymbol?: string; onSelect?: (symbol: string) => void; rowHref?: (symbol: string) => string; limit?: number; view?: TableView; onViewChange?: (view: TableView) => void }
 
 export function MarketStatus({ status }: { status: string }) { const demo = useDemoPresentation(); if (demo && status === "STALE") return null; return <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{status === "loading" ? "시장정보 불러오는 중…" : status === "UNCONFIGURED" ? "시세 연결 준비 중" : status === "STALE" ? "마지막 확인 시세 · 오래된 데이터" : "시세를 불러올 수 없습니다"}</p> }
 
@@ -105,7 +105,7 @@ function Sparkline({ chart }: { chart: Chart }) {
   </svg>
 }
 
-export function StocksMarketTable({ catalog, quotes, capabilities, series, variant, selectedSymbol, onSelect, rowHref, limit, view, onViewChange }: StocksMarketTableProps) {
+export function StocksMarketTable({ catalog, quotes, capabilities, series, profiles = {}, variant, selectedSymbol, onSelect, rowHref, limit, view, onViewChange }: StocksMarketTableProps) {
   const full = variant === "full"
   const [ownView, setOwnView] = useState<TableView>(DEFAULT_TABLE_VIEW)
   const { filter, query, sort } = view ?? ownView
@@ -154,9 +154,9 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, varia
             <div role="columnheader" className={`${HEAD} ${STICKY_RANK} md:bg-[var(--color-arco-surface)]`}>#</div>
             <div role="columnheader" className={`${HEAD} ${STICKY_ASSET} md:bg-[var(--color-arco-surface)]`}>Asset Name</div>
             <div role="columnheader" className={`${HEAD} md:px-3`}>Price<DemoDetails><sup aria-hidden="true" className="ml-0.5 text-xs text-[var(--color-arco-muted)]">1</sup></DemoDetails></div>
-            <div role="columnheader" className={`${HEAD} hidden md:block md:px-3`}>24h ($)</div>
             <div role="columnheader" className={`${HEAD} md:px-3`}>24H (%)</div>
-            <div role="columnheader" className={`${HEAD} hidden md:block md:pl-3`}>24H Volume</div>
+            <div role="columnheader" className={`${HEAD} hidden md:block md:px-3`}>Market Cap / AUM</div>
+            <div role="columnheader" className={`${HEAD} hidden md:block md:pl-3`} title="Estimated session turnover: shares traded × displayed price">Volume (USD)</div>
             <div role="columnheader" className={HEAD}>Asset Status</div>
             {full && <div role="columnheader" className={`${HEAD} hidden md:block md:px-1.5`}>24h Chart</div>}
           </div>
@@ -169,17 +169,21 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, varia
             const label = <><StockLogo symbol={row.symbol} size={40} /><span className="min-w-0"><span className="block truncate text-base font-medium leading-[21px] tracking-[-0.01em] text-[var(--color-arco-ink)]">{row.symbol}</span>{" "}<span className="mt-1 block truncate text-sm font-medium leading-[18px] tracking-[-0.01em] text-[var(--color-arco-chip-ink)]">{row.name}</span></span></>
             const primary = `flex w-full min-w-0 items-center gap-2 rounded-lg text-left ${FOCUS}`
             const quote = row.quote
+            const profile = profiles[row.symbol]
+            const etf = row.curated?.kind === "ETF" || profile?.securityType === "ETF"
+            const size = etf ? profile?.aum ?? null : profile?.marketCap ?? null
+            const volume = volumeDollars(quote?.price ?? null, quote?.sessionVolume ?? null)
             return <div role="row" key={row.symbol} onClick={activate} className={`group cursor-pointer items-center gap-y-2 border-b border-[var(--color-arco-border)] py-3 md:min-h-[73px] md:py-0 ${GRID} ${COLS[variant]} ${selected ? "bg-[var(--color-arco-page)]" : "hover:bg-[var(--color-row-hover-weak)]"}`}>
               {cell(`col-start-1 row-start-1 text-base font-medium tabular-nums text-[var(--color-arco-chip-ink)] ${RESET} ${STICKY_RANK} ${surface}`, row.rank ?? "—")}
               {cell(`col-start-2 row-start-1 ${RESET} ${STICKY_ASSET} ${surface}`, full
                 ? <button type="button" data-row-primary="" data-symbol={row.symbol} aria-pressed={selectedSymbol === undefined ? undefined : selected} onClick={() => onSelect?.(row.symbol)} className={primary}>{label}</button>
                 : rowHref ? <Link to={rowHref(row.symbol)} data-row-primary="" className={primary}>{label}</Link> : <span className={primary}>{label}</span>)}
               {cell(`col-start-3 row-start-1 text-right text-base font-medium tabular-nums text-[var(--color-arco-ink)] md:px-3 md:text-left ${RESET}`, <><span title={quote?.price ? dollars(quote.price) : undefined}>{priceLabel(quote?.price ?? null)}</span><DemoDetails>{quote?.status === "STALE" && <span className="block text-xs font-normal text-[var(--color-arco-text-soft)]">오래된 데이터</span>}</DemoDetails></>)}
-              {cell("hidden text-sm tabular-nums md:block md:px-3", <Change raw={quote?.change ?? null} unit="$" />)}
               {cell(`col-start-3 row-start-2 text-right text-sm tabular-nums md:px-3 md:text-left ${RESET}`, <Change raw={quote?.changePercent ?? null} unit="%" />)}
-              {cell("hidden text-sm font-medium tabular-nums text-[var(--color-arco-ink)] md:block md:pl-3", quote?.sessionVolume == null ? <span className="text-[var(--color-arco-text-soft)]">—</span> : <><span className="whitespace-nowrap">{exact(quote.sessionVolume)}</span> <span className="whitespace-nowrap">주</span></>)}
+              {cell("hidden text-sm font-medium tabular-nums text-[var(--color-arco-ink)] md:block md:px-3", <span title={`${etf ? "AUM" : "Market cap"}: ${dollars(size)}${etf && profile?.aumAsOf ? ` · ${profile.aumAsOf}` : ""}`}>{compactDollars(size)}</span>)}
+              {cell("hidden text-sm font-medium tabular-nums text-[var(--color-arco-ink)] md:block md:pl-3", <span title={volume === null ? undefined : `Estimated session turnover: ${dollars(volume)} (shares × price)`}>{compactDollars(volume)}</span>)}
               {cell(`col-start-2 row-start-2 ${RESET}`, <StatusBadge symbol={row.symbol} capabilities={capabilities} />)}
-              {full && cell("hidden md:flex md:h-12 md:w-40 md:items-center md:justify-center", series[row.symbol] && series[row.symbol].bars.length >= 2 ? <Sparkline chart={series[row.symbol]} /> : <><span aria-hidden="true" className="text-[var(--color-arco-muted)]">—</span><span className="sr-only">24시간 차트 미로드 · 상세에서 확인</span></>)}
+              {full && cell("hidden md:flex md:h-12 md:w-40 md:items-center md:justify-center", series[row.symbol] && series[row.symbol].bars.length >= 2 ? <Sparkline chart={series[row.symbol]} /> : <><span aria-hidden="true" className="text-[var(--color-arco-muted)]">—</span><span className="sr-only">24시간 차트 데이터 없음</span></>)}
             </div>
           })}
         </div>
@@ -187,7 +191,7 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, varia
     </div>
     {shown.length === 0 && <p className="border-b border-[var(--color-arco-border)] py-6 text-center text-sm text-[var(--color-arco-text-soft)]">검색 결과가 없습니다.</p>}
     <DemoDetails><div className="mt-4 space-y-1 text-xs leading-5 text-[var(--color-arco-text-soft)]">
-      <p>{`¹ Price는 기초 미국 주식·ETF의 USD 시세(Massive, ${feed})이며 ARCO 토큰 가격이나 모의 체결가가 아닙니다. 24h ($)·24H (%)는 공급자가 제공한 전일 종가 대비 변동입니다. 24H Volume은 기초 종목의 시장 세션 거래량(주식 수)입니다.${full ? " 24h Chart는 상세 화면에서 이미 불러온 1D(rolling 24시간) 종가만 표시합니다." : ""}`}</p>
+      <p>{`¹ Price는 기초 미국 주식·ETF의 USD 시세(Massive, ${feed})이며 ARCO 토큰 가격이나 모의 체결가가 아닙니다. 24H (%)는 공급자가 제공한 전일 종가 대비 변동입니다. Market Cap은 주식 시가총액, AUM은 ETF 운용자산입니다. Volume (USD)은 세션 거래량 × 표시 가격으로 계산한 추정 거래대금입니다.${full ? " 24h Chart는 각 종목의 1D(rolling 24시간) 종가입니다." : ""}`}</p>
       <p>{source}</p>
       {curated && <p>선정 참고: {CURATED_SELECTION.source} · {CURATED_SELECTION.metric} · {CURATED_SELECTION.period} · {CURATED_SELECTION.retrievedDate} 조회 · {CURATED_SELECTION.note}</p>}
     </div></DemoDetails>

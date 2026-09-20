@@ -117,7 +117,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     assert.equal(m.heading(), null, "no detail without ?symbol")
     // The rows open a detail page (they toggle nothing), so the list's row buttons carry no pressed state at all.
     assert.ok(m.rows().every(row => !row.querySelector("[data-symbol]")!.hasAttribute("aria-pressed")), "no toggle-button semantics on navigating rows")
-    assert.equal(m.calls.filter(url => url.includes("/chart") || url.includes("/profile")).length, 0, "the list requests no chart or profile")
+    assert.ok(m.calls.some(url => url.includes("/chart?range=1D")) && m.calls.some(url => url.includes("/profile")), "the list loads row charts and valuations")
     scrolls.length = 0
     await m.press(m.rowButton("MU"), "Enter")
     assert.equal(m.router.state.location.search, "?symbol=MU")
@@ -183,19 +183,40 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     assert.deepEqual(scrolls.map(item => item.options?.block), ["start"])
   })
 
-  await t.test("a row click outside the button opens it too; rows never request charts, the detail's 1D chart feeds the row sparkline", async (st) => {
+  await t.test("a row click outside the button opens it too; all listed rows load their own current 1D chart", async (st) => {
     const m = await mount(st)
     const row = m.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!
     await m.run(() => (row.querySelector('[role="cell"]') as HTMLElement).click())
     assert.equal(m.router.state.location.search, "?symbol=NVDA")
     const charts = m.calls.filter(url => url.includes("/chart"))
-    assert.deepEqual([...new Set(charts.map(url => new URL(url).pathname.split("/")[5]))], ["NVDA"], "only the detail's symbol")
+    assert.equal(new Set(charts.map(url => new URL(url).pathname.split("/")[5])).size, 40, "each listed symbol has its own chart request")
     await m.close()
     assert.ok(m.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!.querySelector('svg[role="img"][aria-label^="최근 24시간 종가 추이"]'))
-    assert.equal(m.table().querySelectorAll('svg[role="img"]').length, 1)
+    assert.equal(m.table().querySelectorAll('svg[role="img"]').length, 37)
     const before = m.calls.length
     await m.run(() => {})
     assert.equal(m.calls.length, before, "no polling or update loop")
+  })
+
+  await t.test("a background chart completing after a failed detail read restores that row", async (st) => {
+    let release: (() => void) | undefined
+    let reads = 0
+    const intercept = async (url: string, response: Response) => {
+      if (!url.endsWith("/NVDA/chart?range=1D")) return response
+      if (++reads === 1) {
+        await new Promise<void>(resolve => { release = resolve })
+        return response
+      }
+      return Response.json({}, { status: 503 })
+    }
+    const m = await mount(st, "/stocks", intercept)
+    assert.ok(release, "the list's chart request is pending")
+    await m.press(m.rowButton("NVDA"), "Enter")
+    await m.close()
+    const spark = () => m.rows().find(row => row.querySelector('[data-symbol="NVDA"]'))!.querySelector('svg[role="img"]')
+    assert.equal(spark(), null, "failed detail read leaves the row empty")
+    await m.run(() => release!())
+    assert.ok(spark(), "a later successful background result replaces the empty state")
   })
 
   await t.test("only a current 1D series feeds the row: other detail ranges keep it, a STALE 1D chart is not drawn", async (st) => {
@@ -212,7 +233,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     assert.ok(m.calls.some(url => url.includes("/SGOV/chart?range=1D")), "the SGOV detail loaded its 1D chart")
     await m.close()
     assert.equal(spark("SGOV"), null, "a STALE series stays in the detail with its notice")
-    assert.match(m.rows().find(item => item.querySelector('[data-symbol="SGOV"]'))!.textContent!, /24시간 차트 미로드/)
+    assert.match(m.rows().find(item => item.querySelector('[data-symbol="SGOV"]'))!.textContent!, /24시간 차트 데이터 없음/)
   })
 
   await t.test("a finished 1D re-read that is not current clears the row sparkline; the next valid read restores it", async (st) => {
@@ -243,7 +264,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
         await reselect(outcome)
         assert.equal(replaced[replaced.length - 1], outcome, `${outcome}: the replacement answer was requested`)
         assert.equal(Boolean(spark()), false, `${outcome}: the old sparkline is gone`)
-        assert.match(row().textContent!, /24시간 차트 미로드/, `${outcome}: the row falls back to the not-loaded state`)
+        assert.match(row().textContent!, /24시간 차트 데이터 없음/, `${outcome}: the row falls back to the not-loaded state`)
         await reselect(null)
         assert.equal(spark()?.getAttribute("aria-label"), valid, `${outcome}: a following valid read restores it`)
       })
@@ -261,7 +282,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     await other.close()
     assert.equal(otherSpark()?.getAttribute("aria-label"), before, "1W (fails with 503) and 1Y leave the 1D sparkline")
     assert.ok(other.calls.some(url => url.includes("/NVDA/chart?range=1W")) && other.calls.some(url => url.includes("/NVDA/chart?range=1Y")))
-    assert.equal(other.calls.filter(url => url.includes("/chart")).every(url => url.includes("/NVDA/")), true, "rows request no charts")
+    assert.ok(other.calls.some(url => url.includes("/MU/chart?range=1D")), "other rows load their own charts")
   })
 
   await t.test("a ?symbol deep link opens and focuses that security; an unknown symbol is not found (nothing requested); a malformed one is the list", async (st) => {
@@ -293,6 +314,6 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     const malformed = await mount(st, "/stocks?symbol=nvda%3Cx%3E")
     assert.equal(malformed.listed(), true, "a symbol outside the contract syntax is never used")
     assert.equal(malformed.heading(), null)
-    assert.equal(malformed.calls.some(url => /nvda|%3C/i.test(url)), false)
+    assert.equal(malformed.calls.some(url => /%3C/i.test(url)), false)
   })
 })

@@ -1,0 +1,58 @@
+import { useEffect, useMemo, useState } from "react"
+import type { MarketClient } from "./client"
+import type { Chart, Profile } from "./contracts"
+
+export type MarketRows = { series: Readonly<Record<string, Chart>>; profiles: Readonly<Record<string, Profile>> }
+/** Bounded reads; wait for the provider budget to recover instead of flooding it with every row. */
+export async function loadMarketRows(client: MarketClient, symbols: readonly string[], signal: AbortSignal, charts: boolean, publish: (symbol: string, kind: "chart" | "profile", data: Chart | Profile | null) => void) {
+  const tasks = symbols.flatMap(symbol => charts ? [{ symbol, kind: "chart" as const }, { symbol, kind: "profile" as const }] : [{ symbol, kind: "profile" as const }])
+  let index = 0
+  const pause = () => new Promise<void>(resolve => {
+    const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve() }
+    const timer = setTimeout(finish, 60_000)
+    signal.addEventListener("abort", finish, { once: true })
+    if (signal.aborted) finish()
+  })
+  async function worker() {
+    while (!signal.aborted) {
+      const task = tasks[index++]
+      if (!task) return
+      for (;;) {
+        if (signal.aborted) return
+        try {
+          const response = task.kind === "chart" ? await client.chart(task.symbol, "1D", signal) : await client.profile(task.symbol, signal)
+          if (signal.aborted) return
+          if (["REQUEST_BUDGET_EXHAUSTED", "PROVIDER_RATE_LIMITED"].includes(response.reason ?? "")) {
+            if (response.status === "AVAILABLE" && response.data) publish(task.symbol, task.kind, response.data)
+            await pause(); continue
+          }
+          publish(task.symbol, task.kind, response.status === "AVAILABLE" ? response.data : null)
+        } catch { if (!signal.aborted) publish(task.symbol, task.kind, null) }
+        break
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(3, tasks.length) }, worker))
+}
+const EMPTY: MarketRows = { series: {}, profiles: {} }
+/** The owner remains mounted across list/detail navigation; changing clients fences old results. */
+export function useMarketRows(client: MarketClient, symbols: readonly string[], charts: boolean, onChart?: (symbol: string, chart: Chart | null) => void): MarketRows {
+  const key = JSON.stringify(symbols)
+  const names = useMemo(() => JSON.parse(key) as string[], [key])
+  const [state, setState] = useState<{ client: MarketClient; key: string; data: MarketRows } | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    setState({ client, key, data: EMPTY })
+    void loadMarketRows(client, names, controller.signal, charts, (symbol, kind, data) => {
+      if (controller.signal.aborted) return
+      if (kind === "chart") onChart?.(symbol, data as Chart | null)
+      setState(previous => {
+        if (!previous || previous.client !== client || previous.key !== key) return previous
+        if (!data) return previous
+        return { ...previous, data: kind === "chart" ? { ...previous.data, series: { ...previous.data.series, [symbol]: data as Chart } } : { ...previous.data, profiles: { ...previous.data.profiles, [symbol]: data as Profile } } }
+      })
+    })
+    return () => controller.abort()
+  }, [client, key, names, charts, onChart])
+  return state?.client === client && state.key === key ? state.data : EMPTY
+}

@@ -4,7 +4,7 @@ import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { StaticRouter } from "react-router-dom"
 import type { Catalog, Envelope, Quote } from "./contracts"
-import { changeParts, exact } from "./display"
+import { changeParts, compactDollars, volumeDollars } from "./display"
 import { MarketChart } from "./MarketChart"
 import { FIXTURE_TIME, fixtureCatalog, fixtureChart, fixtureQuote, fixtureTop40Catalog, fixtureTop40Chart, fixtureTop40Quote, fixtureTop40Quotes, TOP40_FLAT, TOP40_STALE, TOP40_UNAVAILABLE } from "./fixtures"
 import { DEFAULT_TABLE_VIEW, StocksMarketTable, type Capabilities, type StocksMarketTableProps } from "./StocksMarketTable"
@@ -24,7 +24,7 @@ const cells = (row: string) => row.split('<div role="cell"').slice(1).map(chunk 
 test("header texts are the Figma labels in order; Price carries a decorative superscript 1", () => {
   const html = render()
   const headers = [...html.matchAll(/role="columnheader"[^>]*>(.*?)<\/div>/g)].map(match => text(match[1].replace(/<sup[^>]*>.*?<\/sup>/, "")))
-  assert.deepEqual(headers, ["#", "Asset Name", "Price", "24h ($)", "24H (%)", "24H Volume", "Asset Status", "24h Chart"])
+  assert.deepEqual(headers, ["#", "Asset Name", "Price", "24H (%)", "Market Cap / AUM", "Volume (USD)", "Asset Status", "24h Chart"])
   assert.match(html, /Price<sup aria-hidden="true"[^>]*>1<\/sup>/)
   assert.match(html, /role="table" aria-label="Stocks &amp; ETFs"/)
   assert.match(html, /role="region" aria-label="[^"]+" tabindex="0"[^>]*overflow-x-auto/)
@@ -50,21 +50,21 @@ test("changeParts: two-decimal half-up magnitude; anything that rounds to zero i
   assert.deepEqual(changeParts("3.60"), { direction: "up", magnitude: "3.6" })
 })
 
-test("row values: rounded price with exact title, unsigned change with direction cue, share volume, dashes for missing data", () => {
+test("row values: rounded price with exact title, unsigned change with direction cue, estimated USD volume, dashes for missing data", () => {
   const html = render()
   const soxl = fixtureTop40Quote("SOXL")
   const row = rowOf(html, "SOXL")
   assert.match(row, new RegExp(`title="\\$${soxl.price!.replace(".", "\\.")}"`))
-  assert.deepEqual(cells(row).slice(2, 6), ["$171.63", "하락 $1.14", "하락 0.66%", `${exact(soxl.sessionVolume)} 주`])
-  assert.match(rowOf(html, "SOXS"), /상승 <\/span>\$29\.84/)
+  assert.deepEqual(cells(row).slice(2, 6), ["$171.63", "하락 0.66%", "—", "$7.53B"])
+  assert.match(rowOf(html, "SOXS"), /상승 <\/span>3\.67%/)
   assert.match(row, /<svg aria-hidden="true" width="12" height="10"/)
   for (const symbol of TOP40_UNAVAILABLE) assert.deepEqual(cells(rowOf(html, symbol)).slice(2, 6), ["—", "—", "—", "—"], symbol)
   const flat = cells(rowOf(html, TOP40_FLAT)).slice(3, 5)
-  assert.deepEqual(flat, ["$0", "0%"])
+  assert.deepEqual(flat, ["0%", "—"])
   assert.doesNotMatch(rowOf(html, TOP40_FLAT), /상승|하락|width="12" height="10"/)
   for (const symbol of TOP40_STALE) assert.match(cells(rowOf(html, symbol))[2], /오래된 데이터$/)
-  assert.doesNotMatch(text(html), /\$[0-9][0-9,.]* 주/, "volume is a share count, never dollars")
-  for (const quote of fixtureTop40Quotes().filter(item => item.sessionVolume)) assert.match(text(rowOf(html, quote.symbol)), new RegExp(`${exact(quote.sessionVolume).replace(/[.,]/g, "\\$&")} 주`))
+  assert.match(html, /Estimated session turnover:/)
+  for (const quote of fixtureTop40Quotes().filter(item => item.sessionVolume)) assert.equal(cells(rowOf(html, quote.symbol))[5], compactDollars(volumeDollars(quote.price, quote.sessionVolume)))
 })
 
 test("Asset Status shows the order capability, market-data-only, loading and error states; never session claims", () => {
@@ -124,7 +124,7 @@ test("full rows: the ticker/name button has the accessible name 'NVDA NVIDIA' an
 test("footnote and provenance: price meaning, PILOT copy kept, curated reference only for the exact 40", () => {
   const top40 = text(render())
   assert.match(top40, /¹ Price는 기초 미국 주식·ETF의 USD 시세\(Massive, 시세 지연 정보 미확인\)이며 ARCO 토큰 가격이나 모의 체결가가 아닙니다\./)
-  assert.match(top40, /24h \(\$\)·24H \(%\)는 공급자가 제공한 전일 종가 대비 변동입니다\. 24H Volume은 기초 종목의 시장 세션 거래량\(주식 수\)입니다\. 24h Chart는 상세 화면에서 이미 불러온 1D\(rolling 24시간\) 종가만 표시합니다\./)
+  assert.match(top40, /Volume \(USD\)은 세션 거래량 × 표시 가격으로 계산한 추정 거래대금입니다\./)
   assert.match(top40, /서버 선정 목록 · 40종목 · CURATED · 기준 .+ · 기간 2026-08-16~2026-09-15 · 선정 기준일 2026-09-16/)
   assert.match(top40, /선정 참고: 한국예탁결제원 SEIBro 해외주식 종목별내역\(주식TOP50\) · 매수결제금액 상위 40 · 2026-08-16~2026-09-15 · 2026-09-16 조회 · 이전에 조회한 자료를/)
   assert.doesNotMatch(top40, /최근 24시간/, "the rolling chart copy stays in the detail view")
@@ -142,14 +142,14 @@ test("home variant: no toolbar or chart column, first rows by rank as links, a s
   assert.deepEqual([...html.matchAll(/<a [^>]*data-row-primary=""[^>]*>/g)].map(match => /href="([^"]+)"/.exec(match[0])?.[1]), fixtureTop40Catalog().securities.slice(0, 10).map(item => `/stocks?symbol=${item.symbol}`))
   assert.doesNotMatch(html, /24h Chart|role="group"|<h2|type="search"|<select|role="status"|aria-pressed|<svg role="img"|차트 미로드/)
   assert.match(text(html), /^.*¹ Price는 기초 미국 주식·ETF의 USD 시세\(Massive, 시세 지연 정보 미확인\)이며 ARCO 토큰 가격이나 모의 체결가가 아닙니다\./s)
-  assert.match(text(html), /24h \(\$\)·24H \(%\)는 공급자가 제공한 전일 종가 대비 변동입니다\. 24H Volume은 기초 종목의 시장 세션 거래량\(주식 수\)입니다\./, "home columns carry the same meaning")
+  assert.match(text(html), /Market Cap은 주식 시가총액, AUM은 ETF 운용자산입니다\./)
   assert.doesNotMatch(text(html), /24h Chart는|당일/)
 })
 
-test("24h Chart draws only a series the detail already loaded; other rows say it is not loaded", () => {
+test("24h Chart draws supplied per-symbol series; missing data remains empty", () => {
   const without = render()
   assert.doesNotMatch(without, /role="img"/)
-  assert.equal([...without.matchAll(/24시간 차트 미로드 · 상세에서 확인/g)].length, 40)
+  assert.equal([...without.matchAll(/24시간 차트 데이터 없음/g)].length, 40)
   const chart = fixtureTop40Chart("NVDA", "1D")
   const html = render({ series: { NVDA: chart } })
   const row = rowOf(html, "NVDA")
@@ -185,10 +185,31 @@ test("change text: up uses the AA text token, down/flat/missing keep their meani
   assert.match(up, /class="inline-flex items-center gap-1 text-\[var\(--color-arco-up-text\)\]"><svg aria-hidden="true" width="12" height="10"[^]*?상승 /)
   assert.match(down, /class="inline-flex items-center gap-1 text-\[var\(--color-arco-down\)\]"><svg aria-hidden="true" width="12" height="10"[^]*?하락 /)
   assert.doesNotMatch(html, /inline-flex items-center gap-1 text-\[var\(--color-arco-up\)\]/, "no change text on the 3.78:1 token")
-  assert.match(rowOf(html, TOP40_FLAT), /<span class="text-\[var\(--color-arco-text-soft\)\]">\$0<\/span>/, "zero stays neutral")
+  assert.match(rowOf(html, TOP40_FLAT), /<span class="text-\[var\(--color-arco-text-soft\)\]">0%<\/span>/, "zero stays neutral")
   for (const symbol of TOP40_UNAVAILABLE) assert.match(rowOf(html, symbol), /<span class="text-\[var\(--color-arco-text-soft\)\]">—<\/span>/, "missing stays neutral")
   assert.match(rowOf(html, "NVDA"), /모의 주문/)
   assert.match(html, /bg-\[var\(--color-arco-up\)\] opacity-40/, "the status dot is a graphic and keeps --color-arco-up")
   const detail = renderToStaticMarkup(<MarketChart response={{ status: "AVAILABLE", reason: null, fetchedAt: FIXTURE_TIME, cacheAgeMs: 0, feedDelay: "UNKNOWN", data: fixtureChart("NVDA", "1D") }} />)
   assert.match(detail, /반환 관측 구간 등락 <strong class="text-\[var\(--color-arco-up-text\)\]">\+/, "the detail's rising window change uses the text token")
+})
+
+
+test("Market Cap / AUM uses distinct measures, not ETF market capitalization", () => {
+  const base = { currency: "USD" as const, description: null, exchange: null, website: null, industry: null, logoUrl: null, sourceDate: null }
+  const html = render({ profiles: {
+    SOXL: { ...base, symbol: "SOXL", name: "SOXL", securityType: "ETF", marketCap: "999", aum: "12000000000", aumAsOf: "2026-09-16" },
+    MU: { ...base, symbol: "MU", name: "Micron", securityType: "CS", marketCap: "100000000000", aum: "888" },
+    QQQ: { ...base, symbol: "QQQ", name: "QQQ", securityType: "ETF", marketCap: "123456" },
+  } })
+  assert.equal(cells(rowOf(html, "SOXL"))[4], "$12B")
+  assert.equal(cells(rowOf(html, "MU"))[4], "$100B")
+  assert.equal(cells(rowOf(html, "QQQ"))[4], "—")
+  assert.doesNotMatch(html, />24h \(\$\)</)
+})
+test("USD volume multiplies decimal share counts exactly, preserving zero and missing values", () => {
+  assert.equal(volumeDollars("171.63", "43896163"), "7533898455.69")
+  assert.equal(volumeDollars("0.1", "9007199254740993.5"), "900719925474099.35")
+  assert.equal(volumeDollars("1", "0"), "0")
+  assert.equal(volumeDollars(null, "100"), null)
+  assert.equal(volumeDollars("100", null), null)
 })

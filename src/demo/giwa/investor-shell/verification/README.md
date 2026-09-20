@@ -178,8 +178,9 @@ never bundled.
 
 ## Customer demo presentation
 
-The editable preview opens in customer presentation mode by default. It shows a single
-`Demo` badge in the app header, removes the verification controls/request log and repeated
+The editable preview opens in customer presentation mode by default. The header shows
+Connect Wallet and Mint test assets (inside the menu on mobile), without a Demo badge. It removes
+the verification controls/request log and repeated
 mock-price, fixture, feed-unknown and implementation notes, and removes the visible chart
 observation slider and raw OHLCV table. The chart itself remains keyboard focusable:
 Left/Right and Home/End select a price; Escape or leaving the chart clears the selection.
@@ -237,3 +238,24 @@ open their existing detail routes. Search only navigates and does not initiate t
 Search regression tests live alongside this dated snapshot so no application module imports
 verification data. To include the DOM interaction test, set `GIWA_MARKET_DOM_RUNTIME` to
 an installed jsdom package.json and run the two `product-search*.test.tsx` files here.
+
+## Stocks list metrics (2026-09-20)
+
+The Home and Stocks tables show Price, 24H (%), Market Cap / AUM, Volume (USD), and
+Asset Status; Stocks also shows a per-symbol 1D sparkline. The former 24h ($) change
+column is removed. Volume is an **estimate** of session turnover: exact decimal
+share volume × displayed price, compacted for display, with its calculation in the title.
+It is not a sum of actual trade consideration or a rolling 24-hour value.
+
+Stocks use profile.marketCap; ETFs use profile.aum, never marketCap as an AUM fallback.
+The current offline fixture has neither value, so valuations remain —. No valuation
+fixtures or market data were invented for this change. The server can enrich ETF profiles
+from Massive ETF Global when the configured account has that entitlement.
+
+The list reads each catalog symbol's profile and 1D chart using at most three concurrent
+requests, waits 60 seconds on provider/budget limits, and cancels pending work on unmount.
+It preserves the server's existing request budget. Real accounts at the default five
+requests/minute therefore fill the list progressively. Current fixture mode has 37 valid
+sparklines: SGOV is stale and SCHD/NBIS are unavailable. Detail rereads update the same
+chart state, including invalidation and later recovery. The Home list reads profiles for
+its ten rows and does not load hidden charts.

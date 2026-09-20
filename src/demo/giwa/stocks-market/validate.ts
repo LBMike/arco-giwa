@@ -64,7 +64,7 @@ export function safeLogo(value: unknown, apiBase: string, name: string): string 
 }
 export function parseProfile(value: unknown, name: string, apiBase: string): Profile {
   const r = object(value); if (r.symbol !== name || r.currency !== "USD") return bad()
-  return { symbol: name, currency: "USD", name: text(r.name), description: optional(r.description, v => text(v, 12000)), exchange: optional(r.exchange, text), securityType: optional(r.securityType, text), marketCap: optional(r.marketCap, decimal), website: optional(r.website, url), industry: optional(r.industry, v => text(v, 500)), logoUrl: safeLogo(r.logoUrl, apiBase, name), sourceDate: optional(r.sourceDate, v => text(v, 30)) }
+  return { symbol: name, currency: "USD", name: text(r.name), description: optional(r.description, v => text(v, 12000)), exchange: optional(r.exchange, text), securityType: optional(r.securityType, text), marketCap: optional(r.marketCap, decimal), aum: optional(r.aum ?? null, decimal), aumAsOf: optional(r.aumAsOf ?? null, v => text(v, 30)), website: optional(r.website, url), industry: optional(r.industry, v => text(v, 500)), logoUrl: safeLogo(r.logoUrl, apiBase, name), sourceDate: optional(r.sourceDate, v => text(v, 30)) }
 }
 export function parseChart(value: unknown, name: string, range: Range): Chart {
   const r = object(value); const interval = range === "1D" ? "5m" : range === "1W" ? "1h" : "1d"

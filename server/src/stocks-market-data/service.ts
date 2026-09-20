@@ -1,5 +1,5 @@
 import { MARKET_CONTEXT, PILOT_CATALOG, MarketDataError, type Chart, type ChartRange, type CompanyProfile, type DataReason, type DataStatus, type DisplayCatalog, type FeedDelay, type Logo, type MarketResponse, type Quote } from './contracts.js';
-import { chart, chartPath, profile, quotes, RANGE_RULES, type InternalProfile } from './normalize.js';
+import { chart, chartPath, etfAssets, profile, quotes, RANGE_RULES, type InternalProfile } from './normalize.js';
 import { MassiveTransport } from './transport.js';
 
 export interface StocksMarketDataOptions {
@@ -60,7 +60,7 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
     if (!entry || entry.retryAt <= time) {
       let flight = flights.get(key);
       if (!flight) {
-        // Keys are exclusively catalog symbols × fixed resource/range keys: <= 281.
+        // Keys are exclusively catalog symbols × fixed resource/range keys: <= 321.
         flight = (async () => {
           try {
             const data = await load();
@@ -102,7 +102,17 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
       }
       return result;
     },
-    async profile(symbol) { checkSymbol(symbol); const result = await getProfile(symbol); return { ...result, data: result.data?.profile ?? null }; },
+    async profile(symbol) {
+      checkSymbol(symbol);
+      const result = await getProfile(symbol);
+      const data = result.data?.profile;
+      if (!data) return { ...result, data: null };
+      if (data.securityType !== 'ETF') return { ...result, data: { ...data, aum: null, aumAsOf: null } };
+      // The optional ETF Global entitlement shares the existing transport budget and cache.
+      // A denied/missing AUM read must not discard a valid ticker profile or substitute market cap.
+      const assets = await get(`aum:${symbol}`, POLICY.profile, async () => etfAssets(await transport!.json(`/etf-global/v1/profiles?composite_ticker=${symbol}&sort=effective_date.desc&limit=1`), symbol));
+      return { ...result, reason: assets.reason ?? result.reason, data: { ...data, aum: assets.status === 'AVAILABLE' ? assets.data?.aum ?? null : null, aumAsOf: assets.status === 'AVAILABLE' ? assets.data?.aumAsOf ?? null : null } };
+    },
     async chart(symbol, range) {
       checkSymbol(symbol); if (!Object.prototype.hasOwnProperty.call(RANGE_RULES, range)) throw new MarketDataError('NOT_FOUND');
       const result = await get<Chart>(`chart:${symbol}:${range}`, POLICY.chart, async () => { const requested = now(); return chart(await transport!.json(chartPath(symbol, range, requested)), symbol, range, requested); });

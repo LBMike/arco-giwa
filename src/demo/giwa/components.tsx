@@ -576,13 +576,12 @@ export function useGiwaIsAdmin(): boolean {
 // the nav itself lives in GiwaSidebarNav. Height stays 76px at every width: SectionNav (top-[76px])
 // and the invest panel (top-[104px]) stick beneath it.
 export function GiwaHeader({ admin = false }: { admin?: boolean }) {
-  const demo = useDemoPresentation()
   const isAdmin = useGiwaIsAdmin()
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-arco-border)] bg-[var(--color-arco-page-80)] backdrop-blur">
       <div className="mx-auto flex min-h-[76px] w-full max-w-[1512px] items-center justify-between gap-3 px-4 md:px-8">
         <div className="flex items-center gap-2 xl:hidden">
-          <GiwaHeaderMenu isAdmin={isAdmin} testFunds={admin || demo ? undefined : <TestFundsButton admin={admin} />} />
+          <GiwaHeaderMenu isAdmin={isAdmin} testFunds={admin ? undefined : <TestFundsButton admin={admin} />} />
           <Link
             to={GIWA_PREPROD_ROUTE}
             aria-label="Arco home"
@@ -595,10 +594,9 @@ export function GiwaHeader({ admin = false }: { admin?: boolean }) {
           <GiwaProductSearch />
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          {demo && <span className="hidden rounded-full sm:inline-flex bg-[var(--color-arco-chip)] px-3 py-1 text-xs font-medium text-[var(--color-arco-chip-ink)]">Demo</span>}
           <GiwaWalletButton />
           {/* Mint test assets: top bar from lg; below lg it lives in the menu drawer. */}
-          {!admin && !demo && (
+          {!admin && (
             <div className="hidden lg:block">
               <TestFundsButton admin={admin} />
             </div>
