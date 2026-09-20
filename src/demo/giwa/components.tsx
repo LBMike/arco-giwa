@@ -1,3 +1,4 @@
+import { useDemoPresentation } from "./demo-presentation"
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -574,12 +575,13 @@ export function useGiwaIsAdmin(): boolean {
 // the nav itself lives in GiwaSidebarNav. Height stays 76px at every width: SectionNav (top-[76px])
 // and the invest panel (top-[104px]) stick beneath it.
 export function GiwaHeader({ admin = false }: { admin?: boolean }) {
+  const demo = useDemoPresentation()
   const isAdmin = useGiwaIsAdmin()
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-arco-border)] bg-[var(--color-arco-page-80)] backdrop-blur">
       <div className="mx-auto flex min-h-[76px] w-full max-w-[1512px] items-center justify-between gap-3 px-4 md:px-8">
         <div className="flex items-center gap-2 xl:hidden">
-          <GiwaHeaderMenu isAdmin={isAdmin} testFunds={admin ? undefined : <TestFundsButton admin={admin} />} />
+          <GiwaHeaderMenu isAdmin={isAdmin} testFunds={admin || demo ? undefined : <TestFundsButton admin={admin} />} />
           <Link
             to={GIWA_PREPROD_ROUTE}
             aria-label="Arco home"
@@ -589,9 +591,10 @@ export function GiwaHeader({ admin = false }: { admin?: boolean }) {
           </Link>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {demo && <span className="rounded-full bg-[var(--color-arco-chip)] px-3 py-1 text-xs font-medium text-[var(--color-arco-chip-ink)]">Demo</span>}
           <GiwaWalletButton />
           {/* Mint test assets: top bar from lg; below lg it lives in the menu drawer. */}
-          {!admin && (
+          {!admin && !demo && (
             <div className="hidden lg:block">
               <TestFundsButton admin={admin} />
             </div>
@@ -682,6 +685,7 @@ export function GiwaStrategyCards({
   active: GiwaCategory[]
   onToggle: (category: GiwaCategory) => void
 }) {
+  const demo = useDemoPresentation()
   return (
     <section className="space-y-3">
       <h2 className="pl-1 text-lg font-medium text-[var(--color-arco-ink)]">Strategies</h2>
@@ -703,7 +707,7 @@ export function GiwaStrategyCards({
               <div className="space-y-1">
                 <h3 className="text-lg font-medium leading-6 text-[var(--color-arco-cream)]">{strategy.title}</h3>
                 <p className="line-clamp-2 h-10 max-w-[280px] text-sm leading-5 text-[var(--color-arco-cream)] opacity-80">
-                  {strategy.blurb}
+                  {demo && strategy.category === "U.S Treasuries" ? "Money-market funds and U.S. Treasury strategies." : demo && strategy.category === "Prime Credit" ? "Alternative-credit strategies for income-focused portfolios." : strategy.blurb}
                 </p>
               </div>
               <span className="rounded-[4px] bg-[var(--color-arco-overlay)] px-1 py-0.5 text-xs font-medium text-[var(--color-arco-cream)]">

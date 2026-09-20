@@ -1,3 +1,4 @@
+import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { ArrowLeft } from "lucide-react"
 import type { MarketClient } from "./client"
@@ -72,6 +73,7 @@ function MarketOwner({ client, ordersClient, selection, anchor, onChecked }: { c
 
 /** The list's own frame. Returning from a detail focuses the opened row, or this heading when the table cannot be shown. */
 function ListFrame({ selection, settled, table, children }: { selection: StocksSelection; settled: boolean; table?: RefObject<HTMLElement>; children: ReactNode }) {
+  const demo = useDemoPresentation()
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
     const request = selection.focus
@@ -84,7 +86,7 @@ function ListFrame({ selection, settled, table, children }: { selection: StocksS
     target?.focus({ preventScroll: true })
   }, [selection, settled, table])
   return <section aria-label="Stocks market" className="w-full min-w-0 rounded-2xl bg-[var(--color-arco-surface)] p-4 sm:p-6">
-    <header className="mb-6"><p className="text-xs text-[var(--color-arco-text-soft)]">MARKETS · DISPLAY ONLY</p><h1 ref={heading} tabIndex={-1} className={`mt-1 w-fit rounded-sm text-3xl font-medium ${FOCUS}`}>Stocks</h1><p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">기초 미국 주식·ETF 시장정보. 모의 주문의 체결가는 아래 주문 섹션에서 별도로 확인하세요.</p></header>
+    <header className="mb-6"><p className="text-xs text-[var(--color-arco-text-soft)]">{demo ? "MARKETS" : "MARKETS · DISPLAY ONLY"}</p><h1 ref={heading} tabIndex={-1} className={`mt-1 w-fit rounded-sm text-3xl font-medium ${FOCUS}`}>Stocks</h1><p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">{demo ? "Explore stocks & ETFs" : "기초 미국 주식·ETF 시장정보. 모의 주문의 체결가는 아래 주문 섹션에서 별도로 확인하세요."}</p></header>
     {children}
   </section>
 }
@@ -117,7 +119,7 @@ function MarketCatalog({ client, response, capabilities, selection, anchor, onCh
     return () => onChecked(current => current === answer ? null : current)
   }, [symbol, isListed, onChecked])
   if (symbol === null) return <ListFrame selection={selection} settled table={table}>
-    <div className="mb-4">{quotes.phase !== "ready" ? <Status status={quotes.phase} /> : <><p className="text-xs text-[var(--color-arco-text-soft)]">Massive · {FEED_LABELS[quotes.value.feedDelay]}</p>{quotes.value.status !== "AVAILABLE" && <Status status={quotes.value.status} />}</>}</div>
+    <div className="mb-4">{quotes.phase !== "ready" ? <Status status={quotes.phase} /> : <><DemoDetails><p className="text-xs text-[var(--color-arco-text-soft)]">Massive · {FEED_LABELS[quotes.value.feedDelay]}</p></DemoDetails>{quotes.value.status !== "AVAILABLE" && <Status status={quotes.value.status} />}</>}</div>
     <div ref={table} className="min-w-0 scroll-mt-24"><StocksMarketTable variant="full" catalog={catalog} quotes={quotes} capabilities={capabilities} series={series} view={view} onViewChange={setView} onSelect={name => selection.openDetail(name, "row")} /></div>
   </ListFrame>
   // NVDA is the tradable symbol, so its detail opens even when the market catalog does not list it.

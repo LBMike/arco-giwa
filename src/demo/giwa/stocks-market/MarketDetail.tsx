@@ -1,3 +1,4 @@
+import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 // The /stocks security detail (left column): header, price/period/chart card, About and Statistics. Every value comes from the
 // server market contract (catalog, quotes, profile, chart) or the curated display metadata; nothing from the Figma capture.
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
@@ -62,15 +63,16 @@ export function PeriodTabs({ range, onRange }: { range: Range; onRange: (range: 
 type Quotes = ReadState<Envelope<Quote[]>>
 /** Price header (once per symbol; it stays while a range loads), period buttons outside anything keyed by range, then the chart. */
 export function PriceCard({ quote, quotes, selection, range, onRange, children }: { quote: Quote | null; quotes: Quotes; selection: ChartSelection | null; range: Range; onRange: (range: Range) => void; children: ReactNode }) {
+  const demo = useDemoPresentation()
   const bar = selection?.bar ?? null
   const feed = selection?.feedDelay ?? (quotes.phase === "ready" ? quotes.value.feedDelay : "UNKNOWN")
   return <section aria-label="시세와 차트" className={`${CARD} space-y-5`}>
     <div className="space-y-2" aria-live="polite" aria-atomic="true">
-      <p className="text-sm text-[var(--color-arco-chip-ink)]">{selection ? `${selection.interval} 구간 종가 · 시각은 봉 시작` : "기초 주식 시세 · USD"}</p>
+      <p className="text-sm text-[var(--color-arco-chip-ink)]">{demo ? "Price · USD" : selection ? `${selection.interval} 구간 종가 · 시각은 봉 시작` : "기초 주식 시세 · USD"}</p>
       <p title={dollars(bar?.close ?? quote?.price ?? null)} className="break-all text-[40px] font-medium leading-[1.05] tracking-[-0.03em] tabular-nums text-[var(--color-arco-ink)] sm:text-5xl">{priceLabel(bar?.close ?? quote?.price ?? null)}</p>
       {/* Hidden (not removed) while a bar is picked: the change is against the previous close, not the picked bar. */}
       <p className={`flex flex-wrap items-center gap-x-1.5 text-sm ${selection ? "invisible" : ""}`}><QuoteChange quote={quote} /><span className="text-[var(--color-arco-chip-ink)]">전일 종가 대비</span></p>
-      <p className="text-xs text-[var(--color-arco-text-soft)]">{time(bar?.timestamp ?? quote?.sourceTimestamp ?? null)} · {FEED_LABELS[feed]}</p>
+      <p className="text-xs text-[var(--color-arco-text-soft)]">{time(bar?.timestamp ?? quote?.sourceTimestamp ?? null)}<DemoDetails> · {FEED_LABELS[feed]}</DemoDetails></p>
     </div>
     {/* This symbol's own quote status (STALE included), or the envelope's when the response has no row for it. Not the envelope's
         when a row exists: one stale symbol marks the whole envelope STALE. Shown whatever state the chart below is in. */}
@@ -120,6 +122,7 @@ function Description({ text }: { text: string }) {
 
 /** About: description (2 lines, expandable) and the facts the contract carries. A row without a value is left out. */
 export function AboutCard({ security, profile }: { security: Security; profile: ReadState<Envelope<Profile>> }) {
+  const demo = useDemoPresentation()
   const id = useId()
   const data = profile.phase === "ready" ? profile.value.data : null
   const curated = curatedStock(security.symbol)
@@ -141,12 +144,13 @@ export function AboutCard({ security, profile }: { security: Security; profile: 
   return <section aria-labelledby={id} className={CARD}>
     <h2 id={id} className="text-2xl font-medium leading-[1.05] tracking-[-0.01em] text-[var(--color-arco-ink)]">About</h2>
     {/* "No provider description" only for a profile that loaded; loading, failed and unavailable reads say so in the status below. */}
-    {data && (data.description ? <div className="mt-3"><Description key={data.description} text={data.description} /></div> : <p className="mt-3 text-sm text-[var(--color-arco-text-soft)]">공급자 설명 없음</p>)}
+    <DemoDetails>{data && (data.description ? <div className="mt-3"><Description key={data.description} text={data.description} /></div> : <p className="mt-3 text-sm text-[var(--color-arco-text-soft)]">공급자 설명 없음</p>)}</DemoDetails>
     <div className="mt-3 grid grid-cols-1 md:grid-cols-2 md:gap-x-6 lg:grid-cols-1 2xl:grid-cols-2"><StatList rows={rows.slice(0, half)} /><StatList rows={rows.slice(half)} /></div>
-    <section aria-label="기업정보 상태" className="mt-4 space-y-1 text-xs text-[var(--color-arco-text-soft)]">
+    {demo && (profile.phase !== "ready" || profile.value.status !== "AVAILABLE") ? <Status status={profile.phase === "ready" ? profile.value.status : profile.phase} /> : null}
+    <DemoDetails><section aria-label="기업정보 상태" className="mt-4 space-y-1 text-xs text-[var(--color-arco-text-soft)]">
       <p role="status">{profile.phase === "loading" ? "기업정보 불러오는 중…" : profile.phase === "error" ? "기업정보를 불러올 수 없습니다" : profile.value.status === "STALE" ? "기업정보 · 마지막 확인 정보 · 오래된 데이터" : profile.value.status === "UNCONFIGURED" ? "기업정보 연결 준비 중" : profile.value.status === "UNAVAILABLE" ? "기업정보를 불러올 수 없습니다" : "기업정보 · 공급자 참조 데이터"}</p>
       {profile.phase === "ready" && data && <p>기업정보 최근 수집: {time(profile.value.fetchedAt)} · 공급자 기준일: {data.sourceDate ?? "미확인"}. 시세 관측 시각과 별개입니다.</p>}
-    </section>
+    </section></DemoDetails>
   </section>
 }
 
@@ -154,7 +158,7 @@ function StatGroup({ title, qualifier, rows, note }: { title: string; qualifier?
   return <div className="min-w-0">
     <h3 className="flex min-h-10 flex-wrap items-baseline gap-x-1.5 border-b border-[var(--color-arco-border)] py-2.5 text-base font-medium text-[var(--color-arco-ink)]">{title}{qualifier && <span className="text-sm text-[var(--color-arco-chip-ink)]">{qualifier}</span>}</h3>
     <StatList rows={rows} />
-    {note && <p className="mt-1 text-xs text-[var(--color-arco-text-soft)]">{note}</p>}
+    <DemoDetails>{note && <p className="mt-1 text-xs text-[var(--color-arco-text-soft)]">{note}</p>}</DemoDetails>
   </div>
 }
 const price = (value: string | null): Pick<StatRow, "value" | "title"> => ({ value: priceLabel(value), title: value === null ? undefined : dollars(value) })
@@ -173,10 +177,10 @@ export function StatisticsCard({ symbol, quote, quotes, profile, day }: { symbol
       <StatGroup title="Underlying Asset Price" qualifier="24H" rows={[{ label: "Open", ...price(span?.open ?? null) }, { label: "High", ...price(span?.high ?? null) }, { label: "Low", ...price(span?.low ?? null) }]} note={span ? `최근 24시간(rolling) · 반환된 1D ${day!.interval} 봉의 첫 시가·최고가·최저가${day!.history === "TRUNCATED" ? " · 일부 구간만 반환된 기준" : ""}` : "현재 1D 차트 관측값(봉 2개 이상)이 있을 때만 표시합니다."} />
       <StatGroup title="Underlying Asset Statistics" rows={[{ label: "Total Market Cap", value: compactDollars(marketCap), title: marketCap === null ? undefined : dollars(marketCap) }, { label: "세션 거래량", value: quote?.sessionVolume == null ? "—" : `${exact(quote.sessionVolume)} 주` }, { label: "전일 종가", ...price(quote?.previousClose ?? null) }]} />
     </div>
-    <div className="mt-4 space-y-1 text-xs text-[var(--color-arco-text-soft)]">
+    <DemoDetails><div className="mt-4 space-y-1 text-xs text-[var(--color-arco-text-soft)]">
       <p>Massive · {feed} · 시세 관측: {time(quote?.sourceTimestamp ?? null)}. 주식 시세·기업 시가총액은 ARCO 토큰 가격·유동성·보유량이 아닙니다.</p>
       {symbol === "NVDA" && <p>NVDA 모의 주문은 주문 패널에서 진행합니다. 표시 시세는 체결에 사용하지 않습니다.</p>}
-    </div>
+    </div></DemoDetails>
   </section>
 }
 

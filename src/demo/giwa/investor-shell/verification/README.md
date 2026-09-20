@@ -175,3 +175,22 @@ A blocked `localhost:8080` read that the pages make without a wallet would be a 
 Nothing in `index.html`, `src/main.tsx`, the router (`src/demo/giwa/routes.ts`, `stocks-market/routes.tsx`) or `vite.config.ts`
 references this directory, and product code never imports it. `npm run build` uses the root `index.html`, so this page is
 never bundled.
+
+## Customer demo presentation
+
+The editable preview opens in customer presentation mode by default. It shows a single
+`Demo` badge in the app header, removes the verification controls/request log and repeated
+mock-price, fixture, feed-unknown and implementation notes, and removes the visible chart
+observation slider and raw OHLCV table. The chart itself remains keyboard focusable:
+Left/Right and Home/End select a price; Escape or leaving the chart clears the selection.
+
+Open `index.html?debug=1#/stocks` to restore verification controls and technical explanations.
+The debug market-mode choice is ignored by customer presentation, which starts with the
+40-symbol catalog. The real application does not enable `DemoPresentationContext` and keeps
+its existing explanations. This is a presentation switch only: it does not change fixture
+prices, the captured deployed Funds/Savings catalog, wallet authentication, order requests,
+execution state or the off-origin fetch guard. The preview displays the test cash unit as
+`USDC`; API/token identities remain unchanged. NVDA's order price is separate from its
+market-data price. Unsupported symbols show `Trading coming soon`; their page never exposes
+NVDA trading controls. The investor controller stays mounted during list/detail navigation.
+Actual missing-data, expired-session and transaction-error states remain visible.

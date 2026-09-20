@@ -196,6 +196,7 @@ test("preview installs the fetch guard before rendering and loads product pages 
     "../../../../index.css",
     "../../../theme.css",
     "../../config",
+    "../../demo-presentation",
     "../../routes",
     "../../stocks-market/environment",
     "../../stocks-market/fixtures",

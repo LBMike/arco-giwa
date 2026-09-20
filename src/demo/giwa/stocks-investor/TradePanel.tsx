@@ -1,3 +1,4 @@
+import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 // Quote → order for NVDA, in the GIWA invest-panel look. The quote is the server's; this panel never computes an amount,
 // never replaces an expired quote on its own, and never turns an unconfirmed request into a new one. It reads no wallet,
 // balance or allowance: the only balance it shows is the server portfolio's available NVDA on the Sell side.
@@ -99,7 +100,8 @@ export function attemptTitle(attempt: OrderAttempt, state: StocksInvestorState):
 }
 
 function AttemptView({ attempt, state, cashSymbol, actions }: { attempt: OrderAttempt; state: StocksInvestorState; cashSymbol: StocksCashSymbol | null; actions: StocksInvestorActions }) {
-  const cash = cashSymbol ?? "test cash"
+  const demo = useDemoPresentation()
+  const cash = demo ? "USDC" : cashSymbol ?? "test cash"
   const headingRef = useRef<HTMLHeadingElement>(null)
   useRescueFocus(headingRef, `${attempt.body.idempotencyKey}:${attempt.status}`)
   const request = (
@@ -275,7 +277,7 @@ function NvdaMark() {
 }
 
 function TestNote({ children }: { children: ReactNode }) {
-  return <span className={CHIP_NOTE}>{children}</span>
+  return <DemoDetails><span className={CHIP_NOTE}>{children}</span></DemoDetails>
 }
 
 export type TradePanelProps = {
@@ -288,6 +290,7 @@ export type TradePanelProps = {
 }
 
 export function TradePanel({ state, actions, titleId, headingRef }: TradePanelProps) {
+  const demo = useDemoPresentation()
   const access = useStocksAccess()
   const inputId = useId()
   const hintId = `${inputId}-hint`
@@ -301,7 +304,7 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
   const catalog = state.catalog.status === "ready" ? state.catalog.catalog : null
   const instrument = catalog?.instruments.find((item) => item.symbol === "NVDA") ?? null
   const cashSymbol = catalog?.cashSymbol ?? null
-  const cash = cashSymbol ?? "test cash"
+  const cash = demo ? "USDC" : cashSymbol ?? "test cash"
   const block = tradeBlock(state)
   const attempt = state.attempt
   const showForm = attempt === null || attempt.status === "REJECTED"
@@ -316,7 +319,7 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
   // MAX fills the exact available quantity as typed text (no grouping), only for a positive server value.
   const maxInput = available !== null && !available.startsWith("-") && available !== "0" ? formatBaseUnits(available, STOCKS_QUANTITY_SCALE) : null
   const overAvailable = sell && available !== null && state.quantityCheck.ok && BigInt(state.quantityCheck.baseUnits) > BigInt(available)
-  const blockNotice = block !== null && block !== "ATTEMPT_UNRESOLVED" && block !== "ATTEMPT_OPEN"
+  const blockNotice = !(demo && block === "SIGNED_OUT" && sessionEndedMessage(access) === null) && block !== null && block !== "ATTEMPT_UNRESOLVED" && block !== "ATTEMPT_OPEN"
   // An expired, rejected or other-wallet session says so instead of the generic "Sign-in required" text.
   const sessionEnded = state.session.status === "verified" && !state.authRejected ? null : sessionEndedMessage(access)
   const overAvailableShown = overAvailable && available !== null && state.portfolio.status === "ready"
@@ -338,7 +341,7 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
       symbolNote={<TestNote>Test units</TestNote>}
       value={state.quantityInput}
       // Exact base units of the typed quantity, like the cash side's (also keeps both fields the same height).
-      subValue={state.quantityCheck.ok ? `${state.quantityCheck.baseUnits} base units (9 decimals)` : "9 decimals max"}
+      subValue={demo ? undefined : state.quantityCheck.ok ? `${state.quantityCheck.baseUnits} base units (9 decimals)` : "9 decimals max"}
       onChange={actions.setQuantity}
       filter={(next) => isDecimalKeystroke(next, STOCKS_QUANTITY_SCALE)}
       balanceLabel="Available to sell"
@@ -357,10 +360,10 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
       tone="soft"
       copyButton={false}
       caption={sell ? "You receive" : "You pay"}
-      symbol={cashSymbol ?? "Test cash"}
+      symbol={demo ? "USDC" : cashSymbol ?? "Test cash"}
       symbolNote={<TestNote>TEST</TestNote>}
       value={quote ? formatCash(quote.cashAmount) : "—"}
-      subValue={quote ? `${quote.cashAmount} base units (6 decimals)` : "서버 견적 후 표시"}
+      subValue={demo ? undefined : quote ? `${quote.cashAmount} base units (6 decimals)` : "서버 견적 후 표시"}
     />
   )
 
@@ -514,7 +517,7 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
               </AmountBlock>
             </div>
             <p id={hintId} className={`mt-2 text-xs ${invalid ? "font-medium text-[var(--color-arco-ink)]" : "text-[var(--color-arco-text-soft)]"}`}>
-              {invalid ? QUANTITY_REASON[state.quantityCheck.ok ? "" : state.quantityCheck.reason] ?? "Enter a valid quantity." : "Up to 9 decimal places. The server calculates the exact test cash amount."}
+              {invalid ? QUANTITY_REASON[state.quantityCheck.ok ? "" : state.quantityCheck.reason] ?? "Enter a valid quantity." : demo ? "" : "Up to 9 decimal places. The server calculates the exact test cash amount."}
             </p>
             {overAvailableShown && available !== null && state.portfolio.status === "ready" ? (
               <div className="mt-3" id={availableId}>
@@ -527,7 +530,7 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
           </fieldset>
 
           <div className="mt-3">
-            {instrument ? <InfoRow label="Price" value={`${formatPrice(instrument.price)} ${cash} / NVDA (fixed, test)`} /> : null}
+            {instrument ? <InfoRow label={demo ? "Order price" : "Price"} value={`${formatPrice(instrument.price)} ${cash} / NVDA${demo ? "" : " (fixed, test)"}`} /> : null}
             {quote ? (
               <div ref={quoteRef} tabIndex={-1} role="group" aria-label="Quote" data-testid="stocks-quote" className={FOCUS_RING}>
                 <InfoRow
@@ -544,23 +547,23 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
                 </Field>
                 {quote ? (
                   <>
-                    <Field label={quote.side === "SELL" ? "You receive (test cash)" : "You pay (test cash)"}>
+                    <Field label={quote.side === "SELL" ? (demo ? "You receive" : "You receive (test cash)") : (demo ? "You pay" : "You pay (test cash)")}>
                       {formatCash(quote.cashAmount)} {cash}
                     </Field>
-                    <Field label="Exact amount" mono>
+                    <DemoDetails><Field label="Exact amount" mono>
                       {quote.cashAmount} base units (6 decimals)
                     </Field>
-                    <Field label="Server deadline">{formatUtc(quote.expiresAt)}</Field>
+                    <Field label="Server deadline">{formatUtc(quote.expiresAt)}</Field></DemoDetails>
                   </>
                 ) : null}
                 {/* Off the front of the panel (the block notice says when trading is not activated), with the rest of the order's small print. */}
                 {instrument ? <Field label="Order capability">{instrument.orderCapability === "CHECK_PAUSE_AT_ORDER" ? "Open unless paused" : "Not activated"}</Field> : null}
-                {cashSymbol ? <Field label="Test cash">{cashLabel(cashSymbol)}</Field> : null}
+                <DemoDetails>{cashSymbol ? <Field label="Test cash">{cashLabel(cashSymbol)}</Field> : null}
                 {catalog ? (
                   <Field label="Deployment" mono>
                     {catalog.deploymentId}
                   </Field>
-                ) : null}
+                ) : null}</DemoDetails>
               </dl>
             </InfoRow>
           </div>

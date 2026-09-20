@@ -1,3 +1,4 @@
+import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 import { useCallback, useId, useMemo, useState, type MouseEvent, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { CirclePause, Search } from "lucide-react"
@@ -23,7 +24,7 @@ export type TableView = { filter: TableFilter; query: string; sort: TableSort }
 export const DEFAULT_TABLE_VIEW: TableView = Object.freeze({ filter: "ALL", query: "", sort: "rank" })
 export type StocksMarketTableProps = { catalog: Catalog; quotes: ReadState<Envelope<Quote[]>>; capabilities: Capabilities; series: Readonly<Record<string, Chart>>; variant: "full" | "home"; selectedSymbol?: string; onSelect?: (symbol: string) => void; rowHref?: (symbol: string) => string; limit?: number; view?: TableView; onViewChange?: (view: TableView) => void }
 
-export function MarketStatus({ status }: { status: string }) { return <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{status === "loading" ? "시장정보 불러오는 중…" : status === "UNCONFIGURED" ? "시세 연결 준비 중" : status === "STALE" ? "마지막 확인 시세 · 오래된 데이터" : "시세를 불러올 수 없습니다"}</p> }
+export function MarketStatus({ status }: { status: string }) { const demo = useDemoPresentation(); if (demo && status === "STALE") return null; return <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{status === "loading" ? "시장정보 불러오는 중…" : status === "UNCONFIGURED" ? "시세 연결 준비 중" : status === "STALE" ? "마지막 확인 시세 · 오래된 데이터" : "시세를 불러올 수 없습니다"}</p> }
 
 type Row = { symbol: string; name: string; rank: number | null; position: number; curated: CuratedStock | null; quote: Quote | null }
 export type TableSort = "rank" | "gainer" | "loser" | "priceHigh" | "priceLow"
@@ -75,6 +76,8 @@ export function StatusBadge({ symbol, capabilities }: { symbol: string; capabili
   const capability = capabilities.phase === "ready" ? capabilities.bySymbol.get(symbol) ?? null : null
   const base = "inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full bg-[var(--color-arco-chip)] px-2 text-xs font-medium"
   const badge = `${base} text-[var(--color-arco-ink)]`, quiet = `${base} text-[var(--color-arco-chip-ink)]`
+  const demo = useDemoPresentation()
+  if (demo) return <span className={badge}>{capabilities.phase !== "ready" ? "—" : capability === "CHECK_PAUSE_AT_ORDER" ? "Available" : "Coming soon"}</span>
   if (capabilities.phase === "loading") return <span className={badge}>확인 중</span>
   if (capabilities.phase === "error") return <span className={badge}>상태 확인 불가</span>
   if (capability === "CHECK_PAUSE_AT_ORDER") return <span className={badge} title="테스트넷 모의 주문 · 주문 시점에 일시중지 여부 확인"><span aria-hidden="true" className="relative inline-flex size-3 shrink-0 items-center justify-center"><span className="absolute inset-0 rounded-full bg-[var(--color-arco-up)] opacity-40" /><span className="relative size-2 rounded-full bg-[var(--color-arco-up)]" /></span>모의 주문</span>
@@ -150,7 +153,7 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, varia
           <div role="row" className={`sr-only md:not-sr-only md:grid md:h-12 md:items-center md:border-y md:border-[var(--color-arco-border)] ${GRID} ${COLS[variant]}`}>
             <div role="columnheader" className={`${HEAD} ${STICKY_RANK} md:bg-[var(--color-arco-surface)]`}>#</div>
             <div role="columnheader" className={`${HEAD} ${STICKY_ASSET} md:bg-[var(--color-arco-surface)]`}>Asset Name</div>
-            <div role="columnheader" className={`${HEAD} md:px-3`}>Price<sup aria-hidden="true" className="ml-0.5 text-xs text-[var(--color-arco-muted)]">1</sup></div>
+            <div role="columnheader" className={`${HEAD} md:px-3`}>Price<DemoDetails><sup aria-hidden="true" className="ml-0.5 text-xs text-[var(--color-arco-muted)]">1</sup></DemoDetails></div>
             <div role="columnheader" className={`${HEAD} hidden md:block md:px-3`}>24h ($)</div>
             <div role="columnheader" className={`${HEAD} md:px-3`}>24H (%)</div>
             <div role="columnheader" className={`${HEAD} hidden md:block md:pl-3`}>24H Volume</div>
@@ -171,7 +174,7 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, varia
               {cell(`col-start-2 row-start-1 ${RESET} ${STICKY_ASSET} ${surface}`, full
                 ? <button type="button" data-row-primary="" data-symbol={row.symbol} aria-pressed={selectedSymbol === undefined ? undefined : selected} onClick={() => onSelect?.(row.symbol)} className={primary}>{label}</button>
                 : rowHref ? <Link to={rowHref(row.symbol)} data-row-primary="" className={primary}>{label}</Link> : <span className={primary}>{label}</span>)}
-              {cell(`col-start-3 row-start-1 text-right text-base font-medium tabular-nums text-[var(--color-arco-ink)] md:px-3 md:text-left ${RESET}`, <><span title={quote?.price ? dollars(quote.price) : undefined}>{priceLabel(quote?.price ?? null)}</span>{quote?.status === "STALE" && <span className="block text-xs font-normal text-[var(--color-arco-text-soft)]">오래된 데이터</span>}</>)}
+              {cell(`col-start-3 row-start-1 text-right text-base font-medium tabular-nums text-[var(--color-arco-ink)] md:px-3 md:text-left ${RESET}`, <><span title={quote?.price ? dollars(quote.price) : undefined}>{priceLabel(quote?.price ?? null)}</span><DemoDetails>{quote?.status === "STALE" && <span className="block text-xs font-normal text-[var(--color-arco-text-soft)]">오래된 데이터</span>}</DemoDetails></>)}
               {cell("hidden text-sm tabular-nums md:block md:px-3", <Change raw={quote?.change ?? null} unit="$" />)}
               {cell(`col-start-3 row-start-2 text-right text-sm tabular-nums md:px-3 md:text-left ${RESET}`, <Change raw={quote?.changePercent ?? null} unit="%" />)}
               {cell("hidden text-sm font-medium tabular-nums text-[var(--color-arco-ink)] md:block md:pl-3", quote?.sessionVolume == null ? <span className="text-[var(--color-arco-text-soft)]">—</span> : <><span className="whitespace-nowrap">{exact(quote.sessionVolume)}</span> <span className="whitespace-nowrap">주</span></>)}
@@ -183,10 +186,10 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, varia
       </div>
     </div>
     {shown.length === 0 && <p className="border-b border-[var(--color-arco-border)] py-6 text-center text-sm text-[var(--color-arco-text-soft)]">검색 결과가 없습니다.</p>}
-    <div className="mt-4 space-y-1 text-xs leading-5 text-[var(--color-arco-text-soft)]">
+    <DemoDetails><div className="mt-4 space-y-1 text-xs leading-5 text-[var(--color-arco-text-soft)]">
       <p>{`¹ Price는 기초 미국 주식·ETF의 USD 시세(Massive, ${feed})이며 ARCO 토큰 가격이나 모의 체결가가 아닙니다. 24h ($)·24H (%)는 공급자가 제공한 전일 종가 대비 변동입니다. 24H Volume은 기초 종목의 시장 세션 거래량(주식 수)입니다.${full ? " 24h Chart는 상세 화면에서 이미 불러온 1D(rolling 24시간) 종가만 표시합니다." : ""}`}</p>
       <p>{source}</p>
       {curated && <p>선정 참고: {CURATED_SELECTION.source} · {CURATED_SELECTION.metric} · {CURATED_SELECTION.period} · {CURATED_SELECTION.retrievedDate} 조회 · {CURATED_SELECTION.note}</p>}
-    </div>
+    </div></DemoDetails>
   </div>
 }

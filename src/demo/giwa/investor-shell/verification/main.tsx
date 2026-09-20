@@ -10,6 +10,7 @@
 // Market data comes from the synthetic stocks-market fixtures through StocksPageEnvironment.fetch.
 // This page sends no wallet request itself; window.ethereum is whatever the browser provides.
 
+import { DemoPresentationContext } from "../../demo-presentation"
 import { StrictMode, Suspense, lazy, useState, useSyncExternalStore, type ReactNode } from "react"
 import { createRoot } from "react-dom/client"
 import { createHashRouter, Navigate, RouterProvider } from "react-router-dom"
@@ -324,15 +325,18 @@ function PreviewBar({ mode, onMode }: { mode: MarketMode; onMode: (mode: MarketM
 }
 
 function PreviewPage() {
-  const [mode, setMode] = useState<MarketMode>(readMode)
+  const debug = new URLSearchParams(window.location.search).get("debug") === "1"
+  const [mode, setMode] = useState<MarketMode>(() => debug ? readMode() : "top40")
   const choose = (next: MarketMode) => {
     writeMode(next)
     setMode(next)
   }
   return (
     <>
-      <PreviewBar mode={mode} onMode={choose} />
-      <PreviewApp key={mode} mode={mode} />
+      {debug && <PreviewBar mode={mode} onMode={choose} />}
+      <DemoPresentationContext.Provider value={!debug}>
+        <PreviewApp key={mode} mode={mode} />
+      </DemoPresentationContext.Provider>
     </>
   )
 }

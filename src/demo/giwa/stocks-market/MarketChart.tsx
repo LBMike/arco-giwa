@@ -1,3 +1,4 @@
+import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { Area, AreaChart, CartesianGrid, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import type { Bar, Chart, Envelope, FeedDelay } from "./contracts"
@@ -11,6 +12,7 @@ export function MarketChart({ response, onSelection }: { response: Envelope<Char
   const chart = response.data
   // The containing read is keyed by API/symbol/range, so selection never crosses scopes.
   const [selected, setOwnSelected] = useState<number | null>(null)
+  const demo = useDemoPresentation()
   const sliderId = useId()
   const gradientId = `market-area-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`
   const selectionScope = useRef<HTMLElement>(null)
@@ -48,9 +50,14 @@ export function MarketChart({ response, onSelection }: { response: Envelope<Char
   const message = status && `차트 · ${status}`
   const onMove = (event: { activeTooltipIndex?: string | number | null }) => { const index = Number(event.activeTooltipIndex); if (event.activeTooltipIndex !== null && event.activeTooltipIndex !== undefined && Number.isInteger(index) && points[index]) setSelected(index) }
   return <section ref={selectionScope} aria-label="Underlying security chart" className="w-full min-w-0 space-y-4">
-    {message && <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{message}</p>}
+    {message && !(demo && response.status === "STALE") && <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{message}</p>}
     {!chart || !points.length ? <div className="flex min-h-48 items-center justify-center rounded-2xl bg-[var(--color-arco-page)] p-6 text-sm text-[var(--color-arco-text-soft)]">{message ?? "반환된 차트 관측값이 없습니다"}</div> : <>
-      <div data-chart-tone="" className={`h-[220px] w-full min-w-0 touch-pan-y sm:h-[300px] ${tone}`} aria-label="반환된 종가 차트. 아래 관측값 선택과 원자료 표에서도 확인할 수 있습니다.">
+      <div data-chart-tone="" className={`h-[220px] w-full min-w-0 touch-pan-y sm:h-[300px] ${tone}`} tabIndex={demo ? 0 : undefined} onKeyDown={demo ? event => {
+        const index = selected ?? points.length - 1
+        const next = event.key === "ArrowLeft" ? Math.max(0, index - 1) : event.key === "ArrowRight" ? Math.min(points.length - 1, index + 1) : event.key === "Home" ? 0 : event.key === "End" ? points.length - 1 : undefined
+        if (next !== undefined) { event.preventDefault(); setSelected(next) }
+        if (event.key === "Escape") setSelected(null)
+      } : undefined} onBlur={demo ? () => setSelected(null) : undefined} aria-label={demo ? "종가 차트 · 방향키로 가격 탐색" : "반환된 종가 차트. 아래 관측값 선택과 원자료 표에서도 확인할 수 있습니다."}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0}>
           <AreaChart data={drawing} onMouseMove={onMove} onMouseLeave={() => setSelected(null)} margin={{ top: 8, right: 0, bottom: 0, left: 0 }}>
             <defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="currentColor" stopOpacity={0.2} /><stop offset="100%" stopColor="currentColor" stopOpacity={0} /></linearGradient></defs>
@@ -64,17 +71,17 @@ export function MarketChart({ response, onSelection }: { response: Envelope<Char
           </AreaChart>
         </ResponsiveContainer>
       </div>
-      <div className="space-y-2">
+      <DemoDetails><div className="space-y-2">
         <label htmlFor={sliderId} className="block text-xs text-[var(--color-arco-text-soft)]">관측값 선택 · 방향키로 이동 · 종가와 봉 시작 시각</label>
         <input id={sliderId} type="range" min={0} max={points.length - 1} step={1} value={selected ?? points.length - 1} onChange={event => setSelected(Number(event.target.value))} onBlur={() => setSelected(null)} aria-valuetext={bar ? `${dollars(bar.close)}, ${time(bar.timestamp)}` : `${dollars(points[points.length - 1].bar.close)}, ${time(points[points.length - 1].bar.timestamp)}`} className="w-full accent-[var(--color-arco-ink)]" />
         {points.length === 1 && <p className="text-xs">관측값 1개 · 구간 등락을 계산할 수 없습니다.</p>}
-      </div>
+      </div></DemoDetails>
     </>}
-    <p className="text-sm">반환 관측 구간 등락 <strong className={change === "—" ? "text-[var(--color-arco-text-soft)]" : change.startsWith("−") ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-up-text)]"}>{change}</strong><span className="text-xs text-[var(--color-arco-text-soft)]"> · 분할 조정 종가 기준</span></p>
+    <DemoDetails><p className="text-sm">반환 관측 구간 등락 <strong className={change === "—" ? "text-[var(--color-arco-text-soft)]" : change.startsWith("−") ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-up-text)]"}>{change}</strong><span className="text-xs text-[var(--color-arco-text-soft)]"> · 분할 조정 종가 기준</span></p>
     {chart && points.length ? <>
       <p className="text-xs text-[var(--color-arco-text-soft)]">{time(chart.bars[0].timestamp)} — {time(chart.bars[chart.bars.length - 1].timestamp)} · {chart.range === "1D" ? "최근 24시간(rolling)" : chart.range} · {chart.interval} · New York 시간</p>
       <p className="text-xs text-[var(--color-arco-text-soft)]">{chart.history === "TRUNCATED" ? "일부 이력만 반환됨 · 선택 기간 전체 수익률이 아닙니다." : "반환된 관측값만 표시합니다. 모든 거래일·구간의 이력을 보장하지 않습니다."} {segments.length > 1 ? "관측 공백은 선을 연결하지 않았습니다." : "누락된 관측값은 보간하지 않습니다."}</p>
       <details className="min-w-0"><summary className="cursor-pointer text-sm">정확한 OHLCV 원자료 ({points.length}개)</summary><div className="mt-2 max-h-64 overflow-auto rounded-lg border border-[var(--color-arco-border)]" tabIndex={0} role="region" aria-label="OHLCV 원자료 스크롤"><table className="w-full whitespace-nowrap text-left text-xs"><thead><tr>{["봉 시작 (New York)", "시가 USD", "고가 USD", "저가 USD", "종가 USD", "기초자산 거래량"].map(label => <th key={label} className="p-2 font-medium">{label}</th>)}</tr></thead><tbody>{chart.bars.map(item => <tr key={item.timestamp}><td className="p-2">{time(item.timestamp)}</td>{[item.open, item.high, item.low, item.close, item.volume].map((value, index) => <td key={index} className="p-2 font-mono">{value}</td>)}</tr>)}</tbody></table></div></details>
-    </> : null}
+    </> : null}</DemoDetails>
   </section>
 }

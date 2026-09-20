@@ -1,3 +1,4 @@
+import { DemoDetails } from "../demo-presentation"
 // Catalog list, instrument detail, orders and portfolio. Pure views over controller state.
 
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from "react"
@@ -215,9 +216,9 @@ function MobileTrade({
             <h2 id={DETAIL_TITLE_ID} ref={headingRef} tabIndex={-1} className={`scroll-mt-24 text-lg font-medium text-[var(--color-arco-ink)] ${FOCUS_RING}`}>
               Trade NVDA
             </h2>
-            <p className="text-xs text-[var(--color-arco-text-soft)]">
+            <DemoDetails><p className="text-xs text-[var(--color-arco-text-soft)]">
               Fixed mock price {formatPrice(instrument.price)} {catalog.cashSymbol} / NVDA · test value only
-            </p>
+            </p></DemoDetails>
           </div>
         </div>
         <dl className="mt-3 w-full">

@@ -1,3 +1,4 @@
+import { DemoDetails } from "../demo-presentation"
 // GiwaStocksFeature — the independently renderable GIWA Stocks investor module.
 //
 // The host supplies an API client and a VERIFIED session (SIWE token for the connected wallet).
@@ -136,7 +137,7 @@ export function GiwaStocksFeatureView({
               )}
             </p>
           </div>
-          <p className="text-xs leading-5 text-[var(--color-arco-text-soft)]">GIWA Sepolia testnet · Test value only · Mock broker · Fixed mock price. No real shares, cash or broker execution.</p>
+          <DemoDetails><p className="text-xs leading-5 text-[var(--color-arco-text-soft)]">GIWA Sepolia testnet · Test value only · Mock broker · Fixed mock price. No real shares, cash or broker execution.</p></DemoDetails>
         </header>
 
         <div role="tablist" aria-label="Stocks sections" className="flex w-full flex-wrap gap-2 border-b border-[var(--color-arco-border)]">

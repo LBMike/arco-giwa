@@ -126,7 +126,7 @@ test("the panel's front shows the price; the order's small print is folded into 
   assert.match(text(html), /Order details/, "the disclosure")
   assert.doesNotMatch(text(html), /Order capability/, "no longer a row of its own above the action")
   const source = readFileSync(new URL("./TradePanel.tsx", import.meta.url), "utf8")
-  assert.match(source, /InfoRow label="Order details"[\s\S]{0,1200}Field label="Order capability"/, "it moved into the disclosure, not away")
+  assert.match(source, /InfoRow label="Order details"(?:(?!<\/InfoRow>)[\s\S])*Field label="Order capability"/, "it moved into the disclosure, not away")
 })
 
 test("an ended session (expired, rejected, other wallet) replaces the generic sign-in notice, and the action points at it", async () => {
