@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { ArrowRight } from "lucide-react"
 import { giwaApi } from "./api"
+import { vaultDisplayName, vaultImageFor } from "./catalog"
+import { apyLabel, productById } from "../data/products"
 import { GIWA_CHAIN_ID, GIWA_LIVE_REFETCH } from "./config"
 import { countLabel, fundsProductsOf, homeSavingsSummary } from "./home"
 import { GIWA_FUNDS_ROUTE, GIWA_SAVINGS_ROUTE, GIWA_STOCKS_ROUTE } from "./routes"
@@ -27,7 +29,16 @@ export default function GiwaHomePage() {
     () => homeSavingsSummary(catalogQuery.data ?? [], marketQuery.data ?? []),
     [catalogQuery.data, marketQuery.data],
   )
-  // Counts depend on the catalog only; the market query just warms the shared cache.
+  const fundRates = useMemo(() => {
+    const market = new Map((marketQuery.data ?? []).map(entry => [entry.productId.toLowerCase(), entry]))
+    return new Map(funds.map(product => {
+      const entry = market.get(product.productId.toLowerCase())
+      // Same precedence as the Funds table: published, legacy, then implied APY.
+      const rate = entry?.apy ?? productById(product.productId)?.apy ?? entry?.impliedApy ?? null
+      return [product.productId, rate == null ? "—" : apyLabel(rate)]
+    }))
+  }, [funds, marketQuery.data])
+  // Counts remain available while the market query loads; unknown rates stay empty.
   const status = catalogQuery.isLoading ? "Loading…" : catalogQuery.isError ? "Registry unavailable" : null
 
   return (
@@ -51,15 +62,7 @@ export default function GiwaHomePage() {
             {!status && savings.accounts.length > 0 && (
               <ul className="mt-3 flex flex-wrap gap-2">
                 {savings.accounts.map((account) => (
-                  <li
-                    key={account.key}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-arco-chip)] py-1 pl-1 pr-2.5 text-xs text-[var(--color-arco-chip-ink)]"
-                  >
-                    <span aria-hidden="true" className="inline-flex">
-                      <BrandMark src={account.icon ?? undefined} label={account.symbol} size={20} />
-                    </span>
-                    {account.symbol}
-                  </li>
+                  <HomeProductChip key={account.key} name={account.symbol} image={account.icon ?? undefined} apy={account.apy} />
                 ))}
               </ul>
             )}
@@ -68,6 +71,13 @@ export default function GiwaHomePage() {
             <p className="text-sm text-[var(--color-arco-text-soft)]">
               {status ?? countLabel(funds.length, "product", "products")}
             </p>
+            {!status && funds.length > 0 && (
+              <ul className="mt-3 flex flex-wrap gap-2">
+                {funds.map(product => (
+                  <HomeProductChip key={product.productId} name={vaultDisplayName(product)} image={vaultImageFor(product)} apy={fundRates.get(product.productId) ?? "—"} />
+                ))}
+              </ul>
+            )}
           </HomeCard>
         </div>
       </section>
@@ -102,4 +112,14 @@ function HomeCard({ to, title, cta, children }: { to: string; title: string; cta
       </span>
     </Link>
   )
+}
+
+function HomeProductChip({ name, image, apy }: { name: string; image?: string; apy: string }) {
+  return <li className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-[var(--color-arco-chip)] py-1 pl-1 pr-2.5 text-xs text-[var(--color-arco-chip-ink)]">
+    <span aria-hidden="true" className="inline-flex shrink-0"><BrandMark src={image} label={name} size={20} /></span>
+    <span className="min-w-0 break-words">{name}</span>
+    <span className={`shrink-0 font-medium tabular-nums ${apy === "—" ? "text-[var(--color-arco-text-soft)]" : "text-[var(--color-arco-up-text)]"}`}>
+      {apy}<span className="sr-only"> APY</span>
+    </span>
+  </li>
 }

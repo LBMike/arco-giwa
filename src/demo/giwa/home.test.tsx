@@ -94,13 +94,14 @@ test("Home renders one h1, Savings/Funds cards with data counts, and the Stocks 
   assert.match(html, /<h1[^>]*>Home<\/h1>/)
   assert.match(html, /<h2[^>]*>Invest<\/h2>/)
   assert.match(html, /<h2[^>]*>Stocks<\/h2>/)
-  assert.equal(linkText(html, "/savings"), "Savings 2 savings accounts · 1 coming soon ETH USDC Open Savings")
+  assert.equal(linkText(html, "/savings"), "Savings 2 savings accounts · 1 coming soon ETH — APY USDC 4.2% APY Open Savings")
   // Brand marks are decorative next to the symbol text.
   assert.match(html, /<span aria-hidden="true"[^>]*><img src="\/logos\/usdc.png"/)
-  assert.equal(linkText(html, "/funds"), "Funds 2 products Browse funds")
+  assert.equal(linkText(html, "/funds"), "Funds 2 products aCAPIX 10.53% APY L LEGACY — APY Browse funds")
   assert.equal(linkText(html, "/stocks"), "View all stocks")
   const invest = html.slice(html.indexOf('aria-labelledby="home-invest"'), html.indexOf('aria-labelledby="home-stocks"'))
-  assert.doesNotMatch(invest, /APY|%/) // the Invest cards carry counts only, no rates
+  assert.match(invest, /text-\[var\(--color-arco-up-text\)\]/)
+  assert.doesNotMatch(invest, /HIDDEN|RLUSD/)
 })
 
 test("Home shows Loading… before the catalog arrives and Registry unavailable on a catalog error", () => {
@@ -117,4 +118,20 @@ test("Home shows Loading… before the catalog arrives and Registry unavailable 
   assert.equal(linkText(failed, "/savings"), "Savings Registry unavailable Open Savings")
   assert.equal(linkText(failed, "/funds"), "Funds Registry unavailable Browse funds")
   assert.doesNotMatch(failed, /offline/)
+})
+
+test("Home fund chips use configured identities and published, legacy, implied rates including zero", () => {
+  const products = [
+    vault("acapix", "aCAPIX", { kind: "product", displayName: "Credit Fund", vaultImageUrl: "/logos/credit.svg" }),
+    vault("newfund", "New Fund", { kind: "product" }),
+  ]
+  const html = renderHome(client => {
+    client.setQueryData(["giwa", "catalog"], products)
+    client.setQueryData(["giwa", "market", GIWA_CHAIN_ID], [
+      { productId: "ACAPIX", apy: 0, impliedApy: 99 },
+      { productId: "newfund", apy: null, impliedApy: 3.456 },
+    ])
+  })
+  assert.equal(linkText(html, "/funds"), "Funds 2 products Credit Fund 0% APY N New Fund 3.46% APY Browse funds")
+  assert.match(html, /src="\/logos\/credit.svg"/)
 })
