@@ -191,6 +191,24 @@ its existing explanations. This is a presentation switch only: it does not chang
 prices, the captured deployed Funds/Savings catalog, wallet authentication, order requests,
 execution state or the off-origin fetch guard. The preview displays the test cash unit as
 `USDC`; API/token identities remain unchanged. NVDA's order price is separate from its
-market-data price. Unsupported symbols show `Trading coming soon`; their page never exposes
-NVDA trading controls. The investor controller stays mounted during list/detail navigation.
+market-data price. Symbols without an order API have a selected-symbol Buy/Sell/Orders panel using the GIWA
+Invest card, fields, buttons and mobile sheet. It shows a market-price estimate and an
+explicit connect action; once connected the submit action remains disabled with `Trading
+coming soon`. It never exposes NVDA trading controls or sends an order for another symbol. The investor controller stays mounted during list/detail navigation.
 Actual missing-data, expired-session and transaction-error states remain visible.
+
+
+### Stocks Invest panel (2026-09-20)
+
+`StockInvestSurface` reuses the existing Invest panel tokens, amount components and
+`BottomSheet`; desktop width is 360px, matching Funds. It keeps one card mounted for the
+active desktop/mobile layout and reserves room after the footer for the mobile dock.
+NVDA uses the existing controller/TradePanel inside this surface. Its signed-in form requests
+server quotes and keeps all order/authentication boundaries. Buy quantities are entered in
+the NVDA field; cash comes exclusively from the server quote.
+
+Other listed symbols use `StockMarketInvestPanel`: Buy enters USDC, Sell enters stock units,
+with decimal-string/BigInt estimates from that symbol's already-loaded market quote. These
+estimates are only display values, rounded to two decimals, never execution quotes. Unknown
+or stale prices produce no estimate; balances/fees are not invented. Switching symbols or
+sides clears the draft. This work does not add multi-symbol order APIs or real trade support.

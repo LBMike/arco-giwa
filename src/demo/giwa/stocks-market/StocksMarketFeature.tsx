@@ -2,7 +2,7 @@ import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { ArrowLeft } from "lucide-react"
 import type { MarketClient } from "./client"
-import type { Catalog, Chart, Envelope, Security } from "./contracts"
+import type { Catalog, Chart, Envelope, Quote, Security } from "./contracts"
 import { curatedStock } from "./curated"
 import { FEED_LABELS } from "./display"
 import { FOCUS, knownWithoutCatalog, NotFoundDetail, scrollBehavior, SecurityDetail, UnavailableDetail } from "./MarketDetail"
@@ -12,6 +12,7 @@ import { useOwnedRead } from "./useOwnedRead"
 
 export type StocksAsideView = {
   selection: StocksSelection
+  quote?: Quote | null
   /**
    * The open symbol is not a verified market-data security: the ready market catalog does not list it, or no ready catalog
    * has been checked and it is neither NVDA nor one of the curated 40. The page then claims no market-data support for it.
@@ -32,6 +33,7 @@ export type StocksMarketFeatureProps = {
  * series the list's sparklines use and the table's filter/search/sort live above both views, so a detail visit keeps them.
  */
 export function StocksMarketFeature({ client, ordersClient = null, aside }: StocksMarketFeatureProps) {
+  const demo = useDemoPresentation()
   const selection = useStocksSelection()
   // What the ready market catalog said about the open symbol (reported by its owner); null until a ready catalog was checked.
   const [checked, setChecked] = useState<Checked | null>(null)
@@ -42,17 +44,17 @@ export function StocksMarketFeature({ client, ordersClient = null, aside }: Stoc
   // Below lg the NVDA order panel mounts a fixed Buy/Sell dock with its summary card, whose heading carries the frozen id
   // giwa-stocks-detail-title. The padding keeps the page end (and the chart slider) clear of the dock only while it is there:
   // not on the Orders/Portfolio tabs, nor before the order catalog loads. At lg the same id is the inline panel's: no padding.
-  const layout = detail ? `grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,488px)] lg:items-start${symbol === "NVDA" ? " max-lg:has-[#giwa-stocks-detail-title]:pb-28" : ""}` : "flex flex-col gap-6"
+  const layout = detail ? `grid grid-cols-1 gap-6 ${demo ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "lg:grid-cols-[minmax(0,1fr)_minmax(0,488px)]"} lg:items-start${symbol === "NVDA" ? " max-lg:has-[#giwa-stocks-detail-title]:pb-28" : ""}` : "flex flex-col gap-6"
   return <>
     {detail ? <button ref={back} type="button" onClick={selection.closeDetail} className={`inline-flex h-9 w-fit scroll-mt-[92px] items-center gap-2 rounded-lg text-sm font-medium text-[var(--color-arco-chip-ink)] hover:text-[var(--color-arco-ink)] ${FOCUS}`}><ArrowLeft aria-hidden="true" className="size-4 shrink-0" /><span>Stocks &amp; ETFs</span><span className="sr-only"> 목록으로</span></button> : null}
     <div className={layout}>
       <div className="min-w-0">{client ? <MarketOwner key={client.baseUrl} client={client} ordersClient={ordersClient} selection={selection} anchor={back} onChecked={setChecked} /> : <NoClient selection={selection} anchor={back} />}</div>
-      {aside ? <div className="flex min-w-0 flex-col gap-6">{aside({ selection, unverified: detail && !verified })}</div> : null}
+      {aside ? <div className={`flex min-w-0 flex-col gap-6 ${demo && detail ? "lg:sticky lg:top-[104px]" : ""}`}>{aside({ selection, quote: checked?.symbol === symbol ? checked.quote : null, unverified: detail && !verified })}</div> : null}
     </div>
   </>
 }
 
-type Checked = { symbol: string; listed: boolean }
+type Checked = { symbol: string; listed: boolean; quote: Quote | null }
 type ReportChecked = (update: (current: Checked | null) => Checked | null) => void
 function NoClient({ selection, anchor }: { selection: StocksSelection; anchor: RefObject<HTMLElement> }) {
   if (selection.symbol === null) return <section aria-label="Stocks market" className="w-full rounded-2xl bg-[var(--color-arco-surface)] p-6"><h1 className="text-2xl">Stocks</h1><p role="status" className="mt-3">시장정보 API 연결 준비 중</p></section>
@@ -112,12 +114,13 @@ function MarketCatalog({ client, response, capabilities, selection, anchor, onCh
   const listed = symbol === null ? null : catalog.securities.find(item => item.symbol === symbol) ?? null
   // This ready catalog's answer for the open symbol, so the page can tell a listed security from an unknown one.
   const isListed = listed !== null
+  const selectedQuote = symbol === null ? null : bySymbol.get(symbol) ?? null
   useEffect(() => {
     if (symbol === null) return
-    const answer: Checked = { symbol, listed: isListed }
+    const answer: Checked = { symbol, listed: isListed, quote: selectedQuote }
     onChecked(() => answer)
     return () => onChecked(current => current === answer ? null : current)
-  }, [symbol, isListed, onChecked])
+  }, [symbol, isListed, selectedQuote, onChecked])
   if (symbol === null) return <ListFrame selection={selection} settled table={table}>
     <div className="mb-4">{quotes.phase !== "ready" ? <Status status={quotes.phase} /> : <><DemoDetails><p className="text-xs text-[var(--color-arco-text-soft)]">Massive · {FEED_LABELS[quotes.value.feedDelay]}</p></DemoDetails>{quotes.value.status !== "AVAILABLE" && <Status status={quotes.value.status} />}</>}</div>
     <div ref={table} className="min-w-0 scroll-mt-24"><StocksMarketTable variant="full" catalog={catalog} quotes={quotes} capabilities={capabilities} series={series} view={view} onViewChange={setView} onSelect={name => selection.openDetail(name, "row")} /></div>

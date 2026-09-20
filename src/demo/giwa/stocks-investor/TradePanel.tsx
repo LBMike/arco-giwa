@@ -344,8 +344,8 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
       subValue={demo ? undefined : state.quantityCheck.ok ? `${state.quantityCheck.baseUnits} base units (9 decimals)` : "9 decimals max"}
       onChange={actions.setQuantity}
       filter={(next) => isDecimalKeystroke(next, STOCKS_QUANTITY_SCALE)}
-      balanceLabel="Available to sell"
-      balance={available === null ? undefined : `${formatSignedQuantity(available)} NVDA`}
+      balanceLabel={demo ? "Balance" : "Available to sell"}
+      balance={available === null ? (demo ? "--" : undefined) : `${formatSignedQuantity(available)} NVDA`}
       onMax={maxInput === null ? undefined : () => actions.setQuantity(maxInput)}
       maxClassName={FOCUS_RING}
       className={FIELD_FOCUS}
@@ -361,6 +361,8 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
       copyButton={false}
       caption={sell ? "You receive" : "You pay"}
       symbol={demo ? "USDC" : cashSymbol ?? "Test cash"}
+      icon={demo ? <img src="/logos/usdc.svg" alt="" width={18} height={18} /> : undefined}
+      balance={demo ? "--" : undefined}
       symbolNote={<TestNote>TEST</TestNote>}
       value={quote ? formatCash(quote.cashAmount) : "—"}
       subValue={demo ? undefined : quote ? `${quote.cashAmount} base units (6 decimals)` : "서버 견적 후 표시"}
@@ -436,15 +438,15 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
   }
 
   return (
-    <section className={`flex w-full flex-col gap-4 ${INVEST_PANEL_CARD}`} aria-labelledby={headingId} data-testid="stocks-trade-panel">
-      <Heading id={headingId} headingRef={headingRef}>
+    <section className={demo ? "flex w-full flex-col" : `flex w-full flex-col gap-4 ${INVEST_PANEL_CARD}`} aria-labelledby={demo ? undefined : headingId} aria-label={demo ? "Trade NVDA" : undefined} data-testid="stocks-trade-panel">
+      <DemoDetails><Heading id={headingId} headingRef={headingRef}>
         Trade NVDA
-      </Heading>
+      </Heading></DemoDetails>
       <p className="sr-only" aria-live="polite" data-testid="stocks-trade-status">
         {statusAnnouncement(state)}
       </p>
 
-      {blockNotice || accessStep ? (
+      {blockNotice || (accessStep && !demo) ? (
         <div className={accessStep ? "flex w-full flex-col" : undefined}>
           {blockNotice ? (
             <div id={noticeId}>
@@ -461,7 +463,7 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
               )}
             </div>
           ) : null}
-          {accessStep ? (
+          {accessStep && !demo ? (
             <>
               {cta}
               {hint}
@@ -483,7 +485,7 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
         >
           <fieldset className="flex w-full min-w-0 flex-col" disabled={block !== null}>
             <legend className="sr-only">Order side and quantity</legend>
-            <div role="radiogroup" aria-label="Order side" className={`grid w-full grid-cols-2 ${INVEST_TAB_TRACK}`}>
+            <DemoDetails><div role="radiogroup" aria-label="Order side" className={`grid w-full grid-cols-2 ${INVEST_TAB_TRACK}`}>
               {(["BUY", "SELL"] as const).map((side) => (
                 <button
                   key={side}
@@ -509,9 +511,9 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
                   {side === "BUY" ? "Buy" : "Sell"}
                 </button>
               ))}
-            </div>
+            </div></DemoDetails>
 
-            <div className="mt-4">
+            <div className={demo ? "" : "mt-4"}>
               <AmountBlock tone="soft" invalid={invalid}>
                 {sell ? [nvdaField, cashField] : [cashField, nvdaField]}
               </AmountBlock>
@@ -581,13 +583,13 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
             </div>
           ) : null}
 
-          {accessStep ? null : cta}
+          {accessStep && !demo ? null : cta}
           {step.kind === "place" ? (
             <button type="button" className={`${BUTTON_SECONDARY} mt-2 w-full`} onClick={actions.discardQuote}>
               Discard quote
             </button>
           ) : null}
-          {accessStep ? null : hint}
+          {accessStep && !demo ? null : hint}
         </form>
       ) : null}
     </section>

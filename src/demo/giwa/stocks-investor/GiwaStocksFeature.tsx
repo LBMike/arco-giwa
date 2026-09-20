@@ -1,4 +1,4 @@
-import { DemoDetails } from "../demo-presentation"
+import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 // GiwaStocksFeature — the independently renderable GIWA Stocks investor module.
 //
 // The host supplies an API client and a VERIFIED session (SIWE token for the connected wallet).
@@ -8,6 +8,8 @@ import { DemoDetails } from "../demo-presentation"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react"
 
+import { StockInvestSurface } from "./StockInvestSurface"
+import { TradePanel } from "./TradePanel"
 import { StocksAccessContext, type GiwaStocksAccess } from "./access"
 import { actionsFor, type StocksInvestorActions } from "./actions"
 import type { GiwaStocksClient } from "./client"
@@ -82,6 +84,7 @@ export function GiwaStocksFeatureView({
   access = null,
   showAllStocks = true,
 }: GiwaStocksFeatureViewProps) {
+  const demo = useDemoPresentation()
   const interacted = useRef(false)
   // The mobile trade sheet's open state lives here, above the `switching` swap below: signing in from inside the sheet
   // replaces the detail for one render, and the sheet must come back open. Leaving the NVDA detail, the Stocks tab or the
@@ -102,6 +105,16 @@ export function GiwaStocksFeatureView({
     onTabChange(TABS[target].id)
     tabRefs.current[TABS[target].id]?.focus()
   }
+
+  if (demo && detailOpen) return <StocksAccessContext.Provider value={access}>
+    <OrderExecutionSlotContext.Provider value={renderOrderExecution}>
+      <UserInteractionContext.Provider value={interacted}>
+        <StockInvestSurface symbol="NVDA" tab={tab === "orders" ? "ORDERS" : state.side} onTab={value => { if (value === "ORDERS") onTabChange("orders"); else { actions.setSide(value); onTabChange("stocks") } }}>
+          {switching ? <Notice tone="info">Updating session…</Notice> : tab === "orders" ? <OrdersView state={state} actions={actions} /> : <TradePanel state={state} actions={actions} />}
+        </StockInvestSurface>
+      </UserInteractionContext.Provider>
+    </OrderExecutionSlotContext.Provider>
+  </StocksAccessContext.Provider>
 
   return (
     <StocksAccessContext.Provider value={access}>
