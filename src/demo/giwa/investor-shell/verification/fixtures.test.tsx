@@ -200,6 +200,7 @@ test("preview installs the fetch guard before rendering and loads product pages 
     "../../stocks-market/environment",
     "../../stocks-market/fixtures",
     "../../stocks-market/routes",
+    "./deployed",
     "./fixtures",
     "react",
     "react-dom/client",

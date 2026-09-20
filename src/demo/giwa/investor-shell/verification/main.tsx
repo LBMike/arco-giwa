@@ -1,11 +1,11 @@
-// VERIFICATION SCREEN ONLY — FIXTURE PREVIEW. Not the app: not referenced by index.html, src/main.tsx, the router or
+// EDITABLE PREVIEW — captured GIWA products plus synthetic Stocks data. Not the app: not referenced by index.html, src/main.tsx, the router or
 // the Vite config, and never imported by product code.
 //
 // Mounts the REAL investor shell and pages (GiwaPreprodProviders > StocksPageEnvironment > the investor route tree of
 // src/main.tsx, in a hash router) so the shell, Home, Funds, Savings, Portfolio and the Stocks table can be clicked
-// through without a GIWA API or a chain. A window.fetch guard is installed before any product page module loads:
+// through without a live GIWA API or a chain. A window.fetch guard is installed before any product page module loads:
 //   - same-origin requests pass through (Vite assets, /logos, and /api/v1/stocks/* to the in-process harness of serve.ts),
-//   - the legacy GIWA API reads the pages need are answered from ./fixtures.ts,
+//   - public GIWA product reads use ./deployed-giwa.snapshot.json; wallet activity remains empty fixture data,
 //   - every other off-origin request (public RPC included) gets a 503 JSON error and is logged as BLOCKED.
 // Market data comes from the synthetic stocks-market fixtures through StocksPageEnvironment.fetch.
 // This page sends no wallet request itself; window.ethereum is whatever the browser provides.
@@ -23,8 +23,9 @@ import { StocksPageEnvironment } from "../../stocks-market/environment"
 import { fixtureMarketFetch, fixtureTop40MarketFetch } from "../../stocks-market/fixtures"
 import { stocksRoutes } from "../../stocks-market/routes"
 import { previewLegacyReply } from "./fixtures"
+import { deployedLegacyReply, DEPLOYED_CAPTURED_AT, DEPLOYED_SOURCE } from "./deployed"
 
-type AnsweredBy = "fixture" | "harness" | "BLOCKED"
+type AnsweredBy = "deployed" | "fixture" | "harness" | "BLOCKED"
 type LogEntry = { n: number; method: string; target: string; answeredBy: AnsweredBy; status: number | null; note: string }
 type LogState = { entries: readonly LogEntry[]; total: number; counts: Readonly<Record<AnsweredBy, number>> }
 type MarketMode = "top40" | "pilot" | "unconfigured"
@@ -53,7 +54,7 @@ const RPC_ORIGIN = originOf(GIWA_PUBLIC_RPC)
 
 // ── request log (page-local store) ──────────────────────────────────────────────────────────────────
 
-const EMPTY_LOG: LogState = { entries: [], total: 0, counts: { fixture: 0, harness: 0, BLOCKED: 0 } }
+const EMPTY_LOG: LogState = { entries: [], total: 0, counts: { deployed: 0, fixture: 0, harness: 0, BLOCKED: 0 } }
 let log = EMPTY_LOG
 const listeners = new Set<() => void>()
 let notifyQueued = false
@@ -122,9 +123,13 @@ function guardedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Res
   const method = methodOf(input, init)
   if (aborted(init)) return Promise.reject(new DOMException("The operation was aborted.", "AbortError"))
   if (LEGACY_BASE && (url.href === LEGACY_BASE || url.href.startsWith(`${LEGACY_BASE}/`))) {
-    const reply = previewLegacyReply(method, url.href.slice(LEGACY_BASE.length) || "/", Date.now())
+    const path = url.href.slice(LEGACY_BASE.length) || "/"
+    const captured = deployedLegacyReply(method, path)
+    // Only wallet activity/redemptions remain empty fixture responses. Funds/Savings never fall back to invented data.
+    const walletRead = /^\/api\/v1\/(activity|redemptions)\//.test(path)
+    const reply = captured ?? (walletRead ? previewLegacyReply(method, path, Date.now()) : null)
     if (reply) {
-      record(method, display(url), "fixture", reply.status)
+      record(method, display(url), captured ? "deployed" : "fixture", reply.status)
       return Promise.resolve(json(reply.status, reply.body))
     }
   }
@@ -257,7 +262,7 @@ function RequestLog() {
   return (
     <details className="w-full min-w-0 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)]" data-testid="investor-shell-request-log">
       <summary className={`cursor-pointer rounded-[var(--radius-card)] px-3 py-2 text-xs font-medium text-[var(--color-arco-ink)] ${FOCUS}`} data-testid="investor-shell-request-counts">
-        Request log · {state.total} total · fixture {state.counts.fixture} · harness {state.counts.harness} · BLOCKED {state.counts.BLOCKED}
+        Request log · {state.total} total · GIWA snapshot {state.counts.deployed} · fixture {state.counts.fixture} · harness {state.counts.harness} · BLOCKED {state.counts.BLOCKED}
       </summary>
       <div className="border-t border-[var(--color-arco-border)] p-3">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -291,9 +296,9 @@ function PreviewBar({ mode, onMode }: { mode: MarketMode; onMode: (mode: MarketM
     >
       <div className="mx-auto flex w-full min-w-0 max-w-[1512px] flex-col gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-semibold">PREVIEW · fixture data · not the app</p>
+          <p className="text-sm font-semibold">PREVIEW · GIWA 배포 상품 데이터 · Stocks 합성 데이터</p>
           <p className="mt-1 break-words text-xs text-[var(--color-arco-text-soft)]">
-            Real shell and pages. GIWA API and market data are in-page fixtures, /api/v1/stocks/* is the in-process harness, and every other off-origin request is blocked. This page sends no wallet request.
+            Funds/Savings는 기존 GIWA 공개 상품 정보의 사본입니다. 기준: {new Date(DEPLOYED_CAPTURED_AT).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} KST. 실시간 갱신·실제 거래 환경이 아닙니다. Stocks 시세는 합성 데이터입니다. <a href={`${DEPLOYED_SOURCE}/api/v1/evm/catalog/91342`} target="_blank" rel="noreferrer" className="underline">상품 데이터 출처</a>
           </p>
         </div>
         <div className="flex min-w-0 flex-wrap gap-x-8 gap-y-3">

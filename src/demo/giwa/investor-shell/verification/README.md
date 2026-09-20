@@ -1,5 +1,20 @@
 # Investor shell preview
 
+## Editable workspace update — 2026-09-20
+
+This workspace now displays a captured copy of the existing GIWA deployment's public product data by default.
+`deployed-giwa.snapshot.json` records the public API source and capture time. Catalog, market, featured cards and
+each product's price history are copied without rewriting fields. Funds shows bEQTY, auMINT, aiBENJI and aCAPIX;
+Savings uses the same catalog so product IDs and links stay consistent. This is a dated snapshot, not a live feed.
+Stocks still uses synthetic market data. Wallet activity remains empty preview data. External fetch blocking remains.
+
+The synthetic fixtures below are retained as test inputs; their five invented funds are no longer the default display
+in this editable workspace. `deployed.ts` routes public product reads and never substitutes synthetic history.
+
+## Original synthetic fixture reference
+
+The remainder documents the original all-synthetic mode and its retained test data, before the update above.
+
 **Fixture preview: not the app, not a real stack.** Nothing behind this page is a GIWA API, a database, a chain or a
 wallet. Every product, rate, price and address on it is invented.
 
