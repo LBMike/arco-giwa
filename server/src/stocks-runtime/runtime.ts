@@ -9,7 +9,7 @@ import { createDurableMockBroker } from '../stocks/mock-broker.js';
 import { createStocksRpcPort, type JsonRpcTransport } from '../stocks/rpc.js';
 import { StocksFinalizedObserver } from './observer.js';
 import { endpoint, externalStocksSigner, httpStocksRpc } from './transport.js';
-import type { NamedOperator } from './session.js';
+import { parseStocksOperators, type NamedOperator } from './operators.js';
 import { StocksObservationHealth } from './health.js';
 import { runtimeSnapshot } from './status.js';
 import { createSubmissionReceiptVerifier } from '../stocks-submissions/receipts.js';
@@ -39,8 +39,8 @@ export function parseStocksRuntimeConfig(value: unknown): StocksRuntimeConfig {
   ensure(row.operatorControls === undefined || typeof row.operatorControls === 'boolean', 'INVALID_STOCKS_OPERATOR_CONTROLS');
   freezeManifest(row.manifest);
   endpoint(row.rpcUrl); endpoint(row.signerUrl);
-  ensure(Array.isArray(row.operators) && row.operators.every(op => op && typeof op.wallet === 'string' && typeof op.operatorId === 'string' && Array.isArray(op.permissions) && op.permissions.every(p => typeof p === 'string')), 'INVALID_STOCKS_OPERATORS');
-  return structuredClone(row);
+  const operators = parseStocksOperators(row.operators);
+  return { ...structuredClone(row), operators };
 }
 
 // Optional composition: absence leaves every legacy route and worker unchanged.
@@ -74,7 +74,7 @@ export async function createStocksRuntime(options: {
 }) {
   const manifest = freezeManifest(options.manifest) as StocksRuntimeConfig['manifest'];
   const { pool, transport, signer, autodispatch, paused } = options;
-  const operators = structuredClone(options.operators);
+  const operators = parseStocksOperators(options.operators);
   ensure(typeof autodispatch === 'boolean' && typeof paused === 'boolean', 'INVALID_STOCKS_RUNTIME_POLICY');
   ensure(options.operatorControls === undefined || typeof options.operatorControls === 'boolean', 'INVALID_STOCKS_OPERATOR_CONTROLS');
   const digest = manifestDigest(manifest);

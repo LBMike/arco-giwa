@@ -1,4 +1,4 @@
-import { address, immutable, manifestDigest, PROFILE } from '../stocks/contracts.js';
+import { immutable, manifestDigest, PROFILE } from '../stocks/contracts.js';
 import { parseStocksRuntimeConfig, stocksAutodispatch, type StocksRuntimeConfig } from '../stocks-runtime/runtime.js';
 import { createDeploymentEvidence } from '../stocks-execution/deployment.js';
 
@@ -52,11 +52,9 @@ export async function checkStocksPreflight(env: NodeJS.ProcessEnv, options: {
     checks.push(result('autodispatch', autodispatch, autodispatch ? 'OBSERVATION_ENABLED_ON_START' : 'AUTODISPATCH_REQUIRED_FOR_OBSERVATION'));
     if (config) {
         checks.push(result('startupPause', config.paused, config.paused ? 'PAUSED_START_CONFIGURED' : 'PAUSED_START_REQUIRED'));
-        let validOperators = false;
-        try {
-            const wallets = config.operators.map(op => address(op.wallet));
-            validOperators = new Set(wallets).size === wallets.length && config.operators.every(op => op.operatorId.trim().length > 0 && op.operatorId.length <= 128) && config.operators.some(op => op.permissions.includes('stocks:read'));
-        } catch { /* invalid address */ }
+        // The runtime parser validates identities and permissions. A deployment
+        // additionally requires a reader so its state can be inspected.
+        const validOperators = config.operators.some(op => op.permissions.includes('stocks:read'));
         checks.push(result('operators', validOperators, validOperators ? 'NAMED_READER_CONFIGURED' : 'NAMED_READER_INVALID_OR_MISSING'));
     }
     for (const id of ['database', 'deployment', 'signer']) checks.push({ id, status: 'NOT_CHECKED', code: online ? 'CONFIGURATION_BLOCKED' : 'ONLINE_CHECK_REQUIRED' });

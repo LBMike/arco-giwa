@@ -1,17 +1,17 @@
 import { createRequire } from 'node:module';
 import type { FastifyRequest } from 'fastify';
 import { address, type Actor, type Operator } from '../stocks/contracts.js';
+import { parseStocksOperators, type NamedOperator } from './operators.js';
+export type { NamedOperator } from './operators.js';
 
 const require = createRequire(import.meta.url);
 const { verify } = require('jsonwebtoken') as typeof import('jsonwebtoken');
-export type NamedOperator = { wallet: string; operatorId: string; permissions: string[] };
 
 // The existing SIWE endpoint issues a short-lived HS256 wallet session. A legacy
 // shared operator token is deliberately not a Stocks operator identity.
 export function stocksSessionResolvers(secret: string, domains: readonly string[], operators: readonly NamedOperator[]) {
   const allowedDomains = new Set(domains);
-  const directory = new Map(operators.map(op => [address(op.wallet), { operatorId: op.operatorId, permissions: [...op.permissions] }]));
-  if (directory.size !== operators.length || operators.some(op => !op.operatorId || !Array.isArray(op.permissions))) throw new Error('INVALID_STOCKS_OPERATORS');
+  const directory = new Map(parseStocksOperators(operators).map(op => [op.wallet, { operatorId: op.operatorId, permissions: op.permissions }]));
   async function resolveActor(request: FastifyRequest): Promise<Actor | null> {
     const header = request.headers.authorization;
     if (!header?.startsWith('Bearer ')) return null;
@@ -26,7 +26,8 @@ export function stocksSessionResolvers(secret: string, domains: readonly string[
   }
   async function resolveOperator(request: FastifyRequest): Promise<Operator | null> {
     const actor = await resolveActor(request);
-    return actor ? directory.get(actor.wallet) ?? null : null;
+    const operator = actor ? directory.get(actor.wallet) : undefined;
+    return operator ? { operatorId: operator.operatorId, permissions: [...operator.permissions] } : null;
   }
   return { resolveActor, resolveOperator };
 }
