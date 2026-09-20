@@ -93,3 +93,25 @@ test("a path-prefixed base sends the public catalog under the prefix without Aut
   await client.catalog(new AbortController().signal)
   assert.deepEqual(calls.map(c => [c.url, new Headers(c.init.headers).get("authorization")]), [["https://api.test/prefix/api/v1/stocks/market/catalog", null]])
 })
+
+test("Alpaca envelopes retain feed coverage, accept public quotes and reject ambiguous providers", async () => {
+  for (const marketFeed of ["IEX", "SIP"] as const) {
+    const reply = { ...fixtureEnvelope([fixtureQuote()]), provider: "ALPACA", marketFeed }
+    const client = createMarketClient("https://api.fixture", async (_url, init) => {
+      const headers = new Headers(init.headers)
+      assert.equal(headers.get("APCA-API-KEY-ID"), null)
+      assert.equal(headers.get("APCA-API-SECRET-KEY"), null)
+      return Response.json(reply)
+    })
+    const response = await client.quotes(["NVDA"], new AbortController().signal)
+    assert.equal(response.provider, "ALPACA")
+    assert.equal(response.marketFeed, marketFeed)
+    assert.equal(response.data?.[0].price, "183.123456789012345678")
+  }
+  for (const patch of [{ provider: "ALPACA" }, { provider: "ALPACA", marketFeed: "ALL" }, { provider: "ALPACA", marketFeed: "iex" }, { provider: "MASSIVE", marketFeed: "SIP" }]) {
+    assert.throws(() => envelope({ ...fixtureEnvelope(fixtureCatalog()), ...patch }, parseCatalog))
+  }
+  const profile = envelope(fixtureEnvelope(fixtureProfile()), value => parseProfile(value, "NVDA", "https://api.fixture"))
+  assert.equal(profile.provider, "MASSIVE", "hybrid fundamentals keep their own source")
+  assert.equal(profile.marketFeed, undefined)
+})

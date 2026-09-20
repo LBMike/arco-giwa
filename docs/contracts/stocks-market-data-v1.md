@@ -18,7 +18,7 @@ The plugin/factory export names and exact TypeScript DTO fields must be document
 
 ## Response semantics
 
-Every JSON endpoint carries `schemaVersion: 1`, `profile: DEMO_TESTNET`, `chainId: 91342`, `purpose: DISPLAY_ONLY`, `priceBasis: UNDERLYING_SECURITY`, `provider: MASSIVE`, and `executionPriceSource: FIXED_MOCK_PRICE` to make the separation machine-readable.
+Every JSON endpoint carries `schemaVersion: 1`, `profile: DEMO_TESTNET`, `chainId: 91342`, `purpose: DISPLAY_ONLY`, `priceBasis: UNDERLYING_SECURITY`, `provider: MASSIVE|ALPACA`, and `executionPriceSource: FIXED_MOCK_PRICE` to make the separation machine-readable.
 
 Service responses carry explicit `status` (`AVAILABLE`, `STALE`, `UNAVAILABLE`, `UNCONFIGURED`), sanitized `reason`, `fetchedAt` (transport/cache observation), source timestamps on values/bars, and configured `feedDelay` (`UNKNOWN`, `DELAYED_15_MIN`, `END_OF_DAY`, `REALTIME`). Default UNKNOWN, never infer REALTIME from a successful response or key. A recent fetch does not make old trade timestamps live. Empty chart bars mean no returned observations, not zero prices. Decimal values (including price, change, marketCap and volumes) must be exact strings parsed from provider numeric lexemes, with bounded precision/magnitude; use bigint for comparisons/arithmetic. Numeric timestamps/counters are permitted when checked safe integers. No floating-point money arithmetic.
 
@@ -28,7 +28,7 @@ Do not map a static provider error body directly into HTTP responses/logs. Unava
 
 ## Credentials and request policy
 
-Factory accepts server-only injected API key and feed delay; keys are never returned or put in browser bundles/URLs. Default missing key returns UNCONFIGURED without network I/O. Use HTTPS `api.massive.com` and Authorization Bearer header, redirect error, bounded response bytes and total elapsed deadline including body read. Company branding host/path is explicitly restricted; proxy PNG/JPEG/WebP only with signature/type validation. Public API responses use same-origin logo path. Singleflight refresh and bounded cache/cooldown/request budget must work across request keys; a 429 should cool down provider calls globally rather than amplify into per-symbol retry storms. Document that a multi-process deployment needs shared quotas/cache externally.
+Factory accepts server-only injected API key and feed delay; keys are never returned or put in browser bundles/URLs. Default missing key returns UNCONFIGURED without network I/O. The default provider is Massive; the optional Alpaca provider uses two server-only authentication headers and a separate feed selection (see the extension below). Use HTTPS `api.massive.com` and Authorization Bearer header, redirect error, bounded response bytes and total elapsed deadline including body read. Company branding host/path is explicitly restricted; proxy PNG/JPEG/WebP only with signature/type validation. Public API responses use same-origin logo path. Singleflight refresh and bounded cache/cooldown/request budget must work across request keys; a 429 should cool down provider calls globally rather than amplify into per-symbol retry storms. Document that a multi-process deployment needs shared quotas/cache externally.
 
 ## Provider sources (accessed 2026-09-17)
 
@@ -126,3 +126,16 @@ no periodic refresh is added. Available per-symbol bars only feed list sparkline
 failed/stale detail rereads clearing them and subsequent successful reads restoring them.
 USD volume is calculated with bigint from session shares × displayed price, explicitly
 an estimate rather than exact executed turnover. It does not enter execution or settlement.
+
+
+## Alpaca provider extension (2026-09-21)
+
+The existing routes and quote/profile/chart DTOs are retained. ALPACA responses require `marketFeed: IEX|SIP` in addition to the unchanged display-only context. MASSIVE responses omit this field. Browser validation allows only these declared providers and feed combinations. IEX is a single-exchange observation set; it must not be described as consolidated US volume. `feedDelay` is independent of feed coverage and never inferred from successful authentication.
+
+Alpaca snapshots are batched for the allowlisted catalog. The freshest usable latestTrade or minuteBar supplies price. Change and percentage change are derived from a prior-session close with exact decimal arithmetic. Session volume is accepted only when the daily bar belongs to the same New York session date as the selected price. Missing symbols return explicit unavailable quotes, with no substitution from another security.
+
+Historical bars request split adjustment and the existing fixed intervals/ranges. A next-page token marks the returned chart TRUNCATED; no unbounded pagination is introduced. Existing cache, quote timestamp high-water, stale limits, response-size/time bounds and provider request controls apply. Credentials are restricted to `data.alpaca.markets` request headers and redirects are not followed.
+
+Fundamentals remain an independent Massive integration: stock market cap comes from the company profile; ETF AUM comes from ETF Global when entitled. Profile/logo responses identify MASSIVE even when prices use ALPACA. Failure or absence of fundamentals credentials does not block Alpaca quotes/charts. Market cap is never computed from trading volume, and an ETF's market cap is never substituted for its AUM.
+
+See [runtime setup](./stocks-market-runtime-v1.md#alpaca-activation) for configuration and official references. Tests use mocked provider responses; live account/feed compatibility is not yet verified.

@@ -1,4 +1,4 @@
-import type { Chart, FeedDelay, Range } from "./contracts"
+import type { Chart, Envelope, FeedDelay, Range } from "./contracts"
 import { scaled } from "./validate"
 export function exact(value: string | null): string { if (value === null) return "—"; const [whole, fraction = ""] = value.split("."); const trimmed = fraction.replace(/0+$/, ""); return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (trimmed ? `.${trimmed}` : "") }
 export function dollars(value: string | null): string { return value === null ? "—" : `$${exact(value)}` }
@@ -96,4 +96,10 @@ export function volumeDollars(price: string | null, shares: string | null): stri
   const units = scaled(price) * scaled(shares) / 10n ** 18n
   const fraction = String(units % (10n ** 18n)).padStart(18, "0").replace(/0+$/, "")
   return `${units / (10n ** 18n)}${fraction ? `.${fraction}` : ""}`
+}
+
+/** Feed coverage and latency are separate: IEX volume is never consolidated US volume. */
+export function marketSourceLabel(response?: Pick<Envelope<unknown>, "provider" | "marketFeed">): string {
+  if (response?.provider === "ALPACA") return response.marketFeed === "IEX" ? "Alpaca · IEX (single exchange)" : "Alpaca · SIP (US consolidated)"
+  return "Massive"
 }

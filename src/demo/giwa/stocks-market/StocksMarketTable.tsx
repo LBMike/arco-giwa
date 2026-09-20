@@ -4,7 +4,7 @@ import { Link } from "react-router-dom"
 import { CirclePause, Search } from "lucide-react"
 import type { Catalog, Chart, Envelope, Profile, Quote } from "./contracts"
 import { CURATED_SELECTION, curatedStock, matchesCuratedSelection, type CuratedStock } from "./curated"
-import { changeParts, chartPoints, dollars, compactDollars, volumeDollars, FEED_LABELS, priceLabel, windowChange } from "./display"
+import { changeParts, chartPoints, dollars, compactDollars, volumeDollars, marketSourceLabel, FEED_LABELS, priceLabel, windowChange } from "./display"
 import { StockLogo } from "./StockLogo"
 import { useOwnedRead, type ReadState } from "./useOwnedRead"
 import { scaled } from "./validate"
@@ -128,6 +128,7 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, profi
     ? rows.filter(row => (activeFilter === "ALL" || row.curated?.kind === activeFilter) && (!needle || [row.symbol, row.name, row.curated?.name ?? ""].some(text => text.toLowerCase().includes(needle)))).sort(compare(activeSort))
     : [...rows].sort(compare("rank")).slice(0, limit ?? rows.length)
   const feed = FEED_LABELS[quotes.phase === "ready" ? quotes.value.feedDelay : "UNKNOWN"]
+  const provider = marketSourceLabel(quotes.phase === "ready" ? quotes.value : undefined)
   const provenance = catalog.provenance
   const asOf = provenance.asOfDate ? `선정 기준일 ${provenance.asOfDate}` : "선정 기준일 미확인"
   const source = provenance.verification === "PILOT" ? `NVDA 파일럿 목록 · 40종목 선정 완료를 의미하지 않습니다. ${asOf}` : [`서버 선정 목록 · ${catalog.securities.length}종목 · ${provenance.verification}`, provenance.rankingMetric && `기준 ${provenance.rankingMetric}`, provenance.period && `기간 ${provenance.period}`, asOf].filter(Boolean).join(" · ")
@@ -156,7 +157,7 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, profi
             <div role="columnheader" className={`${HEAD} md:px-3`}>Price<DemoDetails><sup aria-hidden="true" className="ml-0.5 text-xs text-[var(--color-arco-muted)]">1</sup></DemoDetails></div>
             <div role="columnheader" className={`${HEAD} md:px-3`}>24H (%)</div>
             <div role="columnheader" className={`${HEAD} hidden md:block md:px-3`}>Market Cap / AUM</div>
-            <div role="columnheader" className={`${HEAD} hidden md:block md:pl-3`} title="Estimated session turnover: shares traded × displayed price">Volume (USD)</div>
+            <div role="columnheader" className={`${HEAD} hidden md:block md:pl-3`} title={`${provider} · Estimated session turnover: shares traded × displayed price`}>Volume (USD)</div>
             <div role="columnheader" className={HEAD}>Asset Status</div>
             {full && <div role="columnheader" className={`${HEAD} hidden md:block md:px-1.5`}>24h Chart</div>}
           </div>
@@ -191,7 +192,7 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, profi
     </div>
     {shown.length === 0 && <p className="border-b border-[var(--color-arco-border)] py-6 text-center text-sm text-[var(--color-arco-text-soft)]">검색 결과가 없습니다.</p>}
     <DemoDetails><div className="mt-4 space-y-1 text-xs leading-5 text-[var(--color-arco-text-soft)]">
-      <p>{`¹ Price는 기초 미국 주식·ETF의 USD 시세(Massive, ${feed})이며 ARCO 토큰 가격이나 모의 체결가가 아닙니다. 24H (%)는 공급자가 제공한 전일 종가 대비 변동입니다. Market Cap은 주식 시가총액, AUM은 ETF 운용자산입니다. Volume (USD)은 세션 거래량 × 표시 가격으로 계산한 추정 거래대금입니다.${full ? " 24h Chart는 각 종목의 1D(rolling 24시간) 종가입니다." : ""}`}</p>
+      <p>{`¹ Price는 기초 미국 주식·ETF의 USD 시세(${provider}, ${feed})이며 ARCO 토큰 가격이나 모의 체결가가 아닙니다. 24H (%)는 전일 종가 대비 변동입니다. Market Cap은 주식 시가총액, AUM은 ETF 운용자산입니다. Volume (USD)은 세션 거래량 × 표시 가격으로 계산한 추정 거래대금입니다.${full ? " 24h Chart는 각 종목의 1D(rolling 24시간) 종가입니다." : ""}`}</p>
       <p>{source}</p>
       {curated && <p>선정 참고: {CURATED_SELECTION.source} · {CURATED_SELECTION.metric} · {CURATED_SELECTION.period} · {CURATED_SELECTION.retrievedDate} 조회 · {CURATED_SELECTION.note}</p>}
     </div></DemoDetails>

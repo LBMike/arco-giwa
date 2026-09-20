@@ -1,9 +1,14 @@
 import { MARKET_CONTEXT, PILOT_CATALOG, MarketDataError, type Chart, type ChartRange, type CompanyProfile, type DataReason, type DataStatus, type DisplayCatalog, type FeedDelay, type Logo, type MarketResponse, type Quote } from './contracts.js';
 import { chart, chartPath, etfAssets, profile, quotes, RANGE_RULES, type InternalProfile } from './normalize.js';
-import { MassiveTransport } from './transport.js';
+import { alpacaChart, alpacaChartPath, alpacaQuotes } from './alpaca.js';
+import { AlpacaTransport, MassiveTransport } from './transport.js';
 
 export interface StocksMarketDataOptions {
   apiKey?: string;
+  provider?: 'MASSIVE' | 'ALPACA';
+  alpacaKeyId?: string;
+  alpacaSecretKey?: string;
+  alpacaFeed?: 'iex' | 'sip';
   catalog?: DisplayCatalog;
   feedDelay?: FeedDelay;
   fetch?: typeof fetch;
@@ -46,15 +51,19 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
   const now = options.now ?? Date.now; const delay = options.feedDelay ?? 'UNKNOWN';
   if (!['UNKNOWN', 'DELAYED_15_MIN', 'END_OF_DAY', 'REALTIME'].includes(delay)) return BAD_CONFIG();
   const observationLimit = { UNKNOWN: 20 * 60000, DELAYED_15_MIN: 20 * 60000, END_OF_DAY: 36 * 3600000, REALTIME: 2 * 60000 }[delay];
+  const provider = options.provider ?? 'MASSIVE'; const alpacaFeed = options.alpacaFeed ?? 'iex';
+  if (!['MASSIVE', 'ALPACA'].includes(provider) || !['iex', 'sip'].includes(alpacaFeed)) return BAD_CONFIG();
   const transport = options.apiKey ? new MassiveTransport({ apiKey: options.apiKey, fetch: options.fetch, now, timeoutMs: options.timeoutMs, requestsPerMinute: options.requestsPerMinute }) : null;
+  const alpaca = provider === 'ALPACA' && options.alpacaKeyId && options.alpacaSecretKey ? new AlpacaTransport({ keyId: options.alpacaKeyId, secretKey: options.alpacaSecretKey, fetch: options.fetch, now, timeoutMs: options.timeoutMs, requestsPerMinute: options.requestsPerMinute }) : null;
+  const priceTransport = provider === 'ALPACA' ? alpaca : transport;
   const cache = new Map<string, Entry>(); const flights = new Map<string, Promise<void>>();
   // Retain the accepted source high-water independently of reset/missing snapshots.
   // Only validated catalog symbols can enter this map, so it holds at most 40 keys.
   const latestAcceptedTimestamp = new Map<string, string>();
-  const envelope = <T>(status: DataStatus, reason: DataReason, data: T | null, fetched?: number): MarketResponse<T> => ({ ...MARKET_CONTEXT, status, reason, data: data === null ? null : structuredClone(data), fetchedAt: fetched === undefined ? null : new Date(fetched).toISOString(), cacheAgeMs: fetched === undefined ? null : Math.max(0, now() - fetched), feedDelay: delay });
+  const envelope = <T>(status: DataStatus, reason: DataReason, data: T | null, fetched?: number): MarketResponse<T> => ({ ...MARKET_CONTEXT, provider, ...(provider === 'ALPACA' ? { marketFeed: alpacaFeed === 'iex' ? 'IEX' as const : 'SIP' as const } : {}), status, reason, data: data === null ? null : structuredClone(data), fetchedAt: fetched === undefined ? null : new Date(fetched).toISOString(), cacheAgeMs: fetched === undefined ? null : Math.max(0, now() - fetched), feedDelay: delay });
   const checkSymbol = (symbol: string) => { if (!symbols.includes(symbol)) throw new MarketDataError('NOT_FOUND'); };
   async function get<T>(key: string, policy: { ttl: number; maxAge: number }, load: () => Promise<T>): Promise<MarketResponse<T>> {
-    if (!transport) return envelope('UNCONFIGURED', 'NOT_CONFIGURED', null);
+    if (!(key === 'quotes' || key.startsWith('chart:') ? priceTransport : transport)) return envelope('UNCONFIGURED', 'NOT_CONFIGURED', null);
     let entry = cache.get(key); let time = now();
     if (entry?.data !== undefined && entry.fetched !== undefined && time - entry.fetched < policy.ttl) return envelope('AVAILABLE', null, entry.data as T, entry.fetched);
     if (!entry || entry.retryAt <= time) {
@@ -84,12 +93,13 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
     if (entry?.data !== undefined && entry.fetched !== undefined && time - entry.fetched <= policy.maxAge) return envelope(entry.reason ? 'STALE' : 'AVAILABLE', entry.reason, entry.data as T, entry.fetched);
     return envelope('UNAVAILABLE', entry?.reason ?? 'PROVIDER_UNAVAILABLE', null, entry?.fetched);
   }
+  const massiveEnvelope = <T>(result: MarketResponse<T>): MarketResponse<T> => { const { marketFeed: _feed, ...rest } = result; return { ...rest, provider: 'MASSIVE' }; };
   const getProfile = (symbol: string) => get<InternalProfile>(`profile:${symbol}`, POLICY.profile, async () => profile(await transport!.json(`/v3/reference/tickers/${symbol}`), symbol));
   return {
     hasSymbol: symbol => symbols.includes(symbol),
     catalog: () => envelope('AVAILABLE', null, selected),
     async quotes() {
-      const result = await get<Quote[]>('quotes', POLICY.quotes, async () => quotes(await transport!.json(`/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${symbols.join(',')}&include_otc=false`), symbols, now()));
+      const result = await get<Quote[]>('quotes', POLICY.quotes, async () => provider === 'ALPACA' ? alpacaQuotes(await alpaca!.json(`/v2/stocks/snapshots?symbols=${symbols.join(',')}&feed=${alpacaFeed}`), symbols, now()) : quotes(await transport!.json(`/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${symbols.join(',')}&include_otc=false`), symbols, now()));
       if (!result.data) result.data = symbols.map(symbol => ({ symbol, currency: 'USD', price: null, change: null, changePercent: null, sessionVolume: null, previousClose: null, sourceTimestamp: null, observationAgeMs: null, priceSource: null, status: result.status, reason: result.reason }));
       else {
         for (const q of result.data) {
@@ -104,7 +114,7 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
     },
     async profile(symbol) {
       checkSymbol(symbol);
-      const result = await getProfile(symbol);
+      const result = massiveEnvelope(await getProfile(symbol));
       const data = result.data?.profile;
       if (!data) return { ...result, data: null };
       if (data.securityType !== 'ETF') return { ...result, data: { ...data, aum: null, aumAsOf: null } };
@@ -115,18 +125,18 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
     },
     async chart(symbol, range) {
       checkSymbol(symbol); if (!Object.prototype.hasOwnProperty.call(RANGE_RULES, range)) throw new MarketDataError('NOT_FOUND');
-      const result = await get<Chart>(`chart:${symbol}:${range}`, POLICY.chart, async () => { const requested = now(); return chart(await transport!.json(chartPath(symbol, range, requested)), symbol, range, requested); });
+      const result = await get<Chart>(`chart:${symbol}:${range}`, POLICY.chart, async () => { const requested = now(); return provider === 'ALPACA' ? alpacaChart(await alpaca!.json(alpacaChartPath(symbol, range, requested, alpacaFeed)), symbol, range, requested) : chart(await transport!.json(chartPath(symbol, range, requested)), symbol, range, requested); });
       if (result.status === 'AVAILABLE' && result.data?.history === 'EMPTY') result.reason = 'EMPTY_HISTORY';
       return result;
     },
     async logo(symbol) {
       checkSymbol(symbol);
-      return get<Logo>(`logo:${symbol}`, POLICY.logo, async () => {
+      return massiveEnvelope(await get<Logo>(`logo:${symbol}`, POLICY.logo, async () => {
         const p = await getProfile(symbol);
         if (!p.data) throw new MarketDataError(p.reason ?? 'NOT_FOUND');
         if (!p.data.iconPath) throw new MarketDataError('NOT_FOUND');
         return transport!.logo(p.data.iconPath);
-      });
+      }));
     },
   };
 }

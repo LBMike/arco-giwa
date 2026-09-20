@@ -2,7 +2,13 @@ import { performance } from 'node:perf_hooks';
 import { MarketDataError, type Logo } from './contracts.js';
 import { parseExactJson } from './exact-json.js';
 
-export interface TransportOptions { apiKey: string; fetch?: typeof fetch; now?: () => number; timeoutMs?: number; requestsPerMinute?: number }
+export interface TransportLimits { fetch?: typeof fetch; now?: () => number; timeoutMs?: number; requestsPerMinute?: number }
+export interface TransportOptions extends TransportLimits { apiKey: string }
+export interface AlpacaTransportOptions extends TransportLimits { keyId: string; secretKey: string }
+function credential(value: string): string {
+  if (!/^[\x21-\x7e]{1,512}$/.test(value)) throw new Error('INVALID_MARKET_DATA_CONFIG');
+  return value;
+}
 export function brandingPath(input: unknown): string | null {
   if (typeof input !== 'string') return null;
   try {
@@ -12,21 +18,21 @@ export function brandingPath(input: unknown): string | null {
     return url.pathname;
   } catch { return null; }
 }
-export class MassiveTransport {
+class BoundedTransport {
   private readonly fetcher: typeof fetch;
   private readonly now: () => number;
-  private readonly timeout: number;
+  protected readonly timeout: number;
   private readonly budget: number;
   private calls: number[] = [];
   private cooldownUntil = 0;
-  constructor(private readonly options: TransportOptions) {
+  constructor(options: TransportLimits, private readonly origin: string, private readonly authentication: Record<string, string>) {
     this.fetcher = options.fetch ?? fetch; this.now = options.now ?? Date.now;
     this.timeout = options.timeoutMs ?? 4000; this.budget = options.requestsPerMinute ?? 5;
-    if (!/^[\x21-\x7e]{1,512}$/.test(options.apiKey) || !Number.isSafeInteger(this.timeout) || this.timeout < 10 || this.timeout > 15000 || !Number.isSafeInteger(this.budget) || this.budget < 1 || this.budget > 300) throw new Error('INVALID_MARKET_DATA_CONFIG');
+    if (!Number.isSafeInteger(this.timeout) || this.timeout < 10 || this.timeout > 15000 || !Number.isSafeInteger(this.budget) || this.budget < 1 || this.budget > 300) throw new Error('INVALID_MARKET_DATA_CONFIG');
   }
-  private async request(path: string, maxBytes: number, image = false): Promise<{ bytes: Uint8Array; type: string }> {
-    const url = new URL(path, 'https://api.massive.com');
-    if (url.origin !== 'https://api.massive.com' || url.username || url.password || url.hash || url.searchParams.has('apiKey') || !path.startsWith('/') || path.startsWith('//')) throw new MarketDataError('INVALID_RESPONSE');
+  protected async request(path: string, maxBytes: number, image = false): Promise<{ bytes: Uint8Array; type: string }> {
+    const url = new URL(path, this.origin);
+    if (url.origin !== this.origin || url.username || url.password || url.hash || url.searchParams.has('apiKey') || !path.startsWith('/') || path.startsWith('//')) throw new MarketDataError('INVALID_RESPONSE');
     const now = this.now();
     if (now < this.cooldownUntil) throw new MarketDataError('PROVIDER_RATE_LIMITED');
     this.calls = this.calls.filter(t => t > now - 60000);
@@ -38,7 +44,7 @@ export class MassiveTransport {
     let finished = false;
     const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new MarketDataError('TIMEOUT')); }, this.timeout); });
     const work = async () => {
-      const response = await this.fetcher(url, { headers: { Authorization: `Bearer ${this.options.apiKey}`, Accept: image ? 'image/png,image/jpeg,image/webp' : 'application/json' }, redirect: 'error', signal: controller.signal });
+      const response = await this.fetcher(url, { headers: { ...this.authentication, Accept: image ? 'image/png,image/jpeg,image/webp' : 'application/json' }, redirect: 'error', signal: controller.signal });
       if (finished || performance.now() - started >= this.timeout) { void response.body?.cancel().catch(() => {}); throw new MarketDataError('TIMEOUT'); }
       if (response.redirected || (response.url && new URL(response.url).origin !== url.origin)) throw new MarketDataError('INVALID_RESPONSE');
       if (response.status === 429) {
@@ -77,6 +83,16 @@ export class MassiveTransport {
       return result;
     }
     catch (e) { throw e instanceof MarketDataError ? e : new MarketDataError('INVALID_RESPONSE'); }
+  }
+}
+export class AlpacaTransport extends BoundedTransport {
+  constructor(options: AlpacaTransportOptions) {
+    super(options, 'https://data.alpaca.markets', { 'APCA-API-KEY-ID': credential(options.keyId), 'APCA-API-SECRET-KEY': credential(options.secretKey) });
+  }
+}
+export class MassiveTransport extends BoundedTransport {
+  constructor(options: TransportOptions) {
+    super(options, 'https://api.massive.com', { Authorization: `Bearer ${credential(options.apiKey)}` });
   }
   async logo(path: string): Promise<Logo> {
     if (brandingPath(`https://api.massive.com${path}`) !== path) throw new MarketDataError('INVALID_RESPONSE');

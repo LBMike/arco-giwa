@@ -6,7 +6,7 @@ import type { MarketClient } from "./client"
 import type { Chart, Envelope, Profile, Quote, Range, Security } from "./contracts"
 import { RANGES } from "./contracts"
 import { curatedStock, type CuratedStock } from "./curated"
-import { barRange, changeParts, compactDollars, dollars, exact, FEED_LABELS, priceLabel, time } from "./display"
+import { barRange, changeParts, compactDollars, dollars, exact, FEED_LABELS, marketSourceLabel, priceLabel, time } from "./display"
 import { MarketChart, type ChartSelection } from "./MarketChart"
 import type { StocksSelection } from "./selection"
 import { StockLogo } from "./StockLogo"
@@ -175,7 +175,7 @@ export function StatisticsCard({ symbol, quote, quotes, profile, day }: { symbol
     <h2 id={id} className="text-2xl font-medium leading-[1.05] tracking-[-0.01em] text-[var(--color-arco-ink)]">Statistics</h2>
     <div className="mt-3 grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-6 lg:grid-cols-1 2xl:grid-cols-2">
       <StatGroup title="Underlying Asset Price" qualifier="24H" rows={[{ label: "Open", ...price(span?.open ?? null) }, { label: "High", ...price(span?.high ?? null) }, { label: "Low", ...price(span?.low ?? null) }]} note={span ? `최근 24시간(rolling) · 반환된 1D ${day!.interval} 봉의 첫 시가·최고가·최저가${day!.history === "TRUNCATED" ? " · 일부 구간만 반환된 기준" : ""}` : "현재 1D 차트 관측값(봉 2개 이상)이 있을 때만 표시합니다."} />
-      <StatGroup title="Underlying Asset Statistics" rows={[{ label: "Total Market Cap", value: compactDollars(marketCap), title: marketCap === null ? undefined : dollars(marketCap) }, { label: "세션 거래량", value: quote?.sessionVolume == null ? "—" : `${exact(quote.sessionVolume)} 주` }, { label: "전일 종가", ...price(quote?.previousClose ?? null) }]} />
+      <StatGroup title="Underlying Asset Statistics" rows={[{ label: "Total Market Cap", value: compactDollars(marketCap), title: marketCap === null ? undefined : dollars(marketCap) }, { label: "세션 거래량", title: quotes.phase === "ready" && quotes.value.provider === "ALPACA" ? marketSourceLabel(quotes.value) : undefined, value: quote?.sessionVolume == null ? "—" : `${exact(quote.sessionVolume)} 주` }, { label: "전일 종가", ...price(quote?.previousClose ?? null) }]} />
     </div>
     <DemoDetails><div className="mt-4 space-y-1 text-xs text-[var(--color-arco-text-soft)]">
       <p>Massive · {feed} · 시세 관측: {time(quote?.sourceTimestamp ?? null)}. 주식 시세·기업 시가총액은 ARCO 토큰 가격·유동성·보유량이 아닙니다.</p>

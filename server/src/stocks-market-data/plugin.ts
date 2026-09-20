@@ -7,7 +7,8 @@ export interface StocksMarketDataPluginOptions { service: StocksMarketDataServic
 const ROOT = '/api/v1/stocks/market';
 class InputError extends Error { constructor(readonly code: 'INVALID_QUERY' | 'UNKNOWN_SYMBOL', readonly status: number) { super(code); } }
 export async function stocksMarketDataPlugin(app: FastifyInstance, { service }: StocksMarketDataPluginOptions): Promise<void> {
-  app.setErrorHandler((error, _request, reply) => reply.code(error instanceof InputError ? error.status : 500).send({ ...MARKET_CONTEXT, error: error instanceof InputError ? error.code : 'MARKET_DATA_INTERNAL_ERROR' }));
+  const { provider, marketFeed } = service.catalog();
+  app.setErrorHandler((error, _request, reply) => reply.code(error instanceof InputError ? error.status : 500).send({ ...MARKET_CONTEXT, provider, ...(marketFeed ? { marketFeed } : {}), error: error instanceof InputError ? error.code : 'MARKET_DATA_INTERNAL_ERROR' }));
   const query = (request: FastifyRequest, allowed: string[] = []) => {
     const q = request.query as Record<string, unknown>;
     if (!q || Object.keys(q).some(k => !allowed.includes(k))) throw new InputError('INVALID_QUERY', 400);
