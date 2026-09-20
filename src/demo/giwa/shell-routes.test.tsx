@@ -59,3 +59,31 @@ test("shell layout keeps the provider split, the 76px sticky bar and matching gu
   assert.doesNotMatch(components, /HeaderNavLink/)
   assert.match(read("../components/SectionNav.tsx"), /sticky top-\[76px\][^"]*-mx-4 px-4 md:-mx-8 md:px-8/)
 })
+
+test("a page's fixed bottom bar reserves its room after the footer, not inside main", () => {
+  const shell = read("./GiwaPreprodApp.tsx")
+  // The column that holds the sticky bar, <main> and the footer: padding here is the only in-flow room AFTER the footer
+  // (html, body and #root are height:100%, so an element appended to <body> lands one viewport down, not at the end).
+  const open = shell.indexOf('<div className="flex min-h-screen min-w-0 flex-col pb-[var(--giwa-dock-space,0px)]">')
+  assert.ok(open > 0, "the shell column reserves a page's fixed bottom bar")
+  // File order alone would also hold for a footer OUTSIDE that column: walk to the tag that closes it instead.
+  let depth = 0
+  let close = -1
+  for (const match of shell.slice(open).matchAll(/<div\b|<\/div>/g)) {
+    depth += match[0] === "</div>" ? -1 : 1
+    if (depth === 0) {
+      close = open + (match.index ?? 0)
+      break
+    }
+  }
+  assert.ok(close > open, "the padded column's closing tag")
+  const column = shell.slice(open, close)
+  assert.match(column, /<Footer links=\{GIWA_FOOTER_LINKS\} \/>/, "the footer is inside the padded column, so the room lands after it")
+  assert.match(column, /<main\b/, "and so is main")
+  // The only publisher today: the Stocks NVDA dock, while it is mounted.
+  const views = read("./stocks-investor/StocksViews.tsx")
+  assert.match(views, /const DOCK_SPACE_PROPERTY = "--giwa-dock-space"/)
+  assert.match(views, /const DOCK_SPACE = "calc\(env\(safe-area-inset-bottom\) \+ 4\.5rem\)"/)
+  assert.match(views, /style\.setProperty\(property, value\)/, "set on mount")
+  assert.match(views, /style\.removeProperty\(property\)/, "removed on unmount")
+})

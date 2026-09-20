@@ -218,6 +218,14 @@ export function GiwaStocksFeature(props: GiwaStocksFeatureProps) {
   )
 
   const context = { client, session, hostWallet, onSessionRejected }
+  // The note the panel took for a sign-in the user started belongs to THIS trade view with THIS wallet connected, and only
+  // until that sign-in is over. Leaving the NVDA detail or the Stocks tab, losing the connected wallet, or a sign-in the
+  // host reports as failed drops it, so a session that lands after that starts on Buy like any other. Declared before
+  // setContext so that in a commit which does both, the note is gone before the new identity is entered.
+  const tradeShown = tab === "stocks" && detailOpen && access !== null && access.wallet === "ready" && access.host !== "error"
+  useIsomorphicLayoutEffect(() => {
+    if (!tradeShown) controller.forgetSignInIntent()
+  }, [controller, tradeShown])
   // Applied before paint on every render; a context with the same identity is a no-op.
   useIsomorphicLayoutEffect(() => {
     controller.setContext(context)
@@ -250,12 +258,14 @@ export function GiwaStocksFeature(props: GiwaStocksFeatureProps) {
   // A refusal shown on the Sell form (it may arrive without the "placing" state ever being painted). Editing after it
   // clears the refusal while the form stays in view, which is not a new appearance.
   const refusedKey = state.attempt?.status === "REJECTED" ? state.attempt.body.idempotencyKey : null
-  const seenSellForm = useRef<{ shown: boolean; refusedKey: string | null }>({ shown: false, refusedKey: null })
+  // The generation is part of "seen": signing in while the Sell form is on screen makes a new identity whose holdings have
+  // not been read yet, so that first appearance under the new identity is a new appearance.
+  const seenSellForm = useRef<{ shown: boolean; refusedKey: string | null; generation: number }>({ shown: false, refusedKey: null, generation: state.generation })
   useEffect(() => {
     const previous = seenSellForm.current
-    seenSellForm.current = { shown: sellForm, refusedKey }
+    seenSellForm.current = { shown: sellForm, refusedKey, generation: state.generation }
     if (switching || !verified || !catalogReady || !sellForm) return
-    if (!previous.shown || (refusedKey !== null && refusedKey !== previous.refusedKey)) actions.loadPortfolio()
+    if (!previous.shown || previous.generation !== state.generation || (refusedKey !== null && refusedKey !== previous.refusedKey)) actions.loadPortfolio()
   }, [actions, switching, verified, catalogReady, sellForm, refusedKey, state.generation])
 
   // A SELL order that has just been accepted reserves units: refresh the available quantity once. An attempt restored as

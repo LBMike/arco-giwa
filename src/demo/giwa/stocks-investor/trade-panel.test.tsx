@@ -84,6 +84,51 @@ test("CTA precedence: wallet → network → wallet support → signing in → s
   assert.deepEqual(tradeStep(h.controller.getState(), null), { kind: "blocked", label: "Get quote", hint: null })
 })
 
+test("the step before the form (wallet, network, sign-in) is offered with its reason, above the form; a trading action stays at its foot", async () => {
+  const h = await signedOut()
+  const steps: [Partial<GiwaStocksAccess>, string][] = [
+    [{ wallet: "disconnected", host: "signed-out", connectWallet: noop }, "Connect wallet"],
+    [{ wallet: "wrong-network", host: "signed-out", switchNetwork: noop }, "Switch to GIWA Sepolia"],
+    [{ wallet: "ready", host: "signed-out", canSignIn: true, signIn: noop }, "Sign in to trade"],
+    [{ wallet: "ready", host: "signing-in" }, "Signing in…"],
+    [{ wallet: "unavailable", host: "signed-out" }, "Wallet cannot sign here"],
+  ]
+  for (const [over, label] of steps) {
+    const html = panel(render(h.controller, { ...READY_ACCESS, host: "signed-out", ...over } as GiwaStocksAccess))
+    const action = html.indexOf(cta(html).tag)
+    // The panel's own id ends in -notice; `id="` alone would match the section's data-testid and never fail.
+    const noticeId = html.match(/id="([^"]*-notice)"/)?.[1]
+    assert.ok(noticeId, `${label}: the block notice is rendered`)
+    const notice = html.indexOf(`id="${noticeId}"`)
+    const reason = html.indexOf("Sign-in required")
+    const form = html.indexOf("<form")
+    const group = html.indexOf('role="radiogroup"')
+    assert.ok(action > 0 && form > 0 && group > 0, label)
+    assert.ok(notice > 0 && notice < action, `${label}: the reason comes first`)
+    assert.ok(reason > 0 && reason < action, `${label}: and its text is above the action`)
+    assert.ok(action < form, `${label}: the whole next-step button is above the disabled form, in the first screen`)
+    assert.ok(action < group, `${label}: above the Buy/Sell segment`)
+  }
+  // Signed in, the form is usable: the action is the form's own submit, at the foot of the panel as in the GIWA panel.
+  const open = createHarness()
+  await open.enter(WALLET_A)
+  const html = panel(render(open.controller))
+  assert.equal(cta(html).label, "Get quote")
+  assert.ok(html.indexOf(cta(html).tag) > html.indexOf('role="radiogroup"'), "the trading action stays at the foot of the form")
+  assert.ok(html.indexOf(cta(html).tag) > html.indexOf("<form"), "inside the form (Enter in the quantity field asks for a quote)")
+})
+
+test("the panel's front shows the price; the order's small print is folded into 'Order details'", async () => {
+  const open = createHarness()
+  await open.enter(WALLET_A)
+  const html = panel(render(open.controller))
+  assert.match(text(html), /Price 120 ARCO_TEST_USDC \/ NVDA \(fixed, test\)/, "the mock price stays on the front")
+  assert.match(text(html), /Order details/, "the disclosure")
+  assert.doesNotMatch(text(html), /Order capability/, "no longer a row of its own above the action")
+  const source = readFileSync(new URL("./TradePanel.tsx", import.meta.url), "utf8")
+  assert.match(source, /InfoRow label="Order details"[\s\S]{0,1200}Field label="Order capability"/, "it moved into the disclosure, not away")
+})
+
 test("an ended session (expired, rejected, other wallet) replaces the generic sign-in notice, and the action points at it", async () => {
   const h = await signedOut()
   const generic = /Connecting a wallet alone does not sign you in/

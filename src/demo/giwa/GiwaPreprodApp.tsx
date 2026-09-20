@@ -37,7 +37,10 @@ export function GiwaPreprodApp({ admin = false }: { admin?: boolean }) {
           </div>
         </div>
       </aside>
-      <div className="flex min-h-screen min-w-0 flex-col">
+      {/* A page may publish --giwa-dock-space for a fixed bottom bar of its own (the Stocks NVDA dock): the room is kept
+          here, after the footer, because the bar covers the bottom of the viewport and padding inside <main> would leave
+          the footer under it. Unset on every other page, so the shell is unchanged. */}
+      <div className="flex min-h-screen min-w-0 flex-col pb-[var(--giwa-dock-space,0px)]">
         <GiwaHeader admin={admin} />
         <main
           ref={mainRef}

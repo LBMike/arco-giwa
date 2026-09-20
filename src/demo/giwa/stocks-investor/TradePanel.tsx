@@ -364,9 +364,28 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
     />
   )
 
+  const signIn = step.kind === "sign-in" && access?.canSignIn ? access.signIn : undefined
   const accessAction =
-    step.kind === "connect" ? access?.connectWallet : step.kind === "switch" ? access?.switchNetwork : step.kind === "sign-in" && access?.canSignIn ? access.signIn : undefined
+    step.kind === "connect"
+      ? access?.connectWallet
+      : step.kind === "switch"
+        ? access?.switchNetwork
+        : signIn
+          ? // The user states Buy or Sell before signing in; the controller keeps that one choice through this sign-in.
+            () => {
+              actions.noteSignInIntent()
+              signIn()
+            }
+          : undefined
+  // Wallet, network and sign-in are the steps BEFORE the form can be used. Their action goes with the reason, above the
+  // disabled form, so the whole next-step button is in the first screen of the detail instead of below 400 px of preview.
+  const accessStep = step.kind === "connect" || step.kind === "switch" || step.kind === "sign-in" || step.kind === "signing-in" || step.kind === "wallet-unavailable"
   const describedBy = step.hint ? ctaHintId : blockNotice ? noticeId : undefined
+  const hint = step.hint ? (
+    <p id={ctaHintId} className="mt-2 text-xs leading-5 text-[var(--color-arco-text-soft)]">
+      {step.hint}
+    </p>
+  ) : null
   let cta: ReactNode = null
   switch (step.kind) {
     case "attempt":
@@ -422,19 +441,29 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
         {statusAnnouncement(state)}
       </p>
 
-      {blockNotice ? (
-        <div id={noticeId}>
-          {sessionEnded !== null && (block === "SIGNED_OUT" || block === "AUTH_REJECTED") ? (
-            <Notice tone="info" title="Sign-in required">
-              {sessionEnded}
-            </Notice>
-          ) : block === "SIGNED_OUT" && state.session.status === "signed-out" ? (
-            <Notice tone="info" title="Sign-in required">
-              {signedOutMessage(state.session.reason)}
-            </Notice>
-          ) : (
-            <Notice tone={block === "AUTH_REJECTED" ? "warning" : "info"}>{tradeBlockMessage(block)}</Notice>
-          )}
+      {blockNotice || accessStep ? (
+        <div className={accessStep ? "flex w-full flex-col" : undefined}>
+          {blockNotice ? (
+            <div id={noticeId}>
+              {sessionEnded !== null && (block === "SIGNED_OUT" || block === "AUTH_REJECTED") ? (
+                <Notice tone="info" title="Sign-in required">
+                  {sessionEnded}
+                </Notice>
+              ) : block === "SIGNED_OUT" && state.session.status === "signed-out" ? (
+                <Notice tone="info" title="Sign-in required">
+                  {signedOutMessage(state.session.reason)}
+                </Notice>
+              ) : (
+                <Notice tone={block === "AUTH_REJECTED" ? "warning" : "info"}>{tradeBlockMessage(block)}</Notice>
+              )}
+            </div>
+          ) : null}
+          {accessStep ? (
+            <>
+              {cta}
+              {hint}
+            </>
+          ) : null}
         </div>
       ) : null}
 
@@ -498,12 +527,7 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
           </fieldset>
 
           <div className="mt-3">
-            {instrument ? (
-              <>
-                <InfoRow label="Price" value={`${formatPrice(instrument.price)} ${cash} / NVDA (fixed, test)`} />
-                <InfoRow label="Order capability" value={instrument.orderCapability === "CHECK_PAUSE_AT_ORDER" ? "Open unless paused" : "Not activated"} />
-              </>
-            ) : null}
+            {instrument ? <InfoRow label="Price" value={`${formatPrice(instrument.price)} ${cash} / NVDA (fixed, test)`} /> : null}
             {quote ? (
               <div ref={quoteRef} tabIndex={-1} role="group" aria-label="Quote" data-testid="stocks-quote" className={FOCUS_RING}>
                 <InfoRow
@@ -529,6 +553,8 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
                     <Field label="Server deadline">{formatUtc(quote.expiresAt)}</Field>
                   </>
                 ) : null}
+                {/* Off the front of the panel (the block notice says when trading is not activated), with the rest of the order's small print. */}
+                {instrument ? <Field label="Order capability">{instrument.orderCapability === "CHECK_PAUSE_AT_ORDER" ? "Open unless paused" : "Not activated"}</Field> : null}
                 {cashSymbol ? <Field label="Test cash">{cashLabel(cashSymbol)}</Field> : null}
                 {catalog ? (
                   <Field label="Deployment" mono>
@@ -552,17 +578,13 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
             </div>
           ) : null}
 
-          {cta}
+          {accessStep ? null : cta}
           {step.kind === "place" ? (
             <button type="button" className={`${BUTTON_SECONDARY} mt-2 w-full`} onClick={actions.discardQuote}>
               Discard quote
             </button>
           ) : null}
-          {step.hint ? (
-            <p id={ctaHintId} className="mt-2 text-xs leading-5 text-[var(--color-arco-text-soft)]">
-              {step.hint}
-            </p>
-          ) : null}
+          {accessStep ? null : hint}
         </form>
       ) : null}
     </section>

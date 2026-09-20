@@ -62,7 +62,9 @@ export function StocksPage() {
     // Detail mode: only the heading above the order panel (it starts near the top of the column); the full explanation follows it.
     const explain = <><p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">테스트넷 모의 체결가: 서버 발급 견적 기준. 현재 고정 모의 가격 120이며 위 USD 시장시세와 별개입니다. 시장정보 종목 선택은 이 NVDA 주문에 적용되지 않습니다.</p><ExecutionCapabilityNote /></>
     const trade = <section key="trade" aria-label="NVDA testnet mock trading" className="w-full min-w-0 rounded-3xl border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] [&>:last-child]:rounded-b-3xl">
-      <div className="border-b border-[var(--color-arco-border)] p-4 sm:p-6"><h2 className="text-lg font-medium">NVDA · 테스트넷 모의 거래</h2>{symbol === null ? explain : null}</div>
+      {/* Detail mode: a compact label only — the panel below carries its own "Trade NVDA" heading, and the next-step button
+          has to fit in the first screen. The list keeps the full header, where the explanation belongs above the panel. */}
+      <div className={`border-b border-[var(--color-arco-border)] ${symbol === null ? "p-4 sm:p-6" : "px-4 py-3 sm:px-6"}`}><h2 className={symbol === null ? "text-lg font-medium" : "text-sm font-medium"}>NVDA · 테스트넷 모의 거래</h2>{symbol === null ? explain : null}</div>
       <InvestorWithExecution client={clients.investor} session={host.investor} hostWallet={session ? { address: session.walletAddress, chainId: session.chainId } : null} onSessionRejected={rejected} access={access} detailOpen={symbol === "NVDA"} onDetailChange={open => { if (open) selection.openDetail("NVDA", "investor"); else selection.closeDetail() }} />
       {symbol !== null ? <div className="border-t border-[var(--color-arco-border)] p-4 sm:p-6">{explain}</div> : null}
     </section>

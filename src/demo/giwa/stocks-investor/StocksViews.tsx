@@ -112,6 +112,14 @@ const DOCK_PRIMARY = `flex-1 min-h-11 rounded-[var(--radius-card)] bg-[var(--col
 const DOCK_SECONDARY = `flex-1 min-h-11 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] py-3 text-sm font-medium text-[var(--color-arco-ink)] ${FOCUS_RING}`
 /** Room the fixed dock takes at the bottom of the viewport (about 4.5rem plus the safe area), kept clear for focus scrolling. */
 const DOCK_SCROLL_PADDING = "7rem"
+/**
+ * The dock's own height, published for the page shell to reserve AFTER its footer (GiwaPreprodApp reads it as the shell
+ * column's padding-bottom). `pb-*` inside <main> cannot do this: the dock is fixed to the viewport, so the footer that
+ * follows main still ends under it. html, body and #root are height:100%, so an element appended to <body> lands at one
+ * viewport height, not at the end of the page — the reservation has to be in the shell's own flow.
+ */
+const DOCK_SPACE_PROPERTY = "--giwa-dock-space"
+const DOCK_SPACE = "calc(env(safe-area-inset-bottom) + 4.5rem)"
 
 /** The sheet's open state, owned above the session-switch boundary (GiwaStocksFeatureView) so a sign-in keeps it open. */
 export type TradeSheetState = { open: boolean; onOpenChange: (open: boolean) => void }
@@ -182,14 +190,20 @@ function MobileTrade({
     setOpen(false)
   }
   const expanded = { "aria-expanded": open, "aria-controls": sheetId }
-  // The fixed dock covers the bottom of the viewport: keep a focused control scrolled clear of it while it is mounted.
+  // The fixed dock covers the bottom of the viewport while it is mounted: keep a focused control scrolled clear of it, and
+  // tell the page shell how much room to leave after its footer so the dock never covers the footer's links.
   useEffect(() => {
     const style = document.documentElement.style
-    const previous = style.getPropertyValue("scroll-padding-bottom")
-    style.setProperty("scroll-padding-bottom", DOCK_SCROLL_PADDING)
+    const previous: [string, string, string][] = [
+      ["scroll-padding-bottom", style.getPropertyValue("scroll-padding-bottom"), DOCK_SCROLL_PADDING],
+      [DOCK_SPACE_PROPERTY, style.getPropertyValue(DOCK_SPACE_PROPERTY), DOCK_SPACE],
+    ]
+    for (const [property, , value] of previous) style.setProperty(property, value)
     return () => {
-      if (previous) style.setProperty("scroll-padding-bottom", previous)
-      else style.removeProperty("scroll-padding-bottom")
+      for (const [property, before] of previous) {
+        if (before) style.setProperty(property, before)
+        else style.removeProperty(property)
+      }
     }
   }, [])
   return (

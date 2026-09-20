@@ -19,6 +19,8 @@ type Harness = ReturnType<typeof CreateHarness>
 const runtime = process.env.GIWA_HOST_DOM_RUNTIME
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 const DESKTOP = "(min-width: 1024px)"
+/** StocksViews' DOCK_SPACE: the room the shell reserves after its footer while the NVDA dock is mounted. */
+const DOCK_SPACE = "calc(env(safe-area-inset-bottom) + 4.5rem)"
 
 test("mobile NVDA trade: dock, bottom sheet and one trade panel (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package.json)", { skip: !runtime }, async (t: TestContext) => {
   const { JSDOM } = createRequire(runtime!)("jsdom")
@@ -155,6 +157,10 @@ test("mobile NVDA trade: dock, bottom sheet and one trade panel (set GIWA_HOST_D
           summary: [...doc.querySelectorAll('[data-testid="stocks-trade-summary-status"]')] as HTMLElement[],
         }),
         scrollPadding: () => doc.documentElement.style.getPropertyValue("scroll-padding-bottom"),
+        /** The room the shell reserves after its footer while the dock is mounted (GiwaPreprodApp reads this). */
+        dockSpace: () => doc.documentElement.style.getPropertyValue("--giwa-dock-space"),
+        /** The side the one mounted trade panel shows as chosen. */
+        side: () => (["BUY", "SELL"] as const).find((side) => doc.querySelector(`[data-side="${side}"]`)?.getAttribute("aria-checked") === "true") ?? null,
         async unmount() {
           if (!mounted) return
           mounted = false
@@ -267,6 +273,7 @@ test("mobile NVDA trade: dock, bottom sheet and one trade panel (set GIWA_HOST_D
           cleanups = []
           assert.equal(doc.body.style.overflow, "", "no scroll lock is left behind")
           assert.equal(doc.documentElement.style.getPropertyValue("scroll-padding-bottom"), "", "no dock scroll padding is left behind")
+          assert.equal(doc.documentElement.style.getPropertyValue("--giwa-dock-space"), "", "no reserved dock space is left behind")
         }
       })
 
@@ -292,6 +299,9 @@ test("mobile NVDA trade: dock, bottom sheet and one trade panel (set GIWA_HOST_D
       assert.ok(doc.body.lastElementChild === page.element, `nothing appended to <body> after the page: ${describe(doc.body.lastElementChild)}`)
       // The fixed dock's height is reserved for focus scrolling while it is mounted.
       assert.equal(page.scrollPadding(), "7rem", "scroll-padding-bottom while the dock is mounted")
+      // ...and published for the page shell, which keeps that much room AFTER its footer (padding inside <main> cannot:
+      // the footer comes after main and would stay under the fixed dock).
+      assert.equal(page.dockSpace(), DOCK_SPACE, "the dock's height is reserved for the shell while it is mounted")
       const posts = page.posts()
 
       await page.activate(sell, "Sell")
@@ -368,10 +378,12 @@ test("mobile NVDA trade: dock, bottom sheet and one trade panel (set GIWA_HOST_D
       assert.ok(page.button("Place buy order", page.element), "same ready quote")
       assert.ok(page.dock().bar === null, "no dock at lg")
       assert.equal(page.scrollPadding(), "", "no dock, no reserved scroll padding")
+      assert.equal(page.dockSpace(), "", "no dock, no reserved room after the footer")
       assert.equal(doc.querySelectorAll("#giwa-stocks-detail-title").length, 1)
 
       await setDesktop(false)
       assert.equal(page.scrollPadding(), "7rem")
+      assert.equal(page.dockSpace(), DOCK_SPACE, "the dock is back: so is the room after the footer")
       assert.equal(page.inputs(), 0, "the sheet closed at lg stays closed below it")
       assert.match(page.element.textContent ?? "", /Next stepQuote ready: 240 ARCO_TEST_USDC for 2 NVDA/)
       assert.equal(doc.querySelectorAll("#giwa-stocks-detail-title").length, 1)
@@ -446,6 +458,8 @@ test("mobile NVDA trade: dock, bottom sheet and one trade panel (set GIWA_HOST_D
       await page.waitFor(() => page.element.querySelector("#giwa-stocks-detail-title"), "detail heading")
       await page.activate(page.dock().sell, "Sell")
       const before = await page.waitFor(() => page.sheet(), "sheet")
+      assert.equal(page.side(), "SELL", "the dock's Sell chose the side before signing in")
+      const posts = page.posts()
       const signIn = await page.waitFor(() => page.button("Sign in to trade", before), "Sign in to trade in the sheet")
       await page.click(signIn, "Sign in to trade")
       assert.equal(page.calls.signIn, 1, "the host's sign-in, from the user's click")
@@ -457,6 +471,9 @@ test("mobile NVDA trade: dock, bottom sheet and one trade panel (set GIWA_HOST_D
       assert.equal(dialogs.length, 1, "exactly one dialog: the sheet is still open")
       const sheet = page.sheet()
       assert.ok(sheet, "the Trade NVDA sheet")
+      // A user who opened Sell is still selling: the new identity clears the form, but not the choice they just stated.
+      assert.equal(page.side(), "SELL", "the side the user chose before signing in")
+      assert.equal(page.posts(), posts, "signing in sends no quote and no order")
       assert.ok(page.button("Get quote", sheet), "the next step is in the sheet")
       assert.ok(sheet.contains(doc.activeElement), `focus is in the sheet, not on ${describe(doc.activeElement)}`)
       assert.equal(page.dock().buy?.getAttribute("aria-expanded"), "true")
@@ -469,6 +486,124 @@ test("mobile NVDA trade: dock, bottom sheet and one trade panel (set GIWA_HOST_D
       await page.settle(350)
       assert.ok(page.sheet() === null, "not reopened on return")
       assert.equal(page.dock().buy?.getAttribute("aria-expanded"), "false")
+    })
+
+    await scenario("the Sell chosen for a sign-in is kept through that one step only (and the holdings are then read)", async () => {
+      /** Signed out, NVDA detail open, the dock's Sell chosen — the only way to state a side before signing in. */
+      const noteSell = async (deploymentId: string, options: { holding?: string } = {}) => {
+        const page = await mount(deploymentId, { signedOut: true, ...options })
+        await page.activate(await page.waitFor(() => page.element.querySelector<HTMLButtonElement>('button[aria-label="View NVDA"]'), "View NVDA"), "View NVDA")
+        await page.waitFor(() => page.element.querySelector("#giwa-stocks-detail-title"), "detail heading")
+        await page.activate(page.dock().sell, "Sell")
+        const sheet = await page.waitFor(() => page.sheet(), "sheet")
+        assert.equal(page.side(), "SELL", `${deploymentId}: the dock's Sell chose the side`)
+        return { page, sheet }
+      }
+      /** The inline panel at lg shows the side without a dock press of its own (the dock's buttons set it). */
+      const sideAfterSignIn = async (page: Awaited<ReturnType<typeof mount>>) => {
+        await setDesktop(true)
+        await page.waitFor(() => page.button("Get quote", page.element), "the signed-in form")
+        const side = page.side()
+        await setDesktop(false)
+        return side
+      }
+
+      // Kept: the user's own sign-in, the same view, the same wallet. The holdings of the wallet that just signed in are
+      // read once for the Sell form, and the next quote the user asks for is a SELL quote.
+      {
+        const { page, sheet } = await noteSell("sheet-dom-intent-kept", { holding: "2000000000" })
+        await page.click(await page.waitFor(() => page.button("Sign in to trade", sheet), "Sign in to trade"), "Sign in to trade")
+        const posts = page.posts()
+        await page.update({ session: page.stocks.session(WALLET_A), access: page.signedIn })
+        await page.waitFor(() => page.button("Get quote"), "the form after signing in")
+        assert.equal(page.side(), "SELL", "still selling")
+        await page.waitFor(() => page.portfolioReads() === 1, "the Sell form reads the holdings of the wallet that signed in")
+        await page.settle(120)
+        assert.equal(page.portfolioReads(), 1, "exactly once")
+        assert.equal(page.posts(), posts, "signing in and rendering send no quote and no order")
+        await page.quote("1", "Place sell order")
+        assert.equal(page.stocks.requests("POST", "/api/v1/stocks/orders").length, 0, "no order was placed")
+        await page.unmount()
+      }
+      // Dropped: the user left the trade view before the sign-in landed.
+      {
+        const { page, sheet } = await noteSell("sheet-dom-intent-left")
+        await page.click(await page.waitFor(() => page.button("Sign in to trade", sheet), "Sign in to trade"), "Sign in to trade")
+        await page.click(page.element.querySelector("#giwa-stocks-tab-orders"), "Orders tab")
+        await page.update({ session: page.stocks.session(WALLET_A), access: page.signedIn })
+        await page.click(page.element.querySelector("#giwa-stocks-tab-stocks"), "Stocks tab")
+        assert.equal(await sideAfterSignIn(page), "BUY", "a sign-in that lands after the user left the trade view starts on Buy")
+        await page.unmount()
+      }
+      // Dropped: the connected wallet went away while the sign-in was running.
+      {
+        const { page, sheet } = await noteSell("sheet-dom-intent-wallet")
+        await page.click(await page.waitFor(() => page.button("Sign in to trade", sheet), "Sign in to trade"), "Sign in to trade")
+        await page.update({ access: { ...page.signedIn, wallet: "disconnected", host: "signed-out", canSignIn: false } })
+        await page.update({ session: page.stocks.session(WALLET_A), access: page.signedIn })
+        assert.equal(await sideAfterSignIn(page), "BUY", "no connected wallet, no kept side")
+        await page.unmount()
+      }
+      // Dropped: nothing in the panel started this sign-in (the page's own sign-in region, or a session restored elsewhere).
+      {
+        const { page } = await noteSell("sheet-dom-intent-elsewhere")
+        await page.update({ session: page.stocks.session(WALLET_A), access: page.signedIn })
+        assert.equal(page.calls.signIn, 0, "the panel never asked for a sign-in")
+        assert.equal(await sideAfterSignIn(page), "BUY", "a session the panel did not ask for starts on Buy")
+        await page.unmount()
+      }
+      // Dropped: the host reported the sign-in as failed. Pressing sign-in again notes it afresh, and that one is kept.
+      {
+        {
+          const { page, sheet } = await noteSell("sheet-dom-intent-failed")
+          await page.click(await page.waitFor(() => page.button("Sign in to trade", sheet), "Sign in to trade"), "Sign in to trade")
+          await page.update({ access: { ...page.signedIn, host: "error", hostError: null, canSignIn: true } })
+          assert.equal(page.side(), "SELL", "a failed sign-in changes nothing on screen")
+          await page.update({ session: page.stocks.session(WALLET_A), access: page.signedIn })
+          assert.equal(await sideAfterSignIn(page), "BUY", "a session that lands after a failed sign-in starts on Buy")
+          await page.unmount()
+        }
+        {
+          const { page, sheet } = await noteSell("sheet-dom-intent-retry")
+          await page.click(await page.waitFor(() => page.button("Sign in to trade", sheet), "Sign in to trade"), "Sign in to trade")
+          await page.update({ access: { ...page.signedIn, host: "error", hostError: null, canSignIn: true } })
+          await page.click(await page.waitFor(() => page.button("Sign in to trade", page.sheet() ?? doc.body), "Sign in to trade again"), "Sign in to trade")
+          assert.equal(page.calls.signIn, 2, "two presses, two host sign-ins")
+          await page.update({ session: page.stocks.session(WALLET_A), access: page.signedIn })
+          await page.waitFor(() => page.button("Get quote"), "the form after signing in")
+          assert.equal(page.side(), "SELL", "the fresh press kept the side")
+          await page.unmount()
+        }
+      }
+      // The side that is kept is the one on screen when the sign-in lands, not a copy taken at the press: a Buy chosen
+      // after pressing sign-in (the dock's buttons work while signed out) is the user's last word.
+      {
+        const { page, sheet } = await noteSell("sheet-dom-intent-changed-mind")
+        await page.click(await page.waitFor(() => page.button("Sign in to trade", sheet), "Sign in to trade"), "Sign in to trade")
+        await page.activate(page.sheet()?.querySelector<HTMLButtonElement>('button[aria-label="Close"]') ?? null, "Close")
+        await page.waitFor(() => page.sheet() === null, "sheet closed")
+        await page.activate(page.dock().buy, "Buy")
+        await page.waitFor(() => page.sheet(), "sheet reopened on Buy")
+        assert.equal(page.side(), "BUY", "the dock's Buy changed the user's mind")
+        await page.update({ session: page.stocks.session(WALLET_A), access: page.signedIn })
+        await page.waitFor(() => page.button("Get quote"), "the form after signing in")
+        assert.equal(page.side(), "BUY", "the later choice wins over the earlier sign-in press")
+        await page.unmount()
+      }
+      // Unchanged: already signed in, the host issues a new token for the same wallet. That is not a sign-in the user
+      // started from the panel, so the new identity starts on Buy exactly as before.
+      {
+        await setDesktop(true)
+        const page = await mount("sheet-dom-intent-refresh")
+        await page.openDetail()
+        await page.click(page.element.querySelector('[data-side="SELL"]'), "Sell")
+        assert.equal(page.side(), "SELL", "signed in, the panel's own Sell")
+        await page.update({ session: page.stocks.session(WALLET_A, true) })
+        await page.waitFor(() => page.button("Get quote", page.element), "the form under the new token")
+        assert.equal(page.side(), "BUY", "a refreshed token still clears the form")
+        await page.unmount()
+        await setDesktop(false)
+      }
     })
 
     await scenario("with the sheet closed, one polite summary line announces quote expiry and order results (never two status lines)", async () => {

@@ -5,6 +5,8 @@ import type { StocksOrder, StocksSide } from "./types"
 export type StocksInvestorActions = {
   retryCatalog: () => void
   setSide: (side: StocksSide) => void
+  /** The panel's own sign-in press: keep the side the user chose through that one sign-in. Requests nothing. */
+  noteSignInIntent: () => void
   setQuantity: (input: string) => void
   requestQuote: () => void
   discardQuote: () => void
@@ -23,6 +25,7 @@ export function actionsFor(controller: StocksInvestorController): StocksInvestor
   return {
     retryCatalog: () => void controller.loadCatalog(),
     setSide: (side) => controller.setSide(side),
+    noteSignInIntent: () => controller.noteSignInIntent(),
     setQuantity: (input) => controller.setQuantity(input),
     requestQuote: () => void controller.requestQuote(),
     discardQuote: () => controller.discardQuote(),
