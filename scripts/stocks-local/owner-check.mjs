@@ -148,6 +148,25 @@ try {
   await until(async () => await gate().getAttribute('data-phase') === 'ready', 'pause after restart');
   assert.match(await gate().innerText(), /Paused/);
   passed('operator pause survives API restart');
+  await local('topUpTestCash');
+  assert.equal(await page.getByTestId('local-test-cash').innerText(), '2,000');
+  const toppedUp = await state();
+  assert.equal(toppedUp.snapshot.holderCash, '2000000000');
+  for (const key of ['buyOrders', 'sellOrders', 'claimCount', 'proofCount', 'holderStock', 'vaultCash', 'escrowStock', 'stockSupply'])
+    assert.deepEqual(toppedUp.snapshot[key], completed.snapshot[key], key);
+  assert.equal(toppedUp.sends.length, 4);
+  await local('topUpTestCash'); // Already at target: no new faucet transaction.
+  assert.equal((await state()).snapshot.blockNumber, toppedUp.snapshot.blockNumber);
+  await local('restartApi'); await page.reload(); await signIn();
+  await until(async () => await gate().getAttribute('data-phase') === 'ready', 'pause after cash top-up');
+  assert.match(await gate().innerText(), /Paused/);
+  const retained = await state();
+  assert.equal(retained.snapshot.holderCash, '2000000000');
+  assert.deepEqual(retained.snapshot.buyOrders, completed.snapshot.buyOrders);
+  assert.deepEqual(retained.snapshot.sellOrders, completed.snapshot.sellOrders);
+  report.topUp = { ...retained.snapshot, sends: retained.sends.length };
+  await page.screenshot({ path: join(evidence, 'owner-cash-top-up.png'), fullPage: true });
+  passed('local cash top-up preserves trade history and pause; repeated top-up sends nothing and survives API restart');
   assert.deepEqual(report.pageErrors, []);
   assert.ok(report.clientEvents.some(event => event.message.includes('[vite] connected.')), 'Development updates use the owned listener');
   assert.ok(!report.clientEvents.some(event => /connection lost|failed to connect/.test(event.message)), 'No development-server reconnect/reload loop');

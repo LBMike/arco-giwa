@@ -118,6 +118,9 @@ export async function createLocalBrowserHost({ root, resourceDir, ownerWorkspace
       case 'stopProcessing': await stack.stopProcessing(); return;
       case 'startProcessing': await stack.startProcessing(); return;
       case 'restartApi': await stack.restartApi(); return;
+      case 'topUpTestCash':
+        if (!ownerWorkspace || typeof stack.topUpTestCash !== 'function') throw failure(403, 'LOCAL_TEST_CASH_DISABLED');
+        await stack.topUpTestCash(); return;
       case 'armShortSession':
         if (typeof stack.armShortSession !== 'function') throw failure(403, 'LOCAL_RECOVERY_FIXTURE_DISABLED');
         stack.armShortSession(); return;

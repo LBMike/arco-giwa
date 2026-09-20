@@ -14,8 +14,8 @@ import '../../../src/index.css';
 import '../../../src/demo/theme.css';
 
 type Config = { apiBase: string; frontendOrigin: string; accounts: { holder: string; otherHolder: string; operator?: string }; account: string | null; capability: string; knownHashRecovery: boolean; operatorDiagnostics: boolean; ownerWorkspace: boolean };
-type State = { account: string | null; holdWaiting: boolean; holdArmed: boolean; calls: number; sends: { outcome: string }[] };
-type Control = { action: 'account'; account: 'A' | 'B' | 'operator' } | { action: 'holdNextSend' | 'releaseHeld' | 'dropHeld' | 'stopProcessing' | 'startProcessing' | 'restartApi' | 'armShortSession' };
+type State = { account: string | null; holdWaiting: boolean; holdArmed: boolean; calls: number; sends: { outcome: string }[]; holderCash: string };
+type Control = { action: 'account'; account: 'A' | 'B' | 'operator' } | { action: 'holdNextSend' | 'releaseHeld' | 'dropHeld' | 'stopProcessing' | 'startProcessing' | 'restartApi' | 'armShortSession' | 'topUpTestCash' };
 type Request = { method: string; params?: unknown[] };
 type Listener = (...args: unknown[]) => void;
 const address = /^0x[0-9a-fA-F]{40}$/;
@@ -37,6 +37,8 @@ function configOf(value: unknown): Config {
 }
 function stateOf(value: unknown, config: Config): State {
   const row = object(value);
+  const snapshot = object(row.snapshot);
+  if (typeof snapshot.holderCash !== 'string' || !/^(0|[1-9][0-9]{0,77})$/.test(snapshot.holderCash)) throw Error('LOCAL_STATE_INVALID');
   if (row.account !== null && (typeof row.account !== 'string' || ![config.accounts.holder.toLowerCase(), config.accounts.otherHolder.toLowerCase(), config.accounts.operator?.toLowerCase()].includes(row.account.toLowerCase()))) throw Error('LOCAL_STATE_INVALID');
   if (typeof row.holdWaiting !== 'boolean' || typeof row.holdArmed !== 'boolean' || !Number.isSafeInteger(row.calls) || Number(row.calls) < 0 || !Array.isArray(row.sends)) throw Error('LOCAL_STATE_INVALID');
   const sends = row.sends.map(value => {
@@ -44,7 +46,7 @@ function stateOf(value: unknown, config: Config): State {
     if (typeof send.outcome !== 'string') throw Error('LOCAL_STATE_INVALID');
     return { outcome: send.outcome };
   });
-  return { account: row.account as string | null, holdWaiting: row.holdWaiting, holdArmed: row.holdArmed, calls: Number(row.calls), sends };
+  return { account: row.account as string | null, holdWaiting: row.holdWaiting, holdArmed: row.holdArmed, calls: Number(row.calls), sends, holderCash: snapshot.holderCash };
 }
 async function json(response: Response): Promise<unknown> {
   if (!response.ok) throw Error('LOCAL_REQUEST_FAILED');
@@ -119,8 +121,8 @@ async function start() {
       if (busy) return; setBusy(true);
       try {
         await fetch('/__local/control', { method: 'POST', headers, body: JSON.stringify(body), credentials: 'omit', cache: 'no-store', redirect: 'error' }).then(json);
-        acceptState(await readState()); setMessage(`테스트 제어 완료: ${body.action}`);
-      } catch { setMessage('LOCAL_CONTROL_FAILED'); }
+        acceptState(await readState()); setMessage(body.action === 'topUpTestCash' ? 'Account A 테스트 현금 보충을 확인했습니다. 기존 거래 기록은 유지됩니다.' : `테스트 제어 완료: ${body.action}`);
+      } catch { setMessage(body.action === 'topUpTestCash' ? 'LOCAL_CONTROL_FAILED · 보충 결과를 확인하지 못했습니다. 현재 테스트 잔액을 확인하세요. 자동 재전송은 하지 않습니다.' : 'LOCAL_CONTROL_FAILED'); }
       finally { setBusy(false); }
     }
     async function finish() {
@@ -141,6 +143,7 @@ async function start() {
     ];
     if (config.operatorDiagnostics) buttons.push({ label: 'Operator (sign-in only)', body: { action: 'account', account: 'operator' } });
     if (config.knownHashRecovery) buttons.push({ label: 'Next login: 30s JWT (test only)', body: { action: 'armShortSession' } });
+    if (config.ownerWorkspace) buttons.push({ label: 'Account A 현금 2,000까지 보충', body: { action: 'topUpTestCash' } });
     return <div className="arco-demo" style={{ width: '100%', maxWidth: 1280, minHeight: '100vh', margin: '0 auto', padding: '16px', boxSizing: 'border-box', overflowWrap: 'anywhere', background: 'var(--color-arco-page)', color: 'var(--color-arco-ink)' }}>
       <aside aria-label="Local test controls" data-testid="local-test-controls" style={{ width: '100%', padding: 16, marginBottom: 24, border: '1px solid var(--color-arco-border)', borderRadius: 16, background: 'var(--color-arco-surface-muted)' }}>
         <h1 style={{ fontSize: 16, fontWeight: 600 }}>LOCAL TEST ONLY · PostgreSQL + local EVM</h1>
@@ -150,6 +153,7 @@ async function start() {
           <button type="button" style={buttonStyle} disabled={busy || stopped} data-local-action="refresh" onClick={() => { void refresh(); }}>Refresh test state</button>
           {config.ownerWorkspace && <button type="button" style={buttonStyle} disabled={busy || stopped} data-local-action="finish" onClick={() => { void finish(); }}>로컬 실행 종료</button>}
         </div>
+        {config.ownerWorkspace && <p style={{ marginTop: 10, fontSize: 13 }}>Account A 테스트 현금 (최근 조회): <span data-testid="local-test-cash">{(Number(state.holderCash) / 1_000_000).toLocaleString('ko-KR', { maximumFractionDigits: 2 })}</span> ARCO_TEST_USDC · Refresh test state로 갱신</p>}
         <p data-testid="local-test-state" style={{ marginTop: 10, fontSize: 13 }}>
           Account {same(state.account, config.accounts.holder) ? 'A' : same(state.account, config.accounts.otherHolder) ? 'B' : config.accounts.operator && same(state.account, config.accounts.operator) ? 'Operator' : 'disconnected'}
           {' · '}Wallet calls: <span data-testid="local-wallet-calls">{state.calls}</span>

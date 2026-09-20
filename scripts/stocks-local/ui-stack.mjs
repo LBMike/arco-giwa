@@ -18,15 +18,18 @@ import { createStocksMarketDataService } from '../../server/dist/stocks-market-d
 import { localSigner } from './local-signer.mjs';
 import { createShortSessionFixture } from './short-session.mjs';
 import { assertLocalStartupChain } from './startup-chain.mjs';
+import { createTestCashTopUp } from './test-cash.mjs';
 
 const { Pool } = createRequire(import.meta.url)('pg');
 const faucetAbi = parseAbi(['function faucet(address,uint256)']);
 
-export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test', knownHashRecovery = false, operatorDiagnostics = false, operatorControls = false }) {
+export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test', knownHashRecovery = false, operatorDiagnostics = false, operatorControls = false, ownerWorkspace = false }) {
   assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1');
   assert.equal(typeof knownHashRecovery, 'boolean');
   assert.equal(typeof operatorDiagnostics, 'boolean');
   assert.equal(typeof operatorControls, 'boolean');
+  assert.equal(typeof ownerWorkspace, 'boolean');
+  if (ownerWorkspace) assert.equal(process.env.STOCKS_LOCAL_OWNER, '1');
   assert.equal(bundle.execution, 'LOCAL_EVM_TEST_HARNESS_ONLY');
   const target = new URL(rpcUrl), database = new URL(databaseUrl), origin = new URL(frontendOrigin);
   assert.equal(target.protocol, 'http:'); assert.equal(target.hostname, '127.0.0.1');
@@ -98,6 +101,13 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
   const requests = [], processingErrors = [];
   let runtime, signerServer, app, timer, activeTick, closing, restarting;
   let closed = false, processing = false, port = 0, apiBase;
+  const testCash = ownerWorkspace ? createTestCashTopUp({
+    closed: () => closed,
+    balance: async () => chain.tokenBalance(manifest.cashToken, accounts.holder, (await chain.block('finalized')).number),
+    send: amount => rpc('eth_sendTransaction', [{ from: accounts.faucetOperator, to: manifest.cashToken, value: '0x0', gas: '0x1e8480',
+      data: encodeFunctionData({ abi: faucetAbi, functionName: 'faucet', args: [accounts.holder, amount] }) }]),
+    receipt: hash => rpc('eth_getTransactionReceipt', [hash]),
+  }) : undefined;
   const signerToken = `TEST_HARNESS_ONLY_${randomUUID()}`;
   const authSecret = `TEST_HARNESS_ONLY_SESSION_${randomUUID()}`;
   const shortSession = knownHashRecovery ? createShortSessionFixture({ secret: authSecret, holder: accounts.holder }) : null;
@@ -191,7 +201,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
     runtime?.stop();
     closing = (async () => {
       const failures = [];
-      for (const cleanup of [stopProcessing, async () => { await restarting; }, async () => { await app?.close(); },
+      for (const cleanup of [stopProcessing, async () => { await testCash?.drain(); }, async () => { await restarting; }, async () => { await app?.close(); },
         async () => { if (runtime) await runtime.close(); }, async () => { await signerServer?.close(); },
         async () => { if (!runtime) await pool.end(); }]) {
         try { await cleanup(); } catch (error) { failures.push(error); }
@@ -244,6 +254,7 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
     return { apiBase, frontendOrigin, accounts, manifest, digest, rpc, chain, pool, service: runtime.service, repo,
       operatorDiagnostics: operatorDiagnostics || operatorControls,
       operatorControls,
+      topUpTestCash: testCash ? () => testCash.topUp() : undefined,
       controlForHarness: operatorControls ? { service: runtime.control, faults: controlFaults, runtime } : undefined,
       stopRuntime: operatorDiagnostics ? async () => { await stopProcessing(); runtime.stop(); } : undefined,
       armShortSession: shortSession ? () => { assert.ok(!closed); shortSession.arm(); } : undefined,

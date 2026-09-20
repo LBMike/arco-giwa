@@ -10,7 +10,7 @@ import { createLocalBrowserHost } from './browser-server.mjs';
 
 const repository = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const A = `0x${'1'.repeat(40)}`, B = `0x${'2'.repeat(40)}`;
-async function fixture(t, recovery = false, operatorDiagnostics = false) {
+async function fixture(t, recovery = false, operatorDiagnostics = false, ownerWorkspace = false) {
   const previousFlag = process.env.STOCKS_LOCAL_STACK_ONLY;
   process.env.STOCKS_LOCAL_STACK_ONLY = '1';
   const directory = await mkdtemp(join(tmpdir(), 'stocks-browser-unit-'));
@@ -28,7 +28,7 @@ async function fixture(t, recovery = false, operatorDiagnostics = false) {
   await mkdir(join(root, 'scripts/stocks-local/browser'), { recursive: true });
   await writeFile(join(root, 'scripts/stocks-local/browser/index.html'), '<!doctype html><title>STOCKS ENTRY</title>');
   const sigtermOwners = process.listeners('SIGTERM');
-  host = await createLocalBrowserHost({ root, resourceDir: directory });
+  host = await createLocalBrowserHost({ root, resourceDir: directory, ownerWorkspace });
   assert.deepEqual(process.listeners('SIGTERM'), sigtermOwners, 'Browser host must not install a Vite process.exit signal handler');
   let account = A, closed = false, hold, nextHold = false;
   const calls = [], sends = [], controls = [];
@@ -59,6 +59,7 @@ async function fixture(t, recovery = false, operatorDiagnostics = false) {
   const stack = { apiBase: 'http://127.0.0.1:12345', frontendOrigin: host.origin, accounts: { holder: A, otherHolder: B, operator: `0x${'4'.repeat(40)}` }, manifest: { fixture: true },
     operatorDiagnostics,
     armShortSession: recovery ? () => controls.push('short-session') : undefined,
+    async topUpTestCash() { controls.push('test-cash'); },
     async snapshot() { return { buyOrders: [], sellOrders: [], claims: [], proofs: [], chain: { holderStock: '0', holderCash: '2' } }; },
     async stopProcessing() { controls.push('stop'); }, async startProcessing() { controls.push('start'); }, async restartApi() { controls.push('restart'); },
   };
@@ -115,6 +116,22 @@ test('two browser hosts own separate update connections and reject foreign origi
   await first.host.close(); await closed;
   assert.equal(secondSocket.destroyed, false, 'Closing one workspace keeps the other connection alive');
   assert.equal((await fetch(second.host.origin + '/__local/config', { headers: { 'sec-fetch-site': 'same-origin' } })).status, 200);
+});
+
+test('cash top-up is owner-only and rejects altered targets and unauthorized requests before invoking the faucet', async t => {
+  const originalFlag = process.env.STOCKS_LOCAL_STACK_ONLY;
+  const disabled = await fixture(t);
+  assert.equal((await disabled.post('/__local/control', { action: 'topUpTestCash' })).status, 403);
+  assert.deepEqual(disabled.controls, []);
+  const enabled = await fixture(t, false, false, true);
+  t.after(() => { if (originalFlag === undefined) delete process.env.STOCKS_LOCAL_STACK_ONLY; else process.env.STOCKS_LOCAL_STACK_ONLY = originalFlag; });
+  for (const extra of [{ amount: '1000000' }, { account: 'B' }, { to: B }])
+    assert.equal((await enabled.post('/__local/control', { action: 'topUpTestCash', ...extra })).status, 400);
+  for (const headers of [{ origin: 'http://foreign.test' }, { 'x-stocks-local-capability': '' }])
+    assert.equal((await enabled.post('/__local/control', { action: 'topUpTestCash' }, headers)).status, 403);
+  assert.deepEqual(enabled.controls, []);
+  assert.equal((await enabled.post('/__local/control', { action: 'topUpTestCash' })).status, 200);
+  assert.deepEqual(enabled.controls, ['test-cash']);
 });
 
 test('short-session control is absent by default and available only in the explicit recovery fixture', async t => {

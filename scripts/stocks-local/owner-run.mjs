@@ -14,7 +14,7 @@ export async function runStack(options) {
   const setup = (async () => {
     host = await createLocalBrowserHost({ root: resolve(import.meta.dirname, '../..'), resourceDir: options.resourceDir, ownerWorkspace: true }); check();
     stack = await createLocalUiStack({ ...options, frontendOrigin: host.origin,
-      knownHashRecovery: true, operatorControls: true }); check();
+      knownHashRecovery: true, operatorControls: true, ownerWorkspace: true }); check();
     wallet = await createLocalWallet({ ...options, ...stack, operatorLogin: true }); check();
     host.attach({ stack, wallet });
   })();
