@@ -10,6 +10,7 @@ import { manifestDigest } from '../stocks/contracts.js';
 import { parseStocksRuntimeConfig } from '../stocks-runtime/runtime.js';
 import { checkStocksPreflight } from './checker.js';
 import { prepareStocksIntegrationBundle } from './integration-bundle.js';
+import { parseCorsAllowedOrigins } from '../config/env.js';
 
 function fixture() {
   const manifest = testManifest();
@@ -32,6 +33,7 @@ test('offline bundle binds the approved manifest and separates browser settings;
   assert.equal(bundle.integration.tradingAuthorized, false);
   assert.deepEqual(bundle.integration.siweDomains, ['app.example.test:8443']);
   assert.equal(bundle.integration.serverEnvironment.CORS_ALLOWED_ORIGINS, f.settings.frontendOrigins[0]);
+  assert.deepEqual(parseCorsAllowedOrigins(bundle.integration.serverEnvironment.CORS_ALLOWED_ORIGINS), bundle.integration.frontendOrigins);
   assert.deepEqual(bundle.integration.browserEnvironment, { VITE_ARCO_API_BASE: f.settings.apiBaseUrl, VITE_PUBLIC_GIWA_RPC: f.settings.publicRpcUrl,
     VITE_GIWA_ADMIN_ADDRESSES: `${a(20)},${a(21)}` });
   assert.ok(!JSON.stringify(bundle.integration.browserEnvironment).includes('server-rpc'));
@@ -59,12 +61,12 @@ test('bundle rejects unapproved, changed or non-public deployment data', () => {
 
 test('explicit HTTPS URLs, origins and named operator permissions are required', () => {
   for (const key of ['rpcUrl', 'publicRpcUrl', 'signerUrl', 'apiBaseUrl'] as const) {
-    for (const value of ['http://localhost:8080', 'https://user:secret@example.test', 'https://example.test?', 'https://example.test#', ' https://example.test', 'https://example.test\\path']) {
+    for (const value of ['http://localhost:8080', 'https://user:secret@example.test', 'https://example.test?', 'https://example.test#', ' https://example.test', 'https://example.test\\path', 'https://*.example.test', 'https://example.test,other.test', 'https://example.test%2cother.test']) {
       const f = fixture(); f.settings[key] = value;
       assert.throws(() => prepareStocksIntegrationBundle(f.manifest, f.settings));
     }
   }
-  for (const origins of [[], ['*'], ['https://app.example.test/path'], ['https://app.example.test', 'https://app.example.test/']]) {
+  for (const origins of [[], ['*'], ['https://*.example.test'], ['https://app.example.test%2cother.test'], ['https://app.example.test/path'], ['https://app.example.test', 'https://app.example.test/']]) {
     const f = fixture(); f.settings.frontendOrigins = origins;
     assert.throws(() => prepareStocksIntegrationBundle(f.manifest, f.settings));
   }

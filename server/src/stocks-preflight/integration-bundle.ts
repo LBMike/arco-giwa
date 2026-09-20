@@ -13,7 +13,9 @@ function object(value: unknown, keys: string[]): Record<string, unknown> {
 function url(value: unknown, originOnly: boolean): string {
   ensure(typeof value === 'string' && value.startsWith('https://') && !/[\s\\?#]/.test(value), 'INVALID_BUNDLE_URL');
   const parsed = new URL(value);
-  ensure(!parsed.username && !parsed.password && parsed.hostname && (!originOnly || parsed.pathname === '/'), 'INVALID_BUNDLE_URL');
+  // A comma in a parsed hostname would split CORS_ALLOWED_ORIGINS into
+  // different origins; percent-encoded commas must be rejected after parsing.
+  ensure(!parsed.username && !parsed.password && parsed.hostname && !/[,*]/.test(parsed.hostname) && (!originOnly || parsed.pathname === '/'), 'INVALID_BUNDLE_URL');
   return originOnly ? parsed.origin : parsed.href;
 }
 
