@@ -11,6 +11,7 @@
     "stocks:doctor": "node scripts/stocks-local/owner.mjs check",
     "stocks:dev": "node scripts/stocks-local/owner.mjs start",
     "stocks:recovery:check": "node scripts/stocks-local/owner.mjs recovery",
+    "stocks:integration:prepare": "node scripts/stocks-preflight/prepare-integration.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "build:server": "tsc -p server/tsconfig.json",
