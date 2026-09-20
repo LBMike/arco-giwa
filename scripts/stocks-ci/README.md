@@ -8,7 +8,7 @@ The existing general CI job remains in place.
 
 | Scenario | Checks |
 | --- | --- |
-| `owner-workspace` | Owner launch command, real operator resume/pause, BUY/SELL through product buttons, local cash top-up without resetting history, API restart persistence, and independent cleanup after the owner stop button |
+| `owner-workspace` | Owner launch command, real operator resume/pause, BUY/SELL through product buttons, local cash top-up without resetting history, downloadable bounded session summary, API restart persistence, and independent cleanup after the owner stop button |
 | `postgres` | Harness boundary/acceptance tests, all frontend tests with jsdom and compiled ABI enabled, nine server PG suites plus the browser-adapter suite, PostgreSQL/Node restart persistence, then a real dump/restore into a new DB with original DB removed |
 | `operator-control` | Real local HTTP/SIWE, DB and EVM trading; persistent pause/resume, concurrency policy, original signer/receipt recovery, BUY/SELL conservation and owned-service cleanup; no browser required |
 | `operator-control-ui` | Product operator control screen: ten required checks for signed permissions, single submission, lost-response retry, conflicting operators, unresolved results, history paging and deployment isolation, unavailable routes; then the existing nineteen investor browser checks and independent cleanup |

@@ -10,6 +10,7 @@ import { StocksHostProvider } from '../../../src/demo/giwa/stocks-host/StocksHos
 import { StocksPageEnvironment } from '../../../src/demo/giwa/stocks-market/StocksPages';
 import { stocksRoutes } from '../../../src/demo/giwa/stocks-market/routes';
 import type { ActiveWalletSource } from '../../../src/demo/giwa/stocks-wallet-source';
+import { createLocalSessionReport } from '../session-report.mjs';
 import '../../../src/index.css';
 import '../../../src/demo/theme.css';
 
@@ -56,7 +57,8 @@ const rootElement = document.getElementById('root');
 if (!rootElement) throw Error('LOCAL_ROOT_MISSING');
 
 async function start() {
-  const config = configOf(await fetch('/__local/config', { credentials: 'omit', cache: 'no-store', redirect: 'error' }).then(json));
+  const bootstrap = await fetch('/__local/config', { credentials: 'omit', cache: 'no-store', redirect: 'error' }).then(json);
+  const config = configOf(bootstrap);
   const headers = Object.freeze({ 'content-type': 'application/json', 'X-Stocks-Local-Capability': config.capability });
   function readState() {
     return fetch('/__local/state', { headers: { 'X-Stocks-Local-Capability': config.capability }, credentials: 'omit', cache: 'no-store', redirect: 'error' }).then(json).then(value => stateOf(value, config));
@@ -125,6 +127,24 @@ async function start() {
       } catch { setMessage(body.action === 'topUpTestCash' ? 'LOCAL_CONTROL_FAILED · 보충 결과를 확인하지 못했습니다. 현재 테스트 잔액을 확인하세요. 자동 재전송은 하지 않습니다.' : 'LOCAL_CONTROL_FAILED'); }
       finally { setBusy(false); }
     }
+    async function exportSummary() {
+      if (busy || stopped || !config.ownerWorkspace) return;
+      setBusy(true);
+      try {
+        const current = await fetch('/__local/state', { headers: { 'X-Stocks-Local-Capability': config.capability }, credentials: 'omit', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15000) }).then(json);
+        const currentView = stateOf(current, config);
+        const report = createLocalSessionReport(bootstrap, current);
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2) + '\n'], { type: 'application/json' }));
+        try {
+          link.href = url; link.download = `stocks-local-summary-${report.capturedAt.replace(/[:.]/g, '-')}.json`;
+          document.body.appendChild(link); link.click();
+        } finally { link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
+        acceptState(currentView);
+        setMessage('Account A 최신 주문 요약의 JSON 다운로드를 요청했습니다. 매수·매도 각각 최대 100건의 식별번호·상태와 잔액이며, 복원용 백업은 아닙니다.');
+      } catch { setMessage('LOCAL_EXPORT_FAILED · 요약을 저장하지 못했습니다. 로컬 실행 상태를 확인한 뒤 다시 시도하세요.'); }
+      finally { setBusy(false); }
+    }
     async function finish() {
       if (busy || stopped) return;
       setBusy(true);
@@ -151,6 +171,7 @@ async function start() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
           {buttons.map(({ label, body }) => <button key={label} type="button" style={buttonStyle} disabled={busy || stopped} data-local-action={body.action === 'account' ? `account-${body.account}` : body.action} onClick={() => { void control(body); }}>{label}</button>)}
           <button type="button" style={buttonStyle} disabled={busy || stopped} data-local-action="refresh" onClick={() => { void refresh(); }}>Refresh test state</button>
+          {config.ownerWorkspace && <button type="button" style={buttonStyle} disabled={busy || stopped} data-local-action="export-summary" onClick={() => { void exportSummary(); }}>테스트 거래 요약 저장</button>}
           {config.ownerWorkspace && <button type="button" style={buttonStyle} disabled={busy || stopped} data-local-action="finish" onClick={() => { void finish(); }}>로컬 실행 종료</button>}
         </div>
         {config.ownerWorkspace && <p style={{ marginTop: 10, fontSize: 13 }}>Account A 테스트 현금 (최근 조회): <span data-testid="local-test-cash">{(Number(state.holderCash) / 1_000_000).toLocaleString('ko-KR', { maximumFractionDigits: 2 })}</span> ARCO_TEST_USDC · Refresh test state로 갱신</p>}

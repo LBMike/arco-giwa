@@ -92,6 +92,7 @@ try {
       'scripts/stocks-local/browser-server.test.mjs', 'scripts/stocks-local/local-wallet.test.mjs',
       'scripts/stocks-local/owner.test.mjs',
       'scripts/stocks-local/test-cash.test.mjs',
+      'scripts/stocks-local/session-report.test.mjs',
       'scripts/stocks-local/startup-chain.test.mjs',
       'scripts/stocks-submissions/backup-state.test.mjs',
       'scripts/stocks-local/short-session.test.mjs', 'scripts/stocks-ci/evidence.test.mjs',
@@ -144,7 +145,7 @@ try {
       const result = JSON.parse(readFileSync(join(browserEvidence, 'owner-result.json'), 'utf8'));
       assert.equal(result.result, 'PASS'); assert.equal(result.cleanupVerified, true);
       assert.deepEqual(result.pageErrors, []);
-      assert.equal(result.checks.length, 7); assert.equal(new Set(result.checks).size, 7);
+      assert.equal(result.checks.length, 8); assert.equal(new Set(result.checks).size, 8);
       assert.ok(result.checks.every(name => typeof name === 'string' && name.trim()));
       assert.equal(result.final.sends, 4); assert.equal(result.final.claimCount, 4);
       assert.equal(result.final.holderStock, '1500000000'); assert.equal(result.final.holderCash, '1820000000');
@@ -153,6 +154,8 @@ try {
       assert.equal(result.topUp.holderCash, '2000000000'); assert.equal(result.topUp.holderStock, '1500000000');
       assert.equal(result.topUp.vaultCash, '180000000'); assert.equal(result.topUp.escrowStock, '0');
       assert.equal(result.topUp.sends, 4); assert.equal(result.topUp.claimCount, 4);
+      assert.equal(result.export.kind, 'STOCKS_LOCAL_SESSION_SUMMARY');
+      assert.equal(result.export.buyCount, 1); assert.equal(result.export.sellCount, 1); assert.equal(result.export.holderCash, '2000');
       assert.equal(result.ready.initialPaused, true); assert.equal(result.ready.persistentAcrossRestart, false);
       assert.equal(result.ready.ownerPid, result.stopped.ownerPid);
       assert.equal(result.stopped.postgresPidFileAbsent, true); assert.equal(result.stopped.postgresSocketAbsent, true);
