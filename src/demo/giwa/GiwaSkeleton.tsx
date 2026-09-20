@@ -48,24 +48,22 @@ export function ProductsSkeleton() {
                 <GiwaSkeleton key={i} className="h-11 w-28 rounded-[5px]" />
               ))}
             </div>
-            <GiwaSkeleton className="h-11 min-w-[200px] flex-1 rounded-[5px]" />
           </div>
           <div
-            className="overflow-x-auto rounded-[var(--radius-card)] bg-[var(--color-arco-surface-30)] p-5"
-            style={{ boxShadow: "var(--shadow-table)" }}
+            className="w-full overflow-x-auto rounded-2xl bg-[var(--color-arco-surface)] p-4 sm:p-6"
           >
             {/* header row */}
-            <div className="flex items-center gap-6 px-1.5 pb-3">
+            <div className="flex items-center gap-6 border-y border-[var(--color-arco-border)] px-1.5 py-4">
               {[0, 1, 2, 3, 4].map((i) => (
                 <GiwaSkeleton key={i} className="h-3 w-16 rounded-full" />
               ))}
             </div>
             {/* rows: circle + a couple of bars */}
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col">
               {Array.from({ length: 6 }).map((_, i) => (
                 <div
                   key={i}
-                  className="flex h-[59px] items-center gap-3 rounded-[var(--radius-row)] bg-[var(--color-arco-surface)] px-4"
+                  className="flex h-[72px] items-center gap-3 border-b border-[var(--color-arco-border)] px-4"
                 >
                   <GiwaSkeleton className="size-9 shrink-0 rounded-full" />
                   <GiwaSkeleton className="h-3 w-32 rounded-full" />

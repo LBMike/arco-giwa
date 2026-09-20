@@ -12,7 +12,6 @@ import {
   Info,
   Loader2,
   LogOut,
-  Search,
   ShieldCheck,
   Wallet,
 } from "lucide-react"
@@ -48,7 +47,6 @@ import { GiwaHeaderMenu } from "./GiwaHeaderMenu"
 import { BrandMark } from "../components/BrandMark"
 import { ASSET_MANAGERS, ISSUERS, ISSUER_OPTIONS, aumLabel, apyLabel, productById } from "../data/products"
 import { ACAPIX_INSTANT_FEES } from "../data/acapix-detail"
-import { Input } from "@/components/ui/input"
 import { GiwaMultiSelect } from "./GiwaMultiSelect"
 import {
   AmountBlock,
@@ -735,7 +733,7 @@ const NETWORK_LOGOS: Record<string, string> = {
   Giwa: "/logos/giwa.png",
 }
 
-// Multi-select filter bar: Category · Denomination · Issuer · Network + name/address search.
+// Multi-select filter bar: Category · Denomination · Issuer · Network. Product search lives in the header.
 // Options are DERIVED from the current rows' unique mapped values (ordered by the canonical lists),
 // so every option actually filters and no row is left unfilterable. Issuer rows carry a logo.
 export function GiwaFilterBar({
@@ -790,15 +788,6 @@ export function GiwaFilterBar({
           selected={filters.network}
           onChange={(next) => onChange({ network: next })}
         />
-      </div>
-      <div className="relative min-w-[200px] flex-1">
-        <Input
-          value={filters.search}
-          onChange={(event) => onChange({ search: event.target.value })}
-          placeholder="Search name or address"
-          className="h-11 rounded-[5px] border-0 bg-[var(--color-arco-surface)] pr-10 text-sm shadow-[0_0_0_0.5px_var(--color-arco-border)] placeholder:text-[var(--color-arco-muted)]"
-        />
-        <Search className="pointer-events-none absolute right-4 top-1/2 size-4 -translate-y-1/2 text-[var(--color-arco-muted)]" />
       </div>
     </div>
   )
@@ -947,6 +936,7 @@ function GiwaProductRow({
 // set (Product | Base Asset | Asset Manager | Issuer | AUM | APY | Network) over REAL
 // GIWA registry rows. Kept SEPARATE from GiwaProductsTable so Admin's ProductCatalogList
 // (operational columns: decimals / registry load-state / vault route) stays unchanged.
+const CATALOG_HEAD = "px-1.5 py-2.5 text-base font-medium text-[var(--color-arco-chip-ink)]"
 const CATALOG_COLS =
   "grid-cols-[minmax(190px,1.5fr)_0.85fr_1.15fr_0.9fr_1fr_0.9fr_0.55fr]"
 
@@ -1028,19 +1018,18 @@ export function GiwaCatalogTable({
 
   return (
     <div
-      className="overflow-x-auto rounded-[var(--radius-card)] bg-[var(--color-arco-surface-30)] p-5"
-      style={{ boxShadow: "var(--shadow-table)" }}
+      className="w-full overflow-x-auto rounded-2xl bg-[var(--color-arco-surface)] p-4 sm:p-6"
       data-testid="giwa-catalog"
     >
-      <div className={`grid min-w-[1000px] ${CATALOG_COLS} items-center px-1.5 pb-2`}>
-        <span className={HEAD}>Product</span>
-        <span className={`${HEAD} text-center`}>Base Asset</span>
-        <span className={`${HEAD} text-center`}>Asset Manager</span>
-        <span className={`${HEAD} text-center`}>Issuer</span>
+      <div className={`grid min-w-[1000px] ${CATALOG_COLS} items-center border-y border-[var(--color-arco-border)] px-1.5 py-1`}>
+        <span className={CATALOG_HEAD}>Product</span>
+        <span className={`${CATALOG_HEAD} text-center`}>Base Asset</span>
+        <span className={`${CATALOG_HEAD} text-center`}>Asset Manager</span>
+        <span className={`${CATALOG_HEAD} text-center`}>Issuer</span>
         <button
           type="button"
           onClick={() => onSort?.("aum")}
-          className={`${HEAD} flex items-center justify-center gap-1 text-center hover:text-[var(--color-arco-ink)]`}
+          className={`${CATALOG_HEAD} flex items-center justify-center gap-1 text-center hover:text-[var(--color-arco-ink)]`}
         >
           AUM
           <SortChevrons active={sortKey === "aum" ? sortDir : undefined} />
@@ -1048,20 +1037,20 @@ export function GiwaCatalogTable({
         <button
           type="button"
           onClick={() => onSort?.("apy")}
-          className={`${HEAD} flex items-center justify-center gap-1 text-center hover:text-[var(--color-arco-ink)]`}
+          className={`${CATALOG_HEAD} flex items-center justify-center gap-1 text-center hover:text-[var(--color-arco-ink)]`}
         >
           APY
           <SortChevrons active={sortKey === "apy" ? sortDir : undefined} />
         </button>
-        <span className={`${HEAD} text-center`}>Network</span>
+        <span className={`${CATALOG_HEAD} text-center`}>Network</span>
       </div>
 
       {sorted.length === 0 ? (
-        <div className="flex min-w-[1000px] flex-col items-center gap-3 rounded-[var(--radius-row)] bg-[var(--color-arco-surface)] px-6 py-14 text-center">
+        <div className="flex min-w-[1000px] flex-col items-center gap-3 border-b border-[var(--color-arco-border)] px-6 py-14 text-center">
           <p className="text-sm text-[var(--color-arco-muted)]">No products match your filters.</p>
         </div>
       ) : (
-        <div className="flex min-w-[1000px] flex-col gap-2.5">
+        <div className="flex min-w-[1000px] flex-col">
           {sorted.map((product) => (
             <GiwaCatalogRow
               key={product.productId}
@@ -1103,10 +1092,6 @@ function GiwaCatalogRow({
   const managerLogo = config.assetManagerImageUrl ?? am?.logo
   const issuerLabel = config.issuerName ?? iss?.label ?? null
   const issuerLogo = config.issuerImageUrl ?? iss?.logo
-  const rowBg =
-    config.pinned || productCategory(product) === "Arco Saving"
-      ? "bg-[var(--color-row-saving)]"
-      : "bg-[var(--color-arco-surface)]"
   const baseSymbol = baseAssetSymbol(product.paymentAssetSymbol)
   // Published rate wins, then the legacy profile (built-ins stay byte-identical); implied
   // APY only fills the gap for vaults with neither (e.g. newly-registered ones).
@@ -1127,12 +1112,10 @@ function GiwaCatalogRow({
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && onSelect()}
-      className={`group relative grid h-[59px] cursor-pointer ${CATALOG_COLS} items-center rounded-[var(--radius-row)] px-1.5 outline-none transition-[box-shadow] focus-visible:ring-2 focus-visible:ring-[var(--color-arco-ink-40)] ${
-        selected ? "ring-2 ring-[var(--color-arco-ink-40)]" : ""
-      } ${rowBg}`}
+      className={`group relative grid min-h-[72px] cursor-pointer ${CATALOG_COLS} items-center border-b border-[var(--color-arco-border)] px-1.5 py-3 outline-none transition-colors hover:bg-[var(--color-arco-surface-muted)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-arco-ink-40)] ${
+        selected ? "bg-[var(--color-arco-chip)]" : "bg-[var(--color-arco-surface)]"
+      }`}
     >
-      <span className="pointer-events-none absolute inset-0 rounded-[var(--radius-row)] bg-transparent backdrop-blur-0 transition-all duration-150 group-hover:bg-[var(--color-row-hover-weak)] group-hover:backdrop-blur-[1px]" />
-
       <div className="relative z-10 flex items-center gap-2.5 pl-1">
         <GiwaBrandMark src={vaultImage} label={product.symbol} size={35} />
         <div className="flex flex-col">
