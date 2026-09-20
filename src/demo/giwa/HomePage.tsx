@@ -7,7 +7,7 @@ import { vaultDisplayName, vaultImageFor } from "./catalog"
 import { apyLabel, productById } from "../data/products"
 import { GIWA_CHAIN_ID, GIWA_LIVE_REFETCH } from "./config"
 import { countLabel, fundsProductsOf, homeSavingsSummary } from "./home"
-import { GIWA_FUNDS_ROUTE, GIWA_SAVINGS_ROUTE, GIWA_STOCKS_ROUTE } from "./routes"
+import { GIWA_FUNDS_ROUTE, GIWA_SAVINGS_ROUTE } from "./routes"
 import { BrandMark } from "../components/BrandMark"
 import { StocksHomeList } from "./stocks-market/StocksHomeList"
 
@@ -82,21 +82,7 @@ export default function GiwaHomePage() {
         </div>
       </section>
 
-      <section aria-labelledby="home-stocks" className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="home-stocks" className="text-xl font-medium text-[var(--color-arco-ink)]">
-            Stocks
-          </h2>
-          <Link
-            to={GIWA_STOCKS_ROUTE}
-            className={`inline-flex min-h-11 items-center gap-1.5 rounded-md text-sm font-medium text-[var(--color-arco-ink)] hover:underline ${FOCUS}`}
-          >
-            View all stocks
-            <ArrowRight aria-hidden="true" className="size-4" />
-          </Link>
-        </div>
-        <StocksHomeList />
-      </section>
+      <StocksHomeList withHighlights />
     </div>
   )
 }
