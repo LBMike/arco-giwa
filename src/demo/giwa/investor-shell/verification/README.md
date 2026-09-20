@@ -259,3 +259,36 @@ requests/minute therefore fill the list progressively. Current fixture mode has 
 sparklines: SGOV is stale and SCHD/NBIS are unavailable. Detail rereads update the same
 chart state, including invalidation and later recovery. The Home list reads profiles for
 its ten rows and does not load hidden charts.
+
+## Opt-in Alpaca IEX display (2026-09-21)
+
+The default verification page remains offline. For the user-authorized local live-data
+preview, put the two Alpaca credentials in the gitignored `.secrets/alpaca.env` and run:
+
+```sh
+TMPDIR=/private/tmp node --import tsx src/demo/giwa/stocks-execution-host/verification/serve.ts --port 4392 --live-market
+```
+
+Open `/src/demo/giwa/investor-shell/verification/index.html#/stocks`.
+The explicit server flag inserts a public IEX-mode marker into the HTML; the preview
+selects live market reads by default. A server failure never falls back to synthetic
+market prices. `?market=live` also explicitly selects live reads; debug controls can still
+select fixture scenarios. No credential is included in the HTML marker.
+
+Only market display reads use Alpaca. Execution remains the in-process simulated harness;
+Savings/Funds keep their deployed catalog snapshot. The helper forces IEX, ignores any SIP
+or Massive selection in the credential file, and never imports credentials into Vite env.
+The host binds loopback, blocks `.secrets` and `.env` paths, and denies cross-origin market
+requests. The normal application and deployment configuration are unaffected.
+
+Free-plan local budget: at most 60 provider requests in a rolling minute for this single
+server, shared across all browser tabs. Quotes are batched for 40 symbols, read every 30s;
+detail charts every 60s; list chart enrichment every 300s. The server reuses its quote/chart
+cache and coalesces simultaneous reads. Background tabs pause scheduled refreshes; returning
+tabs catch up once due; slow requests cannot overlap. HTTP 429 retains the existing backoff.
+Other applications using the same key have their own usage, outside this local budget.
+
+IEX volume is single-exchange volume; USD turnover is an estimate (shares × price).
+The list exposes the latest observed trade timestamp, not a fabricated current time.
+Market cap/AUM remain unavailable without a separate fundamentals source. A rolling 1D
+chart can legitimately be empty over a weekend; 1W/longer ranges retain actual observations.

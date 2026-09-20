@@ -222,7 +222,7 @@ export function SecurityDetail({ client, security, quote, quotes, capabilities, 
 
 function ChartRead({ client, name, range, onSeries, onSelection }: { client: MarketClient; name: string; range: Range; onSeries: (symbol: string, chart: Chart | null) => void; onSelection: (selection: ChartSelection | null) => void }) {
   const load = useCallback((signal: AbortSignal) => client.chart(name, range, signal), [client, name, range])
-  const chart = useOwnedRead(JSON.stringify([client.baseUrl, name, range]), load)
+  const chart = useOwnedRead(JSON.stringify([client.baseUrl, name, range]), load, 60_000)
   // Once this owner's 1D read finishes, the list gets its series only if it is current (AVAILABLE, 2+ bars); a STALE,
   // unavailable, empty, one-bar or failed read clears the symbol's list entry. Other ranges never touch the 1D entry.
   // useOwnedRead only publishes this key's own result, so a late answer from an earlier symbol/range/API cannot report.

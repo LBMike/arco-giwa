@@ -7,7 +7,7 @@
 //   - same-origin requests pass through (Vite assets, /logos, and /api/v1/stocks/* to the in-process harness of serve.ts),
 //   - public GIWA product reads use ./deployed-giwa.snapshot.json; wallet activity remains empty fixture data,
 //   - every other off-origin request (public RPC included) gets a 503 JSON error and is logged as BLOCKED.
-// Market data comes from the synthetic stocks-market fixtures through StocksPageEnvironment.fetch.
+// Market data defaults to synthetic fixtures; ?market=live explicitly reads the same-origin display backend.
 // This page sends no wallet request itself; window.ethereum is whatever the browser provides.
 
 import { DemoPresentationContext } from "../../demo-presentation"
@@ -29,7 +29,7 @@ import { deployedLegacyReply, DEPLOYED_CAPTURED_AT, DEPLOYED_SOURCE } from "./de
 type AnsweredBy = "deployed" | "fixture" | "harness" | "BLOCKED"
 type LogEntry = { n: number; method: string; target: string; answeredBy: AnsweredBy; status: number | null; note: string }
 type LogState = { entries: readonly LogEntry[]; total: number; counts: Readonly<Record<AnsweredBy, number>> }
-type MarketMode = "top40" | "pilot" | "unconfigured"
+type MarketMode = "top40" | "pilot" | "unconfigured" | "live"
 
 const ORIGIN = window.location.origin
 const MAX_ENTRIES = 300
@@ -156,6 +156,7 @@ window.fetch = guardedFetch
 // ── Stocks market data (StocksPageEnvironment.fetch) ────────────────────────────────────────────────
 
 const MARKET_MODES: readonly { id: MarketMode; label: string; create: () => MarketFetch }[] = [
+  { id: "live", label: "Alpaca IEX", create: () => nativeFetch },
   { id: "top40", label: "40-symbol fixture", create: () => fixtureTop40MarketFetch() },
   { id: "pilot", label: "NVDA pilot", create: () => fixtureMarketFetch("ready", ["NVDA"]) },
   { id: "unconfigured", label: "Unconfigured", create: () => fixtureMarketFetch("keyless") },
@@ -169,7 +170,7 @@ function stocksFetch(mode: MarketMode) {
     if (url.origin !== ORIGIN || !url.pathname.startsWith("/api/v1/stocks/market/")) return guardedFetch(input, init)
     const method = methodOf(input, init)
     return market(url.href, init ?? {}).then((response) => {
-      record(method, display(url), "fixture", response.status, `synthetic market · ${mode}`)
+      record(method, display(url), mode === "live" ? "harness" : "fixture", response.status, mode === "live" ? "Alpaca IEX · live backend" : `synthetic market · ${mode}`)
       return response
     })
   }
@@ -326,7 +327,7 @@ function PreviewBar({ mode, onMode }: { mode: MarketMode; onMode: (mode: MarketM
 
 function PreviewPage() {
   const debug = new URLSearchParams(window.location.search).get("debug") === "1"
-  const [mode, setMode] = useState<MarketMode>(() => debug ? readMode() : "top40")
+  const [mode, setMode] = useState<MarketMode>(() => debug ? readMode() : new URLSearchParams(window.location.search).get("market") === "live" || document.querySelector('meta[name="giwa-live-market"]')?.getAttribute("content") === "iex" ? "live" : "top40")
   const choose = (next: MarketMode) => {
     writeMode(next)
     setMode(next)

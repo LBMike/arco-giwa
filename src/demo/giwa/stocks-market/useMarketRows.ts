@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { startVisiblePolling } from "./polling"
 import type { MarketClient } from "./client"
 import type { Chart, Profile } from "./contracts"
 
@@ -43,16 +44,19 @@ export function useMarketRows(client: MarketClient, symbols: readonly string[], 
   useEffect(() => {
     const controller = new AbortController()
     setState({ client, key, data: EMPTY })
-    void loadMarketRows(client, names, controller.signal, charts, (symbol, kind, data) => {
+    const stop = startVisiblePolling(() => loadMarketRows(client, names, controller.signal, charts, (symbol, kind, data) => {
       if (controller.signal.aborted) return
       if (kind === "chart") onChart?.(symbol, data as Chart | null)
       setState(previous => {
         if (!previous || previous.client !== client || previous.key !== key) return previous
-        if (!data) return previous
+        if (!data) {
+          const next = { ...(kind === "chart" ? previous.data.series : previous.data.profiles) }; delete next[symbol]
+          return { ...previous, data: { ...previous.data, [kind === "chart" ? "series" : "profiles"]: next } }
+        }
         return { ...previous, data: kind === "chart" ? { ...previous.data, series: { ...previous.data.series, [symbol]: data as Chart } } : { ...previous.data, profiles: { ...previous.data.profiles, [symbol]: data as Profile } } }
       })
-    })
-    return () => controller.abort()
+    }), charts ? 300_000 : 0)
+    return () => { stop(); controller.abort() }
   }, [client, key, names, charts, onChart])
   return state?.client === client && state.key === key ? state.data : EMPTY
 }

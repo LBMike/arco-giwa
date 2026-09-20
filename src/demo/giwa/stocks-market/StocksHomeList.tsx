@@ -1,3 +1,4 @@
+import { MarketFreshness } from "./MarketFreshness"
 import { useCallback, useContext, useMemo, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { ArrowRight } from "lucide-react"
@@ -37,13 +38,14 @@ function HomeTable({ client, ordersClient, response, withHighlights }: { client:
   const catalog = response.data
   const names = useMemo(() => catalog.securities.map(item => item.symbol), [catalog])
   const load = useCallback((signal: AbortSignal) => client.quotes(names, signal), [client, names])
-  const quotes = useOwnedRead(JSON.stringify([client.baseUrl, names]), load)
+  const quotes = useOwnedRead(JSON.stringify([client.baseUrl, names]), load, 30_000)
   const capabilities = useOrderCapabilities(ordersClient)
   const first = [...catalog.securities].sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity)).slice(0, 10).map(item => item.symbol)
   const overview = useMarketRows(client, first, false)
   // Its own surface card: the pinned # and Asset Name cells are opaque surface while the table scrolls sideways.
   return <HomeLayout withHighlights={withHighlights} catalog={catalog} quotes={quotes}><div className="w-full min-w-0 space-y-3 rounded-[var(--radius-strategy)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-4 sm:p-6">
     {quotes.phase !== "ready" ? <MarketStatus status={quotes.phase} /> : quotes.value.status !== "AVAILABLE" && <MarketStatus status={quotes.value.status} />}
+    {quotes.phase === "ready" && <MarketFreshness response={quotes.value} />}
     <StocksMarketTable variant="home" limit={10} rowHref={stockHref} catalog={catalog} quotes={quotes} capabilities={capabilities} series={NO_SERIES} profiles={overview.profiles} />
   </div></HomeLayout>
 }

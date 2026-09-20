@@ -5,7 +5,8 @@
 //   - one fake EIP-1193 wallet per fixture account (A, B) over the harness's fake chain answers /__fixture/wallet,
 //   - /__fixture/control scripts the fake wallets, chain and server, /__fixture/state reports counters,
 //   - a Vite dev server (JS API, repo vite.config.ts with the port/host overridden inline) serves the page.
-// Binds 127.0.0.1 only. No database, public network, key, signature or real asset.
+// Binds 127.0.0.1 only. Default: offline, no database/key/signature/real asset.
+// Explicit --live-market enables server-only Alpaca IEX display reads; execution stays simulated.
 //
 // Run: TMPDIR=/private/tmp node --import tsx src/demo/giwa/stocks-execution-host/verification/serve.ts --port 4327
 
@@ -110,6 +111,8 @@ function walletErrorCode(error: unknown): number | string {
 async function main() {
   const port = parsePort(process.argv.slice(2))
   const origin = `http://${HOST}:${port}`
+  const liveMarket = process.argv.includes("--live-market")
+    ? await (await import("../../../../../scripts/stocks-local/live-market")).createLiveMarket() : null
   const harness = await createInProcessStocks({ frontendOrigin: origin })
   const wallets: Record<Account, FakeEip1193Wallet> = {
     A: createFakeEip1193Wallet(harness.chain, { account: ACCOUNTS.A }),
@@ -277,12 +280,25 @@ async function main() {
 
   const fixturePlugin = {
     name: "giwa-stocks-verification-fixture",
+    transformIndexHtml() {
+      return liveMarket ? [{ tag: "meta", attrs: { name: "giwa-live-market", content: "iex" }, injectTo: "head" as const }] : []
+    },
     configureServer(server: AnyValue) {
       server.middlewares.use((request: IncomingMessage, response: ServerResponse, next: () => void) => {
         const url = request.url ?? "/"
         const method = (request.method ?? "GET").toUpperCase()
         const route = url.split("?")[0]!
         const handle = async () => {
+          // Never serve server-only credential files through Vite.
+          const decoded = decodeURIComponent(route)
+          if (decoded.includes(".secrets") || /(?:^|[/.])\.env(?:[./]|$)/.test(decoded)) return sendJson(response, 403, { error: "FORBIDDEN" })
+          if (liveMarket && route.startsWith("/api/v1/stocks/market/")) {
+            if (request.headers.host !== `${HOST}:${port}` || (request.headers.origin && request.headers.origin !== origin) || request.headers["sec-fetch-site"] === "cross-site") return sendJson(response, 403, { error: "FORBIDDEN" })
+            if (method !== "GET") return sendJson(response, 405, { error: "METHOD_NOT_ALLOWED" })
+            const answer = await liveMarket.inject({ method: "GET", url })
+            response.writeHead(answer.statusCode, { "content-type": "application/json", "cache-control": "no-store", "x-content-type-options": "nosniff" })
+            response.end(answer.body); return
+          }
           if (route.startsWith("/api/v1/")) return api(request, response, url)
           if (route === "/__fixture/wallet" && method === "POST") return sendJson(response, 200, await walletCall(await readJson(request)))
           if (route === "/__fixture/control" && method === "POST") return sendJson(response, 200, await control(await readJson(request)))
@@ -311,7 +327,7 @@ async function main() {
     appType: "mpa",
     clearScreen: false,
     logLevel: "warn",
-    server: { host: HOST, port, strictPort: true, open: false, hmr: { host: HOST, port } },
+    server: { host: HOST, port, strictPort: true, open: false, hmr: { host: HOST, port }, fs: { deny: ["**/.env*", "**/*.{crt,pem}", "**/.git/**", "**/.secrets/**"] } },
     plugins: [fixturePlugin],
   })
   await server.listen()
@@ -320,11 +336,11 @@ async function main() {
   const shutdown = () => {
     if (closing) return
     closing = true
-    Promise.allSettled([server.close(), harness.close()]).then(() => process.exit(0), () => process.exit(1))
+    Promise.allSettled([server.close(), harness.close(), liveMarket?.close()]).then(() => process.exit(0), () => process.exit(1))
   }
   process.on("SIGINT", shutdown)
   process.on("SIGTERM", shutdown)
-  process.stdout.write(`GIWA Stocks verification fixture (offline, not the app): ${origin}${PAGE_PATH}\n`)
+  process.stdout.write(`GIWA Stocks preview (${liveMarket ? "Alpaca IEX display; simulated execution" : "offline"}): ${origin}${PAGE_PATH}\n`)
 }
 
 main().catch((error: unknown) => {
