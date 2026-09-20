@@ -92,6 +92,7 @@ try {
       'scripts/stocks-local/browser-server.test.mjs', 'scripts/stocks-local/local-wallet.test.mjs',
       'scripts/stocks-local/owner.test.mjs',
       'scripts/stocks-local/backend-build.test.mjs',
+      'scripts/stocks-local/transport-http.test.mjs',
       'scripts/stocks-local/test-cash.test.mjs',
       'scripts/stocks-local/session-report.test.mjs',
       'scripts/stocks-local/startup-chain.test.mjs',

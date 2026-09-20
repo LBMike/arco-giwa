@@ -3,6 +3,7 @@ import { decodeFunctionData } from 'viem';
 import { ABI, callDigest, ensure, freezeManifest, manifestDigest, immutable, hash, type AuthorizedCall, type Manifest, type SignerPort, type Submission } from '../stocks/contracts.js';
 import { authorizedCall, redemptionCall } from '../stocks/chain.js';
 import type { JsonRpcTransport } from '../stocks/rpc.js';
+import { stocksHttpJson, STOCKS_RPC_MAX_BYTES, STOCKS_SIGNER_MAX_BYTES } from './http-json.js';
 
 export type HttpFetch = typeof fetch;
 export function endpoint(value: string, localHarness = false): URL {
@@ -17,9 +18,8 @@ export function httpStocksRpc(url: string, localHarness = false, request: HttpFe
   return async (method, params) => {
     ensure(readMethods.has(method), 'READ_ONLY_RPC_METHOD');
     const id = randomUUID();
-    const response = await request(target, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000), headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) });
-    if (!response.ok) throw new Error('STOCKS_RPC_UNAVAILABLE');
-    const result = await response.json() as Record<string, unknown>;
+    const result = await stocksHttpJson(target, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) },
+      { request, maxBytes: STOCKS_RPC_MAX_BYTES, errorCode: 'STOCKS_RPC_UNAVAILABLE' }) as Record<string, unknown>;
     if (!(result?.jsonrpc === '2.0' && result.id === id && !result.error && Object.prototype.hasOwnProperty.call(result, 'result'))) throw new Error('STOCKS_RPC_RESPONSE_UNAVAILABLE');
     return result.result;
   };
@@ -37,10 +37,8 @@ export function externalStocksSigner(options: ExternalSignerOptions): SignerPort
   const authorization = options.authorization;
   ensure(deploymentDigest === manifestDigest(expected), 'SIGNER_DEPLOYMENT_MISMATCH');
   async function call(path: string, method: string, body?: unknown): Promise<unknown> {
-    const response = await request(new URL(path, base), { method, redirect: 'error', signal: AbortSignal.timeout(10000), headers: { authorization: `Bearer ${authorization}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-    if (method === 'GET' && response.status === 404) return null;
-    if (!response.ok) throw new Error('SIGNER_RESPONSE_UNAVAILABLE');
-    return response.json();
+    return stocksHttpJson(new URL(path, base), { method, headers: { authorization: `Bearer ${authorization}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) },
+      { request, maxBytes: STOCKS_SIGNER_MAX_BYTES, errorCode: 'SIGNER_RESPONSE_UNAVAILABLE', allowNotFound: method === 'GET' });
   }
   function submission(value: unknown, operationId: string, expectedDigest?: string): Submission | null {
     if (value === null) return null;

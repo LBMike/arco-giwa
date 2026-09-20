@@ -106,6 +106,8 @@ archive is removed on success, failure and handled interruption; evidence keeps
 only its digest, byte size and verified stage flags. See the
 [rehearsal guide](../../docs/contracts/stocks-backup-restore-rehearsal.md).
 
+Local harness unit checks also exercise the production RPC/signer HTTP adapters against disposable loopback servers: stalled-body cancellation, decompressed response limits and original-operation lookup after a truncated signer response. These tests use no keys, database or chain writes.
+
 Logs, result/summary JSON and screenshots are stored in the selected evidence
 directory. GitHub artifact upload is **not configured**: separate authorization
 for external retention is pending. Consequently screenshots and result files on
