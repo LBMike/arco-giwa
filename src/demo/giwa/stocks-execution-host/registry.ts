@@ -86,14 +86,16 @@ let lastSourceId = 0
 /** A stable per-object number, so a replaced provider or client object is another identity even at the same address. */
 function sourceIdentity(source: ActiveWalletSource | null): string {
   if (source === null) return "none"
-  const object = source.mode === "injected" ? source.provider : source.client
-  if (object === null || (typeof object !== "object" && typeof object !== "function")) return `${source.mode}:none`
-  let id = sourceIds.get(object as object)
-  if (id === undefined) {
-    id = ++lastSourceId
-    sourceIds.set(object as object, id)
+  const identity = (object: unknown) => {
+    if (object === null || (typeof object !== "object" && typeof object !== "function")) return "none"
+    let id = sourceIds.get(object as object)
+    if (id === undefined) {
+      id = ++lastSourceId
+      sourceIds.set(object as object, id)
+    }
+    return String(id)
   }
-  return `${source.mode}:${id}`
+  return source.mode === "injected" ? `injected:${identity(source.provider)}` : `dynamic:${identity(source.client)}:${identity(source.rawProvider)}`
 }
 
 export function executionIdentityKey(view: ExecutionHostView): string {
@@ -112,8 +114,8 @@ function sameEvidence(a: ReviewedDeployment, b: ReviewedDeployment): boolean {
 
 function capabilityOf(view: ExecutionHostView, capture: ReturnType<typeof captureWalletSource> | null): ExecutionCapability {
   if (view.apiBase === null) return unavailable("API_BASE_NOT_CONFIGURED")
-  // Known before sign-in: a Dynamic source can never execute, so nobody is told to sign in for it.
-  if (view.wallet.source?.mode === "dynamic") return unavailable("WALLET_SOURCE_UNSUPPORTED")
+  // A Dynamic client alone is retrying; only the explicitly selected raw extension can execute.
+  if (view.wallet.source?.mode === "dynamic" && !view.wallet.source.rawProvider) return unavailable("WALLET_SOURCE_UNSUPPORTED")
   if (view.session === null) return unavailable("SESSION_REQUIRED")
   if (capture === null) return unavailable("WALLET_SOURCE_MISSING")
   if (capture.status !== "READY") return unavailable(capture.code)

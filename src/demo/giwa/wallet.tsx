@@ -7,6 +7,7 @@ import { publicGiwaClient, setDynamicWalletClient, setInjectedWalletSource } fro
 import type { HexAddress, UiPhase } from "./types"
 import { dynamicSigningReady, useWalletConnectionEpoch } from "./stocks-host/wallet-lifecycle"
 import type { ActiveWalletSource } from "./stocks-wallet-source/types"
+import { selectedDynamicInjectedProvider } from "./stocks-wallet-source/dynamic-injected"
 
 type WalletContextValue = {
   address: HexAddress | null
@@ -228,16 +229,18 @@ function DynamicGiwaWalletStateProvider({ children, dynamic, account, switchChai
   )
   const address = localLogout ? null : selectedAddress
   const chainId = account.chainId ?? chainIdFromNetwork(network)
-  const connectionEpoch = useWalletConnectionEpoch([account.address, account.chainId, account.status, primaryWallet?.id, primaryWallet?.address, network, dynamicWalletClient, logoutEpoch])
+  const rawProvider = localLogout ? null : selectedDynamicInjectedProvider(primaryWallet)
+  const connectionEpoch = useWalletConnectionEpoch([account.address, account.chainId, account.status, primaryWallet?.id, primaryWallet?.address, network, dynamicWalletClient, rawProvider, logoutEpoch])
   const signingReady = dynamicSigningReady(address, chainId, account.status, primaryWallet?.address, dynamicWalletClient)
   useEffect(() => {
     if (!account.address && !primaryWallet?.address) setLocalLogout(false)
   }, [account.address, primaryWallet?.address])
 
   useEffect(() => {
-    setDynamicWalletClient(address && chainId === GIWA_CHAIN_ID ? dynamicWalletClient ?? null : null)
+    setDynamicWalletClient(address && chainId === GIWA_CHAIN_ID ? dynamicWalletClient ?? null : null, signingReady ? rawProvider : null,
+      () => selectedDynamicInjectedProvider(primaryWallet))
     return () => setDynamicWalletClient(null)
-  }, [address, chainId, dynamicWalletClient])
+  }, [address, chainId, signingReady, dynamicWalletClient, rawProvider, primaryWallet])
 
   const refreshBalance = useCallback(async () => {
     if (!address) {
@@ -283,7 +286,7 @@ function DynamicGiwaWalletStateProvider({ children, dynamic, account, switchChai
     refreshBalance().catch(() => setNativeBalance(null))
   }, [refreshBalance])
 
-  const source = useMemo<ActiveWalletSource>(() => ({ mode: "dynamic", client: signingReady ? dynamicWalletClient ?? null : null }), [signingReady, dynamicWalletClient])
+  const source = useMemo<ActiveWalletSource>(() => ({ mode: "dynamic", client: signingReady ? dynamicWalletClient ?? null : null, rawProvider: signingReady ? rawProvider : null }), [signingReady, dynamicWalletClient, rawProvider])
 
   const phase: UiPhase = !address
     ? "disconnected"

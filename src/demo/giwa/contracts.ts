@@ -65,19 +65,25 @@ type ContractWriter = {
   writeContract(request: unknown): Promise<Hex>
 }
 
-let walletSource: { mode: "injected" } | { mode: "dynamic"; client: ActiveWalletClient | null } = { mode: "injected" }
+type DynamicRawProvider = Extract<ActiveWalletSource, { mode: "dynamic" }>["rawProvider"]
+let walletSource: { mode: "injected" } | { mode: "dynamic"; client: ActiveWalletClient | null; rawProvider?: DynamicRawProvider; readRawProvider?: () => DynamicRawProvider } = { mode: "injected" }
 
 export function setInjectedWalletSource() {
   walletSource = { mode: "injected" }
 }
 
-export function setDynamicWalletClient(client: ActiveWalletClient | null) {
-  walletSource = { mode: "dynamic", client }
+export function setDynamicWalletClient(client: ActiveWalletClient | null, rawProvider?: DynamicRawProvider, readRawProvider?: () => DynamicRawProvider) {
+  walletSource = { mode: "dynamic", client, ...(client && rawProvider ? { rawProvider, readRawProvider } : {}) }
 }
 
 /** Read-only view of the active source object. It creates no client and issues no request. */
 export function activeWalletSource(): ActiveWalletSource {
-  if (walletSource.mode === "dynamic") return { mode: "dynamic", client: walletSource.client }
+  if (walletSource.mode === "dynamic") {
+    const { client, rawProvider, readRawProvider } = walletSource
+    if (!rawProvider) return { mode: "dynamic", client }
+    try { return { mode: "dynamic", client, rawProvider: readRawProvider ? readRawProvider() : rawProvider } }
+    catch { return { mode: "dynamic", client, rawProvider: null } }
+  }
   return { mode: "injected", provider: typeof window === "undefined" ? null : window.ethereum ?? null }
 }
 

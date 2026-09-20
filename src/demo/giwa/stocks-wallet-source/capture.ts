@@ -22,15 +22,15 @@ function observable(provider: Eip1193Provider) {
 }
 
 /**
- * Captures the injected provider object of the current render. Dynamic mode is refused: its connector client has no
- * single-attempt raw request (nested viem transports retry), and `window.ethereum` is never used in its place.
+ * Captures the raw provider of this render. Dynamic requires the explicitly resolved selected extension;
+ * its retrying viem client is never called and `window.ethereum` is never used in its place.
  * Capture issues no wallet request.
  */
 export function captureWalletSource(view: WalletSourceView, options: { activeSource?: () => ActiveWalletSource | null } = {}): WalletSourceCapture {
   const active = view.source
   if (!active) return unavailable("WALLET_SOURCE_MISSING")
-  if (active.mode !== "injected") return unavailable("WALLET_SOURCE_UNSUPPORTED")
-  const provider = active.provider
+  if (active.mode === "dynamic" && (!active.rawProvider || !active.client)) return unavailable("WALLET_SOURCE_UNSUPPORTED")
+  const provider = active.mode === "injected" ? active.provider : active.rawProvider ?? null
   if (!usableProvider(provider)) return unavailable("WALLET_SOURCE_MISSING")
   // Without events a swap inside the same provider object could not be seen synchronously.
   if (!observable(provider)) return unavailable("WALLET_SOURCE_UNSUPPORTED")
@@ -43,18 +43,20 @@ export function captureWalletSource(view: WalletSourceView, options: { activeSou
   const retire = () => { stale = true }
   for (const event of WALLET_SOURCE_EVENTS) provider.on!(event, retire)
 
-  function stillActive() {
+  const stillActive = () => {
     if (!options.activeSource) return true
     try {
       const current = options.activeSource()
-      return current?.mode === "injected" && current.provider === provider
+      return active.mode === "injected"
+        ? current?.mode === "injected" && current.provider === provider
+        : current?.mode === "dynamic" && current.rawProvider === provider && current.client === active.client
     } catch { return false }
   }
 
   return Object.freeze({
     status: "READY",
     source: Object.freeze({
-      mode: "injected",
+      mode: active.mode,
       epoch: view.epoch,
       address: account,
       request: (args: { method: string; params?: readonly unknown[] }) => provider.request({ method: args.method, params: args.params }),

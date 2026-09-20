@@ -193,11 +193,18 @@ test("host DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsdom packa
   })
   await t.test("actual injected and Dynamic providers propagate connection lifetimes without live SDK/RPC", async () => {
     // Mock only vendor hook inputs and contract transport; execute production wallet/provider code.
-    const sdk = { dynamic: { handleLogOut: async () => {}, network: 91342, primaryWallet: { id: "wallet-a", address: A }, sdkHasLoaded: true, setShowAuthFlow: () => {} }, account: { address: A, chainId: 91342, status: "connected" }, client: {} as Record<string, unknown> }
+    class FixtureInjectedConnector {
+      provider = { request: async () => { assert.fail("render must not request the wallet") }, on() {}, removeListener() {} }
+      isInstalledOnBrowser() { return true }
+      get ethProviderHelper() { return { getInstalledProvider: () => this.provider } }
+    }
+    const connector = new FixtureInjectedConnector()
+    const sdk = { Connector: FixtureInjectedConnector, dynamic: { handleLogOut: async () => {}, network: 91342, primaryWallet: { id: "wallet-a", address: A, connector } as { id: string; address: string; connector?: FixtureInjectedConnector }, sdkHasLoaded: true, setShowAuthFlow: () => {} }, account: { address: A, chainId: 91342, status: "connected" }, client: {} as Record<string, unknown> }
     Object.assign(globalThis, { __giwaWalletTest: sdk })
-    const vendor = `export const useDynamicContext=()=>globalThis.__giwaWalletTest.dynamic; export const useAccount=()=>globalThis.__giwaWalletTest.account; export const useSwitchChain=()=>({switchChainAsync:async()=>{}}); export const useWalletClient=()=>({data:globalThis.__giwaWalletTest.client});`
+    const vendor = `export const EthereumInjectedConnector=globalThis.__giwaWalletTest.Connector; export const useDynamicContext=()=>globalThis.__giwaWalletTest.dynamic; export const useAccount=()=>globalThis.__giwaWalletTest.account; export const useSwitchChain=()=>({switchChainAsync:async()=>{}}); export const useWalletClient=()=>({data:globalThis.__giwaWalletTest.client});`
     const contract = `export const publicGiwaClient={getBalance:async()=>1000000000000000000n}; export const setDynamicWalletClient=()=>{}; export const setInjectedWalletSource=()=>{};`
     const hooks = registerHooks({ resolve(specifier, context, next) {
+      if (context.parentURL?.includes("/stocks-wallet-source/dynamic-injected.ts") && specifier === "@dynamic-labs/ethereum") return { url: `data:text/javascript,${encodeURIComponent(vendor)}`, shortCircuit: true }
       if (context.parentURL?.includes("/giwa/wallet.tsx")) {
         if (["@dynamic-labs/sdk-react-core", "wagmi"].includes(specifier)) return { url: `data:text/javascript,${encodeURIComponent(vendor)}`, shortCircuit: true }
         if (specifier === "./contracts") return { url: `data:text/javascript,${encodeURIComponent(contract)}`, shortCircuit: true }
@@ -275,6 +282,13 @@ test("host DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsdom packa
       const renderDynamic = async () => act(async () => { dynamicRoot.render(<StrictMode><DynamicGiwaWalletProvider><Bridge /></DynamicGiwaWalletProvider></StrictMode>); await flush() })
       await renderDynamic()
       assert.equal(wallet.signingReady, true)
+      assert.equal(wallet.source?.mode === "dynamic" && wallet.source.rawProvider, connector.provider)
+      await act(async () => { await host.signIn() }); assert.ok(host.snapshot.session)
+      const rawEpoch = wallet.sessionEpoch
+      connector.provider = { ...connector.provider }
+      await renderDynamic()
+      assert.notEqual(wallet.sessionEpoch, rawEpoch); assert.equal(host.snapshot.session, null)
+      assert.equal(wallet.source?.mode === "dynamic" && wallet.source.rawProvider, connector.provider)
       await act(async () => { await host.signIn() }); assert.ok(host.snapshot.session)
       const firstEpoch = wallet.sessionEpoch
       sdk.client = client(A) // same address, new signer source
@@ -284,11 +298,13 @@ test("host DOM integration (set GIWA_HOST_DOM_RUNTIME to an existing jsdom packa
       sdk.dynamic.primaryWallet = { id: "wallet-b", address: B } // SDK changed before Wagmi caught up
       await renderDynamic()
       assert.equal(wallet.signingReady, false); assert.equal(host.snapshot.session, null)
+      assert.equal(wallet.source?.mode === "dynamic" && wallet.source.rawProvider, null)
       sdk.account = { address: B, chainId: 91342, status: "connected" }; sdk.client = client(B)
       await renderDynamic(); assert.equal(wallet.signingReady, true)
       await act(async () => { await host.signIn() }); assert.equal((host.snapshot as HostSnapshot).session?.walletAddress.toLowerCase(), B)
       await act(async () => { wallet.disconnect(); await flush() })
       assert.equal(wallet.connected, false); assert.equal(host.snapshot.session, null)
+      assert.equal(wallet.source?.mode === "dynamic" && wallet.source.rawProvider, null)
       await act(async () => dynamicRoot.unmount()); dynamicElement.remove()
       assert.equal(f.timers.size, 0)
     } finally { hooks.deregister(); Reflect.deleteProperty(globalThis, "__giwaWalletTest") }

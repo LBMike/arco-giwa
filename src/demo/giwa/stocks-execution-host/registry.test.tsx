@@ -14,6 +14,17 @@ import { createExecutionRegistry, executionIdentityKey, type ExecutionHostView }
 
 const SESSION: HostSession = Object.freeze({ id: "session-a", walletAddress: WALLET, chainId: 91342, accessToken: TOKEN, createdAt: START - 1_000, expiresAt: START + 600_000 })
 
+test("Dynamic selected extension enables the registry; changing only the raw provider changes its identity", () => {
+  const rawProvider = fakeProvider(), client = {}
+  const view: ExecutionHostView = { session: SESSION, apiBase: API, wallet: { address: WALLET, chainId: 91342, epoch: "dynamic:1", source: { mode: "dynamic", client, rawProvider } } }
+  const registry = createExecutionRegistry({ view: () => view, invalidate() {}, activeSource: () => view.wallet.source })
+  assert.equal(registry.capability.status, "READY")
+  assert.equal(rawProvider.calls.length, 0)
+  const replacement = { ...view, wallet: { ...view.wallet, source: { mode: "dynamic" as const, client, rawProvider: fakeProvider() } } }
+  assert.notEqual(executionIdentityKey(view), executionIdentityKey(replacement))
+  registry.dispose(); assert.equal(rawProvider.listenerCount(), 0)
+})
+
 function world(options: { source?: "injected" | "dynamic" | "none"; session?: HostSession | null; apiBase?: string | null; address?: string } = {}) {
   const clock = clocks()
   const provider = fakeProvider()

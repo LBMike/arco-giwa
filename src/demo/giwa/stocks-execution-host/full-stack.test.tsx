@@ -28,6 +28,7 @@ const WALLET_READS = ["eth_chainId", "eth_accounts", "eth_getBlockByNumber", "et
 
 type WorldOptions = {
   network?: NetworkVariant
+  dynamicExtension?: boolean
   lifetimeMs?: number
   /** Test-only rewrite of a real server response (for example a shorter policy lease). */
   rewrite?: (path: string, response: Response) => Promise<Response> | Response
@@ -40,7 +41,9 @@ async function world(side: Side, options: WorldOptions = {}) {
   let session: HostSession = h.session(A, options.lifetimeMs ? { lifetimeMs: options.lifetimeMs } : {})
   const created = await h.createOrder(side, session)
   const wallet = createFakeEip1193Wallet(h.chain, { account: A, network: options.network })
-  let source: ActiveWalletSource = { mode: "injected", provider: wallet }
+  let source: ActiveWalletSource = options.dynamicExtension
+    ? { mode: "dynamic", rawProvider: wallet, client: new Proxy({}, { get() { assert.fail("Dynamic viem client must not receive execution calls") } }) }
+    : { mode: "injected", provider: wallet }
   let active: ActiveWalletSource | null = source
   let view: ExecutionHostView = { session, wallet: { source, address: A, chainId: 91342, epoch: "injected:1" }, apiBase: h.apiBase }
   // Browser clocks: real time plus test offsets, like a stalled page or a sleeping laptop.
@@ -138,6 +141,22 @@ async function until(predicate: () => boolean, label: string) {
 
 for (const side of ["BUY", "SELL"] as const) {
   const transferWord = side === "BUY" ? "deposit" : "escrow"
+
+  test(`${side}: Dynamic selected extension completes exact approval and transfer through the real server adapters`, async () => {
+    await run(side, { dynamicExtension: true }, async w => {
+      assert.equal((await w.check()).status, "APPROVAL_REQUIRED")
+      await w.owner().controller.approve()
+      assert.equal(w.snapshot().status, "READY_TRANSFER")
+      await w.owner().controller.submit()
+      assert.equal(w.snapshot().status, "SUBMITTED")
+      assert.equal(w.sends().length, 2)
+      assert.deepEqual(w.sends()[0].params, [w.expected.approval])
+      assert.deepEqual(w.sends()[1].params, [w.expected.transfer])
+      assert.deepEqual(w.forbidden(), [])
+      const journal = await w.journal()
+      assert.deepEqual([journal.approval.status, journal.transfer.status], ["CONFIRMED", "SUBMITTED"])
+    })
+  })
 
   test(`${side}: check → exact approval → server-verified approval → separate ${transferWord}; exact wallet and server requests`, async () => {
     await run(side, {}, async (w) => {

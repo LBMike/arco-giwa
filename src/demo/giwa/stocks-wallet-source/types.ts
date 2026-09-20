@@ -8,10 +8,10 @@ export type Eip1193Provider = {
   removeListener?(event: string, listener: (...args: unknown[]) => void): unknown
 }
 /** Render-time view of the wallet provider tree's active source. */
-export type ActiveWalletSource = Readonly<{ mode: "injected"; provider: Eip1193Provider | null }> | Readonly<{ mode: "dynamic"; client: unknown }>
+export type ActiveWalletSource = Readonly<{ mode: "injected"; provider: Eip1193Provider | null }> | Readonly<{ mode: "dynamic"; client: unknown; /** Only a selected, installed extension's raw provider; never the viem client. */ rawProvider?: Eip1193Provider | null }>
 export type WalletSourceView = Readonly<{ source: ActiveWalletSource | null; address: string | null; chainId: number | null; epoch: string }>
 export type CapturedWalletSource = Readonly<{
-  mode: "injected"; epoch: string
+  mode: "injected" | "dynamic"; epoch: string
   /** Checksummed. */
   address: Address
   request(args: WalletRpcArgs): Promise<unknown>

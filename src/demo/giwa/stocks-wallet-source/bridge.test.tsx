@@ -49,3 +49,20 @@ test("bridge view maps sessionEpoch, and the module source retires a capture on 
     assert.equal(provider.calls.length, 0)
   } finally { restore(); setInjectedWalletSource() }
 })
+
+test("Dynamic module binding exposes only the explicitly selected extension and clears it on logout", () => {
+  const provider = fakeProvider()
+  const client = { sendTransaction: async () => "0x" as const, writeContract: async () => "0x" as const }
+  try {
+    let selected = provider
+    setDynamicWalletClient(client, provider, () => selected)
+    assert.deepEqual(currentActiveWalletSource(), { mode: "dynamic", client, rawProvider: provider })
+    const capture = captureWalletSource({ source: currentActiveWalletSource(), address: WALLET, chainId: 91342, epoch: "dynamic:1" }, { activeSource: currentActiveWalletSource })
+    assert.equal(capture.status, "READY"); if (capture.status !== "READY") return
+    selected = fakeProvider()
+    assert.equal(capture.source.isCurrent(), false, "provider replacement is seen before another React render")
+    capture.source.dispose()
+    setDynamicWalletClient(null, provider)
+    assert.deepEqual(currentActiveWalletSource(), { mode: "dynamic", client: null })
+  } finally { setInjectedWalletSource() }
+})

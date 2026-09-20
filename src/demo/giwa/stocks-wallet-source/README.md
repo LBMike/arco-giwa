@@ -1,6 +1,6 @@
 # GIWA Stocks active wallet source
 
-Browser wallet ports for `stocks-wallet`'s controller, over the wallet the app already uses. It is pure and injectable: nothing is mounted here, and nothing reads `window.ethereum` except the `contracts.ts` accessor. **It has not been verified with a real wallet or a public network**; every test uses a fake EIP-1193 provider.
+Browser wallet ports for `stocks-wallet`'s controller, over the wallet the app already uses. Capture and ports are injectable and issue no request on mounting. The Dynamic resolver uses the SDK's selected extension lookup, never a generic `window.ethereum` fallback. **It has not been verified with a real wallet or a public network**; execution tests use a fake EIP-1193 provider.
 
 ## Capture
 
@@ -9,17 +9,24 @@ Browser wallet ports for `stocks-wallet`'s controller, over the wallet the app a
 | View | Result |
 | --- | --- |
 | injected provider with `request`, `on` and `removeListener`, valid non-zero address, non-empty epoch | `READY` |
-| Dynamic mode, with or without a client | `WALLET_SOURCE_UNSUPPORTED` |
+| Dynamic with an active client and explicitly resolved observable raw extension provider | `READY` |
+| Dynamic client alone (including embedded/mobile WalletConnect paths) | `WALLET_SOURCE_UNSUPPORTED` |
 | injected provider without `on`/`removeListener` | `WALLET_SOURCE_UNSUPPORTED` (a swap inside the same object could not be seen) |
 | no source, no provider object or no `request` | `WALLET_SOURCE_MISSING` |
 | missing, invalid or zero address | `WALLET_NOT_CONNECTED` |
 | empty epoch | `WALLET_EPOCH_REQUIRED` |
 
-A `READY` capture holds the provider object. `request(args)` calls `provider.request({ method, params })` directly: no viem transport, so no retry layer. Capture subscribes to `accountsChanged`, `chainChanged` and `disconnect` and issues no request. Any event retires the capture for good (an A→B→A round trip is still stale). `isCurrent()` is synchronous: not disposed, no event seen, and `activeSource()` (normally `currentActiveWalletSource`) still reports injected mode with the identical provider object. `dispose()` removes the three listeners.
+A `READY` capture holds the provider object. `request(args)` calls `provider.request({ method, params })` directly: no viem transport, so no retry layer. Capture subscribes to `accountsChanged`, `chainChanged` and `disconnect` and issues no request. Any event retires the capture for good (an A→B→A round trip is still stale). `isCurrent()` is synchronous: not disposed, no event seen, and `activeSource()` (normally `currentActiveWalletSource`) still reports the same mode and identical provider object; Dynamic also requires the same client identity. `dispose()` removes the three listeners.
 
-### Why Dynamic is unavailable
+### Dynamic extension bridge
 
-`useWalletClient().data` is Dynamic's connector client, built from nested viem `custom()` transports. Every client layer's `request` retries -1, -32603, -32005, 429 and code-less errors three times, and `sendTransaction` adds `eth_chainId` and may fall back to `wallet_sendTransaction`. One -32603 can therefore become several `eth_sendTransaction` prompts (a research probe measured 16; `dynamic-control.test.tsx` shows 4 through one layer and 16 through two with installed viem 2.53.1). With the current `providers.tsx` there is no single-attempt raw request, so Dynamic mode is refused with zero calls on the client and no fallback to `window.ethereum`. Enabling it needs a provider configuration decision outside this module.
+`useWalletClient().data` is Dynamic's connector client, built from nested viem `custom()` transports. Every client layer can retry; `dynamic-control.test.tsx` demonstrates repeated sends with installed viem 2.53.1. Stocks never calls that client for execution.
+
+`dynamic-injected.ts` accepts only the installed SDK's `EthereumInjectedConnector` with an installed extension. Its `ethProviderHelper.getInstalledProvider()` resolves the extension selected by Dynamic (including EIP-6963 selection); it does not call `findProvider()`/the MetaMask mobile SDK wrapper, `getWalletClient()` or a global fallback. The result must expose `request`, `on` and `removeListener`. This boundary is based on installed Dynamic 4.91.2; re-check it when upgrading.
+
+`wallet.tsx` supplies that provider only when Dynamic/Wagmi's account, chain and signing client agree. The raw-provider identity joins the connection epoch and registry identity. The module accessor re-resolves it synchronously, so replacing the selected provider invalidates an older capture even before a React render. Capture also compares the Dynamic client identity and retires permanently on provider events. Logout clears the raw binding. Existing Dynamic login and legacy contract clients retain their own paths.
+
+Dynamic without this explicitly resolved extension remains unavailable. Embedded wallets and mobile WalletConnect need separate adapters; do not pass a retrying client as `rawProvider`. The extension provider itself is an external implementation; this code guarantees one application-level request, not the behavior inside an extension.
 
 ## Ports
 
@@ -50,8 +57,8 @@ Then, with **no await in between**, exactly one `eth_sendTransaction [{ from, to
 
 ## Product glue
 
-- `contracts.ts` `activeWalletSource()`: the module-level source (`window.ethereum` identity in injected mode, the Dynamic client in Dynamic mode). It creates no client and issues no request.
-- `wallet.tsx` exposes `source` on the wallet context: the memoised injected provider, or the Dynamic client only while signing is ready.
+- `contracts.ts` `activeWalletSource()`: the module-level source, plus the currently selected raw extension in eligible Dynamic mode. It creates no client and issues no request.
+- `wallet.tsx` exposes `source` on the wallet context: the injected provider, or Dynamic client/raw-provider binding while signing is ready.
 - `bridge.ts`: `activeWalletSourceView(wallet)` and `currentActiveWalletSource()`.
 
 ## Limitations

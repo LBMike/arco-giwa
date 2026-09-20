@@ -2,7 +2,8 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { createWalletClient, custom } from "viem"
 import { captureWalletSource } from "./capture"
-import { fakeProvider, touchSpy, WALLET, windowEthereumSpy } from "./test-support"
+import { deferred, fakeProvider, touchSpy, WALLET, windowEthereumSpy } from "./test-support"
+import type { ActiveWalletSource } from "./types"
 
 // Negative control for plan finding 3. Dynamic's connector client nests viem custom() transports, and each client
 // layer's request retries -32603. retryDelay is shortened only to keep the test fast; the retry count is viem's default.
@@ -29,4 +30,41 @@ test("a Dynamic-shaped nested viem client repeats eth_sendTransaction, so captur
     assert.equal(spy.reads, 0)
   } finally { restore() }
   assert.equal(provider.calls.length, before)
+})
+
+test("Dynamic with an explicit selected raw provider sends once and preserves a late answer without touching viem", async () => {
+  const pending = deferred<unknown>()
+  const provider = fakeProvider({ eth_sendTransaction: () => pending.promise })
+  const client = touchSpy({ request: () => assert.fail("retrying client was called") })
+  const { spy, restore } = windowEthereumSpy(fakeProvider())
+  let active: ActiveWalletSource = { mode: "dynamic", client: client.proxy, rawProvider: provider }
+  try {
+    const captured = captureWalletSource({ source: active, address: WALLET, chainId: 91342, epoch: "dynamic:4" }, { activeSource: () => active })
+    assert.equal(captured.status, "READY"); if (captured.status !== "READY") return
+    const answer = captured.source.request({ method: "eth_sendTransaction", params: [] })
+    assert.equal(answer, pending.promise)
+    assert.equal(provider.calls.length, 1)
+    active = { ...active, rawProvider: fakeProvider() }
+    assert.equal(captured.source.isCurrent(), false)
+    pending.resolve("original-hash")
+    assert.equal(await answer, "original-hash")
+    assert.deepEqual(client.touched, []); assert.equal(spy.reads, 0)
+    captured.source.dispose(); assert.equal(provider.listenerCount(), 0)
+  } finally { restore() }
+})
+
+test("Dynamic raw provider rejects only once, and provider events or signer changes invalidate its capture", async () => {
+  for (const event of ["accountsChanged", "chainChanged", "disconnect"]) {
+    const provider = fakeProvider({ eth_sendTransaction: () => { throw { code: -32603 } } })
+    const client = {}
+    let active: ActiveWalletSource = { mode: "dynamic", client, rawProvider: provider }
+    const captured = captureWalletSource({ source: active, address: WALLET, chainId: 91342, epoch: "dynamic:4" }, { activeSource: () => active })
+    assert.equal(captured.status, "READY"); if (captured.status !== "READY") return
+    await assert.rejects(captured.source.request({ method: "eth_sendTransaction", params: [] }))
+    assert.equal(provider.calls.length, 1)
+    active = { ...active, client: {} }; assert.equal(captured.source.isCurrent(), false)
+    active = { ...active, client }; assert.equal(captured.source.isCurrent(), true)
+    provider.emit(event); assert.equal(captured.source.isCurrent(), false)
+    captured.source.dispose(); assert.equal(provider.listenerCount(), 0)
+  }
 })
