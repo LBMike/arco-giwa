@@ -15,6 +15,8 @@ export interface StocksMarketDataOptions {
   now?: () => number;
   timeoutMs?: number;
   requestsPerMinute?: number;
+  massiveRequestsPerMinute?: number;
+  etfGlobalEnabled?: boolean;
 }
 export interface StocksMarketDataService {
   catalog(): MarketResponse<DisplayCatalog>;
@@ -53,7 +55,8 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
   const observationLimit = { UNKNOWN: 20 * 60000, DELAYED_15_MIN: 20 * 60000, END_OF_DAY: 36 * 3600000, REALTIME: 2 * 60000 }[delay];
   const provider = options.provider ?? 'MASSIVE'; const alpacaFeed = options.alpacaFeed ?? 'iex';
   if (!['MASSIVE', 'ALPACA'].includes(provider) || !['iex', 'sip'].includes(alpacaFeed)) return BAD_CONFIG();
-  const transport = options.apiKey ? new MassiveTransport({ apiKey: options.apiKey, fetch: options.fetch, now, timeoutMs: options.timeoutMs, requestsPerMinute: options.requestsPerMinute }) : null;
+  if (options.etfGlobalEnabled !== undefined && typeof options.etfGlobalEnabled !== 'boolean') return BAD_CONFIG();
+  const transport = options.apiKey ? new MassiveTransport({ apiKey: options.apiKey, fetch: options.fetch, now, timeoutMs: options.timeoutMs, requestsPerMinute: options.massiveRequestsPerMinute ?? options.requestsPerMinute }) : null;
   const alpaca = provider === 'ALPACA' && options.alpacaKeyId && options.alpacaSecretKey ? new AlpacaTransport({ keyId: options.alpacaKeyId, secretKey: options.alpacaSecretKey, fetch: options.fetch, now, timeoutMs: options.timeoutMs, requestsPerMinute: options.requestsPerMinute }) : null;
   const priceTransport = provider === 'ALPACA' ? alpaca : transport;
   const cache = new Map<string, Entry>(); const flights = new Map<string, Promise<void>>();
@@ -117,7 +120,7 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
       const result = massiveEnvelope(await getProfile(symbol));
       const data = result.data?.profile;
       if (!data) return { ...result, data: null };
-      if (data.securityType !== 'ETF') return { ...result, data: { ...data, aum: null, aumAsOf: null } };
+      if (data.securityType !== 'ETF' || options.etfGlobalEnabled === false) return { ...result, data: { ...data, aum: null, aumAsOf: null } };
       // The optional ETF Global entitlement shares the existing transport budget and cache.
       // A denied/missing AUM read must not discard a valid ticker profile or substitute market cap.
       const assets = await get(`aum:${symbol}`, POLICY.profile, async () => etfAssets(await transport!.json(`/etf-global/v1/profiles?composite_ticker=${symbol}&sort=effective_date.desc&limit=1`), symbol));

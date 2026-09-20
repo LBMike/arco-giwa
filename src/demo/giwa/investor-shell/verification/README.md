@@ -276,8 +276,13 @@ market prices. `?market=live` also explicitly selects live reads; debug controls
 select fixture scenarios. No credential is included in the HTML marker.
 
 Only market display reads use Alpaca. Execution remains the in-process simulated harness;
-Savings/Funds keep their deployed catalog snapshot. The helper forces IEX, ignores any SIP
-or Massive selection in the credential file, and never imports credentials into Vite env.
+Savings/Funds keep their deployed catalog snapshot. The helper forces IEX, ignores SIP or Massive selection in the Alpaca credential file,
+and never imports credentials into Vite env. A separate optional `.secrets/massive.env`
+containing MASSIVE_API_KEY enables Basic ticker profiles and stock market capitalization.
+Massive has an independent rolling budget of four requests/minute and a shared 24h
+in-memory profile cache. The preview explicitly disables ETF Global requests, including
+when the account happens to have a paid entitlement. Missing credentials keep profiles
+unconfigured; no fabricated valuation is substituted.
 The host binds loopback, blocks `.secrets` and `.env` paths, and denies cross-origin market
 requests. The normal application and deployment configuration are unaffected.
 
@@ -290,5 +295,8 @@ Other applications using the same key have their own usage, outside this local b
 
 IEX volume is single-exchange volume; USD turnover is an estimate (shares × price).
 The list exposes the latest observed trade timestamp, not a fabricated current time.
-Market cap/AUM remain unavailable without a separate fundamentals source. A rolling 1D
+Stock market caps load progressively with the optional Massive key; ETF AUM remains
+unconfigured in this free-plan preview. The first cold load of all 40 ticker profiles
+can take about ten minutes, and reopening a page shares the existing server cache.
+Restarting the server clears this in-memory cache. A rolling 1D
 chart can legitimately be empty over a weekend; 1W/longer ranges retain actual observations.

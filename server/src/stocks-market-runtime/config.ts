@@ -7,7 +7,7 @@ import {
 } from "../stocks-market-data/index.js"
 
 const delays: readonly string[] = ["UNKNOWN", "DELAYED_15_MIN", "END_OF_DAY", "REALTIME"]
-type RuntimePorts = Pick<StocksMarketDataOptions, "catalog" | "fetch" | "now" | "requestsPerMinute">
+type RuntimePorts = Pick<StocksMarketDataOptions, "catalog" | "fetch" | "now" | "requestsPerMinute" | "massiveRequestsPerMinute" | "etfGlobalEnabled">
 
 /** One service per server instance: the provider budget/cache is shared across routes. */
 export function configuredStocksMarketData(
