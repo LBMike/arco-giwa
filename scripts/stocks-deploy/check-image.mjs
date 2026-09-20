@@ -55,7 +55,7 @@ try {
     assert.notEqual(process.getuid(), 0);
     for (const file of ['server/src', '.git', '.env', '.secrets', 'review-results', 'scripts/stocks-local', 'dist'])
       assert.equal(existsSync(file), false, file);
-    for (const path of ['/api/v1/stocks/orders', '/api/v1/admin/stocks/runtime']) {
+    for (const path of ['/api/v1/stocks/orders', '/api/v1/admin/stocks/runtime', '/ready/stocks']) {
       const response = await fetch('http://127.0.0.1:8080' + path);
       assert.equal(response.status, 404);
     }

@@ -1,6 +1,7 @@
 import { stocksExecutionPlugin, type StocksExecutionPluginOptions } from './stocks-execution/plugin.js'
 import { stocksSubmissionDiagnosticsPlugin, type StocksSubmissionDiagnosticsPluginOptions } from './stocks-submission-diagnostics/plugin.js'
 import { stocksRuntimeStatusPlugin, type StocksRuntimeStatusPluginOptions } from './stocks-runtime-status/plugin.js'
+import { stocksReadinessPlugin } from './stocks-runtime-status/readiness.js'
 import { stocksTradingControlPlugin, type StocksTradingControlPluginOptions } from './stocks-trading-control/plugin.js'
 import { createRequire } from "node:module"
 import cors from "@fastify/cors"
@@ -1269,7 +1270,10 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
   })
 
   if (services.stocks) app.register(stocksPlugin, services.stocks)
-  if (services.stocksRuntimeStatus) app.register(stocksRuntimeStatusPlugin, services.stocksRuntimeStatus)
+  if (services.stocksRuntimeStatus) {
+    app.register(stocksRuntimeStatusPlugin, services.stocksRuntimeStatus)
+    app.register(stocksReadinessPlugin, { getSnapshot: services.stocksRuntimeStatus.getSnapshot })
+  }
   if (services.stocksTradingControl) app.register(stocksTradingControlPlugin, services.stocksTradingControl)
   if (services.stocksSubmissionDiagnostics) app.register(stocksSubmissionDiagnosticsPlugin, services.stocksSubmissionDiagnostics)
   if (services.stocksExecution) app.register(stocksExecutionPlugin, services.stocksExecution)

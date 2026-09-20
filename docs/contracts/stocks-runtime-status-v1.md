@@ -2,7 +2,7 @@
 
 GET `/api/v1/admin/stocks/runtime` provides process-local operator diagnostics. Root composes the optional plugin only when Stocks runtime exists; absent runtime means route absent. No UI, database, RPC, signer, tick, timer or pause mutation is introduced by this endpoint.
 
-Implementation plan and approved scope: new plugin.ts/plugin.test.ts under stocks-runtime-status plus this guide. Read the fixed contracts.ts, authenticate in onRequest before input parsing/source access, reject query/body inputs, whitelist one synchronous snapshot into the existing envelope, validate coherence, then verify adversarial Fastify injection tests and backend compiler/security/type checks. Root owns health/runtime/app/index separately.
+The operator plugin authenticates in onRequest before input parsing/source access, rejects query/body inputs, and whitelists one synchronous snapshot into the existing envelope. Snapshot validation lives in `snapshot.ts` and is shared with the coarse infrastructure probe below. The operator route's authentication and wire format remain unchanged.
 
 The plugin accepts `getSnapshot: () => StocksRuntimeSnapshot` and optional `resolveOperator(request): Promise<Operator|null>`. The resolver must be the existing signed named-operator session resolver. A nonempty operatorId and `stocks:read` permission are required. Shared legacy tokens, headers, browser role and request payload cannot grant permission. Missing/invalid/failed resolution returns fixed 403 OPERATOR_FORBIDDEN before snapshot access or body handling.
 
@@ -31,3 +31,27 @@ at its next refresh; read the [control endpoint](stocks-trading-control-api.md)
 for authoritative DB state. New admissions always read the control store and do
 not use this diagnostic cache as permission. `configuredPause` still reports
 only the fixed startup setting.
+
+## Infrastructure readiness
+
+GET/HEAD `/ready/stocks` is a separate, unauthenticated, coarse probe registered only
+when the Stocks runtime exists. It does not use the operator resolver or expose the
+operator diagnostic envelope. Every valid probe reads and validates exactly one
+synchronous runtime snapshot; its fixed response is
+`{ "ok": true|false, "service": "arco-giwa-stocks", "executionAuthorization": false }`.
+All responses are `Cache-Control: no-store`. Query/body inputs return 400 before
+reading the source. Source errors and invalid snapshots return fixed 503 without
+exception details. Other HTTP methods do not trigger the snapshot source.
+
+200 requires RUNNING, autodispatch enabled, CURRENT observation and no UNAVAILABLE
+operator-control cache. Configured/manual pause and an in-flight tick do not by
+themselves fail readiness. An omitted operator-control cache is supported for
+runtimes without that optional feature. All other valid states return 503.
+Freshness is recalculated by the existing runtime source on every call, including
+the observer's 60-second and optional control cache's 5-second limits. Requests
+do not refresh those clocks, perform dependency I/O, or trigger a tick.
+
+This is not a full dependency health check or trading authorization. Keep `/health`
+for liveness and retain `/ready` for legacy readiness. See the
+[container guide](stocks-backend-container.md#상태-확인과-종료) for deployment scope
+and why a shared API must not lose operator access during a Stocks outage.
