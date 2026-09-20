@@ -110,6 +110,10 @@ npm run stocks:recovery:check
 주문·거래 증거·운영자 이력 유지와 중복 방지를 확인합니다.
 절차와 범위는 [백업·복원 리허설](contracts/stocks-backup-restore-rehearsal.md)에 정리했습니다.
 
+외부 테스트 환경을 준비할 때는 [배포 전 검사](contracts/stocks-preflight-v1.md)를 사용합니다.
+이 검사는 DB 테이블·설치 이력과 함께 거래 기록을 보호하는 규칙의 누락·비활성화·변경을 확인합니다.
+검사 실패를 자동으로 수리하거나 운영 중인 거래를 중지하는 명령은 아닙니다.
+
 ```sh
 npm run typecheck
 npm run build

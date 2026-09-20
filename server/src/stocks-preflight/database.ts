@@ -1,5 +1,6 @@
 import { liquidityScope, manifestDigest, ensure, type Manifest, type SqlPool } from '../stocks/contracts.js';
 import type { Check } from './checker.js';
+import { guardCatalogSql, stockGuardsMatch } from './guards.js';
 
 export type Migration = { name: string; checksum: string };
 const tables = ['StocksQuote', 'StocksOrder', 'StocksFunding', 'StocksOutbox', 'StocksJournal', 'StocksHolding', 'StocksAudit', 'StocksProviderReceipt', 'StocksSellQuote', 'StocksSellOrder', 'StocksQuantityReservation', 'StocksCustody', 'StocksQuantityMovement', 'StocksCashReservation', 'StocksObserverCursor', 'StocksLiquidityBinding', 'StocksWalletSubmissionEnrollment', 'StocksWalletSubmission', 'StocksWalletSubmissionProof'];
@@ -33,6 +34,8 @@ export async function checkPreflightDatabase(pool: SqlPool, manifest: Manifest, 
             const expected = new Map(migrations.map(m => [m.name, m.checksum]));
             const matched = active.every(row => row.finished_at !== null && expected.get(row.migration_name) === row.checksum) && migrations.every(m => active.filter(row => row.migration_name === m.name).length === 1);
             checks.push(check('migrationHistory', matched, 'MIGRATION_HISTORY_MATCHES', historyExists ? 'MIGRATION_HISTORY_MISSING_FAILED_OR_CHANGED' : 'MIGRATION_HISTORY_UNAVAILABLE'));
+            const guards = (await query(guardCatalogSql, ['arco_evm', requiredTables])).rows;
+            checks.push(check('stockMutationGuards', schemaOk && stockGuardsMatch(guards, options.operatorControls === true), 'STOCK_MUTATION_GUARDS_MATCH', 'STOCK_MUTATION_GUARDS_MISSING_DISABLED_OR_CHANGED'));
             if (schemaOk) {
                 const binding = (await query('SELECT "deploymentDigest" FROM arco_evm."StocksLiquidityBinding" WHERE "scopeKey"=$1', [liquidityScope(manifest)])).rows[0];
                 checks.push(check('vaultBinding', !binding || binding.deploymentDigest === manifestDigest(manifest), binding ? 'VAULT_BINDING_MATCHES' : 'VAULT_UNBOUND_BEFORE_FIRST_START', 'VAULT_BOUND_TO_OTHER_DEPLOYMENT'));

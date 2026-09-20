@@ -5,6 +5,7 @@ import { testManifest } from '../stocks/test-fixtures.js';
 import type { SqlClient, SqlPool } from '../stocks/contracts.js';
 import { checkPreflightDatabase } from './database.js';
 import { createPreflightProbes } from './adapters.js';
+import { migrationGuardFixture } from './guard-test-fixtures.js';
 const migrations = [{ name: 'fixture', checksum: 'a'.repeat(64) }];
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 test('late acquired connection is released without a query after preflight timeout', async () => {
@@ -43,6 +44,11 @@ function catalogFixture(controlTables: string[] = [], unreadable?: string) {
                 release: () => { releases++; },
                 query: async (sql, values = []) => {
                     queries.push(sql);
+                    if (sql.includes('pg_catalog.pg_trigger')) {
+                        const names = values[1] as string[];
+                        const rows = migrationGuardFixture().rows.filter(row => names.includes(row.table_name as string) && (!controls.has(row.table_name as string) || controlTables.includes(row.table_name as string)));
+                        return { rows, rowCount: rows.length };
+                    }
                     if (sql.includes('pg_catalog.pg_class')) {
                         const names = values[1] as string[]; requested.push([...names]);
                         const rows = names.filter(name => !controls.has(name) || controlTables.includes(name)).map(name => ({ relname: name, can_read: name !== unreadable }));
@@ -58,12 +64,12 @@ function catalogFixture(controlTables: string[] = [], unreadable?: string) {
     return { pool, queries, requested, counts: () => ({ connections, releases }) };
 }
 
-test('preflight keeps legacy 19-table requirements and result shape when operator controls are absent or disabled', async () => {
+test('preflight keeps legacy 19-table requirements when operator controls are absent or disabled', async () => {
     const f = catalogFixture();
     const legacy = await checkPreflightDatabase(f.pool, testManifest(), migrations, 'arco_evm');
     const disabled = await checkPreflightDatabase(f.pool, testManifest(), migrations, 'arco_evm', { operatorControls: false });
     assert.deepEqual(disabled, legacy); assert.ok(legacy.every(item => item.status === 'PASS'));
-    assert.deepEqual(legacy.map(item => item.id), ['stockTables', 'stockReadAccess', 'migrationHistory', 'vaultBinding']);
+    assert.deepEqual(legacy.map(item => item.id), ['stockTables', 'stockReadAccess', 'migrationHistory', 'stockMutationGuards', 'vaultBinding']);
     assert.ok(f.requested.every(names => names.length === 19 && !names.includes('StocksTradingControl') && !names.includes('StocksTradingControlEvent')));
     assert.deepEqual(f.counts(), { connections: 2, releases: 2 });
 });

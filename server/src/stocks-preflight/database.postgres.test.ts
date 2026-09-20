@@ -80,3 +80,52 @@ test('real PG missing Stocks table blocks startup checks despite matching histor
         assert.equal(checks.find(c => c.id === 'vaultBinding')?.status, 'NOT_CHECKED');
     } finally { await f.pool.query('ALTER TABLE arco_evm."PreflightHiddenProof" RENAME TO "StocksWalletSubmissionProof"'); }
 });
+
+test('real PG preflight rejects disabled, missing and same-name weakened guards despite valid history', options, async t => {
+    const f = await fixture(); t.after(() => f.pool.end()); await history(f.pool);
+    const inspect = () => checkPreflightDatabase(f.pool, f.manifest, migrations, 'arco_evm', { operatorControls: true });
+    const trigger = '"StocksWalletProof_immutable"', table = 'arco_evm."StocksWalletSubmissionProof"';
+    const originalTrigger = (await f.pool.query(`SELECT pg_get_triggerdef(oid) AS sql FROM pg_catalog.pg_trigger WHERE tgname='StocksWalletProof_immutable'`)).rows[0].sql as string;
+    const originalFunction = (await f.pool.query(`SELECT pg_get_functiondef('arco_evm."StocksRejectMutation"()'::regprocedure) AS sql`)).rows[0].sql as string;
+    const deferred = (await f.pool.query(`SELECT pg_get_triggerdef(oid) AS sql FROM pg_catalog.pg_trigger WHERE tgname='StocksTradingControlEvent_applied'`)).rows[0].sql as string;
+    const mutations = [
+        [`ALTER TABLE ${table} DISABLE TRIGGER ${trigger}`, `ALTER TABLE ${table} ENABLE TRIGGER ${trigger}`],
+        [`ALTER TABLE ${table} ENABLE REPLICA TRIGGER ${trigger}`, `ALTER TABLE ${table} ENABLE TRIGGER ${trigger}`],
+        [`DROP TRIGGER ${trigger} ON ${table}`, originalTrigger],
+        [`DROP TRIGGER ${trigger} ON ${table}; CREATE TRIGGER ${trigger} BEFORE UPDATE OR DELETE ON ${table} FOR EACH ROW WHEN (false) EXECUTE FUNCTION arco_evm."StocksRejectMutation"()`, `DROP TRIGGER ${trigger} ON ${table}; ${originalTrigger}`],
+        [`DROP TRIGGER ${trigger} ON ${table}; CREATE TRIGGER ${trigger} BEFORE DELETE ON ${table} FOR EACH ROW EXECUTE FUNCTION arco_evm."StocksRejectMutation"()`, `DROP TRIGGER ${trigger} ON ${table}; ${originalTrigger}`],
+        [`CREATE OR REPLACE FUNCTION arco_evm."StocksRejectMutation"() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RETURN NEW; END$$`, originalFunction],
+        [`ALTER FUNCTION arco_evm."StocksRejectMutation"() SECURITY DEFINER`, `ALTER FUNCTION arco_evm."StocksRejectMutation"() SECURITY INVOKER`],
+        [`ALTER FUNCTION arco_evm."StocksRejectMutation"() SET search_path TO public`, `ALTER FUNCTION arco_evm."StocksRejectMutation"() RESET ALL`],
+        [`ALTER TABLE arco_evm."StocksTradingControlEvent" DISABLE TRIGGER "StocksTradingControlEvent_immutable"`, `ALTER TABLE arco_evm."StocksTradingControlEvent" ENABLE TRIGGER "StocksTradingControlEvent_immutable"`],
+        [`DROP TRIGGER "StocksTradingControlEvent_applied" ON arco_evm."StocksTradingControlEvent"; ${deferred.replace('INITIALLY DEFERRED', 'INITIALLY IMMEDIATE')}`, `DROP TRIGGER "StocksTradingControlEvent_applied" ON arco_evm."StocksTradingControlEvent"; ${deferred}`],
+        [`CREATE TRIGGER "UnexpectedGuard" BEFORE INSERT ON ${table} FOR EACH ROW EXECUTE FUNCTION arco_evm."StocksRejectMutation"()`, `DROP TRIGGER "UnexpectedGuard" ON ${table}`],
+    ];
+    assert.ok((await inspect()).every(c => c.status === 'PASS'));
+    for (const [mutate, restore] of mutations) {
+        try {
+            await f.pool.query(mutate);
+            const checks = await inspect();
+            assert.equal(checks.find(c => c.id === 'migrationHistory')?.status, 'PASS');
+            assert.deepEqual(checks.find(c => c.id === 'stockMutationGuards'), { id: 'stockMutationGuards', status: 'FAIL', code: 'STOCK_MUTATION_GUARDS_MISSING_DISABLED_OR_CHANGED' });
+        } finally { await f.pool.query(restore); }
+        assert.ok((await inspect()).every(c => c.status === 'PASS'));
+    }
+    try {
+        await f.pool.query(`ALTER TABLE ${table} ENABLE ALWAYS TRIGGER ${trigger}`);
+        assert.ok((await inspect()).every(c => c.status === 'PASS'));
+    } finally { await f.pool.query(`ALTER TABLE ${table} ENABLE TRIGGER ${trigger}`); }
+});
+
+test('real PG session replication bypass cannot pass even when every guard is present', options, async t => {
+    const f = await fixture(); t.after(() => f.pool.end()); await history(f.pool);
+    const db = await f.pool.connect();
+    try {
+        await db.query("SET session_replication_role='replica'");
+        const pool: SqlPool = { query: () => { throw new Error('UNEXPECTED'); }, connect: async () => ({ query: db.query.bind(db), release() {} }) };
+        const checks = await checkPreflightDatabase(pool, f.manifest, migrations, 'arco_evm');
+        assert.equal(checks.find(c => c.id === 'migrationHistory')?.status, 'PASS');
+        assert.equal(checks.find(c => c.id === 'stockMutationGuards')?.status, 'FAIL');
+    } finally { await db.query("SET session_replication_role='origin'"); db.release(); }
+    assert.ok((await checkPreflightDatabase(f.pool, f.manifest, migrations, 'arco_evm')).every(c => c.status === 'PASS'));
+});

@@ -46,10 +46,20 @@ Malformed CLI arguments or tool failures produce a smaller fixed-code BLOCKED re
 
 Database checks run inside `REPEATABLE READ READ ONLY`, with 2-second statement/lock timeouts, 3-second idle-transaction timeout, and a 5-second total phase budget. Late acquisition is released without SQL. After a late query, only rollback/release can continue; no late success is accepted. The CLI uses its own one-connection pool with bounded connection and query waits and closes it afterwards.
 
-- All 19 Stocks tables must exist as ordinary tables in `arco_evm`, with SELECT privileges.
+- All 19 base Stocks tables must exist as ordinary tables in `arco_evm`, with SELECT privileges. With `operatorControls: true`, both trading-control tables are also required (21 total).
 - Prisma history must contain exactly one successful, non-rolled-back entry for every repository migration with its SHA-256 file checksum. Missing, unfinished, duplicate, altered or unknown active migration entries block. Rolled-back historical attempts are ignored.
 - The Prisma metadata schema comes from the connection URL's `schema` parameter, defaulting to `public`; only `public` and `arco_evm` are supported. Only the `_prisma_migrations` metadata relation is read there. All product data checks use `arco_evm`.
 - An existing physical cash-vault binding must match the configured manifest digest. An unbound vault is reported as `VAULT_UNBOUND_BEFORE_FIRST_START`; the tool does not create a binding. The existing runtime remains responsible for binding at actual startup.
+
+### Mutation guards
+
+The `stockMutationGuards` check compares the user-trigger inventory with the reviewed repository contract: 38 triggers and 10 functions for the base tables, or 44 triggers and 13 functions with operator controls enabled. The contract includes immutable quotes/journals/evidence, order snapshots and versions, submission state/proof binding, deletion/truncation protection, and operator state/history binding.
+
+Each trigger must be attached to the expected table and function, fire for the expected events, and retain its row/statement timing and deferral behavior. Disabled and replica-only triggers, added `WHEN` conditions, column filters, arguments, transition tables, missing triggers, and unexpected user triggers fail. Ordinary (`O`) and always-on (`A`) triggers are accepted only in an `origin` replication session.
+
+Function schema/name, language, return/argument types, volatility, invoker security and absence of per-function settings must match. SHA-256 of the exact stored function body must match the final migration version, including whitespace. A same-name no-op replacement therefore fails even if migration history is unchanged. Intentional function changes require a new migration and an updated `server/src/stocks-preflight/guard-contract.ts`; its tests compare every current Stocks trigger declaration and final function body against the migrations.
+
+Success returns `STOCK_MUTATION_GUARDS_MATCH`; mismatch returns only `STOCK_MUTATION_GUARDS_MISSING_DISABLED_OR_CHANGED`. No function bodies or catalog rows are printed. This remains a catalog-only check inside the same bounded read-only transaction: it does not invoke a trigger or attempt a product write. A mismatch blocks this preflight report; the CLI does not automatically pause or repair a running service.
 
 Deployment checks reuse the accepted execution-evidence verifier: chain/checkpoint, finalized canonical blocks, five contract code hashes, constructor bindings and token scales, with its 8-second total deadline. They use only read-only RPC methods.
 
@@ -59,7 +69,7 @@ The three online probes run independently, so a failed DB check does not hide a 
 
 ## What passing does not establish
 
-This is a point-in-time paused-start diagnostic, not an execution-policy lease or a complete database-schema diff. Migration records and table/read access do not prove that every constraint/trigger remains intact or that the operational account has correct write privileges. Signer capabilities do not prove its internal persistence or fund its account. Chain verification does not replace the original deployment evidence review.
+This is a point-in-time paused-start diagnostic, not an execution-policy lease or a complete database-schema diff. The mutation-guard inventory is checked, but CHECK/UNIQUE/foreign-key constraints, indexes, column definitions and operational write privileges are not comprehensively compared. A later administrative change can invalidate the result. Signer capabilities do not prove its internal persistence or fund its account. Chain verification does not replace the original deployment evidence review.
 
 There is no claim about current observer coverage, matching ledger balances, faucet funding, gas balance, wallet/UI completion, broker custody, market-data availability or public deployment. After a reviewed paused startup, require CURRENT observation and balance reconciliation before separately permitting test trades. Actual order execution continues to require the existing fresh deployment/policy checks and durable submission claims.
 
