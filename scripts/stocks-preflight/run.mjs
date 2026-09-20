@@ -1,9 +1,10 @@
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { checkStocksPreflight } from '../../server/dist/stocks-preflight/checker.js';
 import { createPreflightProbes } from '../../server/dist/stocks-preflight/adapters.js';
+import { readStocksPublicJson } from '../../server/dist/stocks-runtime/public-config.js';
 
 const args = process.argv.slice(2);
 if (args.length === 1 && args[0] === '--help') {
@@ -20,13 +21,7 @@ if (args.length === 1 && args[0] === '--help') {
         }
         const report = await checkStocksPreflight(process.env, {
             online: args[0] === '--online',
-            readConfig: async path => {
-                const target = await realpath(path);
-                if (target.split('/').some(part => part.startsWith('.env') || part === '.secrets')) throw new Error('PUBLIC_CONFIG_REQUIRED');
-                const info = await stat(target);
-                if (!info.isFile() || info.size > 65536) throw new Error('PUBLIC_CONFIG_INVALID');
-                return JSON.parse(await readFile(target, 'utf8'));
-            },
+            readConfig: readStocksPublicJson,
             probes: prepared => createPreflightProbes(prepared, migrations),
         });
         console.log(JSON.stringify(report, null, 2));

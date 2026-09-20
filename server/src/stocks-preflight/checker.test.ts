@@ -105,3 +105,20 @@ test('CLI defaults offline, emits redacted JSON, and never loads dotenv or echoe
         assert.equal(forbidden.status, 1); assert.equal(JSON.parse(forbidden.stdout).checks.find((c: Check) => c.id === 'configuration').status, 'FAIL');
     } finally { rmSync(temp, { recursive: true }); }
 });
+
+test('preflight rejects invalid UTF-8 even when replacement decoding would produce valid configuration', () => {
+    const f = fixture(), temp = mkdtempSync('/private/tmp/stocks-preflight-utf8-');
+    try {
+        const text = JSON.stringify(f.config).replace('"reader"', '"REPLACE"');
+        const split = text.split('REPLACE');
+        writeFileSync(`${temp}/public.json`, Buffer.concat([Buffer.from(split[0]), Buffer.from([0xff]), Buffer.from(split[1])]));
+        const result = spawnSync(process.execPath, ['scripts/stocks-preflight/run.mjs'], {
+            env: { ...f.env, STOCKS_CONFIG_PATH: `${temp}/public.json` }, encoding: 'utf8', timeout: 3000,
+        });
+        assert.equal(result.status, 1);
+        const report = JSON.parse(result.stdout);
+        assert.equal(report.status, 'BLOCKED');
+        assert.equal(report.checks.find((check: Check) => check.id === 'configuration')?.status, 'FAIL');
+        assert.equal(result.stderr, '');
+    } finally { rmSync(temp, { recursive: true }); }
+});

@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { ensure, freezeManifest, manifestDigest, type Manifest, type SignerPort, type SqlPool } from '../stocks/contracts.js';
 import { ReceiptVerifier } from '../stocks/chain.js';
@@ -10,6 +9,7 @@ import { createStocksRpcPort, type JsonRpcTransport } from '../stocks/rpc.js';
 import { StocksFinalizedObserver } from './observer.js';
 import { endpoint, externalStocksSigner, httpStocksRpc } from './transport.js';
 import { parseStocksOperators, type NamedOperator } from './operators.js';
+import { readStocksPublicJson } from './public-config.js';
 import { StocksObservationHealth } from './health.js';
 import { runtimeSnapshot } from './status.js';
 import { createSubmissionReceiptVerifier } from '../stocks-submissions/receipts.js';
@@ -49,7 +49,7 @@ export async function configuredStocksRuntime(env: NodeJS.ProcessEnv, fallbackDa
   const autodispatch = stocksAutodispatch(env);
   if (env.STOCKS_MODE === undefined || env.STOCKS_MODE === 'DISABLED') return null;
   ensure(env.STOCKS_MODE === 'DEMO_TESTNET' && env.STOCKS_CONFIG_PATH && env.STOCKS_SIGNER_TOKEN, 'STOCKS_CONFIGURATION_REQUIRED');
-  const config = parseStocksRuntimeConfig(JSON.parse(await readFile(env.STOCKS_CONFIG_PATH, 'utf8')));
+  const config = parseStocksRuntimeConfig(await readStocksPublicJson(env.STOCKS_CONFIG_PATH));
   const require = createRequire(import.meta.url);
   const { Pool } = require('pg') as { Pool: new (options: unknown) => SqlPool & { end(): Promise<void> } };
   const pool = new Pool({ connectionString: env.STOCKS_DATABASE_URL ?? fallbackDatabaseUrl, max: 8, connectionTimeoutMillis: 10000, statement_timeout: 30000 });

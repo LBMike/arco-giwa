@@ -1,29 +1,9 @@
-import { constants } from 'node:fs';
-import { open, realpath, mkdir, writeFile } from 'node:fs/promises';
+import { realpath, mkdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
 function publicPath(value) {
   if (typeof value !== 'string' || !isAbsolute(value) || value.split(/[\\/]/).some(p => p.toLowerCase().startsWith('.env') || p.toLowerCase() === '.secrets')) throw new Error('PUBLIC_PATH_REQUIRED');
   return value;
-}
-async function readPublicJson(path) {
-  publicPath(path);
-  const target = publicPath(await realpath(path));
-  const file = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  try {
-    const info = await file.stat();
-    if (!info.isFile() || info.size > 65536) throw new Error('INVALID_PUBLIC_JSON');
-    // Bound the actual read as well as stat, including a file that grows.
-    const buffer = Buffer.alloc(65537);
-    let length = 0;
-    while (length < buffer.length) {
-      const { bytesRead } = await file.read(buffer, length, buffer.length - length, length);
-      if (!bytesRead) break;
-      length += bytesRead;
-    }
-    if (length > 65536) throw new Error('PUBLIC_JSON_TOO_LARGE');
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length)));
-  } finally { await file.close(); }
 }
 
 const args = process.argv.slice(2);
@@ -36,7 +16,8 @@ try {
     publicPath(output);
     // Check resolved parents too, before writing through any directory link.
     publicPath(await realpath(resolve(output, '..')));
-    const manifest = await readPublicJson(args[1]), settings = await readPublicJson(args[3]);
+    const { readStocksPublicJson } = await import('../../server/dist/stocks-runtime/public-config.js');
+    const manifest = await readStocksPublicJson(publicPath(args[1])), settings = await readStocksPublicJson(publicPath(args[3]));
     const { prepareStocksIntegrationBundle } = await import('../../server/dist/stocks-preflight/integration-bundle.js');
     const bundle = prepareStocksIntegrationBundle(manifest, settings);
     await mkdir(output, { mode: 0o700 });

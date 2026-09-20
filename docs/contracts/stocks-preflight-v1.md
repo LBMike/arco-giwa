@@ -27,7 +27,7 @@ With these inputs, offline mode checks only local configuration. It creates no D
 node scripts/stocks-preflight/run.mjs --online
 ```
 
-There is no dotenv loading, automatic configuration discovery, default RPC, automatic retry, activation or network call in offline mode. Missing or invalid settings block all online probes, and all configuration failures that can be evaluated are reported together. The CLI rejects extra arguments rather than accepting credentials on the command line. Public config files are limited to 64 KiB.
+There is no dotenv loading, automatic configuration discovery, default RPC, automatic retry, activation or network call in offline mode. Missing or invalid settings block all online probes, and all configuration failures that can be evaluated are reported together. The CLI rejects extra arguments rather than accepting credentials on the command line. Public config files use the same reader as runtime startup and integration preparation: strict UTF-8, regular files only, and at most 64 KiB both at stat and during the actual read. Malformed bytes are never silently replaced in operator identities. Both supplied and resolved paths reject `.env*` and `.secrets` components case-insensitively. Public-file symlinks and existing relative config paths remain supported; named pipes are rejected without waiting for a writer. File failures map to the existing redacted configuration-failure report.
 
 ## JSON result and exit code
 
