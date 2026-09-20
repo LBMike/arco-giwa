@@ -43,10 +43,10 @@ try {
   const ready = records().find(row => row.kind === 'LOCAL_OWNER_READY');
   assert.ok(ready?.initialPaused && ready.persistentAcrossRestart === false);
   report.ready = ready;
-  const readHead = async () => {
+  const readHead = async (tag = 'finalized') => {
     const response = await fetch(ready.rpcUrl, { method: 'POST', redirect: 'error',
       headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5000),
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBlockByNumber', params: ['finalized', false] }) });
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBlockByNumber', params: [tag, false] }) });
     assert.equal(response.status, 200);
     const row = await response.json(); assert.ok(!row.error && row.result);
     return row.result;
@@ -60,6 +60,22 @@ try {
     return true;
   }, 'idle owner chain advances without any wallet interaction', 30000);
   passed('owned chain keeps finalized blocks fresh while idle, before any browser or wallet action');
+  const assertStateRetained = async (before, after) => {
+    const { blockNumber: beforeNumber, blockHash: beforeHash, ...beforeState } = before;
+    const { blockNumber: afterNumber, blockHash: afterHash, ...afterState } = after;
+    assert.deepEqual(afterState, beforeState);
+    const first = BigInt(beforeNumber), last = BigInt(afterNumber);
+    assert.ok(last >= first && last - first <= 100n, 'Retained state must stay on a bounded forward chain');
+    assert.equal((await readHead(`0x${first.toString(16)}`)).hash, beforeHash, 'Original chain history must survive');
+    let parentHash = beforeHash;
+    for (let number = first + 1n; number <= last; number++) {
+      const block = await readHead(`0x${number.toString(16)}`);
+      assert.equal(block.parentHash, parentHash);
+      assert.deepEqual(block.transactions, [], 'Retaining state must not send any extra transaction');
+      parentHash = block.hash;
+    }
+    assert.equal(afterHash, parentHash);
+  };
   browser = await chromium.launch({ executablePath, headless: true,
     handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false });
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -168,7 +184,7 @@ try {
   assert.equal(completed.snapshot.reconciliationStatus, 'MATCHED_AT_CUTOFF');
   report.final = { sends: completed.sends.length, ...completed.snapshot };
   await local('restartApi'); await page.reload(); await signIn();
-  assert.deepEqual((await state()).snapshot, completed.snapshot);
+  await assertStateRetained(completed.snapshot, (await state()).snapshot);
   assert.equal((await state()).sends.length, 4);
   passed('API restart and page reload preserve orders, balances and four sends');
   await page.locator('#giwa-stocks-tab-portfolio').click();
@@ -182,7 +198,7 @@ try {
   await local('reloadBackend');
   const afterReload = await state();
   assert.equal(afterReload.backendGeneration, 2);
-  assert.deepEqual(afterReload.snapshot, beforeReload.snapshot);
+  await assertStateRetained(beforeReload.snapshot, afterReload.snapshot);
   assert.equal(afterReload.sends.length, beforeReload.sends.length);
   await page.getByRole('button', { name: 'Refresh trading control', exact: true }).click();
   await until(async () => await gate().getAttribute('data-phase') === 'ready', 'paused after code reload');
@@ -197,7 +213,7 @@ try {
     assert.deepEqual(toppedUp.snapshot[key], completed.snapshot[key], key);
   assert.equal(toppedUp.sends.length, 4);
   await local('topUpTestCash'); // Already at target: no new faucet transaction.
-  assert.equal((await state()).snapshot.blockNumber, toppedUp.snapshot.blockNumber);
+  await assertStateRetained(toppedUp.snapshot, (await state()).snapshot);
   await local('restartApi'); await page.reload(); await signIn();
   await until(async () => await gate().getAttribute('data-phase') === 'ready', 'pause after cash top-up');
   assert.match(await gate().innerText(), /Paused/);
@@ -230,7 +246,7 @@ try {
   assert.deepEqual(exported.orders.buy, beforeExport.snapshot.buyOrders);
   assert.deepEqual(exported.orders.sell, beforeExport.snapshot.sellOrders);
   const afterExport = await state();
-  assert.deepEqual(afterExport.snapshot, beforeExport.snapshot);
+  await assertStateRetained(beforeExport.snapshot, afterExport.snapshot);
   assert.equal(afterExport.sends.length, beforeExport.sends.length);
   report.export = { kind: exported.kind, buyCount: exported.orders.buy.length, sellCount: exported.orders.sell.length, holderCash: exported.balances.holderCash };
   passed('downloaded Account A summary preserves live state and includes bounded orders and exact balances');
