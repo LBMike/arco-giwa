@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
+import { useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { giwaApi } from "./api"
 import { GIWA_CHAIN_ID, GIWA_LIVE_REFETCH } from "./config"
@@ -7,7 +8,7 @@ import { GiwaInvestPanel } from "./components"
 import { PerformanceSection, TransparencySection, MoreInfoSection } from "./detail-sections"
 import { parseAumToNumber } from "./display-profile"
 import { marketApyPercent } from "./price-policy"
-import { buildSavingsAccounts, defaultSavingsSelection, type SavingsAccount } from "./savings"
+import { buildSavingsAccounts, resolveSavingsSelection, type SavingsAccount } from "./savings"
 import { SavingsAccountSelector } from "./SavingsAccountSelector"
 import { SavingsSkeleton } from "./GiwaSkeleton"
 import type { GiwaCatalogItem } from "./types"
@@ -26,13 +27,14 @@ export default function GiwaSavingsPage() {
     () => buildSavingsAccounts(catalogQuery.data ?? [], marketQuery.data ?? []),
     [catalogQuery.data, marketQuery.data],
   )
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const selectedAsset = searchParams.get("asset")
+  const selectedAccount = searchParams.get("account")
   // Resolve the active account: an explicit enabled pick, else the default (first enabled). Falls
   // back to the default when the picked key drops out of the list (config change / stale key).
   const selected = useMemo<SavingsAccount | null>(() => {
-    const picked = selectedKey != null ? accounts.find((account) => account.key === selectedKey && !account.disabled) : null
-    return picked ?? defaultSavingsSelection(accounts)
-  }, [accounts, selectedKey])
+    return resolveSavingsSelection(accounts, selectedAccount, selectedAsset)
+  }, [accounts, selectedAccount, selectedAsset])
 
   // First-load only (no cached data yet). Distinguishing loading from empty fixes the bug where
   // the page flashed "No savings accounts yet" before the catalog/market arrived. Background
@@ -52,7 +54,7 @@ export default function GiwaSavingsPage() {
             <SavingsAccountSelector
               accounts={accounts}
               selectedKey={selected?.key ?? null}
-              onSelect={(account) => setSelectedKey(account.key)}
+              onSelect={(account) => setSearchParams(previous => { const next = new URLSearchParams(previous); next.set("asset", account.symbol); next.set("account", account.key); return next })}
             />
             {selected?.vault ? (
               // Keyed by vault so switching assets cleanly remounts the detail (stable hook count).

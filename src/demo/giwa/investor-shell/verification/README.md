@@ -212,3 +212,28 @@ with decimal-string/BigInt estimates from that symbol's already-loaded market qu
 estimates are only display values, rounded to two decimals, never execution quotes. Unknown
 or stale prices produce no estimate; balances/fees are not invented. Switching symbols or
 sides clears the draft. This work does not add multi-symbol order APIs or real trade support.
+
+### Header product search (2026-09-20)
+
+The header search follows Figma nodes 11:4945, 11:7740 and 11:7450 in the existing
+GIWA light theme: a 448px search field/dropdown, grouped compact results under All,
+and logo/name/value rows under Savings, Funds and Stocks. It derives its listings
+from the same catalog and market clients as those pages, not a separate search fixture.
+This preview currently lists 4 savings accounts, 4 funds and 40 stocks. Hidden vaults
+are excluded. Stock catalog and vault loading are independent; missing/stale stock
+quotes show no current price. Fund APY follows the Funds table's published/legacy/implied
+priority. The existing fund detail uses published/implied APY, so its legacy fallback
+can differ from the Funds table; this search change preserves those existing page policies.
+
+Click the search field/icon or press `/` outside an editable field to open it. Match
+tickers, names and fund managers, filter by category, or browse all listings. Arrow keys
+and Enter select a result; Escape, outside click and leaving the search close it. Mobile
+uses a search icon and a viewport-bounded scrollable panel. Savings results link to
+`/savings?asset=ETH&account=real%3Aaeth%3AETH` (and the respective account), selecting
+the exact account even when several vaults accept the same symbol. Older asset-only links
+still work. Funds and Stocks
+open their existing detail routes. Search only navigates and does not initiate transactions.
+
+Search regression tests live alongside this dated snapshot so no application module imports
+verification data. To include the DOM interaction test, set `GIWA_MARKET_DOM_RUNTIME` to
+an installed jsdom package.json and run the two `product-search*.test.tsx` files here.

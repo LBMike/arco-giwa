@@ -43,6 +43,7 @@ import { buildActivityFeed, type ActivityRow } from "./activity-feed"
 import { isVaultCategory, type VaultCategory } from "../../../shared/vault-taxonomy"
 import { isAdminAddress, parseAdminAddresses } from "./admin-access"
 import { GIWA_PREPROD_ROUTE, giwaProductPath } from "./routes"
+import { GiwaProductSearch } from "./GiwaProductSearch"
 import { GiwaHeaderMenu } from "./GiwaHeaderMenu"
 import { BrandMark } from "../components/BrandMark"
 import { ASSET_MANAGERS, ISSUERS, ISSUER_OPTIONS, aumLabel, apyLabel, productById } from "../data/products"
@@ -590,8 +591,11 @@ export function GiwaHeader({ admin = false }: { admin?: boolean }) {
             <img src="/arco-icon.svg" alt="Arco" className="h-[33px] w-[35px] shrink-0" />
           </Link>
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          {demo && <span className="rounded-full bg-[var(--color-arco-chip)] px-3 py-1 text-xs font-medium text-[var(--color-arco-chip-ink)]">Demo</span>}
+        <div className="w-9 shrink-0 sm:w-full sm:min-w-0 sm:max-w-[448px] sm:shrink">
+          <GiwaProductSearch />
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {demo && <span className="hidden rounded-full sm:inline-flex bg-[var(--color-arco-chip)] px-3 py-1 text-xs font-medium text-[var(--color-arco-chip-ink)]">Demo</span>}
           <GiwaWalletButton />
           {/* Mint test assets: top bar from lg; below lg it lives in the menu drawer. */}
           {!admin && !demo && (
