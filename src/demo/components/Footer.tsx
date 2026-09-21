@@ -74,7 +74,7 @@ export function Footer({ links }: { links?: readonly FooterLink[] }) {
       {links?.length ? (
         // 1fr_auto_1fr keeps the link group centred on the container, not merely
         // between the brand and the socials (whose widths differ).
-        <div className="mx-auto grid max-w-[var(--container-page)] grid-cols-[1fr_auto_1fr] items-center gap-4 px-8 py-6">
+        <div className="mx-auto grid w-full max-w-[1512px] grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 py-6 md:px-8">
           {brand}
           <nav className="flex items-center justify-center gap-6">
             {links.map((link) => (
@@ -90,7 +90,7 @@ export function Footer({ links }: { links?: readonly FooterLink[] }) {
           <div className="flex justify-end">{socials}</div>
         </div>
       ) : (
-        <div className="mx-auto flex max-w-[var(--container-page)] items-center justify-between px-8 py-6">
+        <div className="mx-auto flex w-full max-w-[1512px] items-center justify-between px-4 py-6 md:px-8">
           {brand}
           {socials}
         </div>

@@ -44,12 +44,30 @@ export function Pill({ tone, children, title }: { tone: Tone; children: ReactNod
       className={`inline-flex max-w-full items-center gap-1 rounded-[var(--radius-pill)] border px-2 py-0.5 text-[11px] font-medium leading-4 ${PILL_TONE[tone]}`}
     >
       <ToneIcon tone={tone} />
-      <span className="break-words">{children}</span>
+      {/* min-w-0: a long state name (FUNDING_REVIEW_REQUIRED) wraps inside the pill instead of running past its border. */}
+      <span className="min-w-0 break-words">{breakAtUnderscores(children)}</span>
     </span>
   )
 }
 
-export function Card({ title, description, actions, children, headingLevel = 3 }: {
+/** A narrow pill breaks a state name after an underscore (FUNDING_REVIEW_ / REQUIRED), not mid-word. The text is unchanged. */
+function breakAtUnderscores(children: ReactNode): ReactNode {
+  if (typeof children !== "string" || !children.includes("_")) return children
+  const parts = children.split("_")
+  return parts.map((part, index) => (
+    <Fragment key={index}>
+      {part}
+      {index < parts.length - 1 ? (
+        <>
+          _<wbr />
+        </>
+      ) : null}
+    </Fragment>
+  ))
+}
+
+/** Section card. Its heading is h2 under the console's h1; cards nested inside the order detail pass 3. */
+export function Card({ title, description, actions, children, headingLevel = 2 }: {
   title: ReactNode
   description?: ReactNode
   actions?: ReactNode
@@ -172,12 +190,25 @@ export function Button({ children, onClick, label, disabled = false }: { childre
   )
 }
 
+/**
+ * Busy is aria-disabled, not `disabled`: a natively disabled button drops keyboard focus to <body> the moment Enter starts
+ * the read. The click guard keeps one read per activation (load/refreshDetail have no in-flight guard of their own).
+ */
 export function RefreshButton({ onClick, busy, what }: { onClick: () => void; busy: boolean; what: string }) {
   return (
-    <Button onClick={onClick} disabled={busy} label={`Refresh ${what}`}>
+    <button
+      type="button"
+      aria-label={`Refresh ${what}`}
+      aria-disabled={busy || undefined}
+      aria-busy={busy || undefined}
+      onClick={() => {
+        if (!busy) onClick()
+      }}
+      className={`inline-flex min-h-8 items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-arco-ink)] aria-disabled:cursor-not-allowed aria-disabled:text-[var(--color-arco-muted)] ${FOCUS_RING}`}
+    >
       <RefreshCw aria-hidden="true" className="size-3.5" />
       {busy ? "Refreshing…" : "Refresh"}
-    </Button>
+    </button>
   )
 }
 

@@ -3,7 +3,7 @@ import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 
 import { actionsFor } from "./actions"
-import { createHarness, WALLET_A } from "./fixtures/controller-harness"
+import { createHarness, flush, WALLET_A } from "./fixtures/controller-harness"
 import { GiwaStocksFeature, GiwaStocksFeatureView } from "./GiwaStocksFeature"
 import type { StocksInvestorController } from "./controller"
 import type { GiwaStocksTab } from "./types"
@@ -63,8 +63,8 @@ test("BUY quote review shows exact amounts; expired quote offers only a manual n
   await h.enter(WALLET_A)
   await h.quote("0.000000001")
   const ready = text(render(h.controller, "stocks", true))
-  assert.match(ready, /You pay \(test cash\) 0\.000001 ARCO_TEST_USDC/)
-  assert.match(ready, /Exact amount 1 base units \(6 decimals\)/)
+  // GIWA-style amount block: the cash side is the server quote's exact amount, with its exact base units under it.
+  assert.match(ready, /You pay ARCO_TEST_USDC TEST 0\.000001 1 base units \(6 decimals\)/)
   assert.match(ready, /Place buy order/)
   h.advanceDevice(60_000)
   h.controller.tick()
@@ -315,5 +315,195 @@ test("003B: with a host execution slot the accepted order card shows the slot an
     assert.doesNotMatch(shown, /not available in this app yet|does not sign or send anything/)
     // Without a slot nothing changes.
     assert.match(text(render(h.controller, "stocks", true)), side === "BUY" ? /Funding required — not available in this app yet/ : /Escrow required — not available in this app yet/)
+  }
+})
+
+// ── UI review 2026-09-19 (G2) ───────────────────────────────────────────
+
+const PROFILE = { profile: "DEMO_TESTNET", valuePolicy: "TEST_VALUE_ONLY", brokerMode: "MOCK_BROKER", chainId: 91342, priceSource: "FIXED_MOCK_PRICE" }
+
+/** The sr-only polite status sentence of the trade panel. */
+function liveText(html: string): string {
+  const match = html.match(/data-testid="stocks-trade-status">([^<]*)<\/p>/)
+  assert.ok(match, "trade status live region")
+  return text(match[1]).trim()
+}
+
+/** Everything from the unresolved attempt block on (nothing else of the trade panel follows it). */
+function attemptPart(html: string): string {
+  const start = html.indexOf('data-testid="stocks-unconfirmed-attempt"')
+  assert.ok(start >= 0, "unresolved attempt block")
+  return html.slice(start)
+}
+
+function retryButton(html: string): string {
+  const match = html.match(/<button[^>]*>Retry same request<\/button>/)
+  assert.ok(match, "Retry same request button")
+  return match[0]
+}
+
+test("I1: a 401'd order request stops asking to sign in once the same wallet is verified again; retry stays a manual click", async () => {
+  const h = createHarness()
+  await h.enter(WALLET_A)
+  await h.quote("1")
+  h.controls.revokeToken(h.tokenOf(WALLET_A) as string)
+  await h.controller.placeOrder()
+  assert.equal(h.controller.getState().attempt?.status, "AUTH_REQUIRED")
+  assert.equal(h.controller.getState().attempt?.outcomeUnknown, false)
+
+  // Session still rejected (authRejected): every sign-in string is kept and both buttons stay disabled.
+  const rejected = render(h.controller, "stocks", true)
+  const rejectedBlock = text(attemptPart(rejected))
+  assert.match(rejectedBlock, /Sign in again to finish this order request/)
+  assert.match(rejectedBlock, /The server did not accept the sign-in session, so this request was not processed\. After signing in again, retry it unchanged\./)
+  assert.match(rejectedBlock, /The server did not accept this sign-in session\. Sign in again\./)
+  assert.equal(liveText(rejected), "Sign in again to finish this order request.")
+  assert.match(retryButton(rejected), /\sdisabled=""/)
+
+  h.enterWith({ status: "signed-out" })
+  await flush()
+  assert.equal(h.controller.getState().attempt, null, "a signed-out view shows no attempt")
+  h.enterWith(h.session(WALLET_A, true))
+  await flush()
+  const state = h.controller.getState()
+  assert.equal(state.attempt?.status, "AUTH_REQUIRED", "the same request is kept for the same wallet")
+  assert.equal(state.authRejected, false)
+
+  const html = render(h.controller, "stocks", true)
+  const shown = text(html)
+  assert.doesNotMatch(shown, /Sign in again/, "no sign-in request once the session is verified again")
+  assert.match(text(attemptPart(html)), /Order request not processed/)
+  assert.match(text(attemptPart(html)), /The server did not accept the sign-in session, so this request was not processed\. After signing in again, retry it unchanged\./)
+  assert.doesNotMatch(shown, /The server did not accept this sign-in session/)
+  assert.equal(liveText(html), "Order request not processed. Retry it unchanged.")
+  assert.doesNotMatch(retryButton(html), /\sdisabled=""|aria-disabled="true"/, "Retry same request is enabled")
+  assert.equal(h.requests("POST", "/api/v1/stocks/orders").length, 1, "nothing is resent automatically")
+  assert.equal(h.controls.orders().length, 0)
+  await h.controller.retryOrder()
+  assert.equal(h.controller.getState().attempt?.status, "ACCEPTED", "the explicit retry sends the same request")
+})
+
+test("I1: an AUTH_REQUIRED retry whose earlier send is unknown is never called 'not processed' after signing in again", async () => {
+  const h = createHarness()
+  await h.enter(WALLET_A)
+  await h.quote("1")
+  h.controls.dropNext("order")
+  await h.controller.placeOrder()
+  h.controls.revokeToken(h.tokenOf(WALLET_A) as string)
+  await h.controller.retryOrder()
+  assert.equal(h.controller.getState().attempt?.status, "AUTH_REQUIRED")
+  assert.equal(h.controller.getState().attempt?.outcomeUnknown, true)
+  assert.match(text(attemptPart(render(h.controller, "stocks", true))), /Sign in again to finish this order request/)
+
+  h.enterWith(h.session(WALLET_A, true))
+  await flush()
+  const html = render(h.controller, "stocks", true)
+  const block = text(attemptPart(html))
+  assert.doesNotMatch(text(html), /Sign in again|Order request not processed/)
+  assert.match(block, /Order result not confirmed/)
+  assert.match(block, /This request may already have created the order\./)
+  assert.match(block, /so this retry was not processed\. The earlier request may still have created the order\./)
+  assert.equal(liveText(html), "Order result not confirmed.")
+  assert.doesNotMatch(retryButton(html), /\sdisabled=""|aria-disabled="true"/)
+  assert.equal(h.requests("POST", "/api/v1/stocks/orders").length, 2, "nothing is resent automatically")
+})
+
+test("I2: the accepted-order announcement uses the displayed status label, including a passed deadline", async () => {
+  const h = createHarness()
+  await h.enter(WALLET_A)
+  await h.quote("1")
+  await h.controller.placeOrder()
+  assert.equal(liveText(render(h.controller, "stocks", true)), "Order accepted. Status: Awaiting funding.")
+  h.controls.advanceOrder(h.controller.getState().attempt?.order?.id as string, "MINT_UNKNOWN")
+  await h.controller.refreshAttemptOrder()
+  assert.equal(liveText(render(h.controller, "stocks", true)), "Order accepted. Status: Checking mint result.")
+
+  const late = createHarness()
+  await late.enter(WALLET_A)
+  await late.quote("1")
+  await late.controller.placeOrder()
+  late.controls.advanceTime(3_600_000)
+  await late.controller.refreshAttemptOrder()
+  assert.equal(liveText(render(late.controller, "stocks", true)), "Order accepted. Status: Funding deadline passed.")
+})
+
+test("I5: an order refused because trading is paused or unavailable does not claim that no quote was created", async () => {
+  for (const [code, expected] of [
+    ["STOCKS_PAUSED", "Trading is paused. No order was created."],
+    ["STOCKS_NOT_ACTIVATED", "Stocks trading is unavailable. No order was created."],
+    ["VAULT_ALREADY_BOUND_TO_OTHER_DEPLOYMENT", "Stocks trading is unavailable. No order was created."],
+  ] as const) {
+    const h = createHarness()
+    await h.enter(WALLET_A)
+    await h.quote("1")
+    if (code === "STOCKS_PAUSED") h.controls.setPaused(true)
+    else h.controls.failNext("order", 503, { error: code, ...PROFILE })
+    await h.controller.placeOrder()
+    await flush() // a 503 refusal re-reads the catalog
+    const attempt = h.controller.getState().attempt
+    assert.equal(attempt?.status, "REJECTED", code)
+    assert.equal(attempt?.outcomeUnknown, false)
+    const html = render(h.controller, "stocks", true)
+    assert.match(text(html), new RegExp(`Order not placed ${expected.replace(/\./g, "\\.")}`), code)
+    assert.equal(liveText(html), `Order not placed. ${expected}`)
+    assert.doesNotMatch(text(html), /No quote or order/, code)
+  }
+})
+
+test("I5: quote refusals keep their quote-context wording", async () => {
+  const h = createHarness()
+  await h.enter(WALLET_A)
+  h.controls.setPaused(true)
+  await h.quote("1")
+  assert.match(text(render(h.controller, "stocks", true)), /Trading is paused\. No quote or order was created\./)
+})
+
+test("I6: the feature title is a section heading (h2) below the page's h1, same id and text", async () => {
+  const h = createHarness()
+  await h.enter(null)
+  const html = render(h.controller, "stocks")
+  assert.match(html, /<h2 id="giwa-stocks-title" class="text-2xl font-medium text-\[var\(--color-arco-ink\)\]">Stocks<\/h2>/)
+  assert.doesNotMatch(html, /<h1\b/)
+  assert.match(html, /aria-labelledby="giwa-stocks-title"/)
+})
+
+test("order rows lay out by the list's own width (a 488px detail column stacks them), never by the viewport", async () => {
+  const h = createHarness()
+  await h.enter(WALLET_A)
+  await h.quote("2")
+  await h.controller.placeOrder()
+  await h.controller.loadOrders()
+  const html = render(h.controller, "orders")
+  const list = html.match(/<ul class="([^"]*)"/)?.[1] ?? ""
+  assert.match(list, /\[container-type:inline-size\]/, "the list is the query container")
+  const rows = [...html.matchAll(/<li><button type="button" class="([^"]*)"/g)].map((match) => match[1])
+  assert.ok(rows.length > 0)
+  for (const row of rows) {
+    assert.match(row, /(^| )grid-cols-1( |$)/, "stacked below the container threshold")
+    assert.match(row, /\[@container_\(min-width:36rem\)\]:grid-cols-\[6rem_minmax\(0,1fr\)_minmax\(0,1fr\)_minmax\(0,1fr\)\]/)
+    assert.doesNotMatch(row, /(^| )(sm|md|lg|xl):grid-cols-/, "no viewport breakpoint for the columns")
+  }
+})
+
+test("controlled detail (the /stocks page's NVDA column): compact header keeps the session line, the test-value note and the title for AT", async () => {
+  const h = createHarness()
+  await h.enter(WALLET_A)
+  const view = (detailOpen: boolean, showAllStocks: boolean) =>
+    renderToStaticMarkup(
+      <GiwaStocksFeatureView state={h.controller.getState()} actions={actionsFor(h.controller)} tab="stocks" onTabChange={() => undefined} detailOpen={detailOpen} onDetailChange={() => undefined} showAllStocks={showAllStocks} />,
+    )
+  const compact = view(true, false)
+  assert.match(compact, /<h2 id="giwa-stocks-title" class="sr-only">Stocks<\/h2>/, "the title stays, for aria-labelledby and assistive technology")
+  assert.match(compact, /aria-labelledby="giwa-stocks-title"/)
+  assert.match(compact, /<p class="text-sm text-\[var\(--color-arco-text-soft\)\]" data-testid="giwa-stocks-session">Signed in as/, "the session line stays visible")
+  assert.match(text(compact), /GIWA Sepolia testnet · Test value only · Mock broker · Fixed mock price\. No real shares, cash or broker execution\./)
+  const wrapper = compact.match(/data-testid="giwa-stocks-feature"[^>]*><div class="([^"]*)"/)?.[1] ?? ""
+  assert.match(wrapper, /(^| )gap-3( |$)/)
+  assert.doesNotMatch(wrapper, /(^| )(gap-6|py-5|md:py-6)( |$)/, "smaller gaps and padding than the list")
+  assert.match(compact, /role="tablist"/)
+  assert.match(compact, /data-testid="stocks-trade-panel"/)
+  // The page's list mode and the standalone feature keep the full header.
+  for (const html of [view(false, false), view(true, true), view(false, true)]) {
+    assert.match(html, /<h2 id="giwa-stocks-title" class="text-2xl font-medium text-\[var\(--color-arco-ink\)\]">Stocks<\/h2>/)
   }
 })

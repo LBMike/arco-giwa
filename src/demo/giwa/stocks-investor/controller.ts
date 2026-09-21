@@ -338,22 +338,57 @@ export class StocksInvestorController {
     this.touchedOwners.clear()
   }
 
+  /**
+   * That the user THEMSELF started a sign-in from the trade panel, and where. Signing in makes a new identity, and
+   * entering one clears the form — quantity, quote, order and holdings all belong to an actor, so none of them is carried
+   * over. The Buy / Sell segment is not that kind of data: it is the choice the user is stating on screen, so it alone
+   * survives that single step. Deliberately NOT a copy of the side: the side that is kept is the one chosen when the
+   * sign-in lands, so a Buy or Sell pressed after this note still wins. Consumed by the first identity change after it.
+   */
+  private signInIntent: { identityKey: string; clientId: number | null; deploymentId: string | null } | null = null
+
+  /** The panel's own "Sign in to trade" press, before the host's sign-in starts. Noting it requests nothing. */
+  noteSignInIntent(): void {
+    if (this.state.session.status === "verified") return
+    this.signInIntent = { identityKey: this.state.identityKey, clientId: this.clientId, deploymentId: this.deploymentId }
+  }
+
+  /** Leaving the trade view, losing the connected wallet or a failed sign-in drops it: the next one starts on Buy. */
+  forgetSignInIntent(): void {
+    this.signInIntent = null
+  }
+
+  /**
+   * The side a new identity starts on: Buy, unless the user started THIS sign-in from the panel, in which case the side
+   * they have chosen carries over. The note is consumed by the first identity change after it, and is only honoured for a
+   * sign-in (a signed-out → verified step) that is still the same API, the same deployment and the same identity it was
+   * made in. A recovered order keeps its own side and hides the form, so recovery wins over the note.
+   */
+  private sideFor(session: NormalizedSession, restored: OrderAttempt | null): StocksSide {
+    const intent = this.signInIntent
+    this.signInIntent = null
+    if (intent === null || session.status !== "verified" || this.state.session.status === "verified" || restored !== null) return "BUY"
+    const sameStep = intent.identityKey === this.state.identityKey && intent.clientId === this.clientId && intent.deploymentId === this.deploymentId
+    return sameStep ? this.state.side : "BUY"
+  }
+
   private enterIdentity(session: NormalizedSession): void {
     const key = sessionIdentityKey(this.clientId, session, this.deploymentId)
     if (key === this.state.identityKey) return
     this.retireGeneration()
     this.rejectionReported = false
     const owner = attemptOwnerKey(this.client?.baseUrl ?? null, session, this.deploymentId)
+    const restored = owner === null ? null : this.attempts.get(owner) ?? null
     this.set({
       generation: this.state.generation + 1,
       identityKey: key,
       session,
       authRejected: false,
-      side: "BUY",
+      side: this.sideFor(session, restored),
       quantityInput: "",
       quantityCheck: parseHumanDecimal("", STOCKS_QUANTITY_SCALE),
       quote: { status: "idle" },
-      attempt: owner === null ? null : this.attempts.get(owner) ?? null,
+      attempt: restored,
       selectedOrder: null,
       orders: { status: "idle" },
       portfolio: { status: "idle" },

@@ -9,7 +9,7 @@ import { GiwaInvestPanel, GiwaNetworkIcon } from "./components"
 import { GiwaInvestDock } from "./GiwaInvestDock"
 import { useGiwaVaultDetail } from "./useGiwaVaultDetail"
 import { PerformanceSection, TransparencySection, MoreInfoSection } from "./detail-sections"
-import { GIWA_PREPROD_ROUTE } from "./routes"
+import { GIWA_FUNDS_ROUTE } from "./routes"
 import type { GiwaCatalogItem } from "./types"
 import { BrandMark } from "../components/BrandMark"
 import { SectionNav } from "../components/SectionNav"
@@ -124,7 +124,7 @@ function Identity({ label, children }: { label: string; children: ReactNode }) {
 function BackLink() {
   return (
     <Link
-      to={GIWA_PREPROD_ROUTE}
+      to={GIWA_FUNDS_ROUTE}
       className="inline-flex items-center gap-1 text-sm text-[var(--color-arco-muted)] hover:text-[var(--color-arco-ink)]"
     >
       <ArrowLeft className="size-4" /> Back to products

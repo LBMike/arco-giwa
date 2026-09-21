@@ -103,6 +103,11 @@ const REFUSED: Record<string, string> = {
 export function attemptErrorMessage(error: FeatureError, outcomeUnknown: boolean): string {
   if (error.kind === "NETWORK") return error.code === "TIMEOUT" ? "No answer was received from the Stocks API in time." : "No answer was received from the Stocks API."
   if (error.kind === "INVALID_RESPONSE") return "The server's answer could not be read as a Stocks response."
+  // A refused order leaves its quote on screen, so only the order is said to be absent (not "no quote or order").
+  if (!outcomeUnknown && error.kind === "REFUSED") {
+    if (error.code === "STOCKS_PAUSED") return "Trading is paused. No order was created."
+    if (error.code === "STOCKS_NOT_ACTIVATED" || error.code === "VAULT_ALREADY_BOUND_TO_OTHER_DEPLOYMENT") return "Stocks trading is unavailable. No order was created."
+  }
   if (!outcomeUnknown) return errorMessage(error)
   switch (error.kind) {
     case "REFUSED":

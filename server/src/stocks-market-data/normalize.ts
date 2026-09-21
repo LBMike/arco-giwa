@@ -84,3 +84,15 @@ export function chart(input: unknown, symbol: string, range: ChartRange, now: nu
   const truncated = row.next_url != null || (row.queryCount != null && integer(row.queryCount) >= 50000n) || entries.length === 50000;
   return { symbol, currency: 'USD', range, interval: rule.interval, adjustedForSplits: true, from: new Date(window.from).toISOString(), to: new Date(window.to).toISOString(), bars, history: truncated ? 'TRUNCATED' : bars.length ? 'RETURNED_WINDOW' : 'EMPTY', complete: !truncated };
 }
+
+/** ETF Global profiles: AUM is its own measure, never the ticker's market_cap. */
+export function etfAssets(input: unknown, symbol: string): { aum: string | null; aumAsOf: string | null } {
+  const rows = providerObject(input).results;
+  if (!Array.isArray(rows) || rows.length > 1) return invalid();
+  if (!rows.length) return { aum: null, aumAsOf: null };
+  const row = object(rows[0]);
+  if (row.composite_ticker !== symbol || row.product_type !== 'etf') return invalid();
+  const date = text(row.effective_date, 10);
+  if (date !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date)) return invalid();
+  return { aum: optionalDecimal(row.aum), aumAsOf: date };
+}

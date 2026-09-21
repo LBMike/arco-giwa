@@ -1,0 +1,1380 @@
+{
+  "source": "https://arco-giwa-api.onrender.com",
+  "capturedAt": "2026-09-20T09:26:29.702152+00:00",
+  "chainId": 91342,
+  "catalog": [
+    {
+      "id": "cmr9ijc210000y0qqopka32jf",
+      "chainId": 91342,
+      "productId": "beqty",
+      "symbol": "bEQTY",
+      "name": "DigiFT U.S. Equity Income Fund",
+      "productTokenAddress": "0x0089e79de0ab1ae2d876f8f2661b3117fa69e6b5",
+      "paymentAssetSymbol": "tUSDC",
+      "paymentAssetAddress": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+      "depositVaultAddress": "0x2703be9dbdf663c369db2b87a72b42b97bddb3ea",
+      "redemptionVaultAddress": "0x63a1184031c679e1625020d93234d505f0c23acc",
+      "priceFeedAddress": "0xec241df6e4e608c4260959dc07d4f751372afba4",
+      "deploymentBlock": "30008251",
+      "registryReleaseId": "giwa-preprod-2026-06-27",
+      "activationFlags": {
+        "deployed": true,
+        "adminUiEnabled": false,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false
+      },
+      "metadata": {
+        "evmVersion": "cancun",
+        "priceFeedImplementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "depositVaultImplementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+        "productTokenImplementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+        "redemptionVaultImplementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE"
+      },
+      "createdAt": "2026-07-06T17:47:43.945Z",
+      "updatedAt": "2026-07-06T17:47:43.945Z",
+      "paymentAsset": {
+        "id": "cmqw9in0z00017fqqzntrfpui",
+        "chainId": 91342,
+        "symbol": "tUSDC",
+        "name": "Test USDC",
+        "decimals": 6,
+        "tokenAddress": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+        "faucetAddress": "0x785918816f5f5ed6a8c5edf5e223f14223bf41bc",
+        "deploymentBlock": "29212771",
+        "registryReleaseId": "giwa-preprod-2026-06-27",
+        "metadata": {
+          "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+          "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b"
+        },
+        "createdAt": "2026-06-27T11:14:14.675Z",
+        "updatedAt": "2026-06-29T17:33:43.479Z"
+      },
+      "vaultConfig": {
+        "displayName": null,
+        "category": "Equity Exposure",
+        "description": null,
+        "adminDepositAddress": null,
+        "cardSnapshot": false,
+        "cardIndustry": true,
+        "cardExposure": true,
+        "pinned": false,
+        "hidden": false,
+        "kind": "product",
+        "assetManagerName": "BNY Investments",
+        "issuerName": "DigiFT",
+        "about": "Tokenized access via DigiFT to an actively managed U.S. equity income strategy on Ethereum. The underlying BNY/Newton strategy seeks to maximise total returns from income and capital growth and measures performance against the S&P 500 NR Index.\n\nThe fund primarily invests in large-cap U.S. equities/equity-related securities with a dividend-income and value-oriented approach. Access is intended for eligible/accredited investors through authorized regulated intermediaries.",
+        "aum": "$903M",
+        "redemptionTimelineDays": 4,
+        "feeInstantMintingBps": null,
+        "feeInstantRedemptionBps": 0,
+        "feeManagementBps": 150,
+        "feePerformanceBps": null,
+        "vaultImageUrl": "https://sg-files.digift.io/images/offers-imgs/bEQTY.png",
+        "assetManagerImageUrl": "https://pbs.twimg.com/profile_images/1800482990062989312/a59zSH1W_400x400.jpg",
+        "issuerImageUrl": "https://pbs.twimg.com/profile_images/1989699827773616128/1CGIQmp5_400x400.jpg",
+        "docsUrl": null,
+        "legalUrl": null,
+        "risksUrl": null,
+        "docsShown": true,
+        "legalShown": true,
+        "risksShown": true,
+        "portfolioSnapshot": null,
+        "portfolioIndustry": [
+          {
+            "label": "Financials",
+            "percent": 24.4,
+            "valueUsd": null
+          },
+          {
+            "label": "Health Care",
+            "percent": 13.4,
+            "valueUsd": null
+          },
+          {
+            "label": "Industrials",
+            "percent": 12.2,
+            "valueUsd": null
+          },
+          {
+            "label": "Information Technology",
+            "percent": 11.7,
+            "valueUsd": null
+          },
+          {
+            "label": "Energy",
+            "percent": 8.5,
+            "valueUsd": null
+          },
+          {
+            "label": "Materials",
+            "percent": 7.5,
+            "valueUsd": null
+          },
+          {
+            "label": "Consumer Staples",
+            "percent": 7.3,
+            "valueUsd": null
+          },
+          {
+            "label": "Communication Services",
+            "percent": 5.5,
+            "valueUsd": null
+          },
+          {
+            "label": "Consumer Discretionary",
+            "percent": 2.5,
+            "valueUsd": null
+          },
+          {
+            "label": "Utilities",
+            "percent": 1.7,
+            "valueUsd": null
+          },
+          {
+            "label": "Real Estate",
+            "percent": 1.3,
+            "valueUsd": null
+          },
+          {
+            "label": "Cash",
+            "percent": 4.1,
+            "valueUsd": null
+          }
+        ],
+        "portfolioExposure": [
+          {
+            "label": "UnitedHealth Group Incorporated",
+            "percent": 4.3,
+            "valueUsd": null
+          },
+          {
+            "label": "Texas Instruments Incorporated",
+            "percent": 3.8,
+            "valueUsd": null
+          },
+          {
+            "label": "JPMorgan Chase & Co.",
+            "percent": 3.7,
+            "valueUsd": null
+          },
+          {
+            "label": "Assurant, Inc.",
+            "percent": 3.4,
+            "valueUsd": null
+          },
+          {
+            "label": "Colgate-Palmolive Company",
+            "percent": 3.3,
+            "valueUsd": null
+          },
+          {
+            "label": "Cisco Systems, Inc.",
+            "percent": 3.1,
+            "valueUsd": null
+          },
+          {
+            "label": "Applied Materials, Inc.",
+            "percent": 3,
+            "valueUsd": null
+          },
+          {
+            "label": "Fifth Third Bancorp",
+            "percent": 3,
+            "valueUsd": null
+          },
+          {
+            "label": "SLB Limited",
+            "percent": 2.9,
+            "valueUsd": null
+          },
+          {
+            "label": "Johnson & Johnson",
+            "percent": 2.7,
+            "valueUsd": null
+          },
+          {
+            "label": "Other holdings",
+            "percent": 66.8,
+            "valueUsd": null
+          }
+        ],
+        "acceptAssets": null
+      },
+      "pauseState": {
+        "depositPaused": false,
+        "depositPartial": false,
+        "withdrawPaused": false,
+        "withdrawPartial": false
+      }
+    },
+    {
+      "id": "cmqw9ip1i00077fqqy9iby512",
+      "chainId": 91342,
+      "productId": "umint",
+      "symbol": "uMINT",
+      "name": "Arco MINT",
+      "productTokenAddress": "0x24c67a5c506fbd9abc2793bb0967004e88061f8b",
+      "paymentAssetSymbol": "tUSDC",
+      "paymentAssetAddress": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+      "depositVaultAddress": "0xf3c43cd61993f4dcc4203547acb77fde8f56ba8b",
+      "redemptionVaultAddress": "0xc4075029b9e854a7ef28d53749560564c607ea67",
+      "priceFeedAddress": "0x57a4637a478c88643260e0f33534c75581bee9da",
+      "deploymentBlock": "29212861",
+      "registryReleaseId": "giwa-preprod-2026-06-27",
+      "activationFlags": {
+        "deployed": true,
+        "adminUiEnabled": false,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false
+      },
+      "metadata": {
+        "evmVersion": "cancun",
+        "priceFeedImplementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "depositVaultImplementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+        "productTokenImplementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+        "redemptionVaultImplementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE"
+      },
+      "createdAt": "2026-06-27T11:14:17.286Z",
+      "updatedAt": "2026-06-29T17:33:44.810Z",
+      "paymentAsset": {
+        "id": "cmqw9in0z00017fqqzntrfpui",
+        "chainId": 91342,
+        "symbol": "tUSDC",
+        "name": "Test USDC",
+        "decimals": 6,
+        "tokenAddress": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+        "faucetAddress": "0x785918816f5f5ed6a8c5edf5e223f14223bf41bc",
+        "deploymentBlock": "29212771",
+        "registryReleaseId": "giwa-preprod-2026-06-27",
+        "metadata": {
+          "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+          "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b"
+        },
+        "createdAt": "2026-06-27T11:14:14.675Z",
+        "updatedAt": "2026-06-29T17:33:43.479Z"
+      },
+      "vaultConfig": {
+        "displayName": "auMINT",
+        "category": "U.S Treasuries",
+        "description": null,
+        "adminDepositAddress": null,
+        "cardSnapshot": true,
+        "cardIndustry": true,
+        "cardExposure": true,
+        "pinned": false,
+        "hidden": false,
+        "kind": "product",
+        "assetManagerName": "UBS Asset Management",
+        "issuerName": "DigiFT",
+        "about": "Tokenized access to UBS Asset Management's USD money market strategy through uMINT, a UBS USD Money Market Investment Fund Token built on Ethereum and issued under UBS Tokenize. The strategy is positioned for capital preservation, daily liquidity and yield from high-quality short-term USD money market instruments.",
+        "aum": "$12B",
+        "redemptionTimelineDays": 0,
+        "feeInstantMintingBps": 0,
+        "feeInstantRedemptionBps": 0,
+        "feeManagementBps": 40,
+        "feePerformanceBps": 0,
+        "vaultImageUrl": "https://pbs.twimg.com/profile_images/1145608301033533440/6vNXqPlJ_400x400.jpg",
+        "assetManagerImageUrl": "https://pbs.twimg.com/profile_images/1145608301033533440/6vNXqPlJ_400x400.jpg",
+        "issuerImageUrl": "https://pbs.twimg.com/profile_images/1989699827773616128/1CGIQmp5_400x400.jpg",
+        "docsUrl": null,
+        "legalUrl": null,
+        "risksUrl": null,
+        "docsShown": true,
+        "legalShown": true,
+        "risksShown": true,
+        "portfolioSnapshot": [
+          {
+            "label": "Commercial Paper (CP)",
+            "percent": 60.5,
+            "valueUsd": null
+          },
+          {
+            "label": "Repurchase Agreements (Repo)",
+            "percent": 13.1,
+            "valueUsd": null
+          },
+          {
+            "label": "Certificates of Deposit (CD)",
+            "percent": 11.6,
+            "valueUsd": null
+          },
+          {
+            "label": "Asset-backed CP (ABCP)",
+            "percent": 7.6,
+            "valueUsd": null
+          },
+          {
+            "label": "Deposits",
+            "percent": 6.2,
+            "valueUsd": null
+          },
+          {
+            "label": "Cash",
+            "percent": 1,
+            "valueUsd": null
+          }
+        ],
+        "portfolioIndustry": [
+          {
+            "label": "Credit quality: A1+",
+            "percent": 50.4,
+            "valueUsd": null
+          },
+          {
+            "label": "Credit quality: A1",
+            "percent": 49.6,
+            "valueUsd": null
+          }
+        ],
+        "portfolioExposure": [
+          {
+            "label": "Next Day",
+            "percent": 26.8,
+            "valueUsd": null
+          },
+          {
+            "label": "2-7 Days",
+            "percent": 5.8,
+            "valueUsd": null
+          },
+          {
+            "label": "8-35 Days",
+            "percent": 15.9,
+            "valueUsd": null
+          },
+          {
+            "label": "36-95 Days",
+            "percent": 23.1,
+            "valueUsd": null
+          },
+          {
+            "label": "96-185 Days",
+            "percent": 22.1,
+            "valueUsd": null
+          },
+          {
+            "label": "186-397 Days",
+            "percent": 6.3,
+            "valueUsd": null
+          }
+        ],
+        "acceptAssets": null
+      },
+      "pauseState": {
+        "depositPaused": false,
+        "depositPartial": false,
+        "withdrawPaused": false,
+        "withdrawPartial": false
+      }
+    },
+    {
+      "id": "cmrf6cz780001dn8ogkqv2q34",
+      "chainId": 91342,
+      "productId": "arcousd",
+      "symbol": "arcoUSD",
+      "name": "Arco USD",
+      "productTokenAddress": "0x28a934c3465331ddeb60908c0c3f3b8de505be05",
+      "paymentAssetSymbol": "tUSDC",
+      "paymentAssetAddress": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+      "depositVaultAddress": "0x4083d23d792caefefc97b60677c12243aac459e5",
+      "redemptionVaultAddress": "0x5719ed2d50a3fd00852e90afe7d6aa4fb696ec36",
+      "priceFeedAddress": "0x2b1c1af136f8c9d637a44dc5340748e0389d1ead",
+      "deploymentBlock": "30357010",
+      "registryReleaseId": "giwa-preprod-2026-06-27",
+      "activationFlags": {
+        "deployed": true,
+        "adminUiEnabled": false,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false
+      },
+      "metadata": {
+        "evmVersion": "cancun",
+        "priceFeedImplementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "depositVaultImplementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
+        "productTokenImplementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+        "redemptionVaultImplementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE"
+      },
+      "createdAt": "2026-07-10T16:53:29.012Z",
+      "updatedAt": "2026-07-10T16:53:29.012Z",
+      "paymentAsset": {
+        "id": "cmqw9in0z00017fqqzntrfpui",
+        "chainId": 91342,
+        "symbol": "tUSDC",
+        "name": "Test USDC",
+        "decimals": 6,
+        "tokenAddress": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+        "faucetAddress": "0x785918816f5f5ed6a8c5edf5e223f14223bf41bc",
+        "deploymentBlock": "29212771",
+        "registryReleaseId": "giwa-preprod-2026-06-27",
+        "metadata": {
+          "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+          "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b"
+        },
+        "createdAt": "2026-06-27T11:14:14.675Z",
+        "updatedAt": "2026-06-29T17:33:43.479Z"
+      },
+      "vaultConfig": {
+        "displayName": null,
+        "category": "Arco Saving",
+        "description": null,
+        "adminDepositAddress": null,
+        "cardSnapshot": true,
+        "cardIndustry": false,
+        "cardExposure": true,
+        "pinned": false,
+        "hidden": false,
+        "kind": "saving",
+        "assetManagerName": null,
+        "issuerName": null,
+        "about": null,
+        "aum": null,
+        "redemptionTimelineDays": 0,
+        "feeInstantMintingBps": 0,
+        "feeInstantRedemptionBps": 0,
+        "feeManagementBps": 0,
+        "feePerformanceBps": 0,
+        "vaultImageUrl": "https://pbs.twimg.com/profile_images/2061494419069837312/P_U69bS6_400x400.png",
+        "assetManagerImageUrl": null,
+        "issuerImageUrl": null,
+        "docsUrl": null,
+        "legalUrl": null,
+        "risksUrl": null,
+        "docsShown": true,
+        "legalShown": true,
+        "risksShown": true,
+        "portfolioSnapshot": [
+          {
+            "label": "UBS Asset Management uMINT",
+            "percent": 50,
+            "valueUsd": null
+          },
+          {
+            "label": "Franklin Templeton Benji",
+            "percent": 50,
+            "valueUsd": null
+          }
+        ],
+        "portfolioIndustry": null,
+        "portfolioExposure": [
+          {
+            "label": "U.S. Treasury-backed repo & cash",
+            "percent": 100,
+            "valueUsd": null
+          }
+        ],
+        "acceptAssets": [
+          {
+            "apy": null,
+            "icon": "https://pbs.twimg.com/profile_images/1916937910928211968/CKblfanr_400x400.png",
+            "symbol": "USDC",
+            "isDummy": false,
+            "sortOrder": 0,
+            "savingVaultId": "arcousd"
+          },
+          {
+            "apy": null,
+            "icon": "https://pbs.twimg.com/profile_images/1890459435207913472/MyH2IKhR_400x400.jpg",
+            "symbol": "RLUSD",
+            "isDummy": false,
+            "sortOrder": 1,
+            "savingVaultId": "arcousd"
+          }
+        ]
+      },
+      "pauseState": {
+        "depositPaused": false,
+        "depositPartial": false,
+        "withdrawPaused": false,
+        "withdrawPartial": false
+      }
+    },
+    {
+      "id": "cmqw9ip9t00087fqqi8lf3p2u",
+      "chainId": 91342,
+      "productId": "abtc",
+      "symbol": "aBTC",
+      "name": "Arco BTC",
+      "productTokenAddress": "0x2cf0bbfb47710433fcf4c77fabb91839bd4723d3",
+      "paymentAssetSymbol": "tBTC",
+      "paymentAssetAddress": "0x2330e111fb116bf8041f694145e961ed9b66243e",
+      "depositVaultAddress": "0x63bbf5e165a23ba75aafa71a34e74a15a422235e",
+      "redemptionVaultAddress": "0xf24362e7704383c368bc91d0f8d9dbcf21f609bb",
+      "priceFeedAddress": "0x4c3593bc3d4093d3eb11377e64089deecdf1e140",
+      "deploymentBlock": "29212869",
+      "registryReleaseId": "giwa-preprod-2026-06-27",
+      "activationFlags": {
+        "deployed": true,
+        "adminUiEnabled": false,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false
+      },
+      "metadata": {
+        "evmVersion": "cancun",
+        "priceFeedImplementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "depositVaultImplementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+        "productTokenImplementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+        "redemptionVaultImplementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE"
+      },
+      "createdAt": "2026-06-27T11:14:17.585Z",
+      "updatedAt": "2026-06-29T17:33:45.023Z",
+      "paymentAsset": {
+        "id": "cmqw9inem00027fqqkro2c1ay",
+        "chainId": 91342,
+        "symbol": "tBTC",
+        "name": "Test BTC",
+        "decimals": 8,
+        "tokenAddress": "0x2330e111fb116bf8041f694145e961ed9b66243e",
+        "faucetAddress": "0x785918816f5f5ed6a8c5edf5e223f14223bf41bc",
+        "deploymentBlock": "29212779",
+        "registryReleaseId": "giwa-preprod-2026-06-27",
+        "metadata": {
+          "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+          "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b"
+        },
+        "createdAt": "2026-06-27T11:14:15.166Z",
+        "updatedAt": "2026-06-29T17:33:43.695Z"
+      },
+      "vaultConfig": {
+        "displayName": null,
+        "category": "Arco Saving",
+        "description": null,
+        "adminDepositAddress": null,
+        "cardSnapshot": true,
+        "cardIndustry": true,
+        "cardExposure": true,
+        "pinned": false,
+        "hidden": true,
+        "kind": "saving",
+        "assetManagerName": null,
+        "issuerName": null,
+        "about": null,
+        "aum": null,
+        "redemptionTimelineDays": null,
+        "feeInstantMintingBps": null,
+        "feeInstantRedemptionBps": null,
+        "feeManagementBps": null,
+        "feePerformanceBps": null,
+        "vaultImageUrl": null,
+        "assetManagerImageUrl": null,
+        "issuerImageUrl": null,
+        "docsUrl": null,
+        "legalUrl": null,
+        "risksUrl": null,
+        "docsShown": true,
+        "legalShown": false,
+        "risksShown": false,
+        "portfolioSnapshot": null,
+        "portfolioIndustry": null,
+        "portfolioExposure": null,
+        "acceptAssets": null
+      },
+      "pauseState": {
+        "depositPaused": false,
+        "depositPartial": false,
+        "withdrawPaused": false,
+        "withdrawPartial": false
+      }
+    },
+    {
+      "id": "cmqw9ipyq000a7fqqjxzyj6h9",
+      "chainId": 91342,
+      "productId": "aeth",
+      "symbol": "aETH",
+      "name": "Arco ETH",
+      "productTokenAddress": "0x42feede0f4503d9783404b7301a65a0ff17c36d0",
+      "paymentAssetSymbol": "tWETH",
+      "paymentAssetAddress": "0xd6499f5d8c162d81a52302b855b7b2961917fead",
+      "depositVaultAddress": "0xb79ac567b5c9200e5e68b3053b913bcc59f78a7f",
+      "redemptionVaultAddress": "0x0bcb1702c4df8d0e5d9476cbc0d31d0e583b6140",
+      "priceFeedAddress": "0xacc6e9addbc8d43399cff37c81ccf2c815f03dea",
+      "deploymentBlock": "29212885",
+      "registryReleaseId": "giwa-preprod-2026-06-27",
+      "activationFlags": {
+        "deployed": true,
+        "adminUiEnabled": false,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false
+      },
+      "metadata": {
+        "evmVersion": "cancun",
+        "priceFeedImplementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "depositVaultImplementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+        "productTokenImplementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+        "redemptionVaultImplementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE"
+      },
+      "createdAt": "2026-06-27T11:14:18.482Z",
+      "updatedAt": "2026-06-29T17:33:45.694Z",
+      "paymentAsset": {
+        "id": "cmqw9io0a00047fqqcv2o99xj",
+        "chainId": 91342,
+        "symbol": "tWETH",
+        "name": "Test WETH",
+        "decimals": 18,
+        "tokenAddress": "0xd6499f5d8c162d81a52302b855b7b2961917fead",
+        "faucetAddress": "0x785918816f5f5ed6a8c5edf5e223f14223bf41bc",
+        "deploymentBlock": "29212803",
+        "registryReleaseId": "giwa-preprod-2026-06-27",
+        "metadata": {
+          "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+          "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b"
+        },
+        "createdAt": "2026-06-27T11:14:15.946Z",
+        "updatedAt": "2026-06-29T17:33:44.143Z"
+      },
+      "vaultConfig": {
+        "displayName": "arcoETH",
+        "category": "Arco Saving",
+        "description": null,
+        "adminDepositAddress": null,
+        "cardSnapshot": true,
+        "cardIndustry": false,
+        "cardExposure": false,
+        "pinned": false,
+        "hidden": false,
+        "kind": "saving",
+        "assetManagerName": null,
+        "issuerName": null,
+        "about": null,
+        "aum": null,
+        "redemptionTimelineDays": 2,
+        "feeInstantMintingBps": null,
+        "feeInstantRedemptionBps": null,
+        "feeManagementBps": null,
+        "feePerformanceBps": null,
+        "vaultImageUrl": null,
+        "assetManagerImageUrl": null,
+        "issuerImageUrl": null,
+        "docsUrl": null,
+        "legalUrl": null,
+        "risksUrl": null,
+        "docsShown": true,
+        "legalShown": true,
+        "risksShown": true,
+        "portfolioSnapshot": [
+          {
+            "label": "aCAPIX",
+            "percent": 80,
+            "valueUsd": null
+          },
+          {
+            "label": "uMINT",
+            "percent": 20,
+            "valueUsd": null
+          }
+        ],
+        "portfolioIndustry": null,
+        "portfolioExposure": null,
+        "acceptAssets": [
+          {
+            "apy": null,
+            "icon": "https://s2.coinmarketcap.com/static/img/coins/64x64/1027.png",
+            "symbol": "ETH",
+            "isDummy": false,
+            "sortOrder": 2,
+            "savingVaultId": "aeth"
+          }
+        ]
+      },
+      "pauseState": {
+        "depositPaused": false,
+        "depositPartial": false,
+        "withdrawPaused": false,
+        "withdrawPartial": false
+      }
+    },
+    {
+      "id": "cmqw9ipq700097fqqymrddhfg",
+      "chainId": 91342,
+      "productId": "axrp",
+      "symbol": "aXRP",
+      "name": "Arco XRP",
+      "productTokenAddress": "0x46462b8527883c726cf4ebb5c19c492293a62eb0",
+      "paymentAssetSymbol": "tXRP",
+      "paymentAssetAddress": "0x8b93214e63d83d64de4437c82a8eb6f73481a922",
+      "depositVaultAddress": "0xb245fbca1f3de81fc67622ae954c1ab9f6cb3bab",
+      "redemptionVaultAddress": "0x37ae685703ed8815fc3dde53ff4c9cb12dccb9a7",
+      "priceFeedAddress": "0xd11d8c5094e67ca55fbfaad6bf7e459404827f42",
+      "deploymentBlock": "29212877",
+      "registryReleaseId": "giwa-preprod-2026-06-27",
+      "activationFlags": {
+        "deployed": true,
+        "adminUiEnabled": false,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false
+      },
+      "metadata": {
+        "evmVersion": "cancun",
+        "priceFeedImplementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "depositVaultImplementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+        "productTokenImplementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+        "redemptionVaultImplementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE"
+      },
+      "createdAt": "2026-06-27T11:14:18.175Z",
+      "updatedAt": "2026-06-29T17:33:45.455Z",
+      "paymentAsset": {
+        "id": "cmqw9inmo00037fqq2zsq66wq",
+        "chainId": 91342,
+        "symbol": "tXRP",
+        "name": "Test XRP",
+        "decimals": 6,
+        "tokenAddress": "0x8b93214e63d83d64de4437c82a8eb6f73481a922",
+        "faucetAddress": "0x785918816f5f5ed6a8c5edf5e223f14223bf41bc",
+        "deploymentBlock": "29212791",
+        "registryReleaseId": "giwa-preprod-2026-06-27",
+        "metadata": {
+          "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+          "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b"
+        },
+        "createdAt": "2026-06-27T11:14:15.456Z",
+        "updatedAt": "2026-06-29T17:33:43.920Z"
+      },
+      "vaultConfig": {
+        "displayName": "arcoXRP",
+        "category": "Arco Saving",
+        "description": null,
+        "adminDepositAddress": null,
+        "cardSnapshot": true,
+        "cardIndustry": false,
+        "cardExposure": false,
+        "pinned": false,
+        "hidden": false,
+        "kind": "saving",
+        "assetManagerName": null,
+        "issuerName": null,
+        "about": null,
+        "aum": null,
+        "redemptionTimelineDays": 2,
+        "feeInstantMintingBps": null,
+        "feeInstantRedemptionBps": null,
+        "feeManagementBps": null,
+        "feePerformanceBps": null,
+        "vaultImageUrl": "https://i.postimg.cc/Y9dzS20b/arco-XRP.png",
+        "assetManagerImageUrl": null,
+        "issuerImageUrl": null,
+        "docsUrl": null,
+        "legalUrl": null,
+        "risksUrl": null,
+        "docsShown": true,
+        "legalShown": true,
+        "risksShown": true,
+        "portfolioSnapshot": [
+          {
+            "label": "aCAPIX",
+            "percent": 80,
+            "valueUsd": null
+          },
+          {
+            "label": "uMINT",
+            "percent": 20,
+            "valueUsd": null
+          }
+        ],
+        "portfolioIndustry": null,
+        "portfolioExposure": null,
+        "acceptAssets": [
+          {
+            "apy": null,
+            "icon": "https://s2.coinmarketcap.com/static/img/coins/64x64/52.png",
+            "symbol": "XRP",
+            "isDummy": false,
+            "sortOrder": 3,
+            "savingVaultId": "axrp"
+          }
+        ]
+      },
+      "pauseState": {
+        "depositPaused": false,
+        "depositPartial": false,
+        "withdrawPaused": false,
+        "withdrawPartial": false
+      }
+    },
+    {
+      "id": "cmqw9ioic00067fqqjtzvptka",
+      "chainId": 91342,
+      "productId": "ibenji",
+      "symbol": "iBENJI",
+      "name": "Arco BENJI",
+      "productTokenAddress": "0xa3a96a910b94fac01faf5449c2317a78107ed705",
+      "paymentAssetSymbol": "tUSDC",
+      "paymentAssetAddress": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+      "depositVaultAddress": "0xfa24a31bf1f2b149298969ced1205fc22670c1b7",
+      "redemptionVaultAddress": "0x6701efec11af345e38b899cab2673a5e6c9701f2",
+      "priceFeedAddress": "0x92cfc86ad37ed66734a4ae311a79525ba5990680",
+      "deploymentBlock": "29212854",
+      "registryReleaseId": "giwa-preprod-2026-06-27",
+      "activationFlags": {
+        "deployed": true,
+        "adminUiEnabled": false,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false
+      },
+      "metadata": {
+        "evmVersion": "cancun",
+        "priceFeedImplementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "depositVaultImplementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+        "productTokenImplementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+        "redemptionVaultImplementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE"
+      },
+      "createdAt": "2026-06-27T11:14:16.596Z",
+      "updatedAt": "2026-06-29T17:33:44.588Z",
+      "paymentAsset": {
+        "id": "cmqw9in0z00017fqqzntrfpui",
+        "chainId": 91342,
+        "symbol": "tUSDC",
+        "name": "Test USDC",
+        "decimals": 6,
+        "tokenAddress": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+        "faucetAddress": "0x785918816f5f5ed6a8c5edf5e223f14223bf41bc",
+        "deploymentBlock": "29212771",
+        "registryReleaseId": "giwa-preprod-2026-06-27",
+        "metadata": {
+          "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+          "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b"
+        },
+        "createdAt": "2026-06-27T11:14:14.675Z",
+        "updatedAt": "2026-06-29T17:33:43.479Z"
+      },
+      "vaultConfig": {
+        "displayName": "aiBENJI",
+        "category": "U.S Treasuries",
+        "description": null,
+        "adminDepositAddress": null,
+        "cardSnapshot": false,
+        "cardIndustry": false,
+        "cardExposure": true,
+        "pinned": false,
+        "hidden": false,
+        "kind": "product",
+        "assetManagerName": "Franklin Templeton",
+        "issuerName": "DigiFT",
+        "about": "Arco's tokenized access to iBENJI, a Franklin Templeton Benji product representing one share of Franklin OnChain Institutional Liquidity Fund Ltd. The product provides exposure to a government money-market strategy backed by U.S. Treasury bills, U.S. government securities, Treasury-backed repurchase agreements, and cash, with USD 1.00 CNAV mechanics.\n\nThe provided card shows 3.50% 7-day yield as of 29 Jun 2026, Daily at CNAV, minimum 10,000, no subscription/redemption fee, and Sub: T+1 / Red: T+2. Franklin Templeton and DigiFT have announced distribution of BENJI-related tokenization products through DigiFT's MAS-licensed platform for accredited and institutional investors in Asia.",
+        "aum": "$1.3B",
+        "redemptionTimelineDays": 2,
+        "feeInstantMintingBps": 0,
+        "feeInstantRedemptionBps": 0,
+        "feeManagementBps": 50,
+        "feePerformanceBps": 0,
+        "vaultImageUrl": "https://rwa-partners-infra-prod-rwapartnersuploads740d2985-1c2klgo7i3ef.s3.us-east-1.amazonaws.com/uploads/images/BENJI_LOGO.png",
+        "assetManagerImageUrl": "https://img.rwa.xyz/content/entity-icons/128/color/franklin_templeton.png",
+        "issuerImageUrl": "https://pbs.twimg.com/profile_images/1989699827773616128/1CGIQmp5_400x400.jpg",
+        "docsUrl": null,
+        "legalUrl": null,
+        "risksUrl": null,
+        "docsShown": true,
+        "legalShown": true,
+        "risksShown": true,
+        "portfolioSnapshot": null,
+        "portfolioIndustry": null,
+        "portfolioExposure": [
+          {
+            "label": "U.S. Treasury-backed repo & cash",
+            "percent": 100,
+            "valueUsd": null
+          }
+        ],
+        "acceptAssets": null
+      },
+      "pauseState": {
+        "depositPaused": false,
+        "depositPartial": false,
+        "withdrawPaused": false,
+        "withdrawPartial": false
+      }
+    },
+    {
+      "id": "cmqw9io8f00057fqqjqf539ez",
+      "chainId": 91342,
+      "productId": "acapix",
+      "symbol": "aCAPIX",
+      "name": "Arco CAPIX",
+      "productTokenAddress": "0xd87aa38101220e3e0cd2e45b7e97d799abec992f",
+      "paymentAssetSymbol": "tUSDC",
+      "paymentAssetAddress": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+      "depositVaultAddress": "0x4ebce7c472dcb478d30725d0cf3675772dbb34c2",
+      "redemptionVaultAddress": "0x43a7fd58b855f44badadc260dedb45f446b4ecba",
+      "priceFeedAddress": "0x0b01f3e517c1a8749bc3306c22c95c3ba253e4ed",
+      "deploymentBlock": "29212846",
+      "registryReleaseId": "giwa-preprod-2026-06-27",
+      "activationFlags": {
+        "deployed": true,
+        "adminUiEnabled": false,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false
+      },
+      "metadata": {
+        "evmVersion": "cancun",
+        "priceFeedImplementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "depositVaultImplementation": "0xD4bb8C29e8d43004308Fab7ad0554FA9383C9f24",
+        "productTokenImplementation": "0x47bB3DbcFd2E531C745Bb96906f6c7A90EA98c72",
+        "redemptionVaultImplementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE"
+      },
+      "createdAt": "2026-06-27T11:14:16.239Z",
+      "updatedAt": "2026-06-29T17:33:44.367Z",
+      "paymentAsset": {
+        "id": "cmqw9in0z00017fqqzntrfpui",
+        "chainId": 91342,
+        "symbol": "tUSDC",
+        "name": "Test USDC",
+        "decimals": 6,
+        "tokenAddress": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+        "faucetAddress": "0x785918816f5f5ed6a8c5edf5e223f14223bf41bc",
+        "deploymentBlock": "29212771",
+        "registryReleaseId": "giwa-preprod-2026-06-27",
+        "metadata": {
+          "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+          "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b"
+        },
+        "createdAt": "2026-06-27T11:14:14.675Z",
+        "updatedAt": "2026-06-29T17:33:43.479Z"
+      },
+      "vaultConfig": {
+        "displayName": null,
+        "category": "Prime Credit",
+        "description": null,
+        "adminDepositAddress": null,
+        "cardSnapshot": true,
+        "cardIndustry": true,
+        "cardExposure": true,
+        "pinned": false,
+        "hidden": false,
+        "kind": "product",
+        "assetManagerName": "Aksia",
+        "issuerName": "Arco",
+        "about": "Arco tokenized access to CAPIX, the Calamos Aksia Alternative Credit and Income Fund. CAPIX is an income-focused, 40-Act registered interval fund that seeks attractive risk-adjusted returns and high current income by investing across the global private credit asset class.\n\nThe strategy is advised by Calamos Advisors LLC with Aksia LLC as sub-advisor. It provides diversified private credit exposure beyond direct lending, including specialty finance, real asset credit, real estate credit, distressed/special situations and junior capital. Purchases are daily, while fund-level liquidity is through quarterly repurchase offers.",
+        "aum": "1.2B",
+        "redemptionTimelineDays": 21,
+        "feeInstantMintingBps": 0,
+        "feeInstantRedemptionBps": 50,
+        "feeManagementBps": 125,
+        "feePerformanceBps": 0,
+        "vaultImageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTJErgRf7Zuo6Xesl4Y06aSYkJBZed-lfwF6XVyJaCEgtB8f9Y3fWRpp98&s=10",
+        "assetManagerImageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTJErgRf7Zuo6Xesl4Y06aSYkJBZed-lfwF6XVyJaCEgtB8f9Y3fWRpp98&s=10",
+        "issuerImageUrl": "https://pbs.twimg.com/profile_images/2061494419069837312/P_U69bS6_400x400.png",
+        "docsUrl": null,
+        "legalUrl": null,
+        "risksUrl": null,
+        "docsShown": true,
+        "legalShown": true,
+        "risksShown": true,
+        "portfolioSnapshot": [
+          {
+            "label": "Direct Lending - Lower/Core",
+            "percent": 25,
+            "valueUsd": null
+          },
+          {
+            "label": "Direct Lending - Mega/Upper",
+            "percent": 21,
+            "valueUsd": null
+          },
+          {
+            "label": "Direct Lending - Opportunistic",
+            "percent": 7,
+            "valueUsd": null
+          },
+          {
+            "label": "Specialty Finance",
+            "percent": 19,
+            "valueUsd": null
+          },
+          {
+            "label": "Real Asset Credit",
+            "percent": 11,
+            "valueUsd": null
+          },
+          {
+            "label": "Real Estate Credit",
+            "percent": 8,
+            "valueUsd": null
+          },
+          {
+            "label": "Distressed / Special Sits",
+            "percent": 5,
+            "valueUsd": null
+          },
+          {
+            "label": "Junior Capital",
+            "percent": 4,
+            "valueUsd": null
+          }
+        ],
+        "portfolioIndustry": [
+          {
+            "label": "Financial Services",
+            "percent": 11,
+            "valueUsd": null
+          },
+          {
+            "label": "Software",
+            "percent": 8,
+            "valueUsd": null
+          },
+          {
+            "label": "Professional Services",
+            "percent": 7.7,
+            "valueUsd": null
+          },
+          {
+            "label": "Real Estate Mgmt & Development",
+            "percent": 6.9,
+            "valueUsd": null
+          },
+          {
+            "label": "Commercial Services & Supplies",
+            "percent": 5.3,
+            "valueUsd": null
+          },
+          {
+            "label": "Insurance",
+            "percent": 4.4,
+            "valueUsd": null
+          },
+          {
+            "label": "Health Care Providers & Services",
+            "percent": 4.1,
+            "valueUsd": null
+          },
+          {
+            "label": "Oil, Gas & Consumable Fuels",
+            "percent": 3.9,
+            "valueUsd": null
+          },
+          {
+            "label": "IT Services",
+            "percent": 3.7,
+            "valueUsd": null
+          },
+          {
+            "label": "Media",
+            "percent": 2.8,
+            "valueUsd": null
+          },
+          {
+            "label": "Aerospace & Defense",
+            "percent": 2.4,
+            "valueUsd": null
+          },
+          {
+            "label": "Specialty Retail",
+            "percent": 2.1,
+            "valueUsd": null
+          },
+          {
+            "label": "Construction & Engineering",
+            "percent": 2.1,
+            "valueUsd": null
+          },
+          {
+            "label": "Capital Markets",
+            "percent": 2.1,
+            "valueUsd": null
+          },
+          {
+            "label": "Diversified Consumer Services",
+            "percent": 2,
+            "valueUsd": null
+          },
+          {
+            "label": "Entertainment",
+            "percent": 1.8,
+            "valueUsd": null
+          },
+          {
+            "label": "Machinery",
+            "percent": 1.7,
+            "valueUsd": null
+          },
+          {
+            "label": "Food Products",
+            "percent": 1.7,
+            "valueUsd": null
+          },
+          {
+            "label": "Health Care Equipment & Supplies",
+            "percent": 1.7,
+            "valueUsd": null
+          },
+          {
+            "label": "Other / unclassified / cash",
+            "percent": 24.6,
+            "valueUsd": null
+          }
+        ],
+        "portfolioExposure": [
+          {
+            "label": "First Lien private credit assets",
+            "percent": 88,
+            "valueUsd": null
+          },
+          {
+            "label": "Other lien / non-first-lien exposure",
+            "percent": 12,
+            "valueUsd": null
+          }
+        ],
+        "acceptAssets": null
+      },
+      "pauseState": {
+        "depositPaused": false,
+        "depositPartial": false,
+        "withdrawPaused": false,
+        "withdrawPartial": false
+      }
+    }
+  ],
+  "market": [
+    {
+      "productId": "acapix",
+      "navBase": 1.000025,
+      "baseUsd": 1,
+      "navUsd": 1.000025,
+      "apy": 11.58,
+      "impliedApy": 14.109955899002058
+    },
+    {
+      "productId": "ibenji",
+      "navBase": 1.00067742,
+      "baseUsd": 1,
+      "navUsd": 1.00067742,
+      "apy": null,
+      "impliedApy": 3.3633224742270373
+    },
+    {
+      "productId": "umint",
+      "navBase": 1.00103846,
+      "baseUsd": 1,
+      "navUsd": 1.00103846,
+      "apy": null,
+      "impliedApy": 3.4918526423587615
+    },
+    {
+      "productId": "abtc",
+      "navBase": 1,
+      "baseUsd": 80328,
+      "navUsd": 80328,
+      "apy": null,
+      "impliedApy": null
+    },
+    {
+      "productId": "axrp",
+      "navBase": 1.00176923,
+      "baseUsd": 1.38,
+      "navUsd": 1.3824415374,
+      "apy": null,
+      "impliedApy": 4.5718290530678996
+    },
+    {
+      "productId": "aeth",
+      "navBase": 1.0015,
+      "baseUsd": 2578.46,
+      "navUsd": 2582.32769,
+      "apy": null,
+      "impliedApy": 3.8638525029554005
+    },
+    {
+      "productId": "beqty",
+      "navBase": 1.00324074,
+      "baseUsd": 1,
+      "navUsd": 1.00324074,
+      "apy": null,
+      "impliedApy": 13.413466462845204
+    },
+    {
+      "productId": "arcousd",
+      "navBase": 1.0002,
+      "baseUsd": 1,
+      "navUsd": 1.0002,
+      "apy": null,
+      "impliedApy": 4.786318992498728
+    }
+  ],
+  "featured": {
+    "cards": [
+      {
+        "id": "cmrdu47jc00010pqqp6sjmq9u",
+        "productId": "umint",
+        "about": "AAA MMF-rated short-term money market fund designed to prioritize capital preservation and daily liquidity",
+        "shown": true,
+        "position": 0
+      },
+      {
+        "id": "cmrdtyg3t00000pqqp8kty84m",
+        "productId": "beqty",
+        "about": "The fund invests primarily in U.S. large-cap equities across diversified sectors including Financials, Energy, Industrials, Materials",
+        "shown": true,
+        "position": 1
+      }
+    ]
+  },
+  "history": {
+    "beqty": {
+      "productId": "beqty",
+      "apy": null,
+      "points": [
+        {
+          "t": 1783353375,
+          "navBase": 1,
+          "navUsd": 1
+        },
+        {
+          "t": 1783360296,
+          "navBase": 1,
+          "navUsd": 1
+        },
+        {
+          "t": 1783361339,
+          "navBase": 1.0013,
+          "navUsd": 1.0013
+        },
+        {
+          "t": 1783447443,
+          "navBase": 1.00163636,
+          "navUsd": 1.00163636
+        },
+        {
+          "t": 1783511762,
+          "navBase": 1.00191667,
+          "navUsd": 1.00191667
+        },
+        {
+          "t": 1783842647,
+          "navBase": 1.00324074,
+          "navUsd": 1.00324074
+        }
+      ]
+    },
+    "umint": {
+      "productId": "umint",
+      "apy": null,
+      "points": [
+        {
+          "t": 1782558032,
+          "navBase": 1,
+          "navUsd": 1
+        },
+        {
+          "t": 1783511683,
+          "navBase": 1.00103846,
+          "navUsd": 1.00103846
+        }
+      ]
+    },
+    "arcousd": {
+      "productId": "arcousd",
+      "apy": null,
+      "points": [
+        {
+          "t": 1783702135,
+          "navBase": 1,
+          "navUsd": 1
+        },
+        {
+          "t": 1783778166,
+          "navBase": 1.00015,
+          "navUsd": 1.00015
+        },
+        {
+          "t": 1783783551,
+          "navBase": 1.000165,
+          "navUsd": 1.000165
+        },
+        {
+          "t": 1783807155,
+          "navBase": 1.0002,
+          "navUsd": 1.0002
+        }
+      ]
+    },
+    "abtc": {
+      "productId": "abtc",
+      "apy": null,
+      "points": [
+        {
+          "t": 1782558040,
+          "navBase": 1,
+          "navUsd": 80328
+        }
+      ]
+    },
+    "aeth": {
+      "productId": "aeth",
+      "apy": null,
+      "points": [
+        {
+          "t": 1782558065,
+          "navBase": 1,
+          "navUsd": 2578.46
+        },
+        {
+          "t": 1783804903,
+          "navBase": 1.0015,
+          "navUsd": 2582.32769
+        }
+      ]
+    },
+    "axrp": {
+      "productId": "axrp",
+      "apy": null,
+      "points": [
+        {
+          "t": 1782558053,
+          "navBase": 1,
+          "navUsd": 1.38
+        },
+        {
+          "t": 1783805036,
+          "navBase": 1.00176923,
+          "navUsd": 1.3824415374
+        }
+      ]
+    },
+    "ibenji": {
+      "productId": "ibenji",
+      "apy": null,
+      "points": [
+        {
+          "t": 1782558024,
+          "navBase": 1,
+          "navUsd": 1
+        },
+        {
+          "t": 1782892854,
+          "navBase": 1,
+          "navUsd": 1
+        },
+        {
+          "t": 1782893013,
+          "navBase": 1,
+          "navUsd": 1
+        },
+        {
+          "t": 1783538596,
+          "navBase": 1.00067742,
+          "navUsd": 1.00067742
+        }
+      ]
+    },
+    "acapix": {
+      "productId": "acapix",
+      "apy": 11.58,
+      "points": [
+        {
+          "t": 1782558011,
+          "navBase": 1,
+          "navUsd": 1
+        },
+        {
+          "t": 1782839865,
+          "navBase": 1,
+          "navUsd": 1
+        },
+        {
+          "t": 1782845838,
+          "navBase": 1.000025,
+          "navUsd": 1.000025
+        }
+      ]
+    }
+  }
+}

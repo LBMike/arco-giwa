@@ -1,7 +1,7 @@
 // Shared presentation primitives. GIWA tokens only (src/demo/theme.css); no raw colors.
 // Text uses ink or text-soft (≥ 4.5:1 on white). The muted token is kept for placeholders only.
 
-import { createContext, useContext, useEffect, type MutableRefObject, type ReactNode, type RefObject } from "react"
+import { createContext, useContext, useEffect, useSyncExternalStore, type MutableRefObject, type ReactNode, type RefObject } from "react"
 
 import type { ChipTone } from "./status"
 
@@ -69,7 +69,7 @@ export function Heading({ children, level = 2, id, headingRef }: { children: Rea
       id={id}
       ref={headingRef}
       tabIndex={headingRef ? -1 : undefined}
-      className={`${level === 2 ? "text-lg" : "text-base"} font-medium text-[var(--color-arco-ink)] ${headingRef ? FOCUS_RING : ""}`}
+      className={`${level === 2 ? "text-lg" : "text-base"} font-medium text-[var(--color-arco-ink)] ${headingRef ? `scroll-mt-24 ${FOCUS_RING}` : ""}`}
     >
       {children}
     </Tag>
@@ -92,4 +92,30 @@ export function useRescueFocus(target: RefObject<HTMLElement>, key: unknown): vo
     const active = document.activeElement
     if (active === null || active === document.body) target.current?.focus()
   }, [target, key, interacted])
+}
+
+/** The app's lg breakpoint (Tailwind `lg`): the trade panel is inline at or above it, in a bottom sheet below it. */
+export const DESKTOP_QUERY = "(min-width: 1024px)"
+
+function desktopQuery(): MediaQueryList | null {
+  return typeof window === "undefined" || typeof window.matchMedia !== "function" ? null : window.matchMedia(DESKTOP_QUERY)
+}
+
+function subscribeDesktop(onChange: () => void): () => void {
+  const query = desktopQuery()
+  if (query === null) return () => undefined
+  query.addEventListener("change", onChange)
+  return () => query.removeEventListener("change", onChange)
+}
+
+/** No matchMedia (server render, jsdom): desktop, so exactly the inline trade panel is rendered. */
+const readDesktop = () => desktopQuery()?.matches ?? true
+const serverDesktop = () => true
+
+/**
+ * Whether the viewport is at or above lg. Chooses WHICH single trade panel instance is mounted (inline or in the sheet);
+ * layout that only restyles stays in CSS.
+ */
+export function useIsDesktop(): boolean {
+  return useSyncExternalStore(subscribeDesktop, readDesktop, serverDesktop)
 }

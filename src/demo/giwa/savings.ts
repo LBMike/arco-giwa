@@ -92,3 +92,10 @@ export function buildSavingsAccounts(catalog: GiwaCatalogItem[], market: GiwaMar
 export function defaultSavingsSelection(accounts: SavingsAccount[]): SavingsAccount | null {
   return accounts.find((account) => !account.disabled) ?? null
 }
+
+/** Stable account key wins; older asset-only links still select the first enabled matching asset. */
+export function resolveSavingsSelection(accounts: SavingsAccount[], accountKey: string | null, symbol: string | null): SavingsAccount | null {
+  return accounts.find(account => !account.disabled && account.key === accountKey)
+    ?? accounts.find(account => !account.disabled && account.symbol === symbol)
+    ?? defaultSavingsSelection(accounts)
+}

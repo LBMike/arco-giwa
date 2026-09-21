@@ -17,7 +17,10 @@ const REASONS = ["NOT_CONFIGURED", "PROVIDER_UNAUTHORIZED", "PROVIDER_RATE_LIMIT
 function availability(row: Record<string, unknown>) { return { status: choice(row.status, STATUSES), reason: optional(row.reason, value => choice(value, REASONS)) } }
 export function envelope<T>(value: unknown, parse: (value: unknown) => T): Envelope<T> {
   const row = object(value)
-  for (const [key, expected] of Object.entries({ schemaVersion: 1, profile: "DEMO_TESTNET", chainId: 91342, purpose: "DISPLAY_ONLY", priceBasis: "UNDERLYING_SECURITY", provider: "MASSIVE", executionPriceSource: "FIXED_MOCK_PRICE" })) if (row[key] !== expected) return bad()
+  for (const [key, expected] of Object.entries({ schemaVersion: 1, profile: "DEMO_TESTNET", chainId: 91342, purpose: "DISPLAY_ONLY", priceBasis: "UNDERLYING_SECURITY", executionPriceSource: "FIXED_MOCK_PRICE" })) if (row[key] !== expected) return bad()
+  const provider = choice(row.provider, ["MASSIVE", "ALPACA"] as const)
+  const marketFeed = provider === "ALPACA" ? choice(row.marketFeed, ["IEX", "SIP"] as const) : undefined
+  if (provider === "MASSIVE" && row.marketFeed !== undefined) return bad()
   const a = availability(row)
   if ((a.status === "AVAILABLE" || a.status === "STALE") && row.data === null) return bad()
   const fetchedAt = optional(row.fetchedAt, timestamp)
@@ -25,7 +28,7 @@ export function envelope<T>(value: unknown, parse: (value: unknown) => T): Envel
     const quote = object(item)
     if (quote.sourceTimestamp !== null && quote.sourceTimestamp !== undefined && Date.parse(timestamp(quote.sourceTimestamp)) > Date.parse(fetchedAt) + 60000) return bad()
   }
-  return { ...a, fetchedAt, cacheAgeMs: optional(row.cacheAgeMs, count), feedDelay: choice(row.feedDelay, ["UNKNOWN", "DELAYED_15_MIN", "END_OF_DAY", "REALTIME"]), data: optional(row.data, parse) }
+  return { ...a, provider, ...(marketFeed ? { marketFeed } : {}), fetchedAt, cacheAgeMs: optional(row.cacheAgeMs, count), feedDelay: choice(row.feedDelay, ["UNKNOWN", "DELAYED_15_MIN", "END_OF_DAY", "REALTIME"]), data: optional(row.data, parse) }
 }
 export function parseCatalog(value: unknown): Catalog {
   const row = object(value); if (!Array.isArray(row.securities) || row.securities.length < 1 || row.securities.length > 40) return bad()
@@ -64,7 +67,7 @@ export function safeLogo(value: unknown, apiBase: string, name: string): string 
 }
 export function parseProfile(value: unknown, name: string, apiBase: string): Profile {
   const r = object(value); if (r.symbol !== name || r.currency !== "USD") return bad()
-  return { symbol: name, currency: "USD", name: text(r.name), description: optional(r.description, v => text(v, 12000)), exchange: optional(r.exchange, text), securityType: optional(r.securityType, text), marketCap: optional(r.marketCap, decimal), website: optional(r.website, url), industry: optional(r.industry, v => text(v, 500)), logoUrl: safeLogo(r.logoUrl, apiBase, name), sourceDate: optional(r.sourceDate, v => text(v, 30)) }
+  return { symbol: name, currency: "USD", name: text(r.name), description: optional(r.description, v => text(v, 12000)), exchange: optional(r.exchange, text), securityType: optional(r.securityType, text), marketCap: optional(r.marketCap, decimal), aum: optional(r.aum ?? null, decimal), aumAsOf: optional(r.aumAsOf ?? null, v => text(v, 30)), website: optional(r.website, url), industry: optional(r.industry, v => text(v, 500)), logoUrl: safeLogo(r.logoUrl, apiBase, name), sourceDate: optional(r.sourceDate, v => text(v, 30)) }
 }
 export function parseChart(value: unknown, name: string, range: Range): Chart {
   const r = object(value); const interval = range === "1D" ? "5m" : range === "1W" ? "1h" : "1d"

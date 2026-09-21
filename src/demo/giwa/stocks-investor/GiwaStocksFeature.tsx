@@ -1,3 +1,4 @@
+import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 // GiwaStocksFeature — the independently renderable GIWA Stocks investor module.
 //
 // The host supplies an API client and a VERIFIED session (SIWE token for the connected wallet).
@@ -7,6 +8,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react"
 
+import { StockInvestSurface } from "./StockInvestSurface"
+import { TradePanel } from "./TradePanel"
+import { StocksAccessContext, type GiwaStocksAccess } from "./access"
 import { actionsFor, type StocksInvestorActions } from "./actions"
 import type { GiwaStocksClient } from "./client"
 import { createStocksInvestorController, orderIsTerminal, type StocksInvestorState } from "./controller"
@@ -14,7 +18,7 @@ import { shortAddress, signedOutMessage } from "./display"
 import { OrderExecutionSlotContext, type OrderExecutionSlot } from "./execution-slot"
 import { OrdersView, PortfolioView, StockDetailView, StocksListView } from "./StocksViews"
 import type { GiwaStocksHostWallet, GiwaStocksSession, GiwaStocksTab } from "./types"
-import { FOCUS_RING, Notice, UserInteractionContext } from "./ui"
+import { FOCUS_RING, Notice, UserInteractionContext, useIsDesktop } from "./ui"
 
 export type GiwaStocksFeatureProps = {
   /** From createGiwaStocksHttpClient({ baseUrl }). Null renders the "not configured" state; it never falls back to data. */
@@ -34,6 +38,14 @@ export type GiwaStocksFeatureProps = {
   newIdempotencyKey?: () => string
   /** Host wallet steps shown with an accepted order (for example the /stocks execution panel). Absent: status only. */
   renderOrderExecution?: OrderExecutionSlot | null
+  /** Host steps before a request (wallet, network, sign-in) so the trade panel can offer them. Absent: session only. */
+  access?: GiwaStocksAccess | null
+  /**
+   * Controlled NVDA detail (the /stocks page owns list/detail). When given, `onDetailChange` must be given too, and the
+   * feature does not render its own "All stocks" back control (the page provides one). Absent: internal state.
+   */
+  detailOpen?: boolean
+  onDetailChange?: (open: boolean) => void
 }
 
 const TABS: { id: GiwaStocksTab; label: string }[] = [
@@ -54,10 +66,36 @@ export type GiwaStocksFeatureViewProps = {
   /** True while the host's new context is being applied: nothing from the previous session is painted. */
   switching?: boolean
   renderOrderExecution?: OrderExecutionSlot | null
+  /** Host steps before a request (wallet, network, sign-in), offered by the trade panel. Absent: session only. */
+  access?: GiwaStocksAccess | null
+  /** The detail's own "All stocks" control. False when the host page owns list/detail and renders its own way back. */
+  showAllStocks?: boolean
 }
 
-export function GiwaStocksFeatureView({ state, actions, tab, onTabChange, detailOpen, onDetailChange, switching = false, renderOrderExecution = null }: GiwaStocksFeatureViewProps) {
+export function GiwaStocksFeatureView({
+  state,
+  actions,
+  tab,
+  onTabChange,
+  detailOpen,
+  onDetailChange,
+  switching = false,
+  renderOrderExecution = null,
+  access = null,
+  showAllStocks = true,
+}: GiwaStocksFeatureViewProps) {
+  const demo = useDemoPresentation()
   const interacted = useRef(false)
+  // The mobile trade sheet's open state lives here, above the `switching` swap below: signing in from inside the sheet
+  // replaces the detail for one render, and the sheet must come back open. Leaving the NVDA detail, the Stocks tab or the
+  // mobile layout closes it (adjusted during render, so a closed sheet never reappears later).
+  const desktop = useIsDesktop()
+  const [sheetOpen, setSheetOpen] = useState(false)
+  if (sheetOpen && (tab !== "stocks" || !detailOpen || desktop)) setSheetOpen(false)
+  const sheet = useMemo(() => ({ open: sheetOpen, onOpenChange: setSheetOpen }), [sheetOpen])
+  // The page owns list/detail (controlled): its detail is a compact column, so the header keeps only the session line and
+  // the test-value note above the tabs (the title stays for assistive technology).
+  const compact = !showAllStocks && detailOpen
   const tabRefs = useRef<Record<GiwaStocksTab, HTMLButtonElement | null>>({ stocks: null, orders: null, portfolio: null })
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     const last = TABS.length - 1
@@ -68,7 +106,18 @@ export function GiwaStocksFeatureView({ state, actions, tab, onTabChange, detail
     tabRefs.current[TABS[target].id]?.focus()
   }
 
+  if (demo && detailOpen) return <StocksAccessContext.Provider value={access}>
+    <OrderExecutionSlotContext.Provider value={renderOrderExecution}>
+      <UserInteractionContext.Provider value={interacted}>
+        <StockInvestSurface symbol="NVDA" tab={tab === "orders" ? "ORDERS" : state.side} onTab={value => { if (value === "ORDERS") onTabChange("orders"); else { actions.setSide(value); onTabChange("stocks") } }}>
+          {switching ? <Notice tone="info">Updating session…</Notice> : tab === "orders" ? <OrdersView state={state} actions={actions} /> : <TradePanel state={state} actions={actions} />}
+        </StockInvestSurface>
+      </UserInteractionContext.Provider>
+    </OrderExecutionSlotContext.Provider>
+  </StocksAccessContext.Provider>
+
   return (
+    <StocksAccessContext.Provider value={access}>
     <OrderExecutionSlotContext.Provider value={renderOrderExecution}>
     <UserInteractionContext.Provider value={interacted}>
     <section
@@ -82,12 +131,13 @@ export function GiwaStocksFeatureView({ state, actions, tab, onTabChange, detail
         interacted.current = true
       }}
     >
-      <div className="flex w-full flex-col gap-6 px-4 py-6 md:px-8 md:py-8">
-        <header className="flex flex-col gap-2">
+      <div className={`flex w-full flex-col ${showAllStocks ? "gap-6 px-4 py-6 md:px-8 md:py-8" : compact ? "gap-3 px-4 py-4 md:px-6" : "gap-6 px-4 py-5 md:px-6 md:py-6"}`}>
+        <header className={`flex flex-col ${compact ? "gap-1" : "gap-2"}`}>
           <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h1 id="giwa-stocks-title" className="text-2xl font-medium text-[var(--color-arco-ink)]">
+            {/* A section of the host page (the /stocks page's h1 is the market section's "Stocks"). */}
+            <h2 id="giwa-stocks-title" className={compact ? "sr-only" : "text-2xl font-medium text-[var(--color-arco-ink)]"}>
               Stocks
-            </h1>
+            </h2>
             <p className="text-sm text-[var(--color-arco-text-soft)]" data-testid="giwa-stocks-session">
               {switching ? (
                 "Updating session…"
@@ -100,7 +150,7 @@ export function GiwaStocksFeatureView({ state, actions, tab, onTabChange, detail
               )}
             </p>
           </div>
-          <p className="text-xs leading-5 text-[var(--color-arco-text-soft)]">GIWA Sepolia testnet · Test value only · Mock broker · Fixed mock price. No real shares, cash or broker execution.</p>
+          <DemoDetails><p className="text-xs leading-5 text-[var(--color-arco-text-soft)]">GIWA Sepolia testnet · Test value only · Mock broker · Fixed mock price. No real shares, cash or broker execution.</p></DemoDetails>
         </header>
 
         <div role="tablist" aria-label="Stocks sections" className="flex w-full flex-wrap gap-2 border-b border-[var(--color-arco-border)]">
@@ -132,7 +182,7 @@ export function GiwaStocksFeatureView({ state, actions, tab, onTabChange, detail
             <Notice tone="info">Updating session…</Notice>
           ) : tab === "stocks" ? (
             detailOpen ? (
-              <StockDetailView state={state} actions={actions} onBack={() => onDetailChange(false)} />
+              <StockDetailView state={state} actions={actions} onBack={showAllStocks ? () => onDetailChange(false) : null} sheet={sheet} />
             ) : (
               <StocksListView state={state} actions={actions} onOpen={() => onDetailChange(true)} />
             )
@@ -150,18 +200,46 @@ export function GiwaStocksFeatureView({ state, actions, tab, onTabChange, detail
     </section>
     </UserInteractionContext.Provider>
     </OrderExecutionSlotContext.Provider>
+    </StocksAccessContext.Provider>
   )
 }
 
 export function GiwaStocksFeature(props: GiwaStocksFeatureProps) {
-  const { client, session, hostWallet, onSessionRejected, statusPollMs = 10_000, initialTab = "stocks", now, newIdempotencyKey, renderOrderExecution = null } = props
+  const { client, session, hostWallet, onSessionRejected, statusPollMs = 10_000, initialTab = "stocks", now, newIdempotencyKey, renderOrderExecution = null, access = null } = props
   const [controller] = useState(() => createStocksInvestorController({ now, newIdempotencyKey }))
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState)
   const actions = useMemo(() => actionsFor(controller), [controller])
   const [tab, setTab] = useState<GiwaStocksTab>(initialTab)
-  const [detailOpen, setDetailOpen] = useState(false)
+  // Controlled by the host page when it passes detailOpen (it owns list/detail and the way back); otherwise local.
+  const [localDetailOpen, setLocalDetailOpen] = useState(false)
+  const controlledDetail = props.detailOpen !== undefined
+  const detailOpen = controlledDetail ? props.detailOpen === true : localDetailOpen
+  // A detail opened from outside (a market row, Back/Forward, a deep link) lands on the trade view, not on Orders or
+  // Portfolio. Adjusted during render, so the trade panel (or the dock) is in the same commit as the detail. Only the
+  // closed → open change moves the tab: the user's own tab choices while the detail stays open are kept.
+  const [shownDetail, setShownDetail] = useState(detailOpen)
+  if (shownDetail !== detailOpen) {
+    setShownDetail(detailOpen)
+    if (detailOpen && tab !== "stocks") setTab("stocks")
+  }
+  const hostDetailChange = props.onDetailChange
+  const onDetailChange = useCallback(
+    (open: boolean) => {
+      if (controlledDetail) hostDetailChange?.(open)
+      else setLocalDetailOpen(open)
+    },
+    [controlledDetail, hostDetailChange],
+  )
 
   const context = { client, session, hostWallet, onSessionRejected }
+  // The note the panel took for a sign-in the user started belongs to THIS trade view with THIS wallet connected, and only
+  // until that sign-in is over. Leaving the NVDA detail or the Stocks tab, losing the connected wallet, or a sign-in the
+  // host reports as failed drops it, so a session that lands after that starts on Buy like any other. Declared before
+  // setContext so that in a commit which does both, the note is gone before the new identity is entered.
+  const tradeShown = tab === "stocks" && detailOpen && access !== null && access.wallet === "ready" && access.host !== "error"
+  useIsomorphicLayoutEffect(() => {
+    if (!tradeShown) controller.forgetSignInIntent()
+  }, [controller, tradeShown])
   // Applied before paint on every render; a context with the same identity is a no-op.
   useIsomorphicLayoutEffect(() => {
     controller.setContext(context)
@@ -185,6 +263,39 @@ export function GiwaStocksFeature(props: GiwaStocksFeatureProps) {
     if (tab === "orders" && state.orders.status === "idle") actions.loadOrders()
     if (tab === "portfolio" && state.portfolio.status === "idle") actions.loadPortfolio()
   }, [actions, switching, verified, catalogReady, tab, state.generation, state.orders.status, state.portfolio.status])
+
+  // The Sell side shows the server's available NVDA (and MAX): read the portfolio each time the Sell form comes into view
+  // through the user's own action (choosing Sell; Start a new order, or a refused order, returning to the form on Sell).
+  // Edge-triggered on that form, not on the portfolio's status, so a finished read never starts another one. The trade
+  // panel itself never requests anything.
+  const sellForm = state.side === "SELL" && (state.attempt === null || state.attempt.status === "REJECTED")
+  // A refusal shown on the Sell form (it may arrive without the "placing" state ever being painted). Editing after it
+  // clears the refusal while the form stays in view, which is not a new appearance.
+  const refusedKey = state.attempt?.status === "REJECTED" ? state.attempt.body.idempotencyKey : null
+  // The generation is part of "seen": signing in while the Sell form is on screen makes a new identity whose holdings have
+  // not been read yet, so that first appearance under the new identity is a new appearance.
+  const seenSellForm = useRef<{ shown: boolean; refusedKey: string | null; generation: number }>({ shown: false, refusedKey: null, generation: state.generation })
+  useEffect(() => {
+    const previous = seenSellForm.current
+    seenSellForm.current = { shown: sellForm, refusedKey, generation: state.generation }
+    if (switching || !verified || !catalogReady || !sellForm) return
+    if (!previous.shown || previous.generation !== state.generation || (refusedKey !== null && refusedKey !== previous.refusedKey)) actions.loadPortfolio()
+  }, [actions, switching, verified, catalogReady, sellForm, refusedKey, state.generation])
+
+  // A SELL order that has just been accepted reserves units: refresh the available quantity once. An attempt restored as
+  // already accepted (a remount, or a new session generation after signing in again) is not a new acceptance.
+  const generation = state.generation
+  const attemptKey = state.attempt?.body.idempotencyKey ?? null
+  const attemptStatus = state.attempt?.status ?? null
+  const attemptSide = state.attempt?.side ?? null
+  const seenAttempt = useRef({ generation, key: attemptKey, status: attemptStatus })
+  useEffect(() => {
+    const previous = seenAttempt.current
+    seenAttempt.current = { generation, key: attemptKey, status: attemptStatus }
+    if (switching || attemptKey === null || attemptSide !== "SELL" || attemptStatus !== "ACCEPTED" || previous.generation !== generation) return
+    // Same request seen before its acceptance, or a new request of this generation accepted before it was painted.
+    if (previous.key !== attemptKey || previous.status !== "ACCEPTED") actions.loadPortfolio()
+  }, [actions, switching, generation, attemptKey, attemptStatus, attemptSide])
 
   // Re-read a displayed order that can still change, while the page is visible.
   const pollOrder = useCallback(
@@ -210,9 +321,11 @@ export function GiwaStocksFeature(props: GiwaStocksFeatureProps) {
       tab={tab}
       onTabChange={setTab}
       detailOpen={detailOpen}
-      onDetailChange={setDetailOpen}
+      onDetailChange={onDetailChange}
       switching={switching}
       renderOrderExecution={renderOrderExecution}
+      access={access}
+      showAllStocks={!controlledDetail}
     />
   )
 }

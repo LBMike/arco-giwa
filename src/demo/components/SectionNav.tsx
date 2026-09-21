@@ -55,7 +55,7 @@ export function SectionNav() {
   }
 
   return (
-    <div className="mt-6 w-full sticky top-[76px] z-30 -mx-8 px-8 bg-[var(--color-arco-page-80)] backdrop-blur border-b border-[var(--color-arco-border)]">
+    <div className="mt-6 w-full sticky top-[76px] z-30 -mx-4 px-4 md:-mx-8 md:px-8 bg-[var(--color-arco-page-80)] backdrop-blur border-b border-[var(--color-arco-border)]">
       <nav
         aria-label="Sections"
         className="flex items-center gap-6 overflow-x-auto"

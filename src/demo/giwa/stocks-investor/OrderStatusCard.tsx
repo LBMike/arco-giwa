@@ -9,6 +9,9 @@ import { CATEGORY_TONE, deadlinePassed, orderStatusMeaning } from "./status"
 import type { StocksCashSymbol, StocksOrder } from "./types"
 import { BUTTON_SECONDARY, Chip, FOCUS_RING, Field, Notice, useRescueFocus } from "./ui"
 
+/** Native `disabled` drops keyboard focus (also on the automatic poll): while refreshing the button stays focusable, aria-disabled, and has no click handler. */
+const BUSY = "aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+
 export type OrderStatusCardProps = {
   order: StocksOrder
   /** Server time of the response that carried this order; also decides whether its deadline has passed. */
@@ -105,7 +108,7 @@ export function OrderStatusCard({ order, observedAt, cashSymbol, refreshing, err
           {observedAt ? <>Status as of {formatUtc(observedAt)} · </> : null}
           {cashSymbol ? cashLabel(cashSymbol) : "Test value only"}
         </p>
-        <button type="button" className={BUTTON_SECONDARY} onClick={onRefresh} disabled={refreshing} aria-busy={refreshing}>
+        <button type="button" className={`${BUTTON_SECONDARY} ${BUSY}`} onClick={refreshing ? undefined : onRefresh} aria-disabled={refreshing || undefined} aria-busy={refreshing}>
           {refreshing ? "Refreshing…" : "Refresh status"}
         </button>
       </div>

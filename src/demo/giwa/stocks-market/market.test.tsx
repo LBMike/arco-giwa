@@ -59,11 +59,11 @@ test("bounded transport terminates ignored-abort fetches, bad HTTP and oversized
   await assert.rejects(denied.catalog(new AbortController().signal), /MARKET_HTTP_UNAVAILABLE/)
 })
 test("keyless/empty/one/partial/stale charts have explicit distinct presentation without invented observations", () => {
-  const keyless = renderToStaticMarkup(<MarketChart response={{ status: "UNCONFIGURED", reason: "NOT_CONFIGURED", fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: null }} quote={null} />)
+  const keyless = renderToStaticMarkup(<MarketChart response={{ status: "UNCONFIGURED", reason: "NOT_CONFIGURED", fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: null }} />)
   assert.match(keyless, /시세 연결 준비 중/); assert.doesNotMatch(keyless, /recharts|\$0/)
   for (const kind of ["empty", "one", "partial", "stale"]) {
     const chart = fixtureChart(); if (kind === "empty") { chart.bars = []; chart.history = "EMPTY" }; if (kind === "one") chart.bars = chart.bars.slice(0, 1); if (kind === "partial") { chart.history = "TRUNCATED"; chart.complete = false }
-    const html = renderToStaticMarkup(<MarketChart response={{ status: kind === "stale" ? "STALE" : "AVAILABLE", reason: null, fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: chart }} quote={fixtureQuote()} />)
+    const html = renderToStaticMarkup(<MarketChart response={{ status: kind === "stale" ? "STALE" : "AVAILABLE", reason: null, fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: chart }} />)
     assert.match(html, new RegExp(kind === "empty" ? "반환된 차트 관측값이 없습니다" : kind === "one" ? "관측값 1개" : kind === "partial" ? "일부 이력만 반환됨" : "마지막 확인 시세 · 오래된 데이터"))
   }
 })
@@ -92,4 +92,26 @@ test("a path-prefixed base sends the public catalog under the prefix without Aut
   assert.equal(normalizeApiBase("https://api.test/prefix%3Fsegment/"), "https://api.test/prefix%3Fsegment")
   await client.catalog(new AbortController().signal)
   assert.deepEqual(calls.map(c => [c.url, new Headers(c.init.headers).get("authorization")]), [["https://api.test/prefix/api/v1/stocks/market/catalog", null]])
+})
+
+test("Alpaca envelopes retain feed coverage, accept public quotes and reject ambiguous providers", async () => {
+  for (const marketFeed of ["IEX", "SIP"] as const) {
+    const reply = { ...fixtureEnvelope([fixtureQuote()]), provider: "ALPACA", marketFeed }
+    const client = createMarketClient("https://api.fixture", async (_url, init) => {
+      const headers = new Headers(init.headers)
+      assert.equal(headers.get("APCA-API-KEY-ID"), null)
+      assert.equal(headers.get("APCA-API-SECRET-KEY"), null)
+      return Response.json(reply)
+    })
+    const response = await client.quotes(["NVDA"], new AbortController().signal)
+    assert.equal(response.provider, "ALPACA")
+    assert.equal(response.marketFeed, marketFeed)
+    assert.equal(response.data?.[0].price, "183.123456789012345678")
+  }
+  for (const patch of [{ provider: "ALPACA" }, { provider: "ALPACA", marketFeed: "ALL" }, { provider: "ALPACA", marketFeed: "iex" }, { provider: "MASSIVE", marketFeed: "SIP" }]) {
+    assert.throws(() => envelope({ ...fixtureEnvelope(fixtureCatalog()), ...patch }, parseCatalog))
+  }
+  const profile = envelope(fixtureEnvelope(fixtureProfile()), value => parseProfile(value, "NVDA", "https://api.fixture"))
+  assert.equal(profile.provider, "MASSIVE", "hybrid fundamentals keep their own source")
+  assert.equal(profile.marketFeed, undefined)
 })

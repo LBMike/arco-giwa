@@ -52,9 +52,9 @@ function ReconciliationBody({ result, meta }: { result: Reconciliation; meta: St
       >
         <div className="flex flex-wrap items-center gap-2">
           <Pill tone={STATUS_TONE[result.status]}>{result.status}</Pill>
-          <h3 id="stocks-reconciliation-status" className="text-sm font-semibold text-[var(--color-arco-ink)]">
+          <h2 id="stocks-reconciliation-status" className="text-sm font-semibold text-[var(--color-arco-ink)]">
             {RECONCILIATION_HEADLINE[result.status]}
-          </h3>
+          </h2>
         </div>
         <p className="mt-2 text-xs leading-5 text-[var(--color-arco-text-soft)]">
           {result.status === "MATCHED_AT_CUTOFF" && result.cutoff && (
@@ -95,7 +95,7 @@ function ReconciliationBody({ result, meta }: { result: Reconciliation; meta: St
             <Field label="Stock held in redemption escrow"><Amount value={result.snapshot.escrowBalance} scale={QUANTITY_SCALE} unit={STOCK_UNIT} /></Field>
             <Field label="Block time">{formatEpochSeconds(result.snapshot.blockTimestamp) ?? "Not reported"}</Field>
           </Fields>
-          <h4 className="mt-4 text-xs font-semibold text-[var(--color-arco-ink)]">Known wallet balances ({result.snapshot.walletBalances.length})</h4>
+          <h3 className="mt-4 text-xs font-semibold text-[var(--color-arco-ink)]">Known wallet balances ({result.snapshot.walletBalances.length})</h3>
           {result.snapshot.walletBalances.length === 0 ? (
             <EmptyRow>No wallet balances were part of this comparison.</EmptyRow>
           ) : (

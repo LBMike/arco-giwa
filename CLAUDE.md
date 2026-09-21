@@ -51,7 +51,7 @@ inherited at extraction — fix only as a dedicated approved task; never grow th
 
 ## Routes
 
-Root-based (served at app.arco.financial): `/` (investor) · `/savings` · `/portfolio` ·
+Root-based (served at app.arco.financial): `/` (home) · `/funds` (funds list) · `/savings` · `/portfolio` ·
 `/product/:id` · `/admin/{operations,prices,config,featured,monitoring}` — constants in
 `src/demo/giwa/routes.ts`; legacy `/app/*` + `/app/giwa-preprod/*` redirects live in `src/main.tsx`.
 
