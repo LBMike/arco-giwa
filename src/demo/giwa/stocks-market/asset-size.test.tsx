@@ -46,12 +46,13 @@ test("share-class outstanding units survive server and client validation without
   assert.throws(() => parseProfile({ ...parsed, sharesOutstanding: "-1" }, "SOXL", "https://fixture.invalid"))
 })
 
-test("both list variants and ETF detail visibly label the computed value", () => {
+test("list variants keep estimate details in the tooltip; detail labels the computed value", () => {
   const quotes = { phase: "ready" as const, value: fixtureEnvelope([quote]) }
   for (const variant of ["full", "home"] as const) {
     const html = renderToStaticMarkup(<StaticRouter location="/stocks"><StocksMarketTable catalog={fixtureTop40Catalog()} quotes={quotes} capabilities={{ phase: "loading" }} series={{}} profiles={{ SOXL: profile }} variant={variant} /></StaticRouter>)
     assert.match(html, /\$21\.73B/)
-    assert.match(html, />추정 AUM</)
+    assert.doesNotMatch(html, />추정 AUM</)
+    assert.match(html, /title="추정 AUM:/)
   }
   const html = renderToStaticMarkup(<StatisticsCard symbol="SOXL" quote={quote} quotes={quotes} profile={{ phase: "ready", value: fixtureEnvelope(profile) }} day={null} />)
   assert.match(html, /추정 AUM/)
