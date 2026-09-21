@@ -58,3 +58,14 @@ test("both list variants and ETF detail visibly label the computed value", () =>
   assert.match(html, /\$21\.73B/)
   assert.doesNotMatch(html, /Total Market Cap/)
 })
+
+
+test("issuer AUM takes precedence and retains its own source/date through client parsing", () => {
+  const official = parseProfile({ ...profile, aum: "25855926611.57", aumAsOf: "2026-09-18", issuerFundamentals: { source: "Roundhill", sourceUrl: "https://www.roundhillinvestments.com/etf/dram/", asOf: "2026-09-18" } }, "SOXL", "https://fixture.invalid")
+  const size = assetSize(true, official, quote)
+  assert.equal(size.estimated, false)
+  assert.equal(size.value, "25855926611.57")
+  assert.match(size.title, /Roundhill 공식 자료/)
+  assert.match(size.title, /2026-09-18/)
+  assert.throws(() => parseProfile({ ...official, issuerFundamentals: { ...official.issuerFundamentals, sourceUrl: "javascript:alert(1)" } }, "SOXL", "https://fixture.invalid"))
+})

@@ -109,7 +109,7 @@ export function marketSourceLabel(response?: Pick<Envelope<unknown>, "provider" 
  */
 export function assetSize(etf: boolean, profile: Profile | null | undefined, quote: Quote | null | undefined) {
   const reported = etf ? profile?.aum ?? null : profile?.marketCap ?? null
-  if (reported !== null || !etf) return { value: reported, estimated: false, label: etf ? "AUM" : "Total Market Cap", title: `${etf ? "AUM" : "Market cap"}: ${dollars(reported)}${etf && profile?.aumAsOf ? ` · ${profile.aumAsOf}` : ""}` }
+  if (reported !== null || !etf) return { value: reported, estimated: false, label: etf ? "AUM" : "Total Market Cap", title: `${etf ? "AUM" : "Market cap"}: ${dollars(reported)}${etf && profile?.aumAsOf ? ` · ${profile.aumAsOf}` : ""}${profile?.issuerFundamentals ? ` · ${profile.issuerFundamentals.source} 공식 자료 · ${profile.issuerFundamentals.sourceUrl}` : ""}` }
   const shares = profile?.sharesOutstanding ?? null
   const eligible = profile?.symbol === quote?.symbol && quote != null && (quote.status === "AVAILABLE" || quote.status === "STALE") && quote.sourceTimestamp != null && quote.price != null && scaled(quote.price) > 0n && shares != null && scaled(shares) > 0n
   const value = eligible ? volumeDollars(quote!.price, shares) : null
