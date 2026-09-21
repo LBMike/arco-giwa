@@ -43,7 +43,7 @@ test("Massive Basic caps profiles at four calls, skips paid ETF AUM and does not
         assert.equal(headers.get("APCA-API-SECRET-KEY"), null)
         assert.ok(url.pathname.startsWith("/v3/reference/tickers/"))
         const symbol = url.pathname.split("/").slice(-1)[0]
-        return new Response(JSON.stringify({ status: "OK", results: { ticker: symbol, name: symbol, locale: "us", market: "stocks", currency_name: "usd", type: symbol === "SOXL" ? "ETF" : "CS", market_cap: 5367153690000 } }), { headers: { "content-type": "application/json" } })
+        return new Response(JSON.stringify({ status: "OK", results: { ticker: symbol, name: symbol, locale: "us", market: "stocks", currency_name: "usd", type: symbol === "SOXL" ? "ETF" : "CS", market_cap: 5367153690000, share_class_shares_outstanding: symbol === "SOXL" ? 175700060 : undefined } }), { headers: { "content-type": "application/json" } })
       }
       assert.equal(url.hostname, "data.alpaca.markets")
       assert.equal(headers.get("authorization"), null)
@@ -58,6 +58,7 @@ test("Massive Basic caps profiles at four calls, skips paid ETF AUM and does not
       assert.equal(data.provider, "MASSIVE")
       assert.equal(data.data.marketCap, "5367153690000")
       assert.equal(data.data.aum, null)
+      assert.equal(data.data.sharesOutstanding, symbol === "SOXL" ? "175700060" : null)
       assert.ok(!/MASSIVE_TEST_SECRET|TEST_SECRET/.test(reply.body))
     }
     assert.equal(calls.length, 4)
