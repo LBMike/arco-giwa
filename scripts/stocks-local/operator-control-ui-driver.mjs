@@ -116,8 +116,12 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     await screenshot('control-initial-paused.png');
     passed('initial-paused', 'Real SIWE control operator sees initial paused/version0 and backend denies new quotes');
 
+    // Drain the periodic tick before fault injection. Otherwise tick() may
+    // return an already-running healthy pass and leave the observer CURRENT.
+    await stack.stopProcessing();
     stack.controlForHarness.faults.observerUnavailable = true;
     await stack.controlForHarness.runtime.tick();
+    assert.ok(stack.controlForHarness.runtime.status().pauseReasons.includes('OBSERVER_NOT_CURRENT'));
     const before = posts.length;
     await change(false, 'Browser resume while observation unavailable', 'accepted', true);
     assert.equal(posts.length, before + 1);
@@ -125,6 +129,7 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     await call('/api/v1/stocks/quotes', { symbol: 'NVDA', quantity: '0.125' }, operatorSession, 503);
     await screenshot('control-resumed-observer-blocked.png');
     stack.controlForHarness.faults.observerUnavailable = false; await stack.controlForHarness.runtime.tick();
+    await stack.startProcessing();
     await refresh();
     passed('single-submit-other-gate', 'Double confirmation sends once; manual resume cannot override unavailable observation');
 
