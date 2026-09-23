@@ -206,7 +206,14 @@ test("an expired quote blocks the order, is never replaced automatically, and a 
   const h = createHarness()
   await h.enter(WALLET_A)
   await h.quote("1")
-  h.advanceDevice(59_999)
+  const initial = h.controller.getState()
+  assert.equal(initial.quote.status, "ready")
+  if (initial.quote.status !== "ready") return
+  // The controller charges request transit time against the 60-second quote.
+  // Test the computed deadline, rather than assuming that transit cost 0 ms.
+  const beforeDeadline = initial.quote.deadlineMs - initial.nowMs - 1
+  assert.ok(beforeDeadline >= 0)
+  h.advanceDevice(beforeDeadline)
   h.controller.tick()
   assert.equal(h.controller.getState().quote.status, "ready")
   h.advanceDevice(1)
