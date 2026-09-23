@@ -35,6 +35,7 @@ const playwright = toolsRequire.resolve('playwright/package.json');
 const artifactRoot = join(root, 'packages/contracts/artifacts');
 env.GIWA_HOST_DOM_RUNTIME = jsdom;
 env.GIWA_ADMIN_DOM_RUNTIME = jsdom;
+env.GIWA_MARKET_DOM_RUNTIME = jsdom;
 env.GIWA_STOCKS_ARTIFACTS = artifactRoot;
 
 const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });

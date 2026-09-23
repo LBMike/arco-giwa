@@ -26,6 +26,7 @@ writeFileSync(e.FIXTURE_CAPTURE, JSON.stringify({
   probe: e.STOCKS_LOCAL_BROWSER_PROBE ?? null, ui: e.STOCKS_LOCAL_UI ?? null,
   database: e.STOCKS_SUBMISSIONS_TEST_DATABASE_URL ?? null, testDatabase: e.STOCKS_TEST_DATABASE_URL ?? null,
   nodeOptions: e.NODE_OPTIONS, dotenv: e.DOTENV_CONFIG_PATH, evidence: e.STOCKS_LOCAL_BROWSER_EVIDENCE,
+  hostDom: e.GIWA_HOST_DOM_RUNTIME, adminDom: e.GIWA_ADMIN_DOM_RUNTIME, marketDom: e.GIWA_MARKET_DOM_RUNTIME,
 }));
 // No service, network socket or wallet is started. A nonzero child must remain a CI failure.
 process.exitCode = 7;
@@ -34,12 +35,18 @@ process.exitCode = 7;
       cwd: root, encoding: 'utf8', timeout: 10000,
       env: { ...process.env, FIXTURE_CAPTURE: captured, STOCKS_LOCAL_CHROME: process.execPath,
         STOCKS_LOCAL_BROWSER_CASE: 'known-hash-ui', STOCKS_LOCAL_BROWSER_PROBE: 'ready', STOCKS_LOCAL_UI: '1',
-        STOCKS_SUBMISSIONS_TEST_DATABASE_URL: 'not-a-real-database', STOCKS_TEST_DATABASE_URL: 'not-a-real-database' },
+        STOCKS_SUBMISSIONS_TEST_DATABASE_URL: 'not-a-real-database', STOCKS_TEST_DATABASE_URL: 'not-a-real-database',
+        GIWA_MARKET_DOM_RUNTIME: '/not-a-real-jsdom/package.json' },
     });
     assert.equal(execution.error, undefined);
     assert.equal(execution.signal, null);
     assert.equal(execution.status, 1, execution.stderr);
-    assert.deepEqual(JSON.parse(readFileSync(captured, 'utf8')), {
+    const capturedEnv = JSON.parse(readFileSync(captured, 'utf8'));
+    assert.equal(capturedEnv.marketDom, capturedEnv.hostDom);
+    assert.equal(capturedEnv.adminDom, capturedEnv.hostDom);
+    assert.match(capturedEnv.marketDom, /jsdom\/package\.json$/);
+    delete capturedEnv.hostDom; delete capturedEnv.adminDom; delete capturedEnv.marketDom;
+    assert.deepEqual(capturedEnv, {
       scenario: 'operator-control-ui', browser: '1', local: '1', probe: null, ui: null,
       database: null, testDatabase: null, nodeOptions: '', dotenv: '/dev/null', evidence: join(destination, 'browser'),
     });
