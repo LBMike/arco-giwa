@@ -315,13 +315,13 @@ export async function runStack({ rpcUrl, bundle, databaseUrl }) {
     try {
       await alternateSigner.probe();
       const beforeBlockedNonce = await rpc('eth_getTransactionCount', [manifest.signerAddress, 'pending']);
-      const blockedCall = authorizedCall(alternateManifest, 'nonce-probe:blocked', 'MINT', accounts.holder, '1');
+      const blockedCall = authorizedCall(alternateManifest, 'mint:nonce-probe-blocked', 'MINT', accounts.holder, '1');
       await assert.rejects(() => alternateSigner.submit(blockedCall));
       assert.equal(alternateServer.controls.submissionRequests, 1, 'Canonical call must reach the signer over HTTP');
       assert.equal(alternateServer.controls.unresolvedBlocks, 1, 'Physical-account unresolved guard must reject the call');
       assert.equal(alternateServer.controls.submissions, 0);
       assert.equal(await rpc('eth_getTransactionCount', [manifest.signerAddress, 'pending']), beforeBlockedNonce);
-      assert.equal((await pool.query('SELECT COUNT(*)::text AS n FROM stocks_local_harness.signer_operations WHERE id=$1', ['nonce-probe:blocked'])).rows[0].n, '0');
+      assert.equal((await pool.query('SELECT COUNT(*)::text AS n FROM stocks_local_harness.signer_operations WHERE id=$1', [blockedCall.operationId])).rows[0].n, '0');
     } finally { await alternateServer.close(); }
     await resetSigner();
     await drain(async () => await buyState(lost.id) === 'COMPLETED', 'recovering original mint after signer restart');
