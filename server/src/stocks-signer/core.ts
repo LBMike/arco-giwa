@@ -97,7 +97,11 @@ export function createStocksSignerCore(options: {
       const requested = parseStocksSignerPut(manifest, pathId, value);
       let reserved: { created: boolean; operation: SignerOperation };
       try { reserved = await journal.reserve(requested); }
-      catch { throw unavailable('SIGNER_JOURNAL_UNAVAILABLE'); }
+      catch (error) {
+        if (error instanceof StocksError && error.code === 'SIGNER_IMMUTABLE_OPERATION_CONFLICT' && error.status === 409)
+          throw error;
+        throw unavailable('SIGNER_JOURNAL_UNAVAILABLE');
+      }
       const operation = validateStored(reserved.operation, requested);
       if (!reserved.created) return submission(operation); // Never re-send an original operation.
       ensure(operation.txHash === null, 'SIGNER_RECORD_MISMATCH', 503);

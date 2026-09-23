@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [postgres, operator-control, operator-control-ui, operator-diagnostics, known-hash-ui, browser-lifecycle, owner-workspace]
+        scenario: [postgres, signer-journal, operator-control, operator-control-ui, operator-diagnostics, known-hash-ui, browser-lifecycle, owner-workspace]
     defaults:
       run:
         shell: bash
@@ -103,11 +103,16 @@ jobs:
           STOCKS_SUBMISSIONS_EVIDENCE_DIR: ${{ runner.temp }}/stocks-database-failure
         run: node scripts/stocks-submissions/test-postgres.mjs server/dist/stocks-runtime/database-failure.postgres.test.js
 
+      - name: Verify the inactive signer journal in a disposable PostgreSQL database
+        if: matrix.scenario == 'signer-journal'
+        run: node scripts/stocks-signer/test-postgres.mjs
+
       - name: Install pinned Chromium and system libraries
-        if: matrix.scenario != 'postgres' && matrix.scenario != 'operator-control'
+        if: matrix.scenario != 'postgres' && matrix.scenario != 'signer-journal' && matrix.scenario != 'operator-control'
         run: node scripts/stocks-ci/node_modules/playwright/cli.js install --with-deps chromium
 
       - name: Verify real local services and cleanup
+        if: matrix.scenario != 'signer-journal'
         env:
           SCENARIO: ${{ matrix.scenario }}
         run: node scripts/stocks-ci/run.mjs "$SCENARIO" "$RUNNER_TEMP/stocks-ci-evidence"
