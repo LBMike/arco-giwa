@@ -66,7 +66,8 @@ The runner rejects:
 - a browser PASS report without both matching ordered cleanup records;
 - residual owned PIDs, database socket/PID files or browser/API/RPC ports;
 - missing lifecycle probes or unresolved operator diagnostic/control findings;
-- interruption, nonzero child exits or a test exceeding its 12-minute budget.
+- interruption, nonzero child exits, a frontend suite exceeding its 18-minute
+  budget, or any other child check exceeding its 12-minute budget.
 
 Port cleanup requires an explicit `ECONNREFUSED` from each owned IPv4 loopback
 endpoint. A successful connection, timeout, permission/routing error, or socket
@@ -119,7 +120,7 @@ SIGINT/SIGTERM is forwarded through CI and lifecycle wrappers to their owned
 harnesses. The PG harness stops its active child and database before returning a
 cancellation status. No wrapper discovers or terminates unrelated services.
 SIGKILL, host loss or a hung teardown cannot guarantee cleanup; the workflow's
-25-minute job limit and disposable hosted VM are the last boundary. A partial
+30-minute job limit and disposable hosted VM are the last boundary. A partial
 report never counts as success.
 
 Implementation references: [Playwright CI](https://playwright.dev/docs/ci-intro),

@@ -61,7 +61,10 @@ async function run(name, args, additions = {}) {
   let stdout = '', timedOut = false;
   child = spawn(process.execPath, args, { cwd: root, env: { ...env, ...additions }, stdio: ['ignore', 'pipe', 'pipe'] });
   // Allow real JWT/quote expiration. Never change product deadlines to speed up CI.
-  const timer = setTimeout(() => { timedOut = true; child?.kill('SIGTERM'); }, 12 * 60_000);
+  // The full DOM/ABI frontend suite can take over 12 minutes on a shared CI
+  // runner. Keep the other child checks bounded by their original limit.
+  const timeoutMs = name === 'frontend' ? 18 * 60_000 : 12 * 60_000;
+  const timer = setTimeout(() => { timedOut = true; child?.kill('SIGTERM'); }, timeoutMs);
   child.stdout.on('data', chunk => { stdout += chunk; appendFileSync(stdoutPath, chunk); process.stdout.write(chunk); });
   child.stderr.on('data', chunk => { appendFileSync(stderrPath, chunk); process.stderr.write(chunk); });
   let outcome;
