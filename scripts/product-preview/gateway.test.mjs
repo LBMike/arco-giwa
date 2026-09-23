@@ -26,6 +26,26 @@ test('upstream errors and oversized responses cannot leak upstream bodies', asyn
     assert.equal(res.status, 502); assert.equal(res.body, '{"error":"PUBLIC_DATA_UNAVAILABLE"}');
   }
 });
+test('a market outage is unavailable, then the same gateway reads the recovered market', async () => {
+  let available = false;
+  const handler = publicReadGateway({ origin, legacy, market, fetcher: async url => {
+    assert.equal(url, `${market}/api/v1/stocks/market/catalog`);
+    if (!available) throw new Error('market offline');
+    return Response.json({ provider: 'ALPACA', marketFeed: 'IEX' });
+  } });
+  const run = async () => {
+    const res = response();
+    await handler({ method: 'GET', url: '/api/v1/stocks/market/catalog', headers: { host: '127.0.0.1:5173' } }, res, () => {});
+    return res;
+  };
+  const unavailable = await run();
+  assert.equal(unavailable.status, 502);
+  assert.equal(unavailable.body, '{"error":"PUBLIC_DATA_UNAVAILABLE"}');
+  available = true;
+  const recovered = await run();
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(JSON.parse(recovered.body), { provider: 'ALPACA', marketFeed: 'IEX' });
+});
 test('upstream settings reject credentials, paths and non-local market hosts', () => {
   assert.equal(publicUpstream(market, true), market);
   for (const value of ['https://u:p@example.com', 'file:///tmp/data', 'http://public.example', 'https://example.com/path', 'https://example.com/?token=x']) assert.throws(() => publicUpstream(value));

@@ -24,6 +24,8 @@ jobs:
 
       - run: npm run build
 
+      - run: npm run test:preview
+
       # test:frontend pins TMPDIR=/private/tmp (macOS path) — create it on the Linux runner
       # with /tmp semantics (1777), or tsx's cache mkdir fails with EACCES under the runner user.
       - run: sudo mkdir -p /private/tmp && sudo chmod 1777 /private/tmp
