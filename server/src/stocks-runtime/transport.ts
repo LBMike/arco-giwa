@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { decodeFunctionData } from 'viem';
-import { ABI, callDigest, ensure, freezeManifest, manifestDigest, immutable, hash, type AuthorizedCall, type Manifest, type SignerPort, type Submission } from '../stocks/contracts.js';
-import { authorizedCall, redemptionCall } from '../stocks/chain.js';
+import { ensure, freezeManifest, manifestDigest, immutable, hash, type AuthorizedCall, type Manifest, type SignerPort, type Submission } from '../stocks/contracts.js';
 import type { JsonRpcTransport } from '../stocks/rpc.js';
 import { stocksHttpJson, STOCKS_RPC_MAX_BYTES, STOCKS_SIGNER_MAX_BYTES } from './http-json.js';
+import { canonicalStocksSignerCall } from './signer-call.js';
 
 export type HttpFetch = typeof fetch;
 export function endpoint(value: string, localHarness = false): URL {
@@ -54,17 +53,7 @@ export function externalStocksSigner(options: ExternalSignerOptions): SignerPort
     },
     async submit(input: AuthorizedCall) {
       const frozen = immutable(input);
-      ensure(frozen.chainId === 91342 && frozen.networkInstance === expected.networkInstance && frozen.deploymentId === expected.deploymentId && frozen.from === expected.signerAddress && frozen.value === '0', 'SIGNER_CALL_SCOPE_MISMATCH');
-      const digest = callDigest(frozen);
-      // The adapter accepts only the four canonical settlement capabilities.
-      // Re-encoding also rejects a changed operation key, asset or target.
-      const decoded = decodeFunctionData({ abi: ABI, data: frozen.data });
-      let canonical: AuthorizedCall | undefined;
-      if (decoded.functionName === 'mintForOperation') canonical = authorizedCall(expected, frozen.operationId, 'MINT', decoded.args[2], decoded.args[3].toString());
-      if (decoded.functionName === 'refundForOperation') canonical = authorizedCall(expected, frozen.operationId, 'REFUND', decoded.args[1], decoded.args[2].toString());
-      if (decoded.functionName === 'settleRedemption') canonical = redemptionCall(expected, frozen.operationId, 'REDEEM', decoded.args[1], decoded.args[2].toString());
-      if (decoded.functionName === 'returnEscrowForOperation') canonical = redemptionCall(expected, frozen.operationId, 'RETURN', decoded.args[1], '0');
-      ensure(canonical && callDigest(canonical) === digest, 'SIGNER_CALL_CAPABILITY_MISMATCH');
+      const { digest } = canonicalStocksSignerCall(expected, frozen);
       const result = submission(await call(`/v1/operations/${encodeURIComponent(frozen.operationId)}`, 'PUT', { protocol: 'ARCO_STOCKS_SIGNER_V1', deploymentDigest, call: frozen, callDigest: digest }), frozen.operationId, digest);
       if (!result) throw new Error('SIGNER_SUBMISSION_UNKNOWN');
       return result;
