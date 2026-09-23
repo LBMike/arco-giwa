@@ -24,7 +24,7 @@ export async function createLiveMarket(ports: { readCredentials?: () => Record<s
     STOCKS_MARKET_DATA_CATALOG: "CURATED_40",
     ALPACA_DATA_FEED: "iex",
     STOCKS_MARKET_DATA_FEED_DELAY: "REALTIME",
-  }, { requestsPerMinute: 60, massiveRequestsPerMinute: 4, etfGlobalEnabled: false, fetch: ports.fetch })
+  }, { requestsPerMinute: 60, massiveRequestsPerMinute: 4, etfGlobalEnabled: false, issuerFundamentalsEnabled: true, fetch: ports.fetch })
   const app = Fastify({ logger: false })
   await app.register(stocksMarketDataPlugin, { service })
   await app.ready()

@@ -1,8 +1,8 @@
-import { MarketFreshness } from "./MarketFreshness"
 import { useCallback, useContext, useMemo, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { ArrowRight } from "lucide-react"
 import { StocksHighlights } from "./StocksHighlights"
+import { StocksDemoMarketNotice } from "./StocksDemoMarketNotice"
 import { stockHighlights } from "./highlights"
 import type { ReadState } from "./useOwnedRead"
 import { GIWA_STOCKS_ROUTE } from "../routes"
@@ -45,7 +45,6 @@ function HomeTable({ client, ordersClient, response, withHighlights }: { client:
   // Its own surface card: the pinned # and Asset Name cells are opaque surface while the table scrolls sideways.
   return <HomeLayout withHighlights={withHighlights} catalog={catalog} quotes={quotes}><div className="w-full min-w-0 space-y-3 rounded-[var(--radius-strategy)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-4 sm:p-6">
     {quotes.phase !== "ready" ? <MarketStatus status={quotes.phase} /> : quotes.value.status !== "AVAILABLE" && <MarketStatus status={quotes.value.status} />}
-    {quotes.phase === "ready" && <MarketFreshness response={quotes.value} />}
     <StocksMarketTable variant="home" limit={10} rowHref={stockHref} catalog={catalog} quotes={quotes} capabilities={capabilities} series={NO_SERIES} profiles={overview.profiles} />
   </div></HomeLayout>
 }
@@ -61,6 +60,7 @@ function HomeLayout({ withHighlights, catalog = null, quotes, status, children }
     : quotes?.phase === "ready" && quotes.value.status !== "AVAILABLE" ? "No current market data"
     : undefined)
   return <div className="w-full min-w-0 space-y-10">
+    <StocksDemoMarketNotice />
     <StocksHighlights groups={stockHighlights(catalog, data)} status={message} />
     <section aria-labelledby="home-stocks" className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">

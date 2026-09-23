@@ -1,4 +1,3 @@
-import { MarketFreshness } from "./MarketFreshness"
 import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { ArrowLeft } from "lucide-react"
@@ -124,7 +123,6 @@ function MarketCatalog({ client, response, capabilities, selection, anchor, onCh
   }, [symbol, isListed, selectedQuote, onChecked])
   if (symbol === null) return <ListFrame selection={selection} settled table={table}>
     <div className="mb-4">{quotes.phase !== "ready" ? <Status status={quotes.phase} /> : <><DemoDetails><p className="text-xs text-[var(--color-arco-text-soft)]">{marketSourceLabel(quotes.value)} · {FEED_LABELS[quotes.value.feedDelay]}</p></DemoDetails>{quotes.value.status !== "AVAILABLE" && <Status status={quotes.value.status} />}</>}</div>
-    {quotes.phase === "ready" && <div className="mb-3"><MarketFreshness response={quotes.value} /></div>}
     <div ref={table} className="min-w-0 scroll-mt-24"><StocksMarketTable variant="full" catalog={catalog} quotes={quotes} capabilities={capabilities} series={series} profiles={overview.profiles} view={view} onViewChange={setView} onSelect={name => selection.openDetail(name, "row")} /></div>
   </ListFrame>
   // NVDA is the tradable symbol, so its detail opens even when the market catalog does not list it.

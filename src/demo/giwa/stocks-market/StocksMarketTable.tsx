@@ -4,7 +4,7 @@ import { Link } from "react-router-dom"
 import { CirclePause, Search } from "lucide-react"
 import type { Catalog, Chart, Envelope, Profile, Quote } from "./contracts"
 import { CURATED_SELECTION, curatedStock, matchesCuratedSelection, type CuratedStock } from "./curated"
-import { changeParts, chartPoints, dollars, compactDollars, volumeDollars, marketSourceLabel, FEED_LABELS, priceLabel, windowChange } from "./display"
+import { assetSize, changeParts, chartPoints, dollars, compactDollars, volumeDollars, marketSourceLabel, FEED_LABELS, priceLabel, windowChange } from "./display"
 import { StockLogo } from "./StockLogo"
 import { useOwnedRead, type ReadState } from "./useOwnedRead"
 import { scaled } from "./validate"
@@ -172,7 +172,7 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, profi
             const quote = row.quote
             const profile = profiles[row.symbol]
             const etf = row.curated?.kind === "ETF" || profile?.securityType === "ETF"
-            const size = etf ? profile?.aum ?? null : profile?.marketCap ?? null
+            const size = assetSize(etf, profile, quote)
             const volume = volumeDollars(quote?.price ?? null, quote?.sessionVolume ?? null)
             return <div role="row" key={row.symbol} onClick={activate} className={`group cursor-pointer items-center gap-y-2 border-b border-[var(--color-arco-border)] py-3 md:min-h-[73px] md:py-0 ${GRID} ${COLS[variant]} ${selected ? "bg-[var(--color-arco-page)]" : "hover:bg-[var(--color-row-hover-weak)]"}`}>
               {cell(`col-start-1 row-start-1 text-base font-medium tabular-nums text-[var(--color-arco-chip-ink)] ${RESET} ${STICKY_RANK} ${surface}`, row.rank ?? "—")}
@@ -181,7 +181,7 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, profi
                 : rowHref ? <Link to={rowHref(row.symbol)} data-row-primary="" className={primary}>{label}</Link> : <span className={primary}>{label}</span>)}
               {cell(`col-start-3 row-start-1 text-right text-base font-medium tabular-nums text-[var(--color-arco-ink)] md:px-3 md:text-left ${RESET}`, <><span title={quote?.price ? dollars(quote.price) : undefined}>{priceLabel(quote?.price ?? null)}</span><DemoDetails>{quote?.status === "STALE" && <span className="block text-xs font-normal text-[var(--color-arco-text-soft)]">오래된 데이터</span>}</DemoDetails></>)}
               {cell(`col-start-3 row-start-2 text-right text-sm tabular-nums md:px-3 md:text-left ${RESET}`, <Change raw={quote?.changePercent ?? null} unit="%" />)}
-              {cell("hidden text-sm font-medium tabular-nums text-[var(--color-arco-ink)] md:block md:px-3", <span title={`${etf ? "AUM" : "Market cap"}: ${dollars(size)}${etf && profile?.aumAsOf ? ` · ${profile.aumAsOf}` : ""}`}>{compactDollars(size)}</span>)}
+              {cell("hidden text-sm font-medium tabular-nums text-[var(--color-arco-ink)] md:block md:px-3", <span title={size.title}>{compactDollars(size.value)}</span>)}
               {cell("hidden text-sm font-medium tabular-nums text-[var(--color-arco-ink)] md:block md:pl-3", <span title={volume === null ? undefined : `Estimated session turnover: ${dollars(volume)} (shares × price)`}>{compactDollars(volume)}</span>)}
               {cell(`col-start-2 row-start-2 ${RESET}`, <StatusBadge symbol={row.symbol} capabilities={capabilities} />)}
               {full && cell("hidden md:flex md:h-12 md:w-40 md:items-center md:justify-center", series[row.symbol] && series[row.symbol].bars.length >= 2 ? <Sparkline chart={series[row.symbol]} /> : <><span aria-hidden="true" className="text-[var(--color-arco-muted)]">—</span><span className="sr-only">24시간 차트 데이터 없음</span></>)}

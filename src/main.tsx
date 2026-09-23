@@ -3,6 +3,8 @@ import ReactDOM from 'react-dom/client'
 import { createBrowserRouter, Navigate, RouterProvider, useLocation, useParams } from 'react-router-dom'
 import { GIWA_ADMIN_OPERATIONS_ROUTE, GIWA_ADMIN_ROUTE, GIWA_PREPROD_ROUTE } from './demo/giwa/routes'
 import { stocksRoutes } from './demo/giwa/stocks-market/routes'
+import { DemoPresentationContext } from './demo/giwa/demo-presentation'
+import { GIWA_CUSTOMER_PRESENTATION } from './demo/giwa/config'
 import './index.css'
 import './demo/theme.css'
 
@@ -74,7 +76,9 @@ const router = createBrowserRouter([
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <Suspense fallback={null}>
-      <GiwaPreprodProviders><RouterProvider router={router} /></GiwaPreprodProviders>
+      <DemoPresentationContext.Provider value={GIWA_CUSTOMER_PRESENTATION}>
+        <GiwaPreprodProviders><RouterProvider router={router} /></GiwaPreprodProviders>
+      </DemoPresentationContext.Provider>
     </Suspense>
   </React.StrictMode>,
 )

@@ -1,4 +1,4 @@
-import type { Chart, Envelope, FeedDelay, Range } from "./contracts"
+import type { Chart, Envelope, FeedDelay, Profile, Quote, Range } from "./contracts"
 import { scaled } from "./validate"
 export function exact(value: string | null): string { if (value === null) return "—"; const [whole, fraction = ""] = value.split("."); const trimmed = fraction.replace(/0+$/, ""); return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (trimmed ? `.${trimmed}` : "") }
 export function dollars(value: string | null): string { return value === null ? "—" : `$${exact(value)}` }
@@ -102,4 +102,16 @@ export function volumeDollars(price: string | null, shares: string | null): stri
 export function marketSourceLabel(response?: Pick<Envelope<unknown>, "provider" | "marketFeed">): string {
   if (response?.provider === "ALPACA") return response.marketFeed === "IEX" ? "Alpaca · IEX (single exchange)" : "Alpaca · SIP (US consolidated)"
   return "Massive"
+}
+
+/** Reported AUM takes precedence. Market-price capitalization is only an explicitly labelled proxy.
+ * Massive supplies share-class outstanding units, not a dated NAV or weighted share count.
+ */
+export function assetSize(etf: boolean, profile: Profile | null | undefined, quote: Quote | null | undefined) {
+  const reported = etf ? profile?.aum ?? null : profile?.marketCap ?? null
+  if (reported !== null || !etf) return { value: reported, estimated: false, label: etf ? "AUM" : "Total Market Cap", title: `${etf ? "AUM" : "Market cap"}: ${dollars(reported)}${etf && profile?.aumAsOf ? ` · ${profile.aumAsOf}` : ""}${profile?.issuerFundamentals ? ` · ${profile.issuerFundamentals.source} 공식 자료 · ${profile.issuerFundamentals.sourceUrl}` : ""}` }
+  const shares = profile?.sharesOutstanding ?? null
+  const eligible = profile?.symbol === quote?.symbol && quote != null && (quote.status === "AVAILABLE" || quote.status === "STALE") && quote.sourceTimestamp != null && quote.price != null && scaled(quote.price) > 0n && shares != null && scaled(shares) > 0n
+  const value = eligible ? volumeDollars(quote!.price, shares) : null
+  return { value, estimated: value !== null, label: value === null ? "AUM" : "추정 AUM", title: value === null ? "AUM: —" : `추정 AUM: ${dollars(value)} · 발행 좌수 ${exact(shares)} × 시장가격 ${dollars(quote!.price)} · NAV 기준 공식 AUM 아님 · Massive 발행 좌수 기준일 미제공 · 가격 시각: ${quote!.sourceTimestamp}${quote!.status === "STALE" ? " · 마지막 확인 가격" : ""}` }
 }

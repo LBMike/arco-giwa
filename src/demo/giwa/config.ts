@@ -23,6 +23,10 @@ export const ARCO_API_BASE =
   viteEnv.VITE_ARCO_API_BASE || "http://localhost:8080"
 export const DYNAMIC_ENVIRONMENT_ID =
   viteEnv.VITE_DYNAMIC_ENVIRONMENT_ID || ""
+// Explicit presentation setting used by the integrated local product preview.
+// Changes layout/copy only; authentication and transaction checks remain active.
+export const GIWA_CUSTOMER_PRESENTATION = viteEnv.VITE_CUSTOMER_PRESENTATION === "true"
+export const GIWA_STOCKS_DEMO_MARKET = viteEnv.VITE_STOCKS_DEMO_MARKET === "true"
 // Comma-separated operator wallet addresses allowed to SEE the GIWA admin page.
 // Visibility gate only — real enforcement is server requireOperator + on-chain FEED_ADMIN_ROLE.
 export const GIWA_ADMIN_ADDRESSES_RAW = viteEnv.VITE_GIWA_ADMIN_ADDRESSES || ""

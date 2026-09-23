@@ -12,6 +12,7 @@ import { createMarketClient } from "./client"
 import { StocksPageEnvironment, usePageApiBase } from "./environment"
 import { useStocksPageAccess } from "./page-access"
 import { StocksMarketFeature, type StocksAsideView } from "./StocksMarketFeature"
+import { StocksDemoMarketNotice } from "./StocksDemoMarketNotice"
 /** Re-exported under the same name for the verification pages and DOM suites that import it from here. */
 export { StocksPageEnvironment }
 const link = "rounded-lg border border-[var(--color-arco-border)] px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-arco-ink)]"
@@ -79,7 +80,7 @@ export function StocksPage() {
     return [symbol !== "NVDA" && !unverified ? demo ? <StockMarketInvestPanel key={symbol} symbol={symbol} quote={quote ?? null} access={access} /> : <ViewOnlyCard key="view-only" symbol={symbol} /> : null, trade, signInRegion, notice]
   }
   return <StocksExecutionProvider apiBase={apiBase} fetch={environment.fetch as typeof globalThis.fetch | undefined} clock={environment.executionClock} activeSource={environment.activeWalletSource} knownHashes={environment.knownHashes}>
-    <div className="w-full min-w-0 space-y-6"><DemoDetails><StocksNavigation /></DemoDetails><StocksMarketFeature client={clients.market} ordersClient={clients.investor} aside={aside} /></div>
+    <div className="w-full min-w-0 space-y-6"><DemoDetails><StocksNavigation /></DemoDetails><StocksDemoMarketNotice /><StocksMarketFeature client={clients.market} ordersClient={clients.investor} aside={aside} /></div>
   </StocksExecutionProvider>
 }
 /**
