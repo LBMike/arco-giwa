@@ -26,12 +26,28 @@ test("aborted owners never publish even when transports ignore cancellation; bud
   const client = { async profile(symbol: string) { calls++; await new Promise<void>(resolve => releases.push(resolve)); return fixtureEnvelope(fixtureProfile(symbol)) } } as unknown as MarketClient
   const loading = loadMarketRows(client, ["NVDA", "MU", "TSLA", "AAPL"], controller.signal, false, () => published++)
   controller.abort(); releases.forEach(fn => fn()); await loading
-  assert.equal(calls, 3); assert.equal(published, 0)
+  assert.equal(calls, 1); assert.equal(published, 0)
   const budget = new AbortController()
   const limited = { async profile() { return { ...fixtureEnvelope(null, "UNAVAILABLE"), reason: "REQUEST_BUDGET_EXHAUSTED" } } } as unknown as MarketClient
   const waiting = loadMarketRows(limited, ["NVDA"], budget.signal, false, () => published++)
   await new Promise(resolve => setImmediate(resolve)); budget.abort(); await waiting
   assert.equal(published, 0)
+})
+test("a throttled fundamentals feed cannot block the independent chart feed", async () => {
+  const controller = new AbortController()
+  let completed = 0, release!: () => void
+  const allCharts = new Promise<void>(resolve => { release = resolve })
+  const client = {
+    async chart(symbol: string) { return fixtureEnvelope(fixtureChart(symbol)) },
+    async profile() { return { ...fixtureEnvelope(null, "UNAVAILABLE"), reason: "REQUEST_BUDGET_EXHAUSTED" } },
+  } as unknown as MarketClient
+  const loading = loadMarketRows(client, ["NVDA", "MU", "TSLA"], controller.signal, true, (_symbol, kind, data) => {
+    if (kind === "chart" && data && ++completed === 3) release()
+  })
+  await allCharts
+  assert.equal(completed, 3)
+  controller.abort()
+  await loading
 })
 test("AUM is optional for old servers but malformed new values cannot pass validation", () => {
   const profile = fixtureProfile()

@@ -7,9 +7,9 @@ import { runtimeSnapshot } from '../stocks-runtime/status.js';
 import { StocksObservationHealth } from '../stocks-runtime/health.js';
 
 const api = 'https://api.example.test', frontend = 'https://ui.example.test:444';
-function fixture(enabled = true) {
+function fixture(enabled = true, browserOrigin = frontend) {
   const health = new StocksObservationHealth();
-  const env: AppEnv = { corsAllowedOrigins: [frontend], authNonceTtlSeconds: 60, authJwtSecret: 'TEST_ONLY_CONNECTION', adminOperatorToken: 'TEST_ONLY_OPERATOR', registryPath: '/NO_REGISTRY' };
+  const env: AppEnv = { corsAllowedOrigins: [browserOrigin], authNonceTtlSeconds: 60, authJwtSecret: 'TEST_ONLY_CONNECTION', adminOperatorToken: 'TEST_ONLY_OPERATOR', registryPath: '/NO_REGISTRY' };
   const base = { arco: {}, registry: {}, portfolio: {}, readiness: {} } as unknown as ArcoAppServices;
   const app = buildApp(env, { ...base, stocksRuntimeStatus: enabled ? {
     getSnapshot: () => runtimeSnapshot({ deploymentId: 'fixture-deployment', deploymentDigest: 'a'.repeat(64),
@@ -39,6 +39,19 @@ test('actual app passes explicit-origin connection checks without credentials or
   assert.equal(f.calls.length, 5);
   assert.deepEqual(f.calls.map(call => new URL(call.url).pathname).sort(),
     ['/health', '/ready/stocks', ...Array(3).fill('/api/v1/admin/stocks/runtime')].sort());
+});
+test('the existing app serves exact UI4392 CORS while HTTP endpoints and origin aliases remain rejected', async t => {
+  const local = 'http://127.0.0.1:4392';
+  const f = fixture(true, local); t.after(() => f.app.close()); f.health.record('CURRENT');
+  assert.equal((await checkStocksConnection(api, local, { request: f.request })).status, 'CONNECTION_CHECKS_PASSED');
+  let calls = 0;
+  const request = (async () => { calls++; throw Error('NO_REQUEST_ALLOWED'); }) as typeof fetch;
+  assert.equal((await checkStocksConnection(local, local, { request })).status, 'BLOCKED');
+  for (const value of ['http://localhost:4392', 'http://127.0.0.1:4393', 'http://127.1:4392',
+    'http://2130706433:4392', local + '/', local + '?', local + '#', local + '/path', 'http://user@127.0.0.1:4392']) {
+    assert.equal((await checkStocksConnection(api, value, { request })).status, 'BLOCKED', value);
+  }
+  assert.equal(calls, 0);
 });
 test('connected startup is NOT_READY, while missing Stocks routes or wrong browser origin are BLOCKED', async t => {
   const f = fixture(); t.after(() => f.app.close());

@@ -34,9 +34,13 @@ export function windowChange(chart: Chart): string {
 }
 export function chartPoints(chart: Chart) {
   const width = chart.interval === "5m" ? 300000 : chart.interval === "1h" ? 3600000 : 86400000
+  // Keep intraday gaps visible. Historical series should connect actual closes across
+  // overnight, weekends and market holidays without synthesizing prices for closed sessions.
+  // A gap longer than a normal long weekend remains disconnected.
+  const gap = chart.interval === "5m" ? width * 3 : chart.interval === "1h" ? 4 * 86400000 : 5 * 86400000
   // Number conversion happens only here at the plotting boundary; labels retain original bars.
   let segment = 0
-  return chart.bars.map((bar, index) => { const timestamp = Date.parse(bar.timestamp); if (index && timestamp - Date.parse(chart.bars[index - 1].timestamp) > width + (chart.interval === "1d" ? 3600000 : 0)) segment++; return { timestamp, coordinate: Number(bar.close), bar, segment, index } })
+  return chart.bars.map((bar, index) => { const timestamp = Date.parse(bar.timestamp); if (index && timestamp - Date.parse(chart.bars[index - 1].timestamp) > gap) segment++; return { timestamp, coordinate: Number(bar.close), bar, segment, index } })
 }
 const UNITS: readonly (readonly [bigint, string])[] = [[10n ** 12n, "T"], [10n ** 9n, "B"], [10n ** 6n, "M"]]
 /** "$5.36T"-style: integer maths on the exact decimal, at most two decimals, no forced trailing zeros; below a million it is priceLabel. */

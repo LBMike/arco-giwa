@@ -148,14 +148,26 @@ test('holiday/no-trade chart is empty rather than zero, and partial pagination i
   assert.equal(chart(parseExactJson(base + '}'), 'NVDA', '1D', TIME).history, 'EMPTY');
   for (const extra of [',"next_url":"https://evil.example/?apiKey=secret"', ',"queryCount":50000']) { const result = chart(parseExactJson(base + extra + '}'), 'NVDA', '1D', TIME); assert.equal(result.complete, false); assert.equal(result.history, 'TRUNCATED'); assert.ok(!JSON.stringify(result).includes('evil')); }
 });
+test('1D chart shows the latest observed New York trading session after a weekend', () => {
+  const sunday = Date.parse('2026-09-20T18:00:00.000Z');
+  const thursday = Date.parse('2026-09-17T18:00:00.000Z');
+  const friday = Date.parse('2026-09-18T18:00:00.000Z');
+  const bar = (t: number, close: number) => ({ t, o: close, h: close + 1, l: close - 1, c: close, v: 100 });
+  const result = chart(parseExactJson(JSON.stringify({ status: 'OK', ticker: 'NVDA', adjusted: true, resultsCount: 3, results: [bar(thursday, 100), bar(friday, 110), bar(friday + 300000, 111)] })), 'NVDA', '1D', sunday);
+  assert.equal(result.bars.length, 2);
+  assert.equal(result.bars[0].close, '110');
+  assert.equal(result.to, new Date(friday + 300000).toISOString());
+  assert.equal(Date.parse(result.to) - Date.parse(result.from), 86400000);
+  assert.equal(result.history, 'RETURNED_WINDOW');
+});
 test('impossible OHLC, out-of-order/duplicate/future/out-of-window bars fail closed', () => {
   const bar = (t: number, o = '100') => `{"t":${t},"o":${o},"h":101,"l":99,"c":100,"v":2}`;
-  for (const bars of [bar(TIME - 1000, '102'), `${bar(TIME - 1000)},${bar(TIME - 2000)}`, `${bar(TIME - 1000)},${bar(TIME - 1000)}`, bar(TIME + 1000), bar(TIME - 2 * 86400000)]) assert.throws(() => chart(parseExactJson(`{"status":"OK","ticker":"NVDA","adjusted":true,"results":[${bars}]}`), 'NVDA', '1D', TIME), /INVALID_RESPONSE/);
+  for (const bars of [bar(TIME - 1000, '102'), `${bar(TIME - 1000)},${bar(TIME - 2000)}`, `${bar(TIME - 1000)},${bar(TIME - 1000)}`, bar(TIME + 1000), bar(TIME - 8 * 86400000)]) assert.throws(() => chart(parseExactJson(`{"status":"OK","ticker":"NVDA","adjusted":true,"results":[${bars}]}`), 'NVDA', '1D', TIME), /INVALID_RESPONSE/);
   assert.throws(() => chart(parseExactJson('{"status":"OK","ticker":"NVDA","adjusted":false}'), 'NVDA', '1D', TIME), /INVALID_RESPONSE/);
 });
 test('fixed ranges reject impossible aggregate density before retaining chart data', () => {
   const bar = (t: number) => `{"t":${t},"o":100,"h":101,"l":99,"c":100,"v":2}`;
-  for (const bars of [`${bar(TIME - 2000)},${bar(TIME - 1000)}`, Array.from({ length: 291 }, (_, i) => bar(TIME - 291000 + i * 1000)).join(',')]) assert.throws(() => chart(parseExactJson(`{"status":"OK","ticker":"NVDA","adjusted":true,"results":[${bars}]}`), 'NVDA', '1D', TIME), /INVALID_RESPONSE/);
+  for (const bars of [`${bar(TIME - 2000)},${bar(TIME - 1000)}`, Array.from({ length: 2019 }, (_, i) => bar(TIME - 2019000 + i * 1000)).join(',')]) assert.throws(() => chart(parseExactJson(`{"status":"OK","ticker":"NVDA","adjusted":true,"results":[${bars}]}`), 'NVDA', '1D', TIME), /INVALID_RESPONSE/);
 });
 test('ignored abort and stalled body both obey the total deadline', async () => {
   for (const fetcher of [async () => { await new Promise(r => setTimeout(r, 80)); return json(snapshot()); }, async () => new Response(new ReadableStream({ start() {} }), { headers: { 'Content-Type': 'application/json' } })]) {

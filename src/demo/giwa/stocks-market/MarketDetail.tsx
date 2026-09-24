@@ -3,7 +3,7 @@ import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 // server market contract (catalog, quotes, profile, chart) or the curated display metadata; nothing from the Figma capture.
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import type { MarketClient } from "./client"
-import type { Chart, Envelope, Profile, Quote, Range, Security } from "./contracts"
+import type { Chart, Envelope, NvdaLiveSnapshot, Profile, Quote, Range, Security } from "./contracts"
 import { RANGES } from "./contracts"
 import { curatedStock, type CuratedStock } from "./curated"
 import { assetSize, barRange, changeParts, compactDollars, dollars, exact, FEED_LABELS, marketSourceLabel, priceLabel, time } from "./display"
@@ -12,6 +12,7 @@ import type { StocksSelection } from "./selection"
 import { StockLogo } from "./StockLogo"
 import { MarketStatus as Status, StatusBadge, Triangle, type Capabilities } from "./StocksMarketTable"
 import { useOwnedRead, type ReadState } from "./useOwnedRead"
+import type { MarketLiveConnection } from "./useMarketQuotes"
 
 export const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
 export const CARD = "min-w-0 rounded-3xl border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-4 sm:p-6"
@@ -55,24 +56,26 @@ export function QuoteChange({ quote }: { quote: Quote | null }) {
 }
 
 export function PeriodTabs({ range, onRange }: { range: Range; onRange: (range: Range) => void }) {
-  return <div role="group" aria-label="차트 기간" className="inline-flex max-w-full flex-wrap gap-1 rounded bg-[var(--color-arco-chip)] p-0.5">
+  return <div role="group" aria-label="차트 기간" className="inline-flex max-w-full flex-wrap gap-1 rounded bg-[var(--color-arco-stock-chart-chip)] p-0.5">
     {RANGES.map(value => <button type="button" key={value} aria-pressed={range === value} onClick={() => onRange(value)} className={`h-7 min-w-9 rounded px-2 text-sm font-medium ${FOCUS} ${range === value ? "bg-[var(--color-arco-surface)] text-[var(--color-arco-ink)] shadow-[var(--shadow-control)] ring-1 ring-inset ring-[var(--color-arco-ink)]" : "text-[var(--color-arco-chip-ink)] hover:text-[var(--color-arco-ink)]"}`}>{value}</button>)}
   </div>
 }
 
 type Quotes = ReadState<Envelope<Quote[]>>
 /** Price header (once per symbol; it stays while a range loads), period buttons outside anything keyed by range, then the chart. */
-export function PriceCard({ quote, quotes, selection, range, onRange, children }: { quote: Quote | null; quotes: Quotes; selection: ChartSelection | null; range: Range; onRange: (range: Range) => void; children: ReactNode }) {
+export function PriceCard({ quote, quotes, selection, range, onRange, children, marketSession = null, liveConnection = "off" }: { quote: Quote | null; quotes: Quotes; selection: ChartSelection | null; range: Range; onRange: (range: Range) => void; children: ReactNode; marketSession?: NvdaLiveSnapshot["marketSession"] | null; liveConnection?: MarketLiveConnection }) {
   const demo = useDemoPresentation()
   const bar = selection?.bar ?? null
   const feed = selection?.feedDelay ?? (quotes.phase === "ready" ? quotes.value.feedDelay : "UNKNOWN")
-  return <section aria-label="시세와 차트" className={`${CARD} space-y-5`}>
+  return <section aria-label="시세와 차트" className="min-w-0 space-y-5 rounded-[32px] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-4 sm:p-6">
     <div className="space-y-2" aria-live="polite" aria-atomic="true">
       <p className="text-sm text-[var(--color-arco-chip-ink)]">{demo ? "Price · USD" : selection ? `${selection.interval} 구간 종가 · 시각은 봉 시작` : "기초 주식 시세 · USD"}</p>
       <p title={dollars(bar?.close ?? quote?.price ?? null)} className="break-all text-[40px] font-medium leading-[1.05] tracking-[-0.03em] tabular-nums text-[var(--color-arco-ink)] sm:text-5xl">{priceLabel(bar?.close ?? quote?.price ?? null)}</p>
       {/* Hidden (not removed) while a bar is picked: the change is against the previous close, not the picked bar. */}
       <p className={`flex flex-wrap items-center gap-x-1.5 text-sm ${selection ? "invisible" : ""}`}><QuoteChange quote={quote} /><span className="text-[var(--color-arco-chip-ink)]">전일 종가 대비</span></p>
       <p className="text-xs text-[var(--color-arco-text-soft)]">{time(bar?.timestamp ?? quote?.sourceTimestamp ?? null)}<DemoDetails> · {FEED_LABELS[feed]}</DemoDetails></p>
+      {marketSession ? <p className="text-xs text-[var(--color-arco-text-soft)]">미국 주식시장 · {marketSession.state === "OPEN" ? "장중" : marketSession.state === "CLOSED" ? "장 마감" : "장 상태 확인 중"}</p> : null}
+      {liveConnection === "reconnecting" ? <p role="status" className="text-xs text-[var(--color-arco-text-soft)]">시세 연결을 다시 시도하고 있습니다</p> : null}
     </div>
     {/* This symbol's own quote status (STALE included), or the envelope's when the response has no row for it. Not the envelope's
         when a row exists: one stale symbol marks the whole envelope STALE. Shown whatever state the chart below is in. */}
@@ -146,7 +149,7 @@ export function AboutCard({ security, profile }: { security: Security; profile: 
     {/* "No provider description" only for a profile that loaded; loading, failed and unavailable reads say so in the status below. */}
     <DemoDetails>{data && (data.description ? <div className="mt-3"><Description key={data.description} text={data.description} /></div> : <p className="mt-3 text-sm text-[var(--color-arco-text-soft)]">공급자 설명 없음</p>)}</DemoDetails>
     <div className="mt-3 grid grid-cols-1 md:grid-cols-2 md:gap-x-6 lg:grid-cols-1 2xl:grid-cols-2"><StatList rows={rows.slice(0, half)} /><StatList rows={rows.slice(half)} /></div>
-    {demo && (profile.phase !== "ready" || profile.value.status !== "AVAILABLE") ? <Status status={profile.phase === "ready" ? profile.value.status : profile.phase} /> : null}
+    {demo && (profile.phase !== "ready" || profile.value.status !== "AVAILABLE") ? <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{profile.phase === "loading" ? "기업정보 불러오는 중…" : profile.phase === "error" ? "기업정보를 불러올 수 없습니다" : profile.value.status === "STALE" ? "마지막 확인 기업정보" : profile.value.status === "UNCONFIGURED" ? "기업정보 연결 준비 중" : "기업정보를 불러올 수 없습니다"}</p> : null}
     <DemoDetails><section aria-label="기업정보 상태" className="mt-4 space-y-1 text-xs text-[var(--color-arco-text-soft)]">
       <p role="status">{profile.phase === "loading" ? "기업정보 불러오는 중…" : profile.phase === "error" ? "기업정보를 불러올 수 없습니다" : profile.value.status === "STALE" ? "기업정보 · 마지막 확인 정보 · 오래된 데이터" : profile.value.status === "UNCONFIGURED" ? "기업정보 연결 준비 중" : profile.value.status === "UNAVAILABLE" ? "기업정보를 불러올 수 없습니다" : "기업정보 · 공급자 참조 데이터"}</p>
       {profile.phase === "ready" && data && <p>기업정보 최근 수집: {time(profile.value.fetchedAt)} · 공급자 기준일: {data.sourceDate ?? "미확인"}. 시세 관측 시각과 별개입니다.</p>}
@@ -163,7 +166,7 @@ function StatGroup({ title, qualifier, rows, note }: { title: string; qualifier?
 }
 const price = (value: string | null): Pick<StatRow, "value" | "title"> => ({ value: priceLabel(value), title: value === null ? undefined : dollars(value) })
 /**
- * Statistics: open/high/low of the rolling 24 hours come only from a loaded AVAILABLE 1D chart (the same series the list's
+ * Statistics: open/high/low of the latest observed trading session come only from a loaded AVAILABLE 1D chart (the same series the list's
  * sparkline uses); the quote supplies previous close and session volume, the profile the market cap. Missing values are "—".
  */
 export function StatisticsCard({ symbol, quote, quotes, profile, day }: { symbol: string; quote: Quote | null; quotes: Quotes; profile: ReadState<Envelope<Profile>>; day: Chart | null }) {
@@ -172,14 +175,15 @@ export function StatisticsCard({ symbol, quote, quotes, profile, day }: { symbol
   const data = profile.phase === "ready" ? profile.value.data : null
   const size = assetSize(curatedStock(symbol)?.kind === "ETF" || data?.securityType === "ETF", data, quote)
   const feed = FEED_LABELS[quotes.phase === "ready" ? quotes.value.feedDelay : "UNKNOWN"]
+  const source = quotes.phase === "ready" && quotes.value.provider ? marketSourceLabel(quotes.value) : "시세 공급원 확인 중"
   return <section aria-labelledby={id} className={CARD}>
     <h2 id={id} className="text-2xl font-medium leading-[1.05] tracking-[-0.01em] text-[var(--color-arco-ink)]">Statistics</h2>
     <div className="mt-3 grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-6 lg:grid-cols-1 2xl:grid-cols-2">
-      <StatGroup title="Underlying Asset Price" qualifier="24H" rows={[{ label: "Open", ...price(span?.open ?? null) }, { label: "High", ...price(span?.high ?? null) }, { label: "Low", ...price(span?.low ?? null) }]} note={span ? `최근 24시간(rolling) · 반환된 1D ${day!.interval} 봉의 첫 시가·최고가·최저가${day!.history === "TRUNCATED" ? " · 일부 구간만 반환된 기준" : ""}` : "현재 1D 차트 관측값(봉 2개 이상)이 있을 때만 표시합니다."} />
+      <StatGroup title="Underlying Asset Price" qualifier="1D" rows={[{ label: "Open", ...price(span?.open ?? null) }, { label: "High", ...price(span?.high ?? null) }, { label: "Low", ...price(span?.low ?? null) }]} note={span ? `최근 관측 거래일 · 반환된 1D ${day!.interval} 봉의 첫 시가·최고가·최저가${day!.history === "TRUNCATED" ? " · 일부 구간만 반환된 기준" : ""}` : "현재 1D 차트 관측값(봉 2개 이상)이 있을 때만 표시합니다."} />
       <StatGroup title="Underlying Asset Statistics" rows={[{ label: size.label, value: compactDollars(size.value), title: size.title }, { label: "세션 거래량", title: quotes.phase === "ready" && quotes.value.provider === "ALPACA" ? marketSourceLabel(quotes.value) : undefined, value: quote?.sessionVolume == null ? "—" : `${exact(quote.sessionVolume)} 주` }, { label: "전일 종가", ...price(quote?.previousClose ?? null) }]} />
     </div>
     <DemoDetails><div className="mt-4 space-y-1 text-xs text-[var(--color-arco-text-soft)]">
-      <p>Massive · {feed} · 시세 관측: {time(quote?.sourceTimestamp ?? null)}. 주식 시세·기업 시가총액은 ARCO 토큰 가격·유동성·보유량이 아닙니다.</p>
+      <p>{source} · {feed} · 시세 관측: {time(quote?.sourceTimestamp ?? null)}. 주식 시세·기업 시가총액은 ARCO 토큰 가격·유동성·보유량이 아닙니다.</p>
       {symbol === "NVDA" && <p>NVDA 모의 주문은 주문 패널에서 진행합니다. 표시 시세는 체결에 사용하지 않습니다.</p>}
     </div></DemoDetails>
   </section>
@@ -198,26 +202,28 @@ export type SecurityDetailViewProps = {
   selection: ChartSelection | null
   chart: ReactNode
   headingRef?: RefObject<HTMLHeadingElement>
+  marketSession?: NvdaLiveSnapshot["marketSession"] | null
+  liveConnection?: MarketLiveConnection
 }
-export function SecurityDetailView({ security, profile, quote, quotes, capabilities, day, range, onRange, selection, chart, headingRef }: SecurityDetailViewProps) {
+export function SecurityDetailView({ security, profile, quote, quotes, capabilities, day, range, onRange, selection, chart, headingRef, marketSession, liveConnection }: SecurityDetailViewProps) {
   const headingId = useId()
   const data = profile.phase === "ready" ? profile.value.data : null
   return <article aria-labelledby={headingId} className="min-w-0 space-y-4">
     <DetailHeader symbol={security.symbol} name={data?.name ?? security.name} logoUrl={data?.logoUrl ?? null} capabilities={capabilities} headingRef={headingRef} headingId={headingId} />
-    <PriceCard quote={quote} quotes={quotes} selection={selection} range={range} onRange={onRange}>{chart}</PriceCard>
+    <PriceCard quote={quote} quotes={quotes} selection={selection} range={range} onRange={onRange} marketSession={marketSession} liveConnection={liveConnection}>{chart}</PriceCard>
     <AboutCard security={security} profile={profile} />
     <StatisticsCard symbol={security.symbol} quote={quote} quotes={quotes} profile={profile} day={day} />
   </article>
 }
 
-export function SecurityDetail({ client, security, quote, quotes, capabilities, day, onSeries, selection, anchor }: { client: MarketClient; security: Security; quote: Quote | null; quotes: Quotes; capabilities: Capabilities; day: Chart | null; onSeries: (symbol: string, chart: Chart | null) => void; selection: StocksSelection; anchor: RefObject<HTMLElement> }) {
+export function SecurityDetail({ client, security, quote, quotes, capabilities, day, onSeries, selection, anchor, marketSession, liveConnection }: { client: MarketClient; security: Security; quote: Quote | null; quotes: Quotes; capabilities: Capabilities; day: Chart | null; onSeries: (symbol: string, chart: Chart | null) => void; selection: StocksSelection; anchor: RefObject<HTMLElement>; marketSession?: NvdaLiveSnapshot["marketSession"] | null; liveConnection?: MarketLiveConnection }) {
   const [range, setRange] = useState<Range>("1D")
   const [picked, setPicked] = useState<ChartSelection | null>(null)
   const load = useCallback((signal: AbortSignal) => client.profile(security.symbol, signal), [client, security.symbol])
   const profile = useOwnedRead(security.symbol, load)
   const heading = useRef<HTMLHeadingElement>(null)
   useDetailFocus(selection, heading, anchor, true)
-  return <SecurityDetailView security={security} profile={profile} quote={quote} quotes={quotes} capabilities={capabilities} day={day} range={range} onRange={value => { setPicked(null); setRange(value) }} selection={picked} headingRef={heading}
+  return <SecurityDetailView security={security} profile={profile} quote={quote} quotes={quotes} capabilities={capabilities} day={day} range={range} onRange={value => { setPicked(null); setRange(value) }} selection={picked} headingRef={heading} marketSession={marketSession} liveConnection={liveConnection}
     chart={<ChartRead key={JSON.stringify([client.baseUrl, security.symbol, range])} client={client} name={security.symbol} range={range} onSeries={onSeries} onSelection={setPicked} />} />
 }
 

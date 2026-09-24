@@ -35,7 +35,7 @@ test('offline bundle binds the approved manifest and separates browser settings;
   assert.equal(bundle.integration.serverEnvironment.CORS_ALLOWED_ORIGINS, f.settings.frontendOrigins[0]);
   assert.deepEqual(parseCorsAllowedOrigins(bundle.integration.serverEnvironment.CORS_ALLOWED_ORIGINS), bundle.integration.frontendOrigins);
   assert.deepEqual(bundle.integration.browserEnvironment, { VITE_ARCO_API_BASE: f.settings.apiBaseUrl, VITE_PUBLIC_GIWA_RPC: f.settings.publicRpcUrl,
-    VITE_GIWA_ADMIN_ADDRESSES: `${a(20)},${a(21)}` });
+    VITE_CUSTOMER_PRESENTATION: 'true', VITE_GIWA_ADMIN_ADDRESSES: `${a(20)},${a(21)}` });
   assert.ok(!JSON.stringify(bundle.integration.browserEnvironment).includes('server-rpc'));
   assert.ok(!JSON.stringify(bundle.integration.browserEnvironment).includes('signer'));
   const report = await checkStocksPreflight({ ...bundle.integration.serverEnvironment, STOCKS_CONFIG_PATH: '/runtime.json',
@@ -45,6 +45,22 @@ test('offline bundle binds the approved manifest and separates browser settings;
   assert.equal(report.status, 'CONFIGURED_NOT_PROBED'); assert.equal(report.tradingAuthorized, false);
   assert.deepEqual(prepareStocksIntegrationBundle(f.manifest, f.settings), bundle);
   assert.equal(JSON.stringify(f), before);
+});
+
+test('the fixed UI4392 frontend joins the production origin without relaxing any server endpoint', () => {
+  const f = fixture();
+  f.settings.frontendOrigins = ['https://app.arco.financial', 'http://127.0.0.1:4392'];
+  const bundle = prepareStocksIntegrationBundle(f.manifest, f.settings);
+  assert.deepEqual(bundle.integration.siweDomains, ['app.arco.financial', '127.0.0.1:4392']);
+  assert.deepEqual(parseCorsAllowedOrigins(bundle.integration.serverEnvironment.CORS_ALLOWED_ORIGINS), f.settings.frontendOrigins);
+  for (const value of ['http://localhost:4392', 'http://127.0.0.1:4393', 'http://127.1:4392',
+    'http://2130706433:4392', 'http://127.0.0.1:4392/', 'http://127.0.0.1:4392?',
+    'http://127.0.0.1:4392#', 'http://127.0.0.1:4392/path', 'http://user@127.0.0.1:4392', 'http://example.test:4392']) {
+    assert.throws(() => prepareStocksIntegrationBundle(f.manifest, { ...f.settings, frontendOrigins: [value] }), value);
+  }
+  for (const key of ['rpcUrl', 'publicRpcUrl', 'signerUrl', 'apiBaseUrl']) {
+    assert.throws(() => prepareStocksIntegrationBundle(f.manifest, { ...f.settings, [key]: 'http://127.0.0.1:4392' }), key);
+  }
 });
 
 test('bundle rejects unapproved, changed or non-public deployment data', () => {

@@ -5,6 +5,7 @@ import {
   type StocksMarketDataOptions,
   type StocksMarketDataService,
 } from "../stocks-market-data/index.js"
+import { createAlpacaMarketClock } from "../stocks-market-data/session.js"
 
 const delays: readonly string[] = ["UNKNOWN", "DELAYED_15_MIN", "END_OF_DAY", "REALTIME"]
 type RuntimePorts = Pick<StocksMarketDataOptions, "catalog" | "fetch" | "now" | "requestsPerMinute" | "massiveRequestsPerMinute" | "etfGlobalEnabled" | "issuerFundamentalsEnabled">
@@ -30,4 +31,10 @@ export function configuredStocksMarketData(
     alpacaKeyId: source.ALPACA_API_KEY_ID || undefined,
     alpacaSecretKey: source.ALPACA_API_SECRET_KEY || undefined,
   })
+}
+
+/** Market-open information is independent of quote freshness and order eligibility. */
+export function configuredStocksMarketClock(source: NodeJS.ProcessEnv, ports: { fetch?: typeof fetch; now?: () => number } = {}) {
+  if (source.STOCKS_MARKET_DATA_PROVIDER !== "ALPACA" || !source.ALPACA_API_KEY_ID || !source.ALPACA_API_SECRET_KEY) return undefined
+  return createAlpacaMarketClock({ keyId: source.ALPACA_API_KEY_ID, secretKey: source.ALPACA_API_SECRET_KEY, ...ports })
 }

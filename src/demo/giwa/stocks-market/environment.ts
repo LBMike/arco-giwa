@@ -6,7 +6,7 @@ import type { KnownHashStore } from "../stocks-known-hash-recovery"
 import type { ActiveWalletSource } from "../stocks-wallet-source"
 import type { MarketFetch } from "./contracts"
 /** Explicit offline verification seam; normal runtime uses ARCO_API_BASE, browser fetch, real clocks and the wallet module's active source. */
-export const StocksPageEnvironment = createContext<{ apiBase: string | null; fetch?: MarketFetch; executionClock?: ExecutionClockSeam; activeWalletSource?: () => ActiveWalletSource | null; knownHashes?: KnownHashStore }>({ apiBase: ARCO_API_BASE })
+export const StocksPageEnvironment = createContext<{ apiBase: string | null; fetch?: MarketFetch; liveNvda?: boolean; executionClock?: ExecutionClockSeam; activeWalletSource?: () => ActiveWalletSource | null; knownHashes?: KnownHashStore }>({ apiBase: ARCO_API_BASE, liveNvda: true })
 /** One validated API base for market, investor, admin and wallet execution, so a malformed setting fails the same way on every Stocks surface. */
 export function usePageApiBase(): string | null {
   const { apiBase } = useContext(StocksPageEnvironment)

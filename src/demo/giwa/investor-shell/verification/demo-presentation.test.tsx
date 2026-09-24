@@ -1,11 +1,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
+import { StaticRouter } from "react-router-dom"
 import { DemoPresentationContext } from "../../demo-presentation"
 import { MarketChart } from "../../stocks-market/MarketChart"
 import { SecurityDetailView } from "../../stocks-market/MarketDetail"
-import { fixtureEnvelope, fixtureTop40Chart, fixtureTop40Profile, fixtureTop40Quote } from "../../stocks-market/fixtures"
+import { fixtureEnvelope, fixtureTop40Catalog, fixtureTop40Chart, fixtureTop40Profile, fixtureTop40Quote, fixtureTop40Quotes } from "../../stocks-market/fixtures"
 import type { Envelope } from "../../stocks-market/contracts"
+import { MarketQuoteStatus, MarketStatus, StatusBadge, StocksMarketTable } from "../../stocks-market/StocksMarketTable"
 import { GiwaStocksFeatureView } from "../../stocks-investor/GiwaStocksFeature"
 import { actionsFor } from "../../stocks-investor/actions"
 import { createHarness } from "../../stocks-investor/fixtures/controller-harness"
@@ -35,6 +37,44 @@ test("missing chart data remains an unavailable state in the demo", () => {
   const html = renderToStaticMarkup(<DemoPresentationContext.Provider value><MarketChart response={{ ...envelope(fixtureTop40Chart("SOXL", "1D")), data: null, status: "UNAVAILABLE" }} /></DemoPresentationContext.Provider>)
   assert.match(html, /시세를 불러올 수 없습니다/)
   assert.doesNotMatch(html, /type="range"/)
+})
+test("demo prices still disclose a retained stale observation", () => {
+  const quote = fixtureTop40Quote("NVDA")
+  const rows = fixtureTop40Quotes().map(row => row.symbol === "NVDA" ? { ...quote, status: "STALE" as const, reason: "OLD_OBSERVATION" as const } : row)
+  const table = renderToStaticMarkup(<DemoPresentationContext.Provider value><StaticRouter location="/stocks"><StocksMarketTable catalog={fixtureTop40Catalog()} quotes={ready({ ...envelope(rows), status: "STALE" })} capabilities={{ phase: "ready", bySymbol: new Map() }} series={{}} variant="full" /></StaticRouter></DemoPresentationContext.Provider>)
+  assert.doesNotMatch(table, /오래된 데이터/, "the demo does not repeat the same warning under every price")
+  assert.match(table, /sr-only[^>]*>마지막 관측 시세 · /, "the stale NVDA row keeps an accessible observation timestamp")
+  const status = renderToStaticMarkup(<DemoPresentationContext.Provider value><MarketStatus status="STALE" /></DemoPresentationContext.Provider>)
+  assert.match(status, /마지막 확인 시세/)
+  assert.doesNotMatch(status, /오래된 데이터/)
+})
+test("demo list explains closed observations once, and distinguishes an open-market delay", () => {
+  const sourceTimestamp = "2026-09-23T19:59:59.000Z"
+  const rows = ["NVDA", "SOXL"].map(symbol => ({ ...fixtureTop40Quote(symbol), status: "STALE" as const, reason: "OLD_OBSERVATION" as const, sourceTimestamp }))
+  const quotes = ready({ ...envelope(rows), status: "STALE" as const, reason: "OLD_OBSERVATION" })
+  const render = (state: "OPEN" | "CLOSED") => renderToStaticMarkup(<DemoPresentationContext.Provider value><MarketQuoteStatus quotes={quotes} marketSession={{ state, observedAt: "2026-09-24T04:00:00.000Z", nextOpen: null, nextClose: null }} /></DemoPresentationContext.Provider>)
+  const closed = render("CLOSED")
+  assert.match(closed, /미국 주식시장 장 마감 · 마지막 관측 시세 · Sep 23, 2026/)
+  assert.doesNotMatch(closed, /오래된 데이터|실시간/)
+  assert.match(render("OPEN"), /시세 업데이트 지연 · 마지막 관측 시세/)
+  const failure = ready({ ...quotes.value, reason: "PROVIDER_UNAVAILABLE" })
+  const failed = renderToStaticMarkup(<DemoPresentationContext.Provider value><MarketQuoteStatus quotes={failure} marketSession={{ state: "CLOSED", observedAt: null, nextOpen: null, nextClose: null }} /></DemoPresentationContext.Provider>)
+  assert.match(failed, /시세 업데이트 지연/)
+  assert.doesNotMatch(failed, /장 마감/)
+})
+test("preview labels every listed stock Live without changing the server's order capability", () => {
+  const capabilities = { phase: "ready" as const, bySymbol: new Map([["NVDA", "CHECK_PAUSE_AT_ORDER" as const]]) }
+  const table = renderToStaticMarkup(<DemoPresentationContext.Provider value><StaticRouter location="/stocks"><StocksMarketTable catalog={fixtureTop40Catalog()} quotes={ready(envelope(fixtureTop40Quotes()))} capabilities={capabilities} series={{}} variant="full" /></StaticRouter></DemoPresentationContext.Provider>)
+  assert.equal((table.match(/>Live<\/span>/g) ?? []).length, 40)
+  assert.doesNotMatch(table, /Coming soon|Available/)
+  assert.match(detail(true), />Live<\/span>/, "the detail header uses the same presentation label")
+  assert.match(detail(false), /시장정보만/, "normal status still reflects the order catalog")
+  const badge = renderToStaticMarkup(<DemoPresentationContext.Provider value><StatusBadge symbol="SOXL" capabilities={capabilities} /></DemoPresentationContext.Provider>)
+  assert.match(badge, /bg-\[var\(--color-arco-stock-chart-chip\)\]/, "Figma's neutral 5% badge background")
+  assert.match(badge, /text-\[var\(--color-arco-up-text\)\]/, "Figma's green label colour")
+  assert.match(badge, /size-3/, "Figma's 12px halo")
+  assert.match(badge, /opacity-40/, "Figma's 40% green halo")
+  assert.match(badge, /size-2 rounded-full bg-\[var\(--color-arco-up-text\)\]/, "Figma's 8px green dot")
 })
 test("demo trade panel removes test annotations without enabling signed-out trading or hiding an expired session", async () => {
   const h = createHarness()

@@ -5,7 +5,8 @@ type Check = 'PASS' | 'FAIL' | 'NOT_READY' | 'NOT_RUN';
 type Checks = { apiLiveness: Check; stocksReadiness: Check; browserCors: Check; operatorAuthentication: Check };
 const forbiddenOrigin = 'https://stocks-connection-probe.invalid';
 
-function origin(value: unknown): string {
+function origin(value: unknown, localDemoFrontend = false): string {
+  if (localDemoFrontend && value === 'http://127.0.0.1:4392') return value;
   if (typeof value !== 'string' || !value.startsWith('https://') || /[\s\\?#]/.test(value)) throw Error('INVALID_ORIGIN');
   const parsed = new URL(value);
   if (parsed.username || parsed.password || !parsed.hostname || /[,*]/.test(parsed.hostname) || parsed.pathname !== '/') throw Error('INVALID_ORIGIN');
@@ -38,7 +39,7 @@ export async function checkStocksConnection(apiValue: unknown, frontendValue: un
   });
   let api: string, frontend: string;
   try {
-    api = origin(apiValue); frontend = origin(frontendValue);
+    api = origin(apiValue); frontend = origin(frontendValue, true);
     if (frontend === forbiddenOrigin) throw Error('RESERVED_ORIGIN');
   } catch { return { ...report(), error: 'INVALID_CONNECTION_SETTINGS' }; }
 

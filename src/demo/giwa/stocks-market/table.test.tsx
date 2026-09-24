@@ -24,7 +24,8 @@ const cells = (row: string) => row.split('<div role="cell"').slice(1).map(chunk 
 test("header texts are the Figma labels in order; Price carries a decorative superscript 1", () => {
   const html = render()
   const headers = [...html.matchAll(/role="columnheader"[^>]*>(.*?)<\/div>/g)].map(match => text(match[1].replace(/<sup[^>]*>.*?<\/sup>/, "")))
-  assert.deepEqual(headers, ["#", "Asset Name", "Price", "24H (%)", "Market Cap / AUM", "Volume (USD)", "Asset Status", "24h Chart"])
+  assert.deepEqual(headers, ["#", "Asset Name", "Price", "24H (%)", "Mkt Cap", "Volume (USD)", "Asset Status", "1D Chart"])
+  assert.match(html, /title="Stocks: market capitalization · ETFs: assets under management">Mkt Cap/)
   assert.match(html, /Price<sup aria-hidden="true"[^>]*>1<\/sup>/)
   assert.match(html, /role="table" aria-label="Stocks &amp; ETFs"/)
   assert.match(html, /role="region" aria-label="[^"]+" tabindex="0"[^>]*overflow-x-auto/)
@@ -149,11 +150,11 @@ test("home variant: no toolbar or chart column, first rows by rank as links, a s
 test("24h Chart draws supplied per-symbol series; missing data remains empty", () => {
   const without = render()
   assert.doesNotMatch(without, /role="img"/)
-  assert.equal([...without.matchAll(/24시간 차트 데이터 없음/g)].length, 40)
+  assert.equal([...without.matchAll(/1D 차트 데이터 없음/g)].length, 40)
   const chart = fixtureTop40Chart("NVDA", "1D")
   const html = render({ series: { NVDA: chart } })
   const row = rowOf(html, "NVDA")
-  assert.match(row, /<svg role="img" aria-label="최근 24시간 종가 추이 · 하락 \d+\.\d\d%" width="148" height="48" viewBox="0 0 148 48" class="text-\[var\(--color-arco-down\)\]">/)
+  assert.match(row, /<svg role="img" aria-label="최근 관측 거래일 종가 추이 · 하락 \d+\.\d\d%" width="148" height="48" viewBox="0 0 148 48" class="text-\[var\(--color-arco-down\)\]">/)
   assert.match(row, /stop-color="currentColor" stop-opacity="0.24"/)
   assert.match(row, /stroke="currentColor" stroke-width="2" stroke-linecap="round"/)
   assert.doesNotMatch(row, /차트 미로드/)

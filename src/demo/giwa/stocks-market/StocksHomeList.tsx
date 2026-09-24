@@ -10,8 +10,9 @@ import { createGiwaStocksHttpClient } from "../stocks-investor/client"
 import { createMarketClient, type MarketClient } from "./client"
 import type { Catalog, Envelope, Quote } from "./contracts"
 import { StocksPageEnvironment, usePageApiBase } from "./environment"
-import { MarketStatus, StocksMarketTable, useOrderCapabilities, type OrdersCatalogClient } from "./StocksMarketTable"
+import { MarketQuoteStatus, MarketStatus, StocksMarketTable, useOrderCapabilities, type OrdersCatalogClient } from "./StocksMarketTable"
 import { useMarketRows } from "./useMarketRows"
+import { useMarketQuotes } from "./useMarketQuotes"
 import { useOwnedRead } from "./useOwnedRead"
 const NO_SERIES = Object.freeze({})
 const stockHref = (symbol: string) => `${GIWA_STOCKS_ROUTE}?symbol=${encodeURIComponent(symbol)}`
@@ -35,16 +36,16 @@ function HomeCatalog({ client, ordersClient, withHighlights }: { client: MarketC
   return <HomeTable key={JSON.stringify(catalog.value.data.securities.map(item => item.symbol))} client={client} ordersClient={ordersClient} withHighlights={withHighlights} response={catalog.value as Envelope<Catalog> & { data: Catalog }} />
 }
 function HomeTable({ client, ordersClient, response, withHighlights }: { client: MarketClient; ordersClient: OrdersCatalogClient | null; withHighlights: boolean; response: Envelope<Catalog> & { data: Catalog } }) {
+  const { liveNvda } = useContext(StocksPageEnvironment)
   const catalog = response.data
   const names = useMemo(() => catalog.securities.map(item => item.symbol), [catalog])
-  const load = useCallback((signal: AbortSignal) => client.quotes(names, signal), [client, names])
-  const quotes = useOwnedRead(JSON.stringify([client.baseUrl, names]), load, 30_000)
+  const { quotes, live } = useMarketQuotes(client, names, liveNvda === true)
   const capabilities = useOrderCapabilities(ordersClient)
   const first = [...catalog.securities].sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity)).slice(0, 10).map(item => item.symbol)
   const overview = useMarketRows(client, first, false)
   // Its own surface card: the pinned # and Asset Name cells are opaque surface while the table scrolls sideways.
   return <HomeLayout withHighlights={withHighlights} catalog={catalog} quotes={quotes}><div className="w-full min-w-0 space-y-3 rounded-[var(--radius-strategy)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-4 sm:p-6">
-    {quotes.phase !== "ready" ? <MarketStatus status={quotes.phase} /> : quotes.value.status !== "AVAILABLE" && <MarketStatus status={quotes.value.status} />}
+    <MarketQuoteStatus quotes={quotes} marketSession={live?.marketSession} />
     <StocksMarketTable variant="home" limit={10} rowHref={stockHref} catalog={catalog} quotes={quotes} capabilities={capabilities} series={NO_SERIES} profiles={overview.profiles} />
   </div></HomeLayout>
 }

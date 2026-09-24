@@ -1,9 +1,9 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
-import { createMarketClient, normalizeApiBase } from "./client"
+import { createMarketClient, normalizeApiBase, type MarketEventSourceFactory } from "./client"
 import { fixtureCatalog, fixtureChart, fixtureEnvelope, fixtureMarketFetch, fixtureProfile, fixtureQuote } from "./fixtures"
-import { decimal, envelope, parseCatalog, parseChart, parseProfile, parseQuotes, safeLogo } from "./validate"
+import { decimal, envelope, parseCatalog, parseChart, parseNvdaLiveSnapshot, parseProfile, parseQuotes, safeLogo } from "./validate"
 import { chartPoints, dollars, windowChange } from "./display"
 import { MarketChart } from "./MarketChart"
 
@@ -35,11 +35,30 @@ test("chart rejects wrong symbol/range, out-of-order/future bars and impossible 
   for (const bad of [{ ...good, symbol: "AAPL" }, { ...good, range: "1M" }, { ...good, bars: [...good.bars].reverse() }, { ...good, bars: [{ ...good.bars[0], close: "999" }] }, { ...good, bars: [{ ...good.bars[0], timestamp: "2099-01-01T00:00:00.000Z" }] }, { ...good, complete: false }]) assert.throws(() => parseChart(bad, "NVDA", "1D"))
 })
 test("returned-window change uses exact closes, not snapshot daily percentage; gaps are segmented", () => {
-  const chart = fixtureChart(); chart.bars = [chart.bars[0], { ...chart.bars[2], close: "187" }]
+  const chart = fixtureChart(); const bars = chart.bars; chart.bars = [bars[0], { ...bars[2], close: "187" }]
   assert.equal(windowChange(chart), "+10.00%")
   assert.notEqual(windowChange(chart), `${fixtureQuote().changePercent}%`)
-  assert.deepEqual(chartPoints(chart).map(p => p.segment), [0, 1])
+  assert.deepEqual(chartPoints(chart).map(p => p.segment), [0, 0], "nearby observed closes can form one line without an invented bar")
+  chart.bars = [bars[0], bars[4]]
+  assert.deepEqual(chartPoints(chart).map(p => p.segment), [0, 1], "a longer unobserved interval remains a visible gap")
   chart.bars = chart.bars.slice(0, 1); assert.equal(windowChange(chart), "—")
+})
+test("historical closes stay connected across market closures without inventing observations", () => {
+  const daily = fixtureChart()
+  daily.interval = "1d"
+  daily.range = "3M"
+  const sample = daily.bars[0]
+  daily.bars = ["2026-09-18T20:00:00.000Z", "2026-09-21T20:00:00.000Z", "2026-09-22T20:00:00.000Z"].map(timestamp => ({ ...sample, timestamp }))
+  assert.deepEqual(chartPoints(daily).map(point => point.segment), [0, 0, 0], "Friday and Monday closes form one historical line")
+  assert.equal(chartPoints(daily).length, 3, "non-trading days add no artificial bars")
+  daily.bars.push({ ...sample, timestamp: "2026-09-29T20:00:00.000Z" })
+  assert.deepEqual(chartPoints(daily).map(point => point.segment), [0, 0, 0, 1], "a missing trading week stays visibly disconnected")
+
+  const hourly = fixtureChart()
+  hourly.interval = "1h"
+  hourly.range = "1W"
+  hourly.bars = ["2026-09-18T19:00:00.000Z", "2026-09-21T14:00:00.000Z"].map(timestamp => ({ ...sample, timestamp }))
+  assert.deepEqual(chartPoints(hourly).map(point => point.segment), [0, 0], "hourly charts also span a normal weekend")
 })
 test("keyless calls have explicit null values, public GET, no Bearer/cookies or provider endpoint", async () => {
   const calls: { url: string; init: RequestInit }[] = []
@@ -114,4 +133,91 @@ test("Alpaca envelopes retain feed coverage, accept public quotes and reject amb
   const profile = envelope(fixtureEnvelope(fixtureProfile()), value => parseProfile(value, "NVDA", "https://api.fixture"))
   assert.equal(profile.provider, "MASSIVE", "hybrid fundamentals keep their own source")
   assert.equal(profile.marketFeed, undefined)
+})
+
+const liveNvdaFixture = () => ({
+  schemaVersion: 1, symbol: "NVDA", observedAt: "2026-09-24T18:00:00.000Z",
+  underlying: { basis: "UNDERLYING_SECURITY", currency: "USD", price: "125.25", change: "5.25", changePercent: "4.375", sessionVolume: "1000", previousClose: "120", observationAgeMs: 30000, status: "AVAILABLE", reason: null, sourceTimestamp: "2026-09-24T17:59:30.000Z", priceSource: "LAST_TRADE", provider: "ALPACA", marketFeed: "IEX", feedDelay: "REALTIME" },
+  marketSession: { state: "OPEN", observedAt: "2026-09-24T18:00:00.000Z", nextOpen: "2026-09-25T13:30:00.000Z", nextClose: "2026-09-24T20:00:00.000Z" },
+  token: { basis: "ARCO_TOKEN", indicativePrice: null, status: "UNAVAILABLE" },
+  testnetExecution: { mode: "FIXED_MOCK_PRICE", status: "CATALOG_ONLY", unitPrice: "120.000000", quoteRequired: true },
+})
+
+test("NVDA live parser accepts the separate price lanes and rejects malformed market or order claims", () => {
+  const fixture = liveNvdaFixture()
+  assert.deepEqual(parseNvdaLiveSnapshot(fixture), fixture)
+  const unavailable = { ...fixture, underlying: { ...fixture.underlying, price: null, change: null, changePercent: null, sessionVolume: null, previousClose: null, observationAgeMs: null, sourceTimestamp: null, priceSource: null, provider: null, marketFeed: null, feedDelay: "UNKNOWN", status: "UNAVAILABLE" }, marketSession: { state: "UNKNOWN", observedAt: null, nextOpen: null, nextClose: null }, testnetExecution: { ...fixture.testnetExecution, status: "UNAVAILABLE", unitPrice: null } }
+  assert.equal(parseNvdaLiveSnapshot(unavailable).underlying.price, null)
+  const badValues = [
+    { ...fixture, schemaVersion: 2 },
+    { ...fixture, symbol: "AAPL" },
+    { ...fixture, underlying: { ...fixture.underlying, price: 125.25 } },
+    { ...fixture, underlying: { ...fixture.underlying, changePercent: "4e2" } },
+    { ...fixture, underlying: { ...fixture.underlying, observationAgeMs: -1 } },
+    { ...fixture, underlying: { ...fixture.underlying, sourceTimestamp: "2026-09-24T18:02:00.000Z" } },
+    { ...fixture, underlying: { ...fixture.underlying, marketFeed: null } },
+    { ...fixture, underlying: { ...fixture.underlying, status: "UNAVAILABLE" } },
+    { ...fixture, marketSession: { ...fixture.marketSession, nextClose: null } },
+    { ...fixture, token: { ...fixture.token, indicativePrice: "125.25" } },
+    { ...fixture, testnetExecution: { ...fixture.testnetExecution, quoteRequired: false } },
+    { ...fixture, testnetExecution: { ...fixture.testnetExecution, unitPrice: null } },
+  ]
+  for (const value of badValues) assert.throws(() => parseNvdaLiveSnapshot(value), /MARKET_RESPONSE_INVALID/)
+})
+
+test("NVDA live JSON read uses a bounded public GET at the validated base", async () => {
+  const calls: { url: string; init: RequestInit }[] = []
+  const client = createMarketClient("https://api.fixture/prefix//", async (url, init) => { calls.push({ url, init }); return Response.json(liveNvdaFixture()) })
+  const live = await client.liveNvda(new AbortController().signal)
+  assert.equal(live.underlying.price, "125.25")
+  assert.deepEqual(calls.map(({ url, init }) => [url, init.method, init.credentials, init.redirect, new Headers(init.headers).get("authorization")]), [["https://api.fixture/prefix/api/v1/stocks/market/NVDA/live", "GET", "omit", "error", null]])
+  const oversized = createMarketClient("https://api.fixture", async () => new Response("x".repeat(65_537)))
+  await assert.rejects(oversized.liveNvda(new AbortController().signal), /MARKET_RESPONSE_INVALID/)
+})
+
+class FakeMarketStream extends EventTarget {
+  closes = 0
+  close() { this.closes++ }
+  snapshot(data: unknown) { const event = new Event("snapshot"); Object.defineProperty(event, "data", { value: data }); this.dispatchEvent(event) }
+  fail() { this.dispatchEvent(new Event("error")) }
+}
+
+test("NVDA EventSource accepts named snapshots, reports reconnect errors, and closes malformed events", () => {
+  const stream = new FakeMarketStream()
+  const starts: { url: string; init: { withCredentials: false } }[] = []
+  const factory: MarketEventSourceFactory = (url, init) => { starts.push({ url, init }); return stream }
+  const client = createMarketClient("https://api.fixture/prefix", undefined, 10_000, factory)
+  const prices: string[] = []
+  let errors = 0
+  const stop = client.subscribeNvda(snapshot => prices.push(snapshot.underlying.price ?? "—"), () => { errors++ })
+  assert.ok(stop)
+  assert.deepEqual(starts, [{ url: "https://api.fixture/prefix/api/v1/stocks/market/NVDA/live/stream", init: { withCredentials: false } }])
+  const ignored = new Event("message"); Object.defineProperty(ignored, "data", { value: JSON.stringify(liveNvdaFixture()) }); stream.dispatchEvent(ignored)
+  assert.deepEqual(prices, [], "only the named snapshot event is consumed")
+  stream.snapshot(JSON.stringify(liveNvdaFixture()))
+  assert.deepEqual(prices, ["125.25"])
+  stream.fail()
+  assert.equal(errors, 1)
+  assert.equal(stream.closes, 0, "browser EventSource may reconnect after a transport error")
+  stream.snapshot(JSON.stringify({ ...liveNvdaFixture(), token: { basis: "ARCO_TOKEN", indicativePrice: "125.25", status: "AVAILABLE" } }))
+  assert.equal(errors, 2)
+  assert.equal(stream.closes, 1)
+  stream.snapshot(JSON.stringify(liveNvdaFixture()))
+  stop()
+  assert.deepEqual(prices, ["125.25"])
+  assert.equal(stream.closes, 1)
+})
+
+test("NVDA EventSource rejects oversized snapshots and failed construction without leaking payloads", () => {
+  const stream = new FakeMarketStream()
+  const client = createMarketClient("https://api.fixture", undefined, 10_000, () => stream)
+  let errors = 0
+  const stop = client.subscribeNvda(() => assert.fail("oversized data must not publish"), () => { errors++ })
+  assert.ok(stop)
+  stream.snapshot("x".repeat(65_537))
+  assert.equal(errors, 1)
+  assert.equal(stream.closes, 1)
+  assert.equal(createMarketClient("https://api.fixture", undefined, 10_000, () => { throw new Error("secret") }).subscribeNvda(() => {}, () => { errors++ }), null)
+  assert.equal(errors, 2)
+  if (typeof globalThis.EventSource !== "function") assert.equal(createMarketClient("https://api.fixture").subscribeNvda(() => {}, () => {}), null)
 })

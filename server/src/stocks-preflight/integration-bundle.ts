@@ -10,7 +10,9 @@ function object(value: unknown, keys: string[]): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function url(value: unknown, originOnly: boolean): string {
+function url(value: unknown, originOnly: boolean, localDemoFrontend = false): string {
+  // Only the user's fixed local frontend is exempt. Never relax server endpoints.
+  if (localDemoFrontend && originOnly && value === 'http://127.0.0.1:4392') return value;
   ensure(typeof value === 'string' && value.startsWith('https://') && !/[\s\\?#]/.test(value), 'INVALID_BUNDLE_URL');
   const parsed = new URL(value);
   // A comma in a parsed hostname would split CORS_ALLOWED_ORIGINS into
@@ -32,7 +34,7 @@ export function prepareStocksIntegrationBundle(manifestValue: unknown, settingsV
   const rpcUrl = url(settings.rpcUrl, false), publicRpcUrl = url(settings.publicRpcUrl, false);
   const signerUrl = url(settings.signerUrl, true), apiBaseUrl = url(settings.apiBaseUrl, true);
   ensure(Array.isArray(settings.frontendOrigins) && settings.frontendOrigins.length > 0 && settings.frontendOrigins.length <= 10, 'INVALID_FRONTEND_ORIGINS');
-  const origins = settings.frontendOrigins.map(value => url(value, true));
+  const origins = settings.frontendOrigins.map(value => url(value, true, true));
   ensure(new Set(origins).size === origins.length, 'DUPLICATE_FRONTEND_ORIGIN');
   ensure(Array.isArray(settings.operators) && settings.operators.length > 0 && settings.operators.length <= 100, 'INVALID_BUNDLE_OPERATORS');
   const operators = settings.operators.map(value => {
@@ -54,7 +56,7 @@ export function prepareStocksIntegrationBundle(manifestValue: unknown, settingsV
     serverEnvironment: { STOCKS_MODE: 'DEMO_TESTNET', STOCKS_AUTODISPATCH: '1', CORS_ALLOWED_ORIGINS: origins.join(',') },
     // Browser RPC is separately supplied; the server RPC/signing endpoint must
     // never be copied into a browser build by inference.
-    browserEnvironment: { VITE_ARCO_API_BASE: apiBaseUrl, VITE_PUBLIC_GIWA_RPC: publicRpcUrl,
+    browserEnvironment: { VITE_ARCO_API_BASE: apiBaseUrl, VITE_PUBLIC_GIWA_RPC: publicRpcUrl, VITE_CUSTOMER_PRESENTATION: 'true',
       VITE_GIWA_ADMIN_ADDRESSES: operators.map(op => op.wallet).join(',') },
     frontendOrigins: origins, siweDomains: origins.map(origin => new URL(origin).host),
     requiredServerOnlyNames: ['DATABASE_URL', 'DIRECT_URL', 'INDEXER_RPC_URL', 'AUTH_JWT_SECRET', 'ADMIN_OPERATOR_TOKEN', 'STOCKS_SIGNER_TOKEN', 'STOCKS_CONFIG_PATH'],

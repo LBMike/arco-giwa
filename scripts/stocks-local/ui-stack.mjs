@@ -185,6 +185,8 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
     const next = buildApp(appEnv, { ...legacy,
       // Display-only market reads are isolated from trade quote/settlement.
       stocksMarketData: marketDisplay,
+      stocksMarketClock: typeof marketDisplay.marketSession === 'function'
+        ? { get: () => marketDisplay.marketSession() } : undefined,
       stocksTradingControl: controlPort && !controlFaults.disabled ? { service: controlPort, ...resolvers } : undefined,
       stocks: { service: runtime.service, ...resolvers, reconciliationCoverage: runtime.reconciliationCoverage },
       stocksExecution: { service: runtime.execution, ...resolvers },

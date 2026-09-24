@@ -2,9 +2,9 @@ import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 import { useCallback, useId, useMemo, useState, type MouseEvent, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { CirclePause, Search } from "lucide-react"
-import type { Catalog, Chart, Envelope, Profile, Quote } from "./contracts"
+import type { Catalog, Chart, Envelope, NvdaLiveSnapshot, Profile, Quote } from "./contracts"
 import { CURATED_SELECTION, curatedStock, matchesCuratedSelection, type CuratedStock } from "./curated"
-import { assetSize, changeParts, chartPoints, dollars, compactDollars, volumeDollars, marketSourceLabel, FEED_LABELS, priceLabel, windowChange } from "./display"
+import { assetSize, changeParts, chartPoints, dollars, compactDollars, volumeDollars, marketSourceLabel, FEED_LABELS, priceLabel, time, windowChange } from "./display"
 import { StockLogo } from "./StockLogo"
 import { useOwnedRead, type ReadState } from "./useOwnedRead"
 import { scaled } from "./validate"
@@ -24,7 +24,26 @@ export type TableView = { filter: TableFilter; query: string; sort: TableSort }
 export const DEFAULT_TABLE_VIEW: TableView = Object.freeze({ filter: "ALL", query: "", sort: "rank" })
 export type StocksMarketTableProps = { catalog: Catalog; quotes: ReadState<Envelope<Quote[]>>; capabilities: Capabilities; series: Readonly<Record<string, Chart>>; profiles?: Readonly<Record<string, Profile>>; variant: "full" | "home"; selectedSymbol?: string; onSelect?: (symbol: string) => void; rowHref?: (symbol: string) => string; limit?: number; view?: TableView; onViewChange?: (view: TableView) => void }
 
-export function MarketStatus({ status }: { status: string }) { const demo = useDemoPresentation(); if (demo && status === "STALE") return null; return <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{status === "loading" ? "시장정보 불러오는 중…" : status === "UNCONFIGURED" ? "시세 연결 준비 중" : status === "STALE" ? "마지막 확인 시세 · 오래된 데이터" : "시세를 불러올 수 없습니다"}</p> }
+export function MarketStatus({ status }: { status: string }) { const demo = useDemoPresentation(); return <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{status === "loading" ? "시장정보 불러오는 중…" : status === "UNCONFIGURED" ? "시세 연결 준비 중" : status === "STALE" ? demo ? "마지막 확인 시세" : "마지막 확인 시세 · 오래된 데이터" : "시세를 불러올 수 없습니다"}</p> }
+
+const NEW_YORK_DAY = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "short", day: "2-digit" })
+/** One list-level freshness notice; the raw row status and each observation timestamp stay intact. */
+export function MarketQuoteStatus({ quotes, marketSession }: { quotes: ReadState<Envelope<Quote[]>>; marketSession?: NvdaLiveSnapshot["marketSession"] | null }) {
+  const demo = useDemoPresentation()
+  if (quotes.phase !== "ready") return <MarketStatus status={quotes.phase} />
+  if (quotes.value.status === "AVAILABLE") return null
+  if (!demo || quotes.value.status !== "STALE") return <MarketStatus status={quotes.value.status} />
+  const priced = (quotes.value.data ?? []).filter(row => row.price !== null)
+  const stale = priced.filter(row => row.status === "STALE")
+  if (!stale.length) return <MarketStatus status={quotes.value.status} />
+  const days = new Set(stale.flatMap(row => row.sourceTimestamp ? [NEW_YORK_DAY.format(new Date(row.sourceTimestamp))] : []))
+  const day = days.size === 1 && stale.every(row => row.sourceTimestamp !== null) ? [...days][0] : null
+  const closed = marketSession?.state === "CLOSED" && quotes.value.reason === "OLD_OBSERVATION" && stale.every(row => row.reason === "OLD_OBSERVATION")
+  const delayed = marketSession?.state === "OPEN" || quotes.value.reason !== "OLD_OBSERVATION"
+  const prefix = closed ? "미국 주식시장 장 마감" : delayed ? "시세 업데이트 지연" : null
+  const scope = stale.length < priced.length ? "일부 종목의 마지막 관측 시세" : "마지막 관측 시세"
+  return <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{[prefix, scope, day].filter(Boolean).join(" · ")}</p>
+}
 
 type Row = { symbol: string; name: string; rank: number | null; position: number; curated: CuratedStock | null; quote: Quote | null }
 export type TableSort = "rank" | "gainer" | "loser" | "priceHigh" | "priceLow"
@@ -71,13 +90,13 @@ function Change({ raw, unit }: { raw: string | null; unit: "$" | "%" }) {
   const up = parts.direction === "up"
   return <span className={`inline-flex items-center gap-1 ${up ? "text-[var(--color-arco-up-text)]" : "text-[var(--color-arco-down)]"}`}><Triangle up={up} /><span className="sr-only">{up ? "상승 " : "하락 "}</span>{text}</span>
 }
-/** Order capability for one symbol, as the Asset Status column and the detail header show it. */
+/** The preview shows its testnet listing label; the normal app still shows the server's order capability. */
 export function StatusBadge({ symbol, capabilities }: { symbol: string; capabilities: Capabilities }) {
   const capability = capabilities.phase === "ready" ? capabilities.bySymbol.get(symbol) ?? null : null
   const base = "inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full bg-[var(--color-arco-chip)] px-2 text-xs font-medium"
   const badge = `${base} text-[var(--color-arco-ink)]`, quiet = `${base} text-[var(--color-arco-chip-ink)]`
   const demo = useDemoPresentation()
-  if (demo) return <span className={badge}>{capabilities.phase !== "ready" ? "—" : capability === "CHECK_PAUSE_AT_ORDER" ? "Available" : "Coming soon"}</span>
+  if (demo) return <span className="inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full bg-[var(--color-arco-stock-chart-chip)] px-2 text-xs font-medium leading-4 tracking-[-0.14px] text-[var(--color-arco-up-text)]" title="테스트넷 리스팅 표시 · 토큰 발행 및 주문 가능 여부와 별개"><span aria-hidden="true" className="relative inline-flex size-3 shrink-0 items-center justify-center"><span className="arco-live-heartbeat absolute inset-0 rounded-full bg-[var(--color-arco-up-text)] opacity-40" /><span className="relative size-2 rounded-full bg-[var(--color-arco-up-text)]" /></span>Live</span>
   if (capabilities.phase === "loading") return <span className={badge}>확인 중</span>
   if (capabilities.phase === "error") return <span className={badge}>상태 확인 불가</span>
   if (capability === "CHECK_PAUSE_AT_ORDER") return <span className={badge} title="테스트넷 모의 주문 · 주문 시점에 일시중지 여부 확인"><span aria-hidden="true" className="relative inline-flex size-3 shrink-0 items-center justify-center"><span className="absolute inset-0 rounded-full bg-[var(--color-arco-up)] opacity-40" /><span className="relative size-2 rounded-full bg-[var(--color-arco-up)]" /></span>모의 주문</span>
@@ -95,7 +114,7 @@ function Sparkline({ chart }: { chart: Chart }) {
   const y = (v: number) => (max === min ? 24 : 2 + (1 - (v - min) / (max - min)) * 44).toFixed(2)
   const segments = [...new Set(points.map(point => point.segment))].map(segment => points.filter(point => point.segment === segment))
   const change = windowChange(chart).slice(1)
-  return <svg role="img" aria-label={`최근 24시간 종가 추이 · ${direction === "up" ? "상승" : direction === "down" ? "하락" : "보합"} ${change}`} width={148} height={48} viewBox="0 0 148 48" className={direction === "up" ? "text-[var(--color-arco-up)]" : direction === "down" ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-text-soft)]"}>
+  return <svg role="img" aria-label={`최근 관측 거래일 종가 추이 · ${direction === "up" ? "상승" : direction === "down" ? "하락" : "보합"} ${change}`} width={148} height={48} viewBox="0 0 148 48" className={direction === "up" ? "text-[var(--color-arco-stock-chart-up)]" : direction === "down" ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-text-soft)]"}>
     <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="currentColor" stopOpacity={0.24} /><stop offset="1" stopColor="currentColor" stopOpacity={0} /></linearGradient></defs>
     {segments.map(segment => {
       if (segment.length === 1) return <circle key={segment[0].index} cx={x(segment[0].timestamp)} cy={y(segment[0].coordinate)} r={1.5} fill="currentColor" />
@@ -106,6 +125,7 @@ function Sparkline({ chart }: { chart: Chart }) {
 }
 
 export function StocksMarketTable({ catalog, quotes, capabilities, series, profiles = {}, variant, selectedSymbol, onSelect, rowHref, limit, view, onViewChange }: StocksMarketTableProps) {
+  const demo = useDemoPresentation()
   const full = variant === "full"
   const [ownView, setOwnView] = useState<TableView>(DEFAULT_TABLE_VIEW)
   const { filter, query, sort } = view ?? ownView
@@ -156,10 +176,10 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, profi
             <div role="columnheader" className={`${HEAD} ${STICKY_ASSET} md:bg-[var(--color-arco-surface)]`}>Asset Name</div>
             <div role="columnheader" className={`${HEAD} md:px-3`}>Price<DemoDetails><sup aria-hidden="true" className="ml-0.5 text-xs text-[var(--color-arco-muted)]">1</sup></DemoDetails></div>
             <div role="columnheader" className={`${HEAD} md:px-3`}>24H (%)</div>
-            <div role="columnheader" className={`${HEAD} hidden md:block md:px-3`}>Market Cap / AUM</div>
+            <div role="columnheader" className={`${HEAD} hidden md:block md:px-3`} title="Stocks: market capitalization · ETFs: assets under management">Mkt Cap</div>
             <div role="columnheader" className={`${HEAD} hidden md:block md:pl-3`} title={`${provider} · Estimated session turnover: shares traded × displayed price`}>Volume (USD)</div>
             <div role="columnheader" className={HEAD}>Asset Status</div>
-            {full && <div role="columnheader" className={`${HEAD} hidden md:block md:px-1.5`}>24h Chart</div>}
+            {full && <div role="columnheader" className={`${HEAD} hidden md:block md:px-1.5`}>1D Chart</div>}
           </div>
         </div>
         <div role="rowgroup">
@@ -179,12 +199,12 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, profi
               {cell(`col-start-2 row-start-1 ${RESET} ${STICKY_ASSET} ${surface}`, full
                 ? <button type="button" data-row-primary="" data-symbol={row.symbol} aria-pressed={selectedSymbol === undefined ? undefined : selected} onClick={() => onSelect?.(row.symbol)} className={primary}>{label}</button>
                 : rowHref ? <Link to={rowHref(row.symbol)} data-row-primary="" className={primary}>{label}</Link> : <span className={primary}>{label}</span>)}
-              {cell(`col-start-3 row-start-1 text-right text-base font-medium tabular-nums text-[var(--color-arco-ink)] md:px-3 md:text-left ${RESET}`, <><span title={quote?.price ? dollars(quote.price) : undefined}>{priceLabel(quote?.price ?? null)}</span><DemoDetails>{quote?.status === "STALE" && <span className="block text-xs font-normal text-[var(--color-arco-text-soft)]">오래된 데이터</span>}</DemoDetails></>)}
+              {cell(`col-start-3 row-start-1 text-right text-base font-medium tabular-nums text-[var(--color-arco-ink)] md:px-3 md:text-left ${RESET}`, <><span title={quote?.price ? `${dollars(quote.price)}${quote.status === "STALE" && quote.sourceTimestamp ? ` · 마지막 관측 ${time(quote.sourceTimestamp)}` : ""}` : undefined}>{priceLabel(quote?.price ?? null)}</span>{quote?.status === "STALE" && (demo ? <span className="sr-only">마지막 관측 시세{quote.sourceTimestamp ? ` · ${time(quote.sourceTimestamp)}` : ""}</span> : <span className="block text-xs font-normal text-[var(--color-arco-text-soft)]">오래된 데이터</span>)}</>)}
               {cell(`col-start-3 row-start-2 text-right text-sm tabular-nums md:px-3 md:text-left ${RESET}`, <Change raw={quote?.changePercent ?? null} unit="%" />)}
               {cell("hidden text-sm font-medium tabular-nums text-[var(--color-arco-ink)] md:block md:px-3", <span title={size.title}>{compactDollars(size.value)}</span>)}
               {cell("hidden text-sm font-medium tabular-nums text-[var(--color-arco-ink)] md:block md:pl-3", <span title={volume === null ? undefined : `Estimated session turnover: ${dollars(volume)} (shares × price)`}>{compactDollars(volume)}</span>)}
               {cell(`col-start-2 row-start-2 ${RESET}`, <StatusBadge symbol={row.symbol} capabilities={capabilities} />)}
-              {full && cell("hidden md:flex md:h-12 md:w-40 md:items-center md:justify-center", series[row.symbol] && series[row.symbol].bars.length >= 2 ? <Sparkline chart={series[row.symbol]} /> : <><span aria-hidden="true" className="text-[var(--color-arco-muted)]">—</span><span className="sr-only">24시간 차트 데이터 없음</span></>)}
+              {full && cell("hidden md:flex md:h-12 md:w-40 md:items-center md:justify-center", series[row.symbol] && series[row.symbol].bars.length >= 2 ? <Sparkline chart={series[row.symbol]} /> : <><span aria-hidden="true" className="text-[var(--color-arco-muted)]">—</span><span className="sr-only">1D 차트 데이터 없음</span></>)}
             </div>
           })}
         </div>
@@ -192,7 +212,7 @@ export function StocksMarketTable({ catalog, quotes, capabilities, series, profi
     </div>
     {shown.length === 0 && <p className="border-b border-[var(--color-arco-border)] py-6 text-center text-sm text-[var(--color-arco-text-soft)]">검색 결과가 없습니다.</p>}
     <DemoDetails><div className="mt-4 space-y-1 text-xs leading-5 text-[var(--color-arco-text-soft)]">
-      <p>{`¹ Price는 기초 미국 주식·ETF의 USD 시세(${provider}, ${feed})이며 ARCO 토큰 가격이나 모의 체결가가 아닙니다. 24H (%)는 전일 종가 대비 변동입니다. Market Cap은 주식 시가총액, AUM은 ETF 운용자산입니다. Volume (USD)은 세션 거래량 × 표시 가격으로 계산한 추정 거래대금입니다.${full ? " 24h Chart는 각 종목의 1D(rolling 24시간) 종가입니다." : ""}`}</p>
+      <p>{`¹ Price는 기초 미국 주식·ETF의 USD 시세(${provider}, ${feed})이며 ARCO 토큰 가격이나 모의 체결가가 아닙니다. 24H (%)는 전일 종가 대비 변동입니다. Market Cap은 주식 시가총액, AUM은 ETF 운용자산입니다. Volume (USD)은 세션 거래량 × 표시 가격으로 계산한 추정 거래대금입니다.${full ? " 1D Chart는 최근 관측 거래일의 종가입니다." : ""}`}</p>
       <p>{source}</p>
       {curated && <p>선정 참고: {CURATED_SELECTION.source} · {CURATED_SELECTION.metric} · {CURATED_SELECTION.period} · {CURATED_SELECTION.retrievedDate} 조회 · {CURATED_SELECTION.note}</p>}
     </div></DemoDetails>

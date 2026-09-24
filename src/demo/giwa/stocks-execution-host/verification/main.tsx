@@ -89,7 +89,7 @@ const HOST_DEPENDENCIES: HostDependencies = {
   async signMessage() { return FIXTURE_SIGNATURE },
   now: () => Date.now(),
 }
-const PAGE_ENVIRONMENT = { apiBase: ORIGIN, activeWalletSource: readActiveSource }
+const PAGE_ENVIRONMENT = { apiBase: ORIGIN, liveNvda: document.querySelector('meta[name="giwa-live-market"]')?.getAttribute("content") === "iex", activeWalletSource: readActiveSource }
 const router = createMemoryRouter(stocksRoutes(<Outlet />), { initialEntries: ["/stocks"] })
 
 async function postControl(body: Record<string, unknown>): Promise<Record<string, unknown>> {

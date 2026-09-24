@@ -13,14 +13,17 @@ export type HighlightGroups = { gainers: HighlightRow[]; trending: HighlightRow[
 const LISTING_BATCHES: readonly (readonly string[])[] = [CURATED_STOCKS.filter(row => row.symbol !== "NVDA").map(row => row.symbol)]
 const EMPTY: readonly Quote[] = []
 
-/** Only securities in the active server catalog can appear; stale/missing quotes cannot rank. */
+/** Rank current observations when present; after hours, use the last observed session. */
 export function stockHighlights(catalog: Catalog | null, quotes: readonly Quote[] = EMPTY): HighlightGroups {
-  const bySymbol = new Map(quotes.filter(quote => quote.status === "AVAILABLE").map(quote => [quote.symbol, quote]))
+  const observed = quotes.filter(quote => (quote.status === "AVAILABLE" || quote.status === "STALE") && quote.price !== null)
+  const bySymbol = new Map(observed.map(quote => [quote.symbol, quote]))
   const rows = [...new Map((catalog?.securities ?? []).map(security => [security.symbol, security])).values()]
     .map(security => ({ security, quote: bySymbol.get(security.symbol) ?? null }))
-  const gainers = rows.filter(row => row.quote?.price != null && row.quote.changePercent != null && scaled(row.quote.changePercent) > 0n)
+  const rankStatus = rows.some(row => row.quote?.status === "AVAILABLE") ? "AVAILABLE" : "STALE"
+  const ranking = rows.filter(row => row.quote?.status === rankStatus)
+  const gainers = ranking.filter(row => row.quote?.price != null && row.quote.changePercent != null && scaled(row.quote.changePercent) > 0n)
     .sort((a, b) => descending(scaled(a.quote!.changePercent!), scaled(b.quote!.changePercent!)) || tie(a, b)).slice(0, 3)
-  const trending = rows.map(row => ({ row, volume: volumeDollars(row.quote?.price ?? null, row.quote?.sessionVolume ?? null) }))
+  const trending = ranking.map(row => ({ row, volume: volumeDollars(row.quote?.price ?? null, row.quote?.sessionVolume ?? null) }))
     .filter((item): item is { row: HighlightRow; volume: string } => item.volume !== null && scaled(item.volume) > 0n)
     .sort((a, b) => descending(scaled(a.volume), scaled(b.volume)) || tie(a.row, b.row)).slice(0, 3).map(item => item.row)
   const active = new Map(rows.map(row => [row.security.symbol, row]))

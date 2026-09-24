@@ -4,7 +4,7 @@ import { configuredStocksRuntime, stocksAutodispatch } from "./stocks-runtime/ru
 import { closeOnce, installServerShutdown, startManagedStocksServer } from "./stocks-runtime/lifecycle.js"
 import { stocksSessionResolvers } from "./stocks-runtime/session.js"
 import { StocksSubmissionsService } from "./stocks-submissions/service.js"
-import { configuredStocksMarketData } from "./stocks-market-runtime/config.js"
+import { configuredStocksMarketClock, configuredStocksMarketData } from "./stocks-market-runtime/config.js"
 import type { StocksMarketDataService } from "./stocks-market-data/index.js"
 import { createPublicClient, http, keccak256, parseAbi, toBytes, type Hex } from "viem"
 import { buildApp, type PauseStateVaultRef, type VaultPauseState } from "./app.js"
@@ -26,10 +26,11 @@ export async function startServer(envSource: NodeJS.ProcessEnv = process.env, cl
   const env = validateServerEnv(envSource)
   const autodispatch = stocksAutodispatch(envSource)
   const stocksMarketData = configuredStocksMarketData(envSource)
+  const stocksMarketClock = configuredStocksMarketClock(envSource)
   const prisma = createPrismaClient()
   const closeDatabase = closeOnce(() => prisma.$disconnect())
   try {
-    return await composeServer(envSource, env, prisma, closeDatabase, autodispatch, cliOwnsSignals, stocksMarketData)
+    return await composeServer(envSource, env, prisma, closeDatabase, autodispatch, cliOwnsSignals, stocksMarketData, stocksMarketClock)
   } catch (error) {
     await closeDatabase()
     throw error
@@ -44,6 +45,7 @@ async function composeServer(
   autodispatch: boolean,
   cliOwnsSignals: boolean,
   stocksMarketData: StocksMarketDataService,
+  stocksMarketClock: ReturnType<typeof configuredStocksMarketClock>,
 ) {
   const arco = new PrismaArcoService(prisma)
   const registry = new EvmRegistryService(arco)
@@ -307,7 +309,7 @@ async function composeServer(
           registryPath: env.registryPath,
         },
         {
-          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits, stocksMarketData,
+          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits, stocksMarketData, stocksMarketClock,
           stocks: stocks ? {
             service: stocks.service,
             reconciliationCoverage: stocks.reconciliationCoverage,

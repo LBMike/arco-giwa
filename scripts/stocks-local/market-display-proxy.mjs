@@ -46,6 +46,24 @@ function marketSymbol(value) {
   if (!SYMBOL.test(result)) invalid();
   return result;
 }
+const unknownMarketSession = () => ({ state: 'UNKNOWN', observedAt: null, nextOpen: null, nextClose: null });
+function parseMarketSession(value) {
+  const input = row(value);
+  if (input.schemaVersion !== 1 || input.symbol !== 'NVDA') invalid();
+  const session = row(input.marketSession);
+  const state = oneOf(session.state, new Set(['OPEN', 'CLOSED', 'UNKNOWN']));
+  const observedAt = nullable(session.observedAt, timestamp);
+  const nextOpen = nullable(session.nextOpen, timestamp);
+  const nextClose = nullable(session.nextClose, timestamp);
+  if (state === 'UNKNOWN') {
+    if (observedAt !== null || nextOpen !== null || nextClose !== null) invalid();
+  } else {
+    if (!observedAt || !nextOpen || !nextClose || Date.parse(observedAt) >= Date.parse(nextOpen) ||
+        Date.parse(observedAt) >= Date.parse(nextClose) ||
+        (state === 'OPEN') !== (Date.parse(nextClose) < Date.parse(nextOpen))) invalid();
+  }
+  return { state, observedAt, nextOpen, nextClose };
+}
 function parseEnvelope(value, parseData, expectedProvider, expectedFeed) {
   const input = row(value);
   for (const [key, expected] of Object.entries(CONTEXT)) if (input[key] !== expected) invalid();
@@ -238,6 +256,10 @@ export async function createMarketDisplayProxy({ origin, fetcher = fetch, timeou
   return {
     catalog: () => structuredClone(initial),
     hasSymbol: symbol => symbols.has(symbol),
+    marketSession: async () => {
+      try { return parseMarketSession(await read('NVDA/live')); }
+      catch { return unknownMarketSession(); }
+    },
     quotes: () => guarded('quotes', value => parseQuotes(value, symbols)),
     profile: symbol => { requireSymbol(symbol); return guarded(`${symbol}/profile`, value => parseProfile(value, symbol), 'MASSIVE', null); },
     chart: (symbol, range) => { requireSymbol(symbol); if (!RANGES.has(range)) throw Error('INVALID_MARKET_RANGE');

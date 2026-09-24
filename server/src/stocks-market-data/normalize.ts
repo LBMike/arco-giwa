@@ -58,16 +58,26 @@ export function profile(input: unknown, symbol: string): InternalProfile {
 }
 export const RANGE_RULES = Object.freeze({ '1D': { days: 1, multiplier: 5, timespan: 'minute', interval: '5m', width: 300000 }, '1W': { days: 7, multiplier: 1, timespan: 'hour', interval: '1h', width: 3600000 }, '1M': { days: 31, multiplier: 1, timespan: 'day', interval: '1d', width: 86400000 }, '3M': { days: 93, multiplier: 1, timespan: 'day', interval: '1d', width: 86400000 }, '1Y': { days: 366, multiplier: 1, timespan: 'day', interval: '1d', width: 86400000 } } as const);
 export function chartWindow(range: ChartRange, now: number) { return { from: now - RANGE_RULES[range].days * 86400000, to: now }; }
+// A rolling 24-hour request is empty throughout weekends and market holidays. Ask for a bounded
+// calendar-week lookback, then publish only the latest New York trading date as the 1D series.
+export function chartRequestWindow(range: ChartRange, now: number) { return { from: now - (range === '1D' ? 7 : RANGE_RULES[range].days) * 86400000, to: now }; }
+const tradingDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+export function chartSession<T extends { timestamp: string }>(bars: T[], range: ChartRange, now: number): { bars: T[]; from: string; to: string } {
+  if (range !== '1D' || !bars.length) return { bars, from: new Date(chartWindow(range, now).from).toISOString(), to: new Date(now).toISOString() };
+  const latest = Date.parse(bars[bars.length - 1].timestamp);
+  const date = tradingDate.format(latest);
+  return { bars: bars.filter(bar => tradingDate.format(Date.parse(bar.timestamp)) === date), from: new Date(latest - 86400000).toISOString(), to: new Date(latest).toISOString() };
+}
 export function chartPath(symbol: string, range: ChartRange, now: number): string {
-  const rule = RANGE_RULES[range]; const window = chartWindow(range, now);
+  const rule = RANGE_RULES[range]; const window = chartRequestWindow(range, now);
   return `/v2/aggs/ticker/${symbol}/range/${rule.multiplier}/${rule.timespan}/${window.from}/${window.to}?adjusted=true&sort=asc&limit=50000`;
 }
 export function chart(input: unknown, symbol: string, range: ChartRange, now: number): Chart {
-  const row = providerObject(input); const window = chartWindow(range, now); const rule = RANGE_RULES[range];
+  const row = providerObject(input); const window = chartRequestWindow(range, now); const rule = RANGE_RULES[range];
   if (row.ticker !== symbol || row.adjusted !== true || (row.results != null && !Array.isArray(row.results))) return invalid();
   const entries = (row.results ?? []) as unknown[];
   // Bound retained chart memory by the selected interval, not just provider bytes.
-  const maxBars = Math.ceil(rule.days * 86400000 / rule.width) + 2;
+  const maxBars = Math.ceil((window.to - window.from) / rule.width) + 2;
   if (entries.length > maxBars) return invalid();
   if (row.resultsCount != null && integer(row.resultsCount) !== BigInt(entries.length)) return invalid();
   if (row.queryCount != null && integer(row.queryCount) > 50000n) return invalid();
@@ -82,7 +92,8 @@ export function chart(input: unknown, symbol: string, range: ChartRange, now: nu
     bars.push({ timestamp: new Date(time).toISOString(), open, high, low, close, volume });
   }
   const truncated = row.next_url != null || (row.queryCount != null && integer(row.queryCount) >= 50000n) || entries.length === 50000;
-  return { symbol, currency: 'USD', range, interval: rule.interval, adjustedForSplits: true, from: new Date(window.from).toISOString(), to: new Date(window.to).toISOString(), bars, history: truncated ? 'TRUNCATED' : bars.length ? 'RETURNED_WINDOW' : 'EMPTY', complete: !truncated };
+  const session = chartSession(bars, range, now);
+  return { symbol, currency: 'USD', range, interval: rule.interval, adjustedForSplits: true, from: session.from, to: session.to, bars: session.bars, history: truncated ? 'TRUNCATED' : session.bars.length ? 'RETURNED_WINDOW' : 'EMPTY', complete: !truncated };
 }
 
 /** ETF Global profiles: AUM is its own measure, never the ticker's market_cap. */

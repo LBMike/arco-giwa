@@ -191,7 +191,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     const charts = m.calls.filter(url => url.includes("/chart"))
     assert.equal(new Set(charts.map(url => new URL(url).pathname.split("/")[5])).size, 40, "each listed symbol has its own chart request")
     await m.close()
-    assert.ok(m.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!.querySelector('svg[role="img"][aria-label^="최근 24시간 종가 추이"]'))
+    assert.ok(m.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!.querySelector('svg[role="img"][aria-label^="최근 관측 거래일 종가 추이"]'))
     assert.equal(m.table().querySelectorAll('svg[role="img"]').length, 37)
     const before = m.calls.length
     await m.run(() => {})
@@ -233,7 +233,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     assert.ok(m.calls.some(url => url.includes("/SGOV/chart?range=1D")), "the SGOV detail loaded its 1D chart")
     await m.close()
     assert.equal(spark("SGOV"), null, "a STALE series stays in the detail with its notice")
-    assert.match(m.rows().find(item => item.querySelector('[data-symbol="SGOV"]'))!.textContent!, /24시간 차트 데이터 없음/)
+    assert.match(m.rows().find(item => item.querySelector('[data-symbol="SGOV"]'))!.textContent!, /1D 차트 데이터 없음/)
   })
 
   await t.test("a finished 1D re-read that is not current clears the row sparkline; the next valid read restores it", async (st) => {
@@ -264,7 +264,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
         await reselect(outcome)
         assert.equal(replaced[replaced.length - 1], outcome, `${outcome}: the replacement answer was requested`)
         assert.equal(Boolean(spark()), false, `${outcome}: the old sparkline is gone`)
-        assert.match(row().textContent!, /24시간 차트 데이터 없음/, `${outcome}: the row falls back to the not-loaded state`)
+        assert.match(row().textContent!, /1D 차트 데이터 없음/, `${outcome}: the row falls back to the not-loaded state`)
         await reselect(null)
         assert.equal(spark()?.getAttribute("aria-label"), valid, `${outcome}: a following valid read restores it`)
       })

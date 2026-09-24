@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url"
 
 import { getAddress } from "viem"
 import { customerGateway } from "../../../../../scripts/customer-demo/gateway"
+import { createSnapshotStreamHub } from "../../../../../server/src/stocks-market-data/live-stream"
 
 import type { Side } from "../../stocks-wallet/types"
 import type { NetworkVariant } from "../testing/fake-chain"
@@ -120,6 +121,17 @@ async function main() {
   const customer = customerReads ? customerGateway({ origin, authEnabled: customerAuth, tradesEnabled: customerTrades }) : null
   const liveMarket = process.argv.includes("--live-market")
     ? await (await import("../../../../../scripts/stocks-local/live-market")).createLiveMarket() : null
+  // Fastify.inject() buffers until a response ends, so the preview relays finite
+  // snapshots through its own bounded SSE hub instead of injecting the SSE route.
+  const previewLiveHub = liveMarket ? createSnapshotStreamHub({
+    intervalMs: 60_000,
+    read: async () => {
+      const answer = await liveMarket.inject({ method: "GET", url: "/api/v1/stocks/market/NVDA/live" })
+      if (answer.statusCode !== 200) throw new Error("PREVIEW_LIVE_SNAPSHOT_UNAVAILABLE")
+      return answer.json() as Json
+    },
+  }) : null
+  const previewLiveClients = new Set<ServerResponse>()
   const harness = await createInProcessStocks({ frontendOrigin: origin })
   const wallets: Record<Account, FakeEip1193Wallet> = {
     A: createFakeEip1193Wallet(harness.chain, { account: ACCOUNTS.A }),
@@ -305,6 +317,39 @@ async function main() {
           if (liveMarket && route.startsWith("/api/v1/stocks/market/")) {
             if (request.headers.host !== `${HOST}:${port}` || (request.headers.origin && request.headers.origin !== origin) || request.headers["sec-fetch-site"] === "cross-site") return sendJson(response, 403, { error: "FORBIDDEN" })
             if (method !== "GET") return sendJson(response, 405, { error: "METHOD_NOT_ALLOWED" })
+            if (route === "/api/v1/stocks/market/NVDA/live/stream") {
+              if (url !== route) return sendJson(response, 400, { error: "INVALID_QUERY" })
+              if (!previewLiveHub || previewLiveHub.subscriberCount() >= 64) return sendJson(response, 503, { error: "STREAM_CAPACITY" })
+              response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store, no-transform", "x-content-type-options": "nosniff", "x-accel-buffering": "no" })
+              previewLiveClients.add(response)
+              let active = true
+              let unsubscribe = () => {}
+              let heartbeat: ReturnType<typeof setInterval> | undefined
+              const close = () => {
+                if (!active) return
+                active = false
+                clearInterval(heartbeat)
+                unsubscribe()
+                previewLiveClients.delete(response)
+                if (!response.writableEnded) response.end()
+              }
+              response.on("close", close)
+              try { if (!response.write(": connected\n\n")) { close(); return } }
+              catch { close(); return }
+              try {
+                unsubscribe = previewLiveHub.subscribe(snapshot => {
+                  if (!active || response.writableEnded || !response.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`)) close()
+                })
+              } catch { close(); return }
+              // A late subscriber receives the cached snapshot synchronously.
+              // If that write closes the client, release its hub slot now.
+              if (!active) { unsubscribe(); return }
+              heartbeat = setInterval(() => {
+                if (!active || response.writableEnded || !response.write(": keepalive\n\n")) close()
+              }, 15_000)
+              heartbeat.unref()
+              return
+            }
             const answer = await liveMarket.inject({ method: "GET", url })
             response.writeHead(answer.statusCode, { "content-type": "application/json", "cache-control": "no-store", "x-content-type-options": "nosniff" })
             response.end(answer.body); return
@@ -348,6 +393,9 @@ async function main() {
   const shutdown = () => {
     if (closing) return
     closing = true
+    previewLiveHub?.close()
+    for (const client of previewLiveClients) client.end()
+    previewLiveClients.clear()
     Promise.allSettled([server.close(), harness.close(), liveMarket?.close()]).then(() => process.exit(0), () => process.exit(1))
   }
   process.on("SIGINT", shutdown)

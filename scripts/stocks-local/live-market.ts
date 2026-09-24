@@ -3,6 +3,7 @@ import { parse } from "dotenv"
 import Fastify from "fastify"
 import { configuredStocksMarketData } from "../../server/src/stocks-market-runtime/config"
 import { stocksMarketDataPlugin } from "../../server/src/stocks-market-data/plugin"
+import { createAlpacaMarketClock } from "../../server/src/stocks-market-data/session"
 
 function optionalMassiveCredentials(): Record<string, string> {
   try { return parse(readFileSync(new URL("../../.secrets/massive.env", import.meta.url))) }
@@ -25,8 +26,13 @@ export async function createLiveMarket(ports: { readCredentials?: () => Record<s
     ALPACA_DATA_FEED: "iex",
     STOCKS_MARKET_DATA_FEED_DELAY: "REALTIME",
   }, { requestsPerMinute: 60, massiveRequestsPerMinute: 4, etfGlobalEnabled: false, issuerFundamentalsEnabled: true, fetch: ports.fetch })
+  const marketClock = createAlpacaMarketClock({
+    keyId: values.ALPACA_API_KEY_ID,
+    secretKey: values.ALPACA_API_SECRET_KEY,
+    fetch: ports.fetch,
+  })
   const app = Fastify({ logger: false })
-  await app.register(stocksMarketDataPlugin, { service })
+  await app.register(stocksMarketDataPlugin, { service, marketClock })
   await app.ready()
   return app
 }

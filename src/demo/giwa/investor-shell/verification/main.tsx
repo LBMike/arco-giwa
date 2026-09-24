@@ -233,7 +233,7 @@ const router = createHashRouter([
 
 /** Keyed by the market mode, so a mode switch re-mounts providers (new query cache) and pages. */
 function PreviewApp({ mode }: { mode: MarketMode }) {
-  const [environment] = useState(() => ({ apiBase: ORIGIN, fetch: stocksFetch(mode) }))
+  const [environment] = useState(() => ({ apiBase: ORIGIN, fetch: stocksFetch(mode), liveNvda: mode === "live" }))
   return (
     <Suspense fallback={null}>
       <GiwaPreprodProviders>

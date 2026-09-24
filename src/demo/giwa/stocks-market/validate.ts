@@ -1,4 +1,4 @@
-import type { Bar, Catalog, Chart, Envelope, Profile, Quote, Range, Status } from "./contracts"
+import type { Bar, Catalog, Chart, Envelope, NvdaLiveSnapshot, Profile, Quote, Range, Status } from "./contracts"
 export class MarketResponseError extends Error { constructor() { super("MARKET_RESPONSE_INVALID") } }
 const bad = (): never => { throw new MarketResponseError() }
 function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) return bad(); return value as Record<string, unknown> }
@@ -58,6 +58,57 @@ export function parseQuotes(value: unknown, symbols: readonly string[]): Quote[]
     if ((a.status === "UNAVAILABLE" || a.status === "UNCONFIGURED") && price !== null) return bad()
     return { ...a, symbol: name, currency: "USD", price, sourceTimestamp, priceSource, change: optional(r.change, v => decimal(v, true)), changePercent: optional(r.changePercent, v => decimal(v, true)), sessionVolume: optional(r.sessionVolume, decimal), previousClose: optional(r.previousClose, positive), observationAgeMs: optional(r.observationAgeMs, count) }
   })
+}
+/** Validate the independent NVDA display contract before any streamed value reaches the UI. */
+export function parseNvdaLiveSnapshot(value: unknown): NvdaLiveSnapshot {
+  const row = object(value)
+  if (row.schemaVersion !== 1 || row.symbol !== "NVDA") return bad()
+  const observedAt = timestamp(row.observedAt)
+  const underlying = object(row.underlying)
+  if (underlying.basis !== "UNDERLYING_SECURITY" || underlying.currency !== "USD") return bad()
+  const status = choice(underlying.status, STATUSES)
+  const reason = optional(underlying.reason, value => choice(value, REASONS))
+  const price = optional(underlying.price, positive)
+  const sourceTimestamp = optional(underlying.sourceTimestamp, timestamp)
+  const priceSource = optional(underlying.priceSource, value => choice(value, ["LAST_TRADE", "MINUTE_CLOSE"] as const))
+  const provider = optional(underlying.provider, value => choice(value, ["ALPACA", "MASSIVE"] as const))
+  const marketFeed = optional(underlying.marketFeed, value => choice(value, ["IEX", "SIP"] as const))
+  if ((provider === "ALPACA") !== (marketFeed !== null)) return bad()
+  if ((status === "AVAILABLE" || status === "STALE") && (price === null || sourceTimestamp === null || priceSource === null)) return bad()
+  if ((status === "UNAVAILABLE" || status === "UNCONFIGURED") && price !== null) return bad()
+  if (provider === null && price !== null) return bad()
+  if (sourceTimestamp !== null && Date.parse(sourceTimestamp) > Date.parse(observedAt) + 60_000) return bad()
+  const session = object(row.marketSession)
+  const state = choice(session.state, ["OPEN", "CLOSED", "UNKNOWN"] as const)
+  const sessionObservedAt = optional(session.observedAt, timestamp)
+  const nextOpen = optional(session.nextOpen, timestamp)
+  const nextClose = optional(session.nextClose, timestamp)
+  if (state === "UNKNOWN") {
+    if (sessionObservedAt !== null || nextOpen !== null || nextClose !== null) return bad()
+  } else if (sessionObservedAt === null || nextOpen === null || nextClose === null || Date.parse(sessionObservedAt) >= Math.min(Date.parse(nextOpen), Date.parse(nextClose)) || (state === "OPEN") !== (Date.parse(nextClose) < Date.parse(nextOpen))) return bad()
+  const token = object(row.token)
+  if (token.basis !== "ARCO_TOKEN" || token.indicativePrice !== null || token.status !== "UNAVAILABLE") return bad()
+  const execution = object(row.testnetExecution)
+  if (execution.mode !== "FIXED_MOCK_PRICE" || execution.quoteRequired !== true) return bad()
+  const executionStatus = choice(execution.status, ["CATALOG_ONLY", "UNAVAILABLE"] as const)
+  const unitPrice = optional(execution.unitPrice, positive)
+  if ((executionStatus === "CATALOG_ONLY") !== (unitPrice !== null)) return bad()
+  return {
+    schemaVersion: 1, symbol: "NVDA", observedAt,
+    underlying: {
+      basis: "UNDERLYING_SECURITY", currency: "USD", price,
+      change: optional(underlying.change, value => decimal(value, true)),
+      changePercent: optional(underlying.changePercent, value => decimal(value, true)),
+      sessionVolume: optional(underlying.sessionVolume, decimal),
+      previousClose: optional(underlying.previousClose, positive),
+      observationAgeMs: optional(underlying.observationAgeMs, count),
+      status, reason, sourceTimestamp, priceSource, provider, marketFeed,
+      feedDelay: choice(underlying.feedDelay, ["UNKNOWN", "DELAYED_15_MIN", "END_OF_DAY", "REALTIME"] as const),
+    },
+    marketSession: { state, observedAt: sessionObservedAt, nextOpen, nextClose },
+    token: { basis: "ARCO_TOKEN", indicativePrice: null, status: "UNAVAILABLE" },
+    testnetExecution: { mode: "FIXED_MOCK_PRICE", status: executionStatus, unitPrice, quoteRequired: true },
+  }
 }
 export function safeLogo(value: unknown, apiBase: string, name: string): string | null {
   if (value === null) return null

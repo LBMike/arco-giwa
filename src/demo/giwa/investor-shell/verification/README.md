@@ -241,24 +241,28 @@ an installed jsdom package.json and run the two `product-search*.test.tsx` files
 
 ## Stocks list metrics (2026-09-20)
 
-The Home and Stocks tables show Price, 24H (%), Market Cap / AUM, Volume (USD), and
+The Home and Stocks tables show Price, 24H (%), Mkt Cap, Volume (USD), and
 Asset Status; Stocks also shows a per-symbol 1D sparkline. The former 24h ($) change
 column is removed. Volume is an **estimate** of session turnover: exact decimal
 share volume × displayed price, compacted for display, with its calculation in the title.
 It is not a sum of actual trade consideration or a rolling 24-hour value.
+The Mkt Cap column retains ETF AUM values; its header tooltip explains the distinction.
 
 Stocks use profile.marketCap; ETFs use profile.aum, never marketCap as an AUM fallback.
 The current offline fixture has neither value, so valuations remain —. No valuation
 fixtures or market data were invented for this change. The server can enrich ETF profiles
 from Massive ETF Global when the configured account has that entitlement.
 
-The list reads each catalog symbol's profile and 1D chart using at most three concurrent
-requests, waits 60 seconds on provider/budget limits, and cancels pending work on unmount.
-It preserves the server's existing request budget. Real accounts at the default five
-requests/minute therefore fill the list progressively. Current fixture mode has 37 valid
-sparklines: SGOV is stale and SCHD/NBIS are unavailable. Detail rereads update the same
-chart state, including invalidation and later recovery. The Home list reads profiles for
-its ten rows and does not load hidden charts.
+The list reads each catalog symbol's profile and 1D chart using separate queues (two
+chart reads and one profile read at most), waits 60 seconds on provider/budget limits,
+and cancels pending work on unmount. This lets the chart feed fill sparklines while the
+slower fundamentals feed waits for its independent free-plan budget. The 1D server read
+looks back up to seven calendar days and returns only the latest observed New York trading
+date; it therefore still shows the last actual session on weekends and holidays. It never
+invents bars or fills absent data. Current fixture mode has 37 valid sparklines: SGOV is
+stale and SCHD/NBIS are unavailable. Detail rereads update the same chart state, including
+invalidation and later recovery. The Home list reads profiles for its ten rows and does
+not load hidden charts.
 
 ## Opt-in Alpaca IEX display (2026-09-21)
 

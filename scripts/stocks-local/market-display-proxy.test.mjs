@@ -76,6 +76,23 @@ test('allowlisted public display GETs use no credentials and preserve separate m
   assert.equal(calls.length, 4);
 });
 
+test('NVDA market session crosses the loopback bridge without price or credential authority', async () => {
+  let live = { schemaVersion: 1, symbol: 'NVDA', marketSession: {
+    state: 'OPEN', observedAt: '2026-09-24T12:00:00.000Z',
+    nextClose: '2026-09-24T20:00:00.000Z', nextOpen: '2026-09-25T13:30:00.000Z',
+  } };
+  const requested = [];
+  const service = await createMarketDisplayProxy({ origin: ORIGIN, fetcher: async (url, init) => {
+    requested.push({ url, init });
+    return response(url.endsWith('/catalog') ? wrap(catalog) : live);
+  } });
+  assert.equal((await service.marketSession()).state, 'OPEN');
+  assert.equal(requested[1].url, `${ROOT}/NVDA/live`);
+  assert.equal(requested[1].init.credentials, 'omit');
+  live = { ...live, marketSession: { ...live.marketSession, nextClose: '2026-09-26T20:00:00.000Z' } };
+  assert.deepEqual(await service.marketSession(), { state: 'UNKNOWN', observedAt: null, nextOpen: null, nextClose: null });
+});
+
 test('startup rejects unavailable or forged catalog; no synthetic 40-stock fallback', async () => {
   for (const result of [
     async () => { throw Error('private upstream detail'); },

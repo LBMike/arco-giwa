@@ -8,6 +8,7 @@ import cors from "@fastify/cors"
 import { stocksPlugin, type StocksPluginOptions } from "./stocks/plugin.js"
 import { stocksSubmissionsPlugin, type StocksSubmissionsPluginOptions } from "./stocks-submissions/plugin.js"
 import { stocksMarketDataPlugin, type StocksMarketDataService } from "./stocks-market-data/index.js"
+import type { StocksMarketDataPluginOptions } from "./stocks-market-data/index.js"
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify"
 import { generateNonce, SiweMessage } from "siwe"
 import { formatUnits, getAddress, isAddress, type Address } from "viem"
@@ -84,6 +85,7 @@ export type ArcoAppServices = {
   readonly stocksExecution?: StocksExecutionPluginOptions
   readonly stocksSubmissions?: StocksSubmissionsPluginOptions
   readonly stocksMarketData?: StocksMarketDataService
+  readonly stocksMarketClock?: StocksMarketDataPluginOptions["marketClock"]
   readonly stocks?: StocksPluginOptions
   readonly arco: PrismaArcoService
   readonly registry: EvmRegistryService
@@ -1278,7 +1280,11 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
   if (services.stocksSubmissionDiagnostics) app.register(stocksSubmissionDiagnosticsPlugin, services.stocksSubmissionDiagnostics)
   if (services.stocksExecution) app.register(stocksExecutionPlugin, services.stocksExecution)
   if (services.stocksSubmissions) app.register(stocksSubmissionsPlugin, services.stocksSubmissions)
-  if (services.stocksMarketData) app.register(stocksMarketDataPlugin, { service: services.stocksMarketData })
+  if (services.stocksMarketData) app.register(stocksMarketDataPlugin, {
+    service: services.stocksMarketData,
+    marketClock: services.stocksMarketClock,
+    executionCatalog: services.stocks ? () => services.stocks!.service.catalog() : undefined,
+  })
   return app
 }
 

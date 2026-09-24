@@ -56,6 +56,27 @@ test("price card: one caption, rounded price with the exact title, unsigned chan
   assert.match(text(missing), /시장정보 불러오는 중…/)
 })
 
+test("NVDA detail labels the exchange session separately from quote freshness and stream recovery", () => {
+  const closed = text(detail({ marketSession: { state: "CLOSED", observedAt: FIXTURE_TIME, nextOpen: "2026-09-17T13:30:00.000Z", nextClose: null }, liveConnection: "streaming" }))
+  assert.match(closed, /미국 주식시장 · 장 마감/)
+  assert.doesNotMatch(closed, /시세 연결을 다시 시도하고 있습니다/)
+
+  const reconnecting = text(detail({ marketSession: null, liveConnection: "reconnecting" }))
+  assert.match(reconnecting, /시세 연결을 다시 시도하고 있습니다/)
+  assert.doesNotMatch(reconnecting, /미국 주식시장 · 장 마감/)
+
+  const unknown = text(detail({ marketSession: { state: "UNKNOWN", observedAt: null, nextOpen: null, nextClose: null }, liveConnection: "streaming" }))
+  assert.match(unknown, /미국 주식시장 · 장 상태 확인 중/)
+  assert.doesNotMatch(unknown, /미국 주식시장 · 장중|미국 주식시장 · 장 마감/)
+})
+
+test("statistics source follows the quote provider instead of naming a different feed", () => {
+  const quote = fixtureTop40Quote("NVDA")
+  const html = detail({ quotes: ready({ ...envelope([quote]), provider: "ALPACA", marketFeed: "IEX", feedDelay: "REALTIME" }) })
+  assert.match(text(html), /Alpaca · IEX \(single exchange\) · 실시간/)
+  assert.doesNotMatch(text(html), /Massive · 실시간/)
+})
+
 test("a picked bar replaces the quote in the header (same caption slot) and hides the previous-close change", () => {
   const chart = fixtureTop40Chart("NVDA", "1D")
   const bar = chart.bars[3]
@@ -99,7 +120,7 @@ test("price card: this symbol's own non-AVAILABLE quote status whatever the char
 
 test("period buttons: exactly 1D 1W 1M 3M 1Y as <button>s in the 차트 기간 group, pressed state on the active one, no ALL", () => {
   const html = renderToStaticMarkup(<PeriodTabs range="1W" onRange={() => {}} />)
-  assert.match(html, /^<div role="group" aria-label="차트 기간" class="[^"]*bg-\[var\(--color-arco-chip\)\][^"]*">/)
+  assert.match(html, /^<div role="group" aria-label="차트 기간" class="[^"]*bg-\[var\(--color-arco-stock-chart-chip\)\][^"]*">/)
   assert.deepEqual([...html.matchAll(/<button type="button" aria-pressed="(true|false)"[^>]*>([^<]+)<\/button>/g)].map(match => [match[2], match[1]]), [["1D", "false"], ["1W", "true"], ["1M", "false"], ["3M", "false"], ["1Y", "false"]])
   assert.match(html, /aria-pressed="true" class="[^"]*bg-\[var\(--color-arco-surface\)\] text-\[var\(--color-arco-ink\)\]/)
   // A non-colour cue for the selected period (the white pill on the chip track and ink vs chip-ink are both below 3:1).
@@ -148,15 +169,15 @@ test("Statistics: 24H open/high/low from the loaded 1D bars only; quote and prof
   const chart = fixtureTop40Chart("NVDA", "1D")
   const quote = fixtureTop40Quote("NVDA")
   const expected = barRange(chart)!
-  const html = renderToStaticMarkup(<StatisticsCard symbol="NVDA" quote={quote} quotes={ready(envelope([quote]))} profile={ready(envelope(PROFILE))} day={chart} />)
+  const html = renderToStaticMarkup(<StatisticsCard symbol="NVDA" quote={quote} quotes={ready({ ...envelope([quote]), provider: "MASSIVE" })} profile={ready(envelope(PROFILE))} day={chart} />)
   const rows = [...html.matchAll(/<dt[^>]*>([^<]+)<\/dt><dd(?: title="([^"]*)")?[^>]*>([^<]*)<\/dd>/g)].map(match => [match[1], match[3], match[2] ?? null])
   const label = (value: string) => `$${value.replace(/\.?0+$/, "")}`
   assert.deepEqual(rows.slice(0, 3).map(([name, , title]) => [name, title]), [["Open", dollars(expected.open)], ["High", dollars(expected.high)], ["Low", dollars(expected.low)]])
   for (const [, value] of rows.slice(0, 3)) assert.match(value, /^\$[0-9,]+(\.\d{1,2})?$/)
   assert.equal(rows[0][1], label(expected.open).replace(/\B(?=(\d{3})+(?!\d))/g, ","))
   assert.deepEqual(rows.slice(3).map(([name, value, title]) => [name, value, title]), [["Total Market Cap", "$4.21T", "Market cap: $4,210,987,654,321"], ["세션 거래량", `${Number(quote.sessionVolume).toLocaleString("en-US")} 주`, null], ["전일 종가", `$${Number(quote.previousClose).toLocaleString("en-US", { maximumFractionDigits: 2 })}`, dollars(quote.previousClose)]])
-  assert.match(html, /<h3[^>]*>Underlying Asset Price<span class="text-sm text-\[var\(--color-arco-chip-ink\)\]">24H<\/span><\/h3>/)
-  assert.match(text(html), /최근 24시간\(rolling\) · 반환된 1D 5m 봉의 첫 시가·최고가·최저가/)
+  assert.match(html, /<h3[^>]*>Underlying Asset Price<span class="text-sm text-\[var\(--color-arco-chip-ink\)\]">1D<\/span><\/h3>/)
+  assert.match(text(html), /최근 관측 거래일 · 반환된 1D 5m 봉의 첫 시가·최고가·최저가/)
   assert.match(text(html), /Massive · 15분 지연 · 시세 관측: Sep 16, 2026, 08:00:00 AM EDT\. 주식 시세·기업 시가총액은 ARCO 토큰 가격·유동성·보유량이 아닙니다\./)
   assert.match(text(html), /NVDA 모의 주문은 주문 패널에서 진행합니다\. 표시 시세는 체결에 사용하지 않습니다\./)
   const empty = renderToStaticMarkup(<StatisticsCard symbol="MU" quote={null} quotes={{ phase: "loading" }} profile={{ phase: "loading" }} day={null} />)

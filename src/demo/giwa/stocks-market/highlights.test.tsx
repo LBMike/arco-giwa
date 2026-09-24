@@ -40,6 +40,19 @@ test("Newly Added uses the known expansion batch, never quote order or reverse r
   assert.deepEqual(stockHighlights(null), { gainers: [], trending: [], newlyAdded: [] })
 })
 
+test("last observed quotes populate all three cards when the market has no current observations", () => {
+  const catalog = fixtureCatalog(["SOXL", "MU", "TSLA"])
+  const quotes = [quote("SOXL", "2", { status: "STALE", sourceTimestamp: "2026-09-23T20:00:00.000Z" }), quote("MU", "1", { status: "STALE", sourceTimestamp: "2026-09-23T20:00:00.000Z" }), quote("TSLA", "-1", { status: "STALE", sourceTimestamp: "2026-09-23T20:00:00.000Z" })]
+  const groups = stockHighlights(catalog, quotes)
+  assert.deepEqual(symbols(groups.gainers), ["SOXL", "MU"])
+  assert.deepEqual(symbols(groups.trending), ["MU", "SOXL", "TSLA"])
+  assert.equal(groups.newlyAdded[0].quote?.price, quotes[0].price)
+  const html = renderToStaticMarkup(<MemoryRouter><StocksHighlights groups={groups} /></MemoryRouter>)
+  assert.doesNotMatch(html, /No current market data|Price —/)
+  assert.match(html, /Last observed/)
+  assert.match(html, /Sep 23/)
+})
+
 test("cards render titles, badges, actual detail links and at most three rows even if oversized input is supplied", () => {
   const groups = stockHighlights(fixtureTop40Catalog(), fixtureTop40Quotes())
   groups.gainers.push(...groups.trending)

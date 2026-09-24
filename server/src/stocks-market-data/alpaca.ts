@@ -1,6 +1,6 @@
 import { MarketDataError, type Chart, type ChartRange, type Quote } from './contracts.js';
 import { decimal, object, optionalDecimal, scaled } from './exact-json.js';
-import { chartWindow, RANGE_RULES } from './normalize.js';
+import { chartRequestWindow, chartSession, RANGE_RULES } from './normalize.js';
 
 const invalid = (): never => { throw new MarketDataError('INVALID_RESPONSE'); };
 function timestamp(value: unknown, now: number): number {
@@ -65,17 +65,17 @@ export function alpacaQuotes(input: unknown, symbols: readonly string[], now: nu
   });
 }
 export function alpacaChartPath(symbol: string, range: ChartRange, now: number, feed: 'iex' | 'sip'): string {
-  const window = chartWindow(range, now);
+  const window = chartRequestWindow(range, now);
   const timeframe = range === '1D' ? '5Min' : range === '1W' ? '1Hour' : '1Day';
   const params = new URLSearchParams({ timeframe, start: new Date(window.from).toISOString(), end: new Date(window.to).toISOString(), adjustment: 'split', feed, sort: 'asc', limit: '10000' });
   return `/v2/stocks/${encodeURIComponent(symbol)}/bars?${params}`;
 }
 export function alpacaChart(input: unknown, symbol: string, range: ChartRange, now: number): Chart {
-  const row = object(input); const window = chartWindow(range, now); const rule = RANGE_RULES[range];
+  const row = object(input); const window = chartRequestWindow(range, now); const rule = RANGE_RULES[range];
   if (row.symbol !== symbol || (row.bars != null && !Array.isArray(row.bars))) return invalid();
   if (row.next_page_token != null && (typeof row.next_page_token !== 'string' || !row.next_page_token || row.next_page_token.length > 4096)) return invalid();
   const entries = (row.bars ?? []) as unknown[];
-  if (entries.length > Math.ceil(rule.days * 86400000 / rule.width) + 2) return invalid();
+  if (entries.length > Math.ceil((window.to - window.from) / rule.width) + 2) return invalid();
   let previous = 0;
   const bars = entries.map(entry => {
     const bar = object(entry); const time = timestamp(bar.t, now);
@@ -87,5 +87,6 @@ export function alpacaChart(input: unknown, symbol: string, range: ChartRange, n
     return { timestamp: new Date(time).toISOString(), open, high, low, close, volume };
   });
   const truncated = row.next_page_token != null;
-  return { symbol, currency: 'USD', range, interval: rule.interval, adjustedForSplits: true, from: new Date(window.from).toISOString(), to: new Date(window.to).toISOString(), bars, history: truncated ? 'TRUNCATED' : bars.length ? 'RETURNED_WINDOW' : 'EMPTY', complete: !truncated };
+  const session = chartSession(bars, range, now);
+  return { symbol, currency: 'USD', range, interval: rule.interval, adjustedForSplits: true, from: session.from, to: session.to, bars: session.bars, history: truncated ? 'TRUNCATED' : session.bars.length ? 'RETURNED_WINDOW' : 'EMPTY', complete: !truncated };
 }

@@ -90,7 +90,7 @@ async function start() {
   });
   // Stable provider, source, environment and dependencies across counter refreshes and account changes.
   const source: ActiveWalletSource = { mode: 'injected', provider };
-  const environment = { apiBase: config.apiBase, fetch: window.fetch.bind(window), activeWalletSource: () => source };
+  const environment = { apiBase: config.apiBase, fetch: window.fetch.bind(window), liveNvda: true, activeWalletSource: () => source };
   const dependencies = { fetch: environment.fetch, async signMessage({ message, account }: { message: string; account: string }) {
     const signature = await provider.request({ method: 'personal_sign', params: [message, account] });
     if (typeof signature !== 'string') throw Error('LOCAL_SIGNATURE_INVALID'); return signature;

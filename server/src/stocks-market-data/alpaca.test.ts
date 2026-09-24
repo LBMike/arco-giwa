@@ -3,6 +3,8 @@ import test from 'node:test';
 import { createStocksMarketDataService } from './service.js';
 import { AlpacaTransport } from './transport.js';
 import { configuredStocksMarketData } from '../stocks-market-runtime/config.js';
+import { alpacaChart } from './alpaca.js';
+import { parseExactJson } from './exact-json.js';
 
 const NOW = Date.parse('2026-09-21T18:00:00.000Z');
 const credentials = { provider: 'ALPACA' as const, alpacaKeyId: 'TEST_ONLY_ID', alpacaSecretKey: 'TEST_ONLY_SECRET' };
@@ -78,11 +80,18 @@ test('Alpaca chart supplies split adjustment/feed and marks pagination truncated
   const service = createStocksMarketDataService({ ...credentials, alpacaFeed: 'sip', now: () => NOW, fetch: async (input) => {
     calls++; const url = new URL(String(input)); assert.equal(url.pathname, '/v2/stocks/NVDA/bars');
     assert.equal(url.searchParams.get('feed'), 'sip'); assert.equal(url.searchParams.get('adjustment'), 'split'); assert.equal(url.searchParams.get('timeframe'), '5Min');
-    assert.equal(url.searchParams.get('limit'), '10000'); assert.equal(url.searchParams.get('start'), '2026-09-20T18:00:00.000Z');
+    assert.equal(url.searchParams.get('limit'), '10000'); assert.equal(url.searchParams.get('start'), '2026-09-14T18:00:00.000Z');
     return response('{"symbol":"NVDA","bars":[{"t":"2026-09-21T17:55:00Z","o":123,"h":125,"l":122,"c":124,"v":9007199254740993}],"next_page_token":"OPAQUE"}');
   } });
   const chart = await service.chart('NVDA', '1D'); assert.equal(chart.marketFeed, 'SIP'); assert.equal(chart.data!.history, 'TRUNCATED'); assert.equal(chart.data!.complete, false); assert.equal(chart.data!.bars[0].volume, '9007199254740993');
   await service.chart('NVDA', '1D'); assert.equal(calls, 1);
+});
+test('Alpaca 1D chart retains only the latest session when the market is closed', () => {
+  const sunday = Date.parse('2026-09-20T18:00:00.000Z');
+  const bar = (t: string, close: number) => ({ t, o: close, h: close + 1, l: close - 1, c: close, v: 100 });
+  const result = alpacaChart(parseExactJson(JSON.stringify({ symbol: 'NVDA', bars: [bar('2026-09-17T18:00:00Z', 100), bar('2026-09-18T18:00:00Z', 110), bar('2026-09-18T18:05:00Z', 111)] })), 'NVDA', '1D', sunday);
+  assert.deepEqual(result.bars.map(item => item.close), ['110', '111']);
+  assert.equal(Date.parse(result.to) - Date.parse(result.from), 86400000);
 });
 
 test('Alpaca rejects invalid timestamps, schema, decimals, unsolicited symbols, duplicate keys, and chart OHLC', async () => {
