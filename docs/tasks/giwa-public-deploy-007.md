@@ -2,6 +2,8 @@
 
 User authorization: after reviewing the scope, the user explicitly instructed "실제 배포 진행해줘". Root is the sole executor/integrator. Branch `codex/giwa-public-deploy-007`, worktree `/private/tmp/arco-giwa-public-deploy-007`, tested source base `fd1bdd0`.
 
+Status: **COMPLETE**. All five original CREATEs finalized, and the unchanged final verifier returned `VERIFIED`. Public manifest and original transaction identities are in [the execution record](../evidence/giwa-public-deploy-007.md). No further user-local password input or deployment transaction is required for this task. Supabase/Render/signer/customer-trading activation remains a separate integration task.
+
 ## Exact scope
 
 Deploy the five new Stocks contracts only on GIWA Sepolia chain91342 using the existing administrator `0xFDCf58E2954988E5bf0446aAF1284A1069136F29` for deployer/operator/faucet. Preserve existing Savings/Funds, UI4392, API, Supabase and `deployments/91342/**`. Approved plan digest `bd3f8a539469dd4afc709bc076725c14e4f5f3da2330598aff25333f1df86906`, nonces226–230. Genesis `0xca1b5fee64a196abfca007b3a4d4e3ec2b37be83a452d452bf4e45937004cab2`.

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "profile": "DEMO_TESTNET",
+  "chainId": 91342,
+  "deploymentId": "giwa-stocks-8bf197489f45cc7eed2529c4ee9053fb61df43ba29986af0dbbc5a64bd5152a4",
+  "networkInstance": "giwa-91342-8bf197489f45cc7eed2529c4ee9053fb61df43ba29986af0dbbc5a64bd5152a4",
+  "checkpointNumber": "36890392",
+  "checkpointHash": "0xd599afed94fb3d3fcca9a3b902195fb0ef285478b6aaff51361a7d46f7ba9ce3",
+  "abiDigest": "a0d31f9e9c54e63b38215aa64b271ff08d72d16b3a893dfa64652e4eabdaf974",
+  "finalityPolicy": "FINALIZED",
+  "cashToken": "0x986136b5022213c33052d5633863b8a3b5b6590a",
+  "cashSymbol": "ARCO_TEST_USDC",
+  "cashScale": 6,
+  "stockToken": "0xbba70c70b9585bb75f76377ddaa38b8c8efcb437",
+  "quantityScale": 9,
+  "fundingVault": "0x438cd9e0cf3522492d422f1d033ce02b576fcaf0",
+  "mintController": "0x51c278d55c6bc094f2cb8974a2b55ca7d685b9dc",
+  "redemptionEscrow": "0x24ad486ba92fc60eb9511f284c09423ec6635a22",
+  "signerAddress": "0xfdcf58e2954988e5bf0446aaf1284a1069136f29",
+  "codeHashes": {
+    "0x986136b5022213c33052d5633863b8a3b5b6590a": "0xb743bd54b40cc435c536b02e45901f15710f1898a281e8719061403bacaf878c",
+    "0x438cd9e0cf3522492d422f1d033ce02b576fcaf0": "0xe0505a2b239a230f8c2380fe48811d4ab95f83c60db3f3adf7f2782deb0b0f01",
+    "0x51c278d55c6bc094f2cb8974a2b55ca7d685b9dc": "0x290218860579b25c422db3a51fd6b5dac563e5e593c70cee290bf1c9dbbd5ed4",
+    "0xbba70c70b9585bb75f76377ddaa38b8c8efcb437": "0x7aa42c3a03ee8976448789eb692361488ff1a386e398c17dad8428877487bbc0",
+    "0x24ad486ba92fc60eb9511f284c09423ec6635a22": "0x6339e47a10b383ab14c7bef9fa9335a51e83b7649158da3d2d57c236a2164d1f"
+  },
+  "restrictedTransfers": true,
+  "nonUpgradeable": true
+}

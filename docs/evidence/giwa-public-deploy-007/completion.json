@@ -1,0 +1,43 @@
+{
+  "status": "VERIFIED",
+  "recordedAt": "2026-09-24T10:03:17.465Z",
+  "deploymentId": "giwa-stocks-8bf197489f45cc7eed2529c4ee9053fb61df43ba29986af0dbbc5a64bd5152a4",
+  "planDigest": "bd3f8a539469dd4afc709bc076725c14e4f5f3da2330598aff25333f1df86906",
+  "chainId": 91342,
+  "finalityPolicy": "FINALIZED",
+  "abiDigest": "a0d31f9e9c54e63b38215aa64b271ff08d72d16b3a893dfa64652e4eabdaf974",
+  "verification": "Unchanged reviewed local-deploy.ts verify returned VERIFIED; no new transaction submitted during recovery.",
+  "previousFailure": "Final verification emitted LOCAL_DEPLOYMENT_FAILED; original cause was not retained and was not reproduced.",
+  "creations": [
+    {
+      "contractName": "StocksTestCash",
+      "address": "0x986136b5022213c33052d5633863b8a3b5b6590a",
+      "nonce": "226",
+      "transactionHash": "0x513dfc70fe38c6d623157ba5b0b708cc72776e903444c370d0a7671b9d9349c2"
+    },
+    {
+      "contractName": "StocksFundingVault",
+      "address": "0x438cd9e0cf3522492d422f1d033ce02b576fcaf0",
+      "nonce": "227",
+      "transactionHash": "0x48e0d9b0a5abdce951fa1263d854764052f5f3e2e5a4c1ac888a3fd4903f1b3f"
+    },
+    {
+      "contractName": "StocksMintController",
+      "address": "0x51c278d55c6bc094f2cb8974a2b55ca7d685b9dc",
+      "nonce": "228",
+      "transactionHash": "0x3e37b5a2db6b87d52f91e4df08270203ff94efb221aad4a7381621fabc9fc0b4"
+    },
+    {
+      "contractName": "StocksToken",
+      "address": "0xbba70c70b9585bb75f76377ddaa38b8c8efcb437",
+      "nonce": "229",
+      "transactionHash": "0x6e51ddd7bd437679a5fb61242a16424cceb5ec47083109db2afee9981469cb88"
+    },
+    {
+      "contractName": "StocksRedemptionEscrow",
+      "address": "0x24ad486ba92fc60eb9511f284c09423ec6635a22",
+      "nonce": "230",
+      "transactionHash": "0x780041ed95e3ef2026c5c2fe72b8a9eb61edc39090679c9c13b790118f40e5a2"
+    }
+  ]
+}
