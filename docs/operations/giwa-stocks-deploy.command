@@ -50,7 +50,10 @@ printf '%s\n' "$$" > "$giwa_state/launcher.lock/pid"
 giwa_next=''
 for ((giwa_step = 0; giwa_step < 6; giwa_step++)); do
   giwa_ready=0
-  for ((giwa_poll = 0; giwa_poll < 150; giwa_poll++)); do
+  giwa_wait_started=$SECONDS
+  giwa_wait_deadline=$((giwa_wait_started + 3600))
+  giwa_next_notice=$giwa_wait_started
+  while ((SECONDS < giwa_wait_deadline)); do
     if "${giwa_cli[@]}" recover "${giwa_args[@]}" > "$giwa_state/latest-check.json" 2> "$giwa_state/latest-check.error"; then
       giwa_ready=1
       break
@@ -60,11 +63,19 @@ for ((giwa_step = 0; giwa_step < 6; giwa_step++)); do
       printf '%s\n' "$giwa_error"
       exit 1
     fi
-    if ((giwa_poll % 10 == 0)); then echo '원래 거래의 확정을 기다리는 중입니다. 새 거래를 재전송하지 않습니다.'; fi
-    sleep 2
+    if ((SECONDS >= giwa_next_notice)); then
+      if [[ "$giwa_error" == 'LOCAL_DEPLOYMENT_ORIGINAL_NOT_FINALIZED' ]]; then
+        printf '원래 거래가 블록에 포함됐습니다. 네트워크 최종 확정 대기: %s분 / 최대 60분\n' "$(((SECONDS - giwa_wait_started) / 60))"
+      else
+        printf '원래 거래 상태 확인 중: %s분 / 최대 60분. 재전송하지 않습니다.\n' "$(((SECONDS - giwa_wait_started) / 60))"
+      fi
+      giwa_next_notice=$((SECONDS + 60))
+    fi
+    if ((SECONDS >= giwa_wait_deadline)); then break; fi
+    sleep 10
   done
   if [[ "$giwa_ready" != 1 ]]; then
-    echo '아직 원래 거래를 확정할 수 없습니다. 재전송 없이 중단합니다.'
+    echo '최대 60분 대기 후에도 원래 거래를 최종 확정할 수 없습니다. 기록을 보존하고 재전송 없이 중단합니다.'
     exit 1
   fi
   giwa_next="$(node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(s.nextIndex===null){process.stdout.write("done")}else if(Number.isInteger(s.nextIndex)&&s.nextIndex>=0&&s.nextIndex<5){process.stdout.write(String(s.nextIndex))}else{process.exit(1)}' "$giwa_state/latest-check.json")"
