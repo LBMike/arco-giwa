@@ -4,6 +4,7 @@ import path from "path"
 import { readPublicDeploymentJson, writePublicDeploymentJson } from "./public-deployment-json"
 import { constants, ContractFactory, utils } from "ethers"
 import type { Artifact, Artifacts, BuildInfo } from "hardhat/types"
+import { EXPECTED_GIWA_DEPLOYER } from "../keystore-constants"
 
 type ArtifactReader = Pick<Artifacts, "readArtifact" | "getBuildInfo">
 export type PublicDeploymentInput = {
@@ -74,7 +75,10 @@ function validateInput(value: unknown): PublicDeploymentInput {
     startingNonce: nonce(row.startingNonce).toString(),
   }
   requireValue(
-    new Set([input.deployer, input.operator, input.faucetOperator]).size === 3,
+    new Set([input.deployer, input.operator, input.faucetOperator]).size === 3 ||
+      [input.deployer, input.operator, input.faucetOperator].every(
+        (role) => role === EXPECTED_GIWA_DEPLOYER.toLowerCase(),
+      ),
     "DISTINCT_PUBLIC_ROLES_REQUIRED",
   )
   requireValue(

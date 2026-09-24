@@ -5,6 +5,8 @@ import path from "path"
 import { spawnSync } from "child_process"
 import hre from "hardhat"
 import { Contract } from "ethers"
+import { EXPECTED_GIWA_DEPLOYER } from "../../scripts/keystore-constants"
+import { verifyStocksDeploymentEvidence } from "../../scripts/stocks/verify-deployment"
 import {
   prepareStocksDeployment,
   verifyPreparedDeployment,
@@ -50,6 +52,48 @@ describe("GIWA Stocks unsigned deployment preparation", () => {
       assert.equal(await hre.ethers.provider.getCode(step.predictedAddress), "0x")
     }
     assert.deepEqual(await verifyPreparedDeployment(a, hre.artifacts), a)
+  })
+
+  it("supports the explicitly selected GIWA single administrator through five local creations and final verification", async () => {
+    const admin = EXPECTED_GIWA_DEPLOYER
+    const plan = await prepareStocksDeployment(
+      { ...input, deployer: admin, operator: admin, faucetOperator: admin },
+      hre.artifacts,
+    )
+    await hre.network.provider.send("hardhat_impersonateAccount", [admin])
+    await hre.network.provider.send("hardhat_setBalance", [admin, "0x56bc75e2d63100000"])
+    const transactionHashes = []
+    for (const step of plan.steps)
+      transactionHashes.push(
+        await hre.network.provider.send("eth_sendTransaction", [
+          { ...step.transaction, gas: "0x4c4b40" },
+        ]),
+      )
+    const result = await verifyStocksDeploymentEvidence(
+      { plan, expectedPlanDigest: plan.planDigest, transactionHashes, abiDigest: "a".repeat(64) },
+      hre.artifacts,
+      (method, params) => hre.network.provider.send(method, params),
+    )
+    assert.equal(result.manifest.signerAddress, admin.toLowerCase())
+    const cash = new Contract(
+      plan.steps[0].predictedAddress,
+      ["function faucetOperator() view returns(address)"],
+      hre.ethers.provider,
+    )
+    assert.equal((await cash.faucetOperator()).toLowerCase(), admin.toLowerCase())
+    // The exception is confined to this user-selected testnet account, not arbitrary role collisions.
+    await assert.rejects(
+      () =>
+        prepareStocksDeployment(
+          { ...input, operator: input.deployer, faucetOperator: input.deployer },
+          hre.artifacts,
+        ),
+      /DISTINCT_PUBLIC_ROLES_REQUIRED/,
+    )
+    await assert.rejects(
+      () => prepareStocksDeployment({ ...input, deployer: admin, operator: admin }, hre.artifacts),
+      /DISTINCT_PUBLIC_ROLES_REQUIRED/,
+    )
   })
 
   it("executes exact prepared bytecode locally and matches all five runtime hashes and immutable getters", async () => {

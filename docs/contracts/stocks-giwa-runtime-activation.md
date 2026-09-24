@@ -57,7 +57,9 @@ JSON 해석에 실패하면 응답을 거절하며, 자동 redirect나 자동 �
 
 ## 공개 테스트넷으로 넘어가기 위한 입력
 
-필요한 공개 정보는 배포자·운영 서명자·테스트 자산 faucet 운영자의 서로 다른 주소, 배포자 nonce, 선택한 외부 서명 방식이다. 서명 전 계획은 `stocks-giwa-unsigned-deployment.md`의 도구로 생성한다. 계획 자체는 배포 증거가 아니다. 이후 `stocks-giwa-deployment-verification.md`의 읽기 전용 도구에 원래 승인된 계획 digest·원래 5개 거래 hash·현재 백엔드 ABI digest를 전달해 v2 명세를 만든다. 각 거래의 확정된 실제 배포 내용과 코드·생성자 설정을 다시 확인하며, 파일 출력을 배포 성공으로 대신하지 않는다.
+필요한 공개 정보는 배포자·운영 서명자·테스트 자산 faucet 운영자 주소, 배포자 nonce, 선택한 외부 서명 방식이다. 2026-09-24 사용자는 기존 관리자 `0xFDCf58E2954988E5bf0446aAF1284A1069136F29`를 세 역할에 모두 사용하도록 지정했다. 배포 계획은 이 정확한 구성 또는 기존 세 주소 분리 구성을 지원한다. 서명 전 계획은 `stocks-giwa-unsigned-deployment.md`의 도구로 생성한다. 계획 자체는 배포 증거가 아니다. 이후 `stocks-giwa-deployment-verification.md`의 읽기 전용 도구에 원래 승인된 계획 digest·원래 5개 거래 hash·현재 백엔드 ABI digest를 전달해 v2 명세를 만든다. 각 거래의 확정된 실제 배포 내용과 코드·생성자 설정을 다시 확인하며, 파일 출력을 배포 성공으로 대신하지 않는다.
+
+단일 관리자 구성에서는 배포·테스트 자산 발급·기존 Savings/Funds 관리·Stocks 자동 정산이 동일 계정 nonce를 사용한다. 배포 실행기의 공개 journal과 기존 서버 signer의 PostgreSQL journal은 하나의 nonce 예약기가 아니다. 현재 signer는 MINT/REFUND/REDEEM/RETURN만 예약하므로 faucet을 별도 지갑 전송으로 실행하면 readiness가 닫힐 수 있다. 단순 중지/재개나 journal nonce 임의 수정으로 해제하지 않는다. 같은 키의 faucet과 정산을 연결할 공동 nonce 관리 및 bootstrap/관찰 순서 검증은 별도 런타임 통합 작업이다. 단일 관리자 CREATE 배포 검증을 자동 정산 준비 완료로 표현하지 않는다.
 
 현재 새 테스트 자산 계약의 초기 활성화는 cash/stock 공급량 0에서 검증한다. 공개 테스트 자산 발급과 입금은 검증된 관찰기가 시작된 후 진행한다. 기존 Saving/Funds 주소와 배포 명세는 별개로 유지한다. 이 버전은 NVDA·ARCO_TEST_USDC·고정 모의 가격·모의 브로커이며, 실제 주식 체결 또는 실제 USDC/RLUSD로 표시하지 않는다.
 

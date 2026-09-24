@@ -1,0 +1,12 @@
+{
+  "observedAt": "2026-09-24T06:56:45.074642+00:00",
+  "chainId": 91342,
+  "admin": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+  "latestNonce": "226",
+  "pendingNonce": "226",
+  "balanceWei": "176579096541850714",
+  "genesisHash": "0xca1b5fee64a196abfca007b3a4d4e3ec2b37be83a452d452bf4e45937004cab2",
+  "latestBlock": "36887837",
+  "baseFeePerGasWei": "346",
+  "readOnly": true
+}
