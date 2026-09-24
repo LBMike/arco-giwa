@@ -18,6 +18,7 @@ import type { GiwaCatalogItem, GiwaPortfolio, HexAddress } from "./types"
 import { useGiwaWallet } from "./wallet"
 import { aumLabel } from "../data/products"
 import { money } from "../lib/format"
+import { StocksPortfolioSection } from "./stocks-portfolio/StocksPortfolioSection"
 
 const TABS = [
   { id: "portfolio", label: "Portfolio" },
@@ -147,7 +148,7 @@ export default function GiwaPortfolioPage() {
   const seriesPositions = holdings.map((h) => ({ shares: h.shares, history: (historyQuery.data ?? {})[h.product.productId] }))
   const netWorthMetric: ChartMetric = {
     key: "networth",
-    label: "Net Worth",
+    label: "Savings & Funds Value",
     series: buildNetWorthSeries(seriesPositions),
     headline: netWorthLabel,
     valueFormat: aumLabel,
@@ -193,6 +194,7 @@ export default function GiwaPortfolioPage() {
 
   if (!wallet.address) {
     return (
+      <div className="w-full space-y-8">
       <EmptyState
         title="Connect your wallet"
         body="Connect the GIWA wallet to see your portfolio and holdings valued in USD."
@@ -207,6 +209,8 @@ export default function GiwaPortfolioPage() {
           </button>
         }
       />
+      <StocksPortfolioSection />
+      </div>
     )
   }
 
@@ -217,7 +221,7 @@ export default function GiwaPortfolioPage() {
         style={{ boxShadow: "var(--shadow-control)" }}
       >
         <div className="flex flex-col gap-1">
-          <span className="text-sm text-[var(--color-arco-muted)]">Net Worth</span>
+          <span className="text-sm text-[var(--color-arco-muted)]">Savings &amp; Funds Value</span>
           <span className="tabular-nums text-4xl font-medium tracking-tight text-[var(--color-arco-ink)]">{netWorthLabel}</span>
           {incomplete && valued.length > 0 && (
             <span className="text-[11px] text-[var(--color-arco-muted)]">Partial — some asset prices are unavailable</span>
@@ -266,8 +270,8 @@ export default function GiwaPortfolioPage() {
         {tab === "portfolio" ? (
           holdings.length === 0 && !holdingsQuery.isLoading ? (
             <EmptyState
-              title="No holdings yet"
-              body="Deposit into a product to start building your portfolio."
+              title="No Savings or Funds holdings yet"
+              body="Deposit into a Savings or Funds product to start building these holdings."
               action={
                 <Link
                   to={GIWA_FUNDS_ROUTE}
@@ -293,6 +297,7 @@ export default function GiwaPortfolioPage() {
           <GiwaActivityTable rows={buildActivityFeed(activityQuery.data ?? [], redemptionsQuery.data ?? [], products)} />
         )}
       </section>
+      {tab === "portfolio" ? <StocksPortfolioSection /> : null}
     </div>
   )
 }
