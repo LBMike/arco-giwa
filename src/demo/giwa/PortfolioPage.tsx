@@ -70,14 +70,16 @@ export default function GiwaPortfolioPage() {
     queryFn: () => giwaApi.market(GIWA_CHAIN_ID),
     refetchInterval: 45_000,
   })
-  const marketByProduct = new Map<string, GiwaMarketEntry>((marketQuery.data ?? []).map((m) => [m.productId, m]))
+  const marketByProduct = new Map<string, GiwaMarketEntry>((marketQuery.isSuccess ? marketQuery.data : []).map((m) => [m.productId, m]))
 
   const holdingsQuery = useQuery({
     queryKey: ["giwa", "portfolio-holdings", wallet.address, products.map((p) => p.productId).join(",")],
     queryFn: () => readHoldings(products, wallet.address as HexAddress),
     enabled: Boolean(wallet.address && products.length),
   })
-  const rawHoldings = holdingsQuery.data ?? []
+  const holdingsKnown = catalogQuery.isSuccess && (products.length === 0 || holdingsQuery.isSuccess)
+  const holdingsError = catalogQuery.isError || (products.length > 0 && holdingsQuery.isError)
+  const rawHoldings = holdingsKnown ? holdingsQuery.data ?? [] : []
   const heldIds = rawHoldings.map((h) => h.product.productId)
 
   const historyQuery = useQuery({
@@ -103,6 +105,17 @@ export default function GiwaPortfolioPage() {
     queryFn: () => giwaApi.redemptions(wallet.address!),
     enabled: Boolean(wallet.address),
   })
+  const history = historyQuery.isSuccess ? historyQuery.data : {}
+  const activityError = catalogQuery.isError || activityQuery.isError || redemptionsQuery.isError
+  const activityKnown = catalogQuery.isSuccess && activityQuery.isSuccess && redemptionsQuery.isSuccess
+  const refreshing = [catalogQuery, holdingsQuery, marketQuery, historyQuery, activityQuery, redemptionsQuery].some(query => query.isFetching)
+  const refresh = () => {
+    void Promise.allSettled([
+      catalogQuery.refetch(), marketQuery.refetch(), activityQuery.refetch(), redemptionsQuery.refetch(),
+      ...(products.length ? [holdingsQuery.refetch()] : []),
+      ...(heldIds.length ? [historyQuery.refetch()] : []),
+    ])
+  }
 
   const holdings: Holding[] = rawHoldings.map((h) => {
     const entry = marketByProduct.get(h.product.productId)
@@ -112,7 +125,7 @@ export default function GiwaPortfolioPage() {
     const apy = entry?.apy ?? entry?.impliedApy ?? null
     // Price/24hΔ: current NAV/share (live market, else the newest indexed post) and its 24h
     // change from the same price history the Net Worth chart already fetches.
-    const points = (historyQuery.data ?? {})[h.product.productId]?.points ?? []
+    const points = history[h.product.productId]?.points ?? []
     const navBase = entry?.navBase ?? (points.length ? points[points.length - 1].navBase : null)
     const delta24h = priceChange24hPct(points)
     return {
@@ -128,7 +141,7 @@ export default function GiwaPortfolioPage() {
   const totalUsd = valued.reduce((sum, h) => sum + (h.usd as number), 0)
   const incomplete = holdings.some((h) => h.usd == null)
   const netWorthLabel =
-    holdingsQuery.isLoading || marketQuery.isLoading
+    !holdingsKnown || !marketQuery.isSuccess
       ? "—"
       : holdings.length === 0
         ? aumLabel(0)
@@ -145,7 +158,8 @@ export default function GiwaPortfolioPage() {
       : null
 
   // Net Worth / Net Rate series from current shares × per-vault price/apy history.
-  const seriesPositions = holdings.map((h) => ({ shares: h.shares, history: (historyQuery.data ?? {})[h.product.productId] }))
+  const seriesPositions = holdings.map((h) => ({ shares: h.shares, history: history[h.product.productId] }))
+  const chartEmpty = holdingsError || historyQuery.isError ? "Portfolio history could not be loaded" : !holdingsKnown || (heldIds.length > 0 && !historyQuery.isSuccess) ? "Loading portfolio history…" : null
   const netWorthMetric: ChartMetric = {
     key: "networth",
     label: "Net Worth",
@@ -153,7 +167,7 @@ export default function GiwaPortfolioPage() {
     headline: netWorthLabel,
     valueFormat: aumLabel,
     delta: priceReturnPct,
-    emptyLabel: "No net worth history yet",
+    emptyLabel: chartEmpty ?? "No net worth history yet",
   }
   const netRateMetric: ChartMetric = {
     key: "netrate",
@@ -162,7 +176,7 @@ export default function GiwaPortfolioPage() {
     headline: blendedApy != null ? pctLabel(blendedApy) : "—",
     valueFormat: pctLabel,
     delta: apyChangePct,
-    emptyLabel: "No net rate history yet",
+    emptyLabel: chartEmpty ?? "No net rate history yet",
   }
 
   // Sort holdings upstream (numeric values live here) so positions/depositUsd/apyValues/priceCells
@@ -243,6 +257,7 @@ export default function GiwaPortfolioPage() {
       </div>
 
       <GiwaTwoMetricChartCard metrics={[netWorthMetric, netRateMetric]} />
+      {marketQuery.isError || historyQuery.isError ? <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{marketQuery.isError ? "Current valuations are unavailable." : "Portfolio history could not be loaded."} Use Refresh to try again.</p> : null}
 
       <section className="space-y-4">
         <nav aria-label="Portfolio sections" className="flex items-center gap-6 border-b border-[var(--color-arco-border)]">
@@ -263,11 +278,16 @@ export default function GiwaPortfolioPage() {
               </button>
             )
           })}
+          <button type="button" onClick={refresh} disabled={refreshing} className="ml-auto py-2.5 text-sm text-[var(--color-arco-text-soft)] disabled:opacity-50">{refreshing ? "Refreshing…" : "Refresh"}</button>
         </nav>
 
         {tab === "portfolio" ? (
           <>
-            {holdings.length === 0 && !holdingsQuery.isLoading ? (
+            {holdingsError ? (
+              <EmptyState title="Holdings could not be loaded" body="Your balance has not been confirmed. Use Refresh to try again." />
+            ) : !holdingsKnown ? (
+              <EmptyState title="Loading your holdings…" body="Checking your connected wallet on GIWA." />
+            ) : holdings.length === 0 ? (
               <EmptyState
                 title="No Savings or Funds holdings yet"
                 body="Deposit into a Savings or Funds product to start building these holdings."
@@ -295,7 +315,9 @@ export default function GiwaPortfolioPage() {
             <StocksPortfolioSection />
           </>
         ) : (
-          <GiwaActivityTable rows={buildActivityFeed(activityQuery.data ?? [], redemptionsQuery.data ?? [], products)} />
+          activityError ? <EmptyState title="Activity could not be loaded" body="Your transaction history has not been confirmed. Use Refresh to try again." />
+            : !activityKnown ? <EmptyState title="Loading your activity…" body="Checking transactions and redemption requests." />
+              : <GiwaActivityTable rows={buildActivityFeed(activityQuery.data, redemptionsQuery.data, products)} />
         )}
       </section>
     </div>

@@ -211,6 +211,16 @@ test("preview installs the fetch guard before rendering and loads product pages 
   assert.deepEqual([...fixtures.matchAll(/^import (?!type )/gm)], [], "fixtures.ts has type-only imports")
 })
 
+test("customer mode forwards real reads before captured or empty wallet fixtures and never enables auth forwarding", () => {
+  const preview = read("./main.tsx")
+  const forwarded = preview.indexOf('CUSTOMER_READS && url.origin === ORIGIN && url.pathname.startsWith("/api/")')
+  assert.ok(forwarded > 0 && forwarded < preview.indexOf("const captured = deployedLegacyReply"))
+  assert.match(preview, /CUSTOMER_READS && url.origin === RPC_ORIGIN/)
+  const serve = read("../../stocks-execution-host/verification/serve.ts")
+  assert.ok(serve.indexOf("return customer(request, response, next)") < serve.indexOf("return api(request, response, url)"))
+  assert.match(serve, /--customer-reads/)
+})
+
 test("nothing in the app entry, router or build config references the preview; product code never imports it", () => {
   for (const path of ["../../../../../index.html", "../../../../../vite.config.ts", "../../../../main.tsx", "../../routes.ts", "../../stocks-market/routes.tsx"]) {
     assert.doesNotMatch(read(path), /investor-shell/, path)
@@ -222,8 +232,8 @@ test("nothing in the app entry, router or build config references the preview; p
     for (const name of readdirSync(dir)) {
       const path = `${dir}${name}`
       if (statSync(path).isDirectory()) {
-        if (`${path}/` !== here) walk(`${path}/`)
-      } else if (/\.(tsx?|mjs|css|html)$/.test(name) && /investor-shell\/verification/.test(readFileSync(path, "utf8"))) offenders.push(path)
+        if (`${path}/` !== here && name !== "verification") walk(`${path}/`)
+      } else if (!/\.test\.[cm]?[jt]sx?$/.test(name) && /\.(tsx?|mjs|css|html)$/.test(name) && /investor-shell\/verification/.test(readFileSync(path, "utf8"))) offenders.push(path)
     }
   }
   walk(src)

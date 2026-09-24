@@ -32,6 +32,7 @@ type LogState = { entries: readonly LogEntry[]; total: number; counts: Readonly<
 type MarketMode = "top40" | "pilot" | "unconfigured" | "live"
 
 const ORIGIN = window.location.origin
+const CUSTOMER_READS = document.querySelector('meta[name="giwa-customer-reads"]')?.getAttribute("content") === "true"
 const MAX_ENTRIES = 300
 const MODE_KEY = "giwa-investor-shell-preview:market-mode"
 
@@ -123,6 +124,12 @@ function guardedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Res
   const url = new URL(hrefOf(input), window.location.href)
   const method = methodOf(input, init)
   if (aborted(init)) return Promise.reject(new DOMException("The operation was aborted.", "AbortError"))
+  if (CUSTOMER_READS && url.origin === RPC_ORIGIN && url.pathname === "/" && !url.search && method === "POST") {
+    const target = `${ORIGIN}/__giwa/read-rpc`
+    return nativeFetch(input instanceof Request ? new Request(target, input) : target, init)
+  }
+  // In connected mode, no captured catalog or empty wallet fixture can answer an API read.
+  if (CUSTOMER_READS && url.origin === ORIGIN && url.pathname.startsWith("/api/")) return nativeFetch(input, init)
   if (LEGACY_BASE && (url.href === LEGACY_BASE || url.href.startsWith(`${LEGACY_BASE}/`))) {
     const path = url.href.slice(LEGACY_BASE.length) || "/"
     const captured = deployedLegacyReply(method, path)
@@ -326,8 +333,8 @@ function PreviewBar({ mode, onMode }: { mode: MarketMode; onMode: (mode: MarketM
 }
 
 function PreviewPage() {
-  const debug = new URLSearchParams(window.location.search).get("debug") === "1"
-  const [mode, setMode] = useState<MarketMode>(() => debug ? readMode() : new URLSearchParams(window.location.search).get("market") === "live" || document.querySelector('meta[name="giwa-live-market"]')?.getAttribute("content") === "iex" ? "live" : "top40")
+  const debug = !CUSTOMER_READS && new URLSearchParams(window.location.search).get("debug") === "1"
+  const [mode, setMode] = useState<MarketMode>(() => CUSTOMER_READS ? "live" : debug ? readMode() : new URLSearchParams(window.location.search).get("market") === "live" || document.querySelector('meta[name="giwa-live-market"]')?.getAttribute("content") === "iex" ? "live" : "top40")
   const choose = (next: MarketMode) => {
     writeMode(next)
     setMode(next)

@@ -15,6 +15,7 @@ import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
 
 import { getAddress } from "viem"
+import { customerGateway } from "../../../../../scripts/customer-demo/gateway"
 
 import type { Side } from "../../stocks-wallet/types"
 import type { NetworkVariant } from "../testing/fake-chain"
@@ -111,6 +112,8 @@ function walletErrorCode(error: unknown): number | string {
 async function main() {
   const port = parsePort(process.argv.slice(2))
   const origin = `http://${HOST}:${port}`
+  const customerReads = process.argv.includes("--customer-reads")
+  const customer = customerReads ? customerGateway({ origin }) : null
   const liveMarket = process.argv.includes("--live-market")
     ? await (await import("../../../../../scripts/stocks-local/live-market")).createLiveMarket() : null
   const harness = await createInProcessStocks({ frontendOrigin: origin })
@@ -281,7 +284,10 @@ async function main() {
   const fixturePlugin = {
     name: "giwa-stocks-verification-fixture",
     transformIndexHtml() {
-      return liveMarket ? [{ tag: "meta", attrs: { name: "giwa-live-market", content: "iex" }, injectTo: "head" as const }] : []
+      return [
+        ...(liveMarket ? [{ tag: "meta", attrs: { name: "giwa-live-market", content: "iex" }, injectTo: "head" as const }] : []),
+        ...(customerReads ? [{ tag: "meta", attrs: { name: "giwa-customer-reads", content: "true" }, injectTo: "head" as const }] : []),
+      ]
     },
     configureServer(server: AnyValue) {
       server.middlewares.use((request: IncomingMessage, response: ServerResponse, next: () => void) => {
@@ -299,6 +305,7 @@ async function main() {
             response.writeHead(answer.statusCode, { "content-type": "application/json", "cache-control": "no-store", "x-content-type-options": "nosniff" })
             response.end(answer.body); return
           }
+          if (customer && (route.startsWith("/api/") || route.startsWith("/__fixture/") || route.startsWith("/__giwa/"))) return customer(request, response, next)
           if (route.startsWith("/api/v1/")) return api(request, response, url)
           if (route === "/__fixture/wallet" && method === "POST") return sendJson(response, 200, await walletCall(await readJson(request)))
           if (route === "/__fixture/control" && method === "POST") return sendJson(response, 200, await control(await readJson(request)))
@@ -327,6 +334,7 @@ async function main() {
     appType: "mpa",
     clearScreen: false,
     logLevel: "warn",
+    ...(customerReads ? { define: { "import.meta.env.VITE_ARCO_API_BASE": JSON.stringify(origin) } } : {}),
     server: { host: HOST, port, strictPort: true, open: false, hmr: { host: HOST, port }, fs: { deny: ["**/.env*", "**/*.{crt,pem}", "**/.git/**", "**/.secrets/**"] } },
     plugins: [fixturePlugin],
   })
@@ -340,7 +348,8 @@ async function main() {
   }
   process.on("SIGINT", shutdown)
   process.on("SIGTERM", shutdown)
-  process.stdout.write(`GIWA Stocks preview (${liveMarket ? "Alpaca IEX display; simulated execution" : "offline"}): ${origin}${PAGE_PATH}\n`)
+  const pagePath = customerReads ? "/src/demo/giwa/investor-shell/verification/index.html#/" : PAGE_PATH
+  process.stdout.write(`GIWA Stocks preview (${customerReads ? "real GIWA public reads; authentication and trading disconnected" : liveMarket ? "Alpaca IEX display; simulated execution" : "offline"}): ${origin}${pagePath}\n`)
 }
 
 main().catch((error: unknown) => {
