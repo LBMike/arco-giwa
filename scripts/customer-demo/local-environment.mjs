@@ -25,7 +25,7 @@ export function localCustomerEnvironment(value, runtimePath, inherited = process
       ...(inherited.PATH ? { PATH: inherited.PATH } : {}),
       ...(inherited.HOME ? { HOME: inherited.HOME } : {}),
       ...(inherited.TMPDIR ? { TMPDIR: inherited.TMPDIR } : {}),
-      ...value, PORT: '4393', CORS_ALLOWED_ORIGINS: 'http://127.0.0.1:4392',
+      ...value, PORT: '4493', CORS_ALLOWED_ORIGINS: 'http://127.0.0.1:4392',
       INDEXER_RPC_URL: 'https://sepolia-rpc.giwa.io', STOCKS_MODE: 'DEMO_TESTNET', STOCKS_AUTODISPATCH: '1',
       STOCKS_CONFIG_PATH: runtimePath,
     };

@@ -4,7 +4,7 @@ import { createServer, request as httpRequest } from 'node:http';
 import { customerGateway, CUSTOMER_API, CUSTOMER_RPC, LOCAL_CUSTOMER_API } from './gateway';
 
 const origin = 'http://127.0.0.1:4392';
-test('explicit local gateway sends Stocks and SIWE only to4393 while preserving legacy reads and public RPC', async t => {
+test('explicit local gateway sends Stocks and SIWE only to4493 while preserving legacy reads and public RPC', async t => {
   const calls: Array<{ url: string; headers: Headers; body?: BodyInit | null }> = [];
   let fallthrough = 0;
   const handler = customerGateway({ origin, localCustomer: true, authEnabled: true, tradesEnabled: true,
@@ -39,7 +39,7 @@ test('explicit local gateway sends Stocks and SIWE only to4393 while preserving 
   assert.equal(calls.length, 6); assert.equal(fallthrough, 0);
 });
 test('local gateway cannot be selected with another frontend or without both authenticated trading opt-ins', () => {
-  for (const options of [{ origin: 'http://localhost:4392' }, { origin: 'http://127.0.0.1:4393' },
+  for (const options of [{ origin: 'http://localhost:4392' }, { origin: 'http://127.0.0.1:4493' },
     { origin: origin + '/' }, { tradesEnabled: false }, { authEnabled: false, tradesEnabled: false }]) {
     assert.throws(() => customerGateway({ origin, localCustomer: true, authEnabled: true, tradesEnabled: true, ...options }));
   }

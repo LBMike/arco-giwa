@@ -1,7 +1,7 @@
 import { ensure, manifestDigest, type Manifest } from '../stocks/contracts.js';
 
 export const LOCAL_CUSTOMER_ORIGIN = 'http://127.0.0.1:4392';
-export const LOCAL_CUSTOMER_API = 'http://127.0.0.1:4393';
+export const LOCAL_CUSTOMER_API = 'http://127.0.0.1:4493';
 export const LOCAL_CUSTOMER_SIGNER = 'http://127.0.0.1:4394';
 export const LOCAL_CUSTOMER_RPC = 'https://sepolia-rpc.giwa.io';
 export const LOCAL_CUSTOMER_MANIFEST = '4327e1459e77c9a15b4b2b3e6d156a30ddd73b16dd4b45836969c23128390247';
@@ -40,7 +40,7 @@ export function validateLocalCustomerEnvironment(env: NodeJS.ProcessEnv) {
         || url.searchParams.has('sslmode') && !['require', 'verify-full'].includes(url.searchParams.get('sslmode')!)) throw fail();
     }
     if (env.STOCKS_DATABASE_URL && env.STOCKS_DATABASE_URL !== env.DATABASE_URL) throw fail();
-    if (env.PORT !== '4393' || env.CORS_ALLOWED_ORIGINS !== LOCAL_CUSTOMER_ORIGIN
+    if (env.PORT !== '4493' || env.CORS_ALLOWED_ORIGINS !== LOCAL_CUSTOMER_ORIGIN
       || env.INDEXER_RPC_URL !== LOCAL_CUSTOMER_RPC || env.STOCKS_MODE !== 'DEMO_TESTNET'
       || env.STOCKS_AUTODISPATCH !== '1' || !env.STOCKS_CONFIG_PATH || !env.STOCKS_SIGNER_TOKEN) throw fail();
     for (const name of ['DEPLOYER_PRIVATE_KEY', 'GIWA_KEYSTORE_PASSWORD', 'STOCKS_SIGNER_PRIVATE_KEY', 'STOCKS_SIGNER_KEYSTORE_PASSWORD']) {

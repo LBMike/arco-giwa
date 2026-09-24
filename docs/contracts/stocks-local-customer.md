@@ -2,9 +2,9 @@
 
 Immediate target: the existing UI at `http://127.0.0.1:4392/src/demo/giwa/investor-shell/verification/index.html`, with customer `0x3185f0eFB95228c9E476De5C9da1d1aA8ccf76D2`. Existing administrator remains the settlement/faucet/deployment role holder. Do not use the administrator as the customer; their wallet transactions would consume the signer's managed nonce.
 
-The dedicated local API CLI accepts the completed007 deployment only. It binds127.0.0.1:4393, uses the confirmed Supabase project, and reaches the008 signer at127.0.0.1:4394. The public GIWA RPC remains fixed. Normal hosted configuration still requires HTTPS signer endpoints and has no environment switch that enables this local mode.
+The dedicated local API CLI accepts the completed007 deployment only. It binds127.0.0.1:4493, uses the confirmed Supabase project, and reaches the008 signer at127.0.0.1:4394. The public GIWA RPC remains fixed. Normal hosted configuration still requires HTTPS signer endpoints and has no environment switch that enables this local mode.
 
-UI4392 opts into `--customer-reads --customer-auth --customer-trades --local-customer`. Its original screens and live-market option remain available. Only allowed SIWE/Stocks requests switch to4393; legacy Savings/Funds/Portfolio reads retain the existing Render upstream, and public GIWA reads retain the fixed RPC. Admin/fixture/faucet routes remain disconnected. The backend continues to verify user signatures and bearer sessions. No local flag authorizes a trade.
+UI4392 opts into `--customer-reads --customer-auth --customer-trades --local-customer`. Its original screens and live-market option remain available. Only allowed SIWE/Stocks requests switch to4493; legacy Savings/Funds/Portfolio reads retain the existing Render upstream, and public GIWA reads retain the fixed RPC. Admin/fixture/faucet routes remain disconnected. The backend continues to verify user signatures and bearer sessions. No local flag authorizes a trade.
 
 ## Private server configuration
 

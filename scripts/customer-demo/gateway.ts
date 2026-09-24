@@ -5,7 +5,7 @@ import { tradingBody, tradingRead, tradingWrite } from "./trading-routes"
 // Existing product services only. Browser input cannot choose an upstream.
 export const CUSTOMER_API = "https://arco-giwa-api.onrender.com"
 export const CUSTOMER_RPC = "https://sepolia-rpc.giwa.io"
-export const LOCAL_CUSTOMER_API = "http://127.0.0.1:4393"
+export const LOCAL_CUSTOMER_API = "http://127.0.0.1:4493"
 const MAX_REQUEST = 64 * 1024
 const MAX_RESPONSE = 4_000_000
 const RPC_READS = new Set(["eth_chainId", "eth_blockNumber", "eth_call", "eth_getBalance", "eth_getCode", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getLogs"])

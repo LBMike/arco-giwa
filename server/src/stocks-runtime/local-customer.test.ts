@@ -26,7 +26,7 @@ test('local server rejects split databases, wrong origins and hidden key overrid
   const env = {
     DATABASE_URL: 'postgresql://postgres.munsybkrsxrmajmbssli:TEST@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres',
     DIRECT_URL: 'postgresql://postgres:TEST@db.munsybkrsxrmajmbssli.supabase.co:5432/postgres',
-    PORT: '4393', CORS_ALLOWED_ORIGINS: 'http://127.0.0.1:4392', INDEXER_RPC_URL: LOCAL_CUSTOMER_RPC,
+    PORT: '4493', CORS_ALLOWED_ORIGINS: 'http://127.0.0.1:4392', INDEXER_RPC_URL: LOCAL_CUSTOMER_RPC,
     STOCKS_MODE: 'DEMO_TESTNET', STOCKS_AUTODISPATCH: '1', STOCKS_CONFIG_PATH: '/config.json', STOCKS_SIGNER_TOKEN: 'TEST',
   };
   assert.doesNotThrow(() => validateLocalCustomerEnvironment(env));

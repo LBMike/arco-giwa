@@ -16,7 +16,7 @@ test('local environment confines server credentials and drops inherited frontend
   const env = localCustomerEnvironment(input, '/public/runtime.json', { PATH: '/bin', PRIVATE_KEY: 'DONT_COPY',
     NODE_OPTIONS: '--require=untrusted', VITE_DYNAMIC_ENVIRONMENT_ID: 'DONT_COPY', DATABASE_URL: 'WRONG_DATABASE' });
   assert.equal(env.DATABASE_URL, input.DATABASE_URL);
-  assert.equal(env.PORT, '4393'); assert.equal(env.CORS_ALLOWED_ORIGINS, 'http://127.0.0.1:4392');
+  assert.equal(env.PORT, '4493'); assert.equal(env.CORS_ALLOWED_ORIGINS, 'http://127.0.0.1:4392');
   assert.equal(env.STOCKS_CONFIG_PATH, '/public/runtime.json');
   assert.doesNotMatch(JSON.stringify(env), /DONT_COPY|untrusted|WRONG_DATABASE|VITE_/);
   for (const invalid of [{ ...input, PRIVATE_KEY: 'NEVER_PRINT' }, { ...input, AUTH_JWT_SECRET: 'weak' },
