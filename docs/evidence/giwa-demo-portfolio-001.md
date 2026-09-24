@@ -4,11 +4,11 @@ Base `097421589a38c54181f94813c390a4c22253469f`, isolated branch `codex/giwa-dem
 
 ## Implemented
 
-- The actual top-level Portfolio mounts a Stocks holdings section, including a visible sign-in/connection state when no wallet is connected.
+- The main-branch GIWA Portfolio remains the product page: Net Worth, Net Rate, charts, existing holdings and Activity. Stocks appears inside its Portfolio tab after the existing wallet gate; a compact explicit sign-in action replaces the duplicate Stocks account card.
 - Reuses the existing Stocks host session, validated HTTP client, investor controller and PortfolioView. No new balance model, auth provider, schema, dependency or Solidity change.
 - Displays wallet, reserved, available, escrow and total units plus pending orders. Existing string/BigInt precision and mismatch checks remain authoritative.
 - Refetches on mount/re-authentication, visible-page polling, page return and manual refresh. Context changes hide the previous session before paint; delayed results cannot replace the current wallet.
-- Local catalog retry; unavailable/error states do not claim a zero balance. Existing valuation and empty-state labels explicitly identify Savings/Funds.
+- Local catalog retry; unavailable/error states do not claim a zero balance. A small valuation note and the Savings/Funds empty state distinguish those assets from Stocks units.
 
 ## Verification
 
@@ -49,7 +49,7 @@ The customer page was opened and inspected in the browser. Its root `/` and the 
 
 The reviewed two-file patch is `/private/tmp/giwa-demo-portfolio-001-ui4392.patch`. Direct root modification of the UI task's worktree was initially rejected by automatic approval review under AGENTS.md. After the explicit two-file exception request, the user again instructed continuation. Automatic review accepted the guarded integration on that new authorization. The PortfolioPage target still matched the base, and the new component was absent. Only those two files were written. They now match reviewed implementation commit `d92b968c568b790bb5b05e7096cf2b16efe3cc60` exactly. No existing UI/market/server changes were replaced and the running4392 process was preserved.
 
-Post-integration evidence:
+Initial integration evidence (the subsequent main-reuse correction below supersedes the disconnected Stocks card and Trade Stocks link):
 
 - `npm run typecheck` in the running4392 worktree passed (`/private/tmp/giwa-portfolio-4392-typecheck.log`).
 - Browser shows the new `Stocks portfolio` region, Stocks sign-in state, connection button and `Trade Stocks` link on the canonical customer Portfolio route, including when no wallet is connected.
@@ -60,3 +60,22 @@ Post-integration evidence:
 Existing customer-preview limitation: normal GiwaStocksHost authentication uses the configured ARCO_API_BASE (default localhost8080), while preview Stocks reads use4392 and the preview fetch guard blocks off-origin authentication. Its same-origin backend is a simulated DB/chain harness with test-only authentication. Do not silently bypass that guard or represent it as personal MetaMask public-GIWA success. A separate user question distinguishes immediately usable demo-account simulation from the eventual personal-wallet/public-network route.
 
 Public deployment, real-wallet transactions, push and merge were not performed.
+
+## Main-branch Portfolio reuse correction
+
+User steering: reuse the existing main GIWA Portfolio product. Compared against main `8160f354b55dfe9a525565e30ddc007f51448f3d`; the original page was already the basis of the implementation. Restored its Net Worth label and single disconnected-wallet empty state. Kept Net Rate, valuation/chart computation, holdings table, sorting and Activity unchanged. Stocks sits inside the Portfolio tab with a compact required sign-in action, without the duplicate account/connect panel or extra Trade Stocks link. Stocks quantities are not forced into Savings/Funds NAV/APY or USD valuation fields. The existing Funds browse route remains in use.
+
+Only the same two approved files were updated in the running4392 workspace. Both targets were checked byte-for-byte against the prior approved implementation `d92b968c568b790bb5b05e7096cf2b16efe3cc60` before writing. No server restart or other workspace change was made.
+
+- Browser: the canonical Portfolio route immediately shows the existing main-style Connect your wallet empty state, without the duplicate Stocks panel. The tab remains available to the user. This is disconnected-state evidence; a personal-wallet signed-in balance was not browser-verified.
+- Independent source review: no functional blocker or departure from main Portfolio reuse found.
+- Focused SSR/DOM integration: 9 passed, 0 failed, 0 skipped.
+- Source and running4392 typechecks passed.
+- Final product build passed with the existing bundle-size warnings. Full frontend with the existing DOM gate enabled: 1,033 passed, 8 skipped, 0 failed. Existing React SSR warnings remain unchanged.
+
+Final source/target SHA-256:
+
+- `PortfolioPage.tsx`: `5fb6c832bbef99941865e689053dc2e9f8fb80aedca59f348d55b721b9527720`
+- `StocksPortfolioSection.tsx`: `fbc7312658cd4dae1f1e3dc53dce3a3c927d98b01323d7a794dedb32844ab4ed`
+
+Correction logs: `/private/tmp/giwa-portfolio-main-typecheck.log`, `giwa-portfolio-main-focused.log`, `giwa-portfolio-main-build.log`, `giwa-portfolio-main-frontend.log`, `giwa-portfolio-main-4392-typecheck.log`. Server/security/migration checks above apply to the unchanged backend and schema; those suites were not needlessly repeated for this presentation-only correction.

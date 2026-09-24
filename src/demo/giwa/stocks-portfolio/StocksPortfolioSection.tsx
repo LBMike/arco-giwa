@@ -1,9 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react"
-import { Link } from "react-router-dom"
-import { GIWA_STOCKS_ROUTE } from "../routes"
-import { StocksSignIn } from "../stocks-host/StocksSignIn"
 import { useGiwaStocksHost } from "../stocks-host/StocksHostProvider"
-import { useStocksWalletCommands } from "../stocks-host/wallet-commands"
 import { actionsFor } from "../stocks-investor/actions"
 import { createGiwaStocksHttpClient } from "../stocks-investor/client"
 import { createStocksInvestorController, type StocksInvestorContext } from "../stocks-investor/controller"
@@ -59,7 +55,6 @@ export function StocksPortfolioSection() {
   const environment = useContext(StocksPageEnvironment)
   const apiBase = usePageApiBase()
   const host = useGiwaStocksHost()
-  const commands = useStocksWalletCommands()
   const client = useMemo(() => {
     if (!apiBase) return null
     try { return createGiwaStocksHttpClient({ baseUrl: apiBase, fetch: environment.fetch }) }
@@ -69,20 +64,34 @@ export function StocksPortfolioSection() {
   const invalidate = host.invalidate
   // A late 401 belongs to the captured session, never a later sign-in.
   const rejected = useCallback(() => { if (sessionId) invalidate(sessionId) }, [sessionId, invalidate])
+  const signingIn = host.snapshot.status === "signing-in"
+  const accessMessage = host.walletStatus === "wrong-network"
+    ? "Switch to GIWA Sepolia in your wallet to view Stocks holdings."
+    : host.walletStatus !== "ready"
+      ? "Your wallet is not ready to view Stocks holdings."
+      : signingIn
+        ? "Confirm the sign-in message in your wallet."
+        : !host.canSignIn
+          ? "Stocks sign-in is unavailable. Reload the page to try again."
+          : host.snapshot.error
+            ? "Your Stocks session is unavailable. Sign in again to view your holdings."
+            : "Sign a message to view Stocks holdings. This does not authorize a transaction."
   return (
-    <section aria-label="Stocks portfolio" className="w-full min-w-0 space-y-4" data-testid="stocks-portfolio-section">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-[var(--color-arco-text-soft)]">Stocks are shown in units and excluded from Savings &amp; Funds valuations.</p>
-        <Link to={GIWA_STOCKS_ROUTE} className={BUTTON_SECONDARY}>Trade Stocks</Link>
-      </div>
-      <StocksSignIn />
-      {host.walletStatus === "wrong-network" && commands?.switchNetwork ? (
-        <button type="button" className={BUTTON_SECONDARY} onClick={commands.switchNetwork}>Switch to GIWA Sepolia</button>
-      ) : null}
-      {host.walletStatus === "disconnected" && commands?.connect ? (
-        <button type="button" className={BUTTON_SECONDARY} onClick={commands.connect}>Connect wallet for Stocks</button>
-      ) : null}
-      <StocksPortfolioPanel client={client} session={host.investor} hostWallet={{ address: host.wallet.address, chainId: host.wallet.chainId }} onSessionRejected={rejected} />
+    <section aria-label="Stocks portfolio" className="w-full min-w-0" data-testid="stocks-portfolio-section">
+      {client === null || host.investor.status === "verified" ? (
+        <StocksPortfolioPanel client={client} session={host.investor} hostWallet={{ address: host.wallet.address, chainId: host.wallet.chainId }} onSessionRejected={rejected} />
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-arco-border)] py-4">
+          <div>
+            <h2 className="text-base font-medium text-[var(--color-arco-ink)]">Stocks holdings</h2>
+            <p role="status" className="mt-1 text-sm text-[var(--color-arco-text-soft)]">{accessMessage}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={BUTTON_SECONDARY} disabled={!host.canSignIn || signingIn} onClick={() => void host.signIn()}>{signingIn ? "Signing in…" : "View Stocks holdings"}</button>
+            {signingIn ? <button type="button" className={BUTTON_SECONDARY} onClick={host.logout}>Cancel sign-in</button> : null}
+          </div>
+        </div>
+      )}
     </section>
   )
 }
