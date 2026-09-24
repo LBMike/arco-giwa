@@ -1,5 +1,7 @@
 # Stocks external signer boundary — inactive local slice
 
+Update 2026-09-24: [the separate runnable KMS host](stocks-kms-signer-host.md) now composes these injected modules. The component factories below remain inactive on their own. The dedicated PostgreSQL/EVM test now uses real TCP through that host and a test-only KMS port; AWS and public GIWA activation remain separate.
+
 These modules are an unconnected protocol boundary for the existing `ARCO_STOCKS_SIGNER_V1` client. They do not start a listener, access a key, or configure a public RPC. The inactive HTTP app factory implements `GET /v1/capabilities` and can return `DURABLE_SERIALIZED` and `IMMUTABLE_IDEMPOTENT` only after its injected authorization and readiness checks pass. Nothing in the product boots that app or configures it as `signerUrl`; this is not a public signer service.
 
 `server/src/stocks-runtime/signer-call.ts` now supplies one canonical allowlist to the client and the future service. Only `mintForOperation`, `refundForOperation`, `settleRedemption`, and `returnEscrowForOperation` are accepted, with their matching `mint:`, `refund:`, `redeem:`, and `return:` operation IDs. The call must match the reviewed manifest's chain, deployment, signer, target, exact calldata and zero value. `parseStocksSignerPut` additionally requires the exact v1 request fields, deployment digest, path operation ID and call digest before touching a journal.

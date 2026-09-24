@@ -1,24 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createPublicKey, randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { encodeFunctionData, parseAbi } from 'viem';
+import { bytesToHex, encodeFunctionData, hexToBytes, parseAbi, parseSignature } from 'viem';
 import { mnemonicToAccount } from 'viem/accounts';
 import pg from 'pg';
-import { authorizedCall } from '../../server/dist/stocks/chain.js';
-import { ABI_DIGEST, callDigest, manifestDigest } from '../../server/dist/stocks/contracts.js';
-import { createStocksSignerCore } from '../../server/dist/stocks-signer/core.js';
+import { authorizedCall, escrowIdentity, redemptionCall } from '../../server/dist/stocks/chain.js';
+import { ABI, ABI_DIGEST, callDigest, manifestDigest, operationKey } from '../../server/dist/stocks/contracts.js';
+import { createKmsCustody } from '../../server/dist/stocks-signer/custody-kms.js';
+import { startStocksSignerHost } from '../../server/dist/stocks-signer/host.js';
+import { parseSignerHostConfig } from '../../server/dist/stocks-signer/host-config.js';
 import { httpStocksSignerRpc } from '../../server/dist/stocks-signer/http-rpc.js';
-import { createStocksSignerHttpService } from '../../server/dist/stocks-signer/http-service.js';
 import { createOriginalNonceLookup } from '../../server/dist/stocks-signer/nonce-lookup.js';
 import { createOriginalSignerTransport } from '../../server/dist/stocks-signer/original-transport.js';
 import { PostgresSignerJournal } from '../../server/dist/stocks-signer/postgres-journal.js';
-import { createStocksSignerReadiness } from '../../server/dist/stocks-signer/readiness.js';
 import { externalStocksSigner } from '../../server/dist/stocks-runtime/transport.js';
 
 // Standalone, disposable EVM test. Run after `npm run build:server` with
@@ -48,7 +48,7 @@ function stopped(pid) {
 }
 
 test(withPostgres
-  ? 'inactive HTTP signer client uses PostgreSQL and an isolated EVM to recover the exact original'
+  ? 'runnable KMS signer host uses TCP, PostgreSQL and an isolated EVM to recover the exact original'
   : 'one-shot external-custody transport signs and recovers the exact original on an isolated EVM',
   { timeout: 120_000 }, async t => {
     assert.ok(existsSync(hardhat), 'Install the existing contracts lockfile before this test');
@@ -158,16 +158,41 @@ test(withPostgres
       intent = journal;
     }
     let signatures = 0;
-    const custody = { signOriginal: async request => {
-      signatures++;
-      assert.equal(request.chainId, 91342);
-      assert.equal(request.value, 0n);
-      // Only this test fixture holds a Hardhat account. Production custody is
-      // external and must independently enforce its own one-shot policy.
-      return fixtureAccount.signTransaction({ type: 'eip1559', chainId: request.chainId,
-        nonce: Number(request.nonce), to: request.to, data: request.data, value: request.value,
-        gas: 1_000_000n, maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n });
-    } };
+    let heldSignature;
+    let signatureStarted;
+    let kmsAvailable = true;
+    let custodyCloses = 0;
+    const keyArn = 'arn:aws:kms:ap-northeast-2:123456789012:key/12345678-1234-1234-1234-123456789012';
+    const publicKey = hexToBytes(fixtureAccount.publicKey);
+    const spki = createPublicKey({ key: { kty: 'EC', crv: 'secp256k1',
+      x: Buffer.from(publicKey.slice(1, 33)).toString('base64url'),
+      y: Buffer.from(publicKey.slice(33)).toString('base64url') }, format: 'jwk' }).export({ format: 'der', type: 'spki' });
+    const fees = { gas: 1_000_000n, maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n };
+    const makeCustody = () => createKmsCustody({ identity: { region: 'ap-northeast-2', keyArn,
+      signerAddress: manifest.signerAddress }, fees, limits, port: {
+      async getPublicKey() {
+        if (!kmsAvailable) throw Error('TEST_ONLY_KMS_UNAVAILABLE');
+        return { KeyId: keyArn, KeySpec: 'ECC_SECG_P256K1', KeyUsage: 'SIGN_VERIFY',
+          SigningAlgorithms: ['ECDSA_SHA_256'], PublicKey: spki };
+      },
+      async sign(digest) {
+        signatures++;
+        signatureStarted?.();
+        if (heldSignature) await heldSignature;
+        const signature = parseSignature(await fixtureAccount.sign({ hash: bytesToHex(digest) }));
+        const integer = hex => {
+          let b = Buffer.from(hex.slice(2).replace(/^(00)+/, ''), 'hex');
+          if (b[0] >= 128) b = Buffer.concat([Buffer.from([0]), b]);
+          return Buffer.concat([Buffer.from([2, b.length]), b]);
+        };
+        const body = Buffer.concat([integer(signature.r), integer(signature.s)]);
+        return { KeyId: keyArn, SigningAlgorithm: 'ECDSA_SHA_256',
+          Signature: Buffer.concat([Buffer.from([0x30, body.length]), body]) };
+      },
+      destroy() { custodyCloses++; },
+    } });
+    const custody = makeCustody();
+    t.after(() => custody.close());
     const transport = createOriginalSignerTransport({ manifest, rpc: signerRpc, custody, intent, lookup, limits });
     const operation = async (id, recipient) => {
       const call = authorizedCall(manifest, id, 'MINT', recipient, '1000000000');
@@ -182,7 +207,7 @@ test(withPostgres
       }
       throw Error('Local EVM receipt unavailable');
     };
-    const balance = async wallet => BigInt(await rpc('eth_call', [{ to: manifest.stockToken,
+    const balance = async (wallet, token = manifest.stockToken) => BigInt(await rpc('eth_call', [{ to: token,
       data: encodeFunctionData({ abi: parseAbi(['function balanceOf(address) view returns (uint256)']),
         functionName: 'balanceOf', args: [wallet] }) }, 'latest']));
 
@@ -200,33 +225,45 @@ test(withPostgres
     };
 
     if (withPostgres) {
-      // The product's existing signer client speaks to the inactive HTTP app
-      // via Fastify inject. Nothing listens on a socket or selects a public
-      // signer endpoint. All chain writes still pass through the restricted
-      // JSON-RPC transport and the dedicated PostgreSQL journal.
-      const throughHttp = (core, durableJournal) => {
-        const token = randomBytes(32).toString('base64url');
-        const app = createStocksSignerHttpService({ manifest, core, bearerToken: token,
-          ready: createStocksSignerReadiness({ manifest, reviewedManifestDigest: digest,
-            reviewedInitialNonce: initialNonce, journal: durableJournal, rpc: signerRpc,
-            operationalReady: async () => true }),
-        });
-        apps.add(app);
-        assert.equal(app.server.listening, false, 'The signer HTTP test must not start a listener');
-        const client = externalStocksSigner({ url: 'https://signer.integration.test/', authorization: token,
-          deploymentDigest: digest, manifest, request: async (url, init) => {
-            const response = await app.inject({ method: init?.method ?? 'GET',
-              url: new URL(String(url)).pathname,
-              headers: Object.fromEntries(new Headers(init?.headers).entries()),
-              ...(init?.body ? { payload: String(init.body) } : {}),
-            });
-            return new Response(response.body, { status: response.statusCode,
-              headers: { 'content-type': 'application/json' } });
-          } });
+      // Real TCP uses the production host composition and KMS DER adapter.
+      // Only the KMS wire port and RPC destination are test-owned substitutes.
+      const hostConfig = parseSignerHostConfig({ schemaVersion: 1, profile: 'DEMO_TESTNET', manifest,
+        reviewedManifestDigest: digest, reviewedInitialNonce: initialNonce, rpcUrl: 'https://sepolia-rpc.giwa.io',
+        listen: { host: '127.0.0.1', port: 8081 },
+        custody: { type: 'AWS_KMS', region: 'ap-northeast-2', keyArn, exclusiveAccountControlConfirmed: true },
+        transaction: Object.fromEntries(Object.entries(fees).map(([k, v]) => [k, String(v)])),
+        limits: Object.fromEntries(Object.entries(limits).map(([k, v]) => [k, String(v)])),
+      });
+      const token = randomBytes(32).toString('base64url');
+      const startHost = async (rpc = signerRpc, mode = 'serve', overrides = {}) => {
+        const pool = new pg.Pool({ connectionString: postgresUrl, max: 2 });
+        const host = await startStocksSignerHost({ config: { ...hostConfig, listen: { host: '127.0.0.1', port: 0 } },
+          pool, custody: makeCustody(), rpc, bearerToken: token, mode, ...overrides });
+        apps.add(host);
+        return host;
+      };
+      const checked = await startHost(signerRpc, 'check');
+      assert.equal(checked.address, null); assert.equal(signatures, 0);
+      const throughHttp = async (rpc = signerRpc) => {
+        const app = await startHost(rpc);
+        const unauthorized = await fetch(`${app.address}/v1/capabilities`);
+        assert.equal(unauthorized.status, 401);
+        const client = externalStocksSigner({ url: app.address, localHarness: true, authorization: token,
+          deploymentDigest: digest, manifest });
         return { app, client };
       };
-      const core = createStocksSignerCore({ manifest, journal, transport });
-      const firstHttp = throughHttp(core, journal);
+      const firstHttp = await throughHttp();
+      const occupiedPort = Number(new URL(firstHttp.app.address).port);
+      await assert.rejects(startHost(signerRpc, 'serve', {
+        config: { ...hostConfig, listen: { host: '127.0.0.1', port: occupiedPort } },
+      }), /SIGNER_HOST_NOT_READY/);
+      await assert.rejects(startHost(signerRpc, 'serve', { signal: AbortSignal.abort() }), /SIGNER_HOST_NOT_READY/);
+      await assert.rejects(startHost(signerRpc, 'serve', { bearerToken: 'invalid' }), /SIGNER_HOST_NOT_READY/);
+      kmsAvailable = false;
+      await assert.rejects(firstHttp.client.probe());
+      assert.equal(signatures, 0);
+      await assert.rejects(startHost(), /SIGNER_HOST_NOT_READY/);
+      kmsAvailable = true;
       await firstHttp.client.probe();
       assert.equal(await firstHttp.client.lookup(firstCall.operationId), null);
       const first = await firstHttp.client.submit(firstCall);
@@ -238,19 +275,35 @@ test(withPostgres
       assert.deepEqual(await firstHttp.client.lookup(firstCall.operationId), first);
       assert.deepEqual(await firstHttp.client.submit(firstCall), first);
       assert.equal(signatures, 1);
+      const concurrent = await Promise.all(Array.from({ length: 8 }, () => firstHttp.client.submit(firstCall)));
+      assert.ok(concurrent.every(row => row.txHash === first.txHash));
+      assert.equal(signatures, 1);
 
       const nonceBefore = BigInt(await rpc('eth_getTransactionCount', [manifest.signerAddress, 'pending']));
-      const uncertain = createOriginalSignerTransport({ manifest, rpc: lostAckRpc, custody, intent, lookup, limits });
-      const uncertainCore = createStocksSignerCore({ manifest, journal, transport: uncertain });
-      const uncertainHttp = throughHttp(uncertainCore, journal);
+      const uncertainHttp = await throughHttp(lostAckRpc);
       await uncertainHttp.client.probe();
-      await assert.rejects(uncertainHttp.client.submit(secondCall), /SIGNER_RESPONSE_UNAVAILABLE/);
+      let releaseSignature;
+      heldSignature = new Promise(resolve => { releaseSignature = resolve; });
+      const admitted = new Promise(resolve => { signatureStarted = resolve; });
+      const uncertainSubmission = assert.rejects(uncertainHttp.client.submit(secondCall), /SIGNER_RESPONSE_UNAVAILABLE/);
+      await admitted;
+      const closesBeforeDrain = custodyCloses;
+      let drained = false;
+      const draining = uncertainHttp.app.close().then(() => { drained = true; });
+      await delay(25);
+      assert.equal(drained, false, 'Shutdown must wait for admitted signing work');
+      assert.equal(custodyCloses, closesBeforeDrain, 'Custody stays available until signed hash and broadcast settle');
+      releaseSignature();
+      heldSignature = undefined; signatureStarted = undefined;
+      await uncertainSubmission;
+      await draining;
+      apps.delete(uncertainHttp.app);
       assert.equal(sends, 1);
       assert.equal((await receipt(sentHash)).status, '0x1');
       const unresolved = await journal.read(secondCall.operationId);
       assert.equal(unresolved.txHash, null);
       assert.equal(await journal.readSignedHash(unresolved), sentHash);
-      await assert.rejects(uncertainHttp.client.submit(secondCall), /SIGNER_RESPONSE_UNAVAILABLE/);
+      await assert.rejects(firstHttp.client.submit(secondCall), /SIGNER_RESPONSE_UNAVAILABLE/);
       assert.equal(sends, 1, 'Repeated submit cannot broadcast the reserved original again');
       await firstHttp.app.close();
       apps.delete(firstHttp.app);
@@ -263,9 +316,7 @@ test(withPostgres
       // server before invoking this EVM scenario.
       activePool = new pg.Pool({ connectionString: postgresUrl, max: 4 });
       const reopened = new PostgresSignerJournal(activePool, manifest, initialNonce);
-      const restarted = createOriginalSignerTransport({ manifest, rpc: signerRpc, custody, intent: reopened, lookup, limits });
-      const recoveredCore = createStocksSignerCore({ manifest, journal: reopened, transport: restarted });
-      const recoveredHttp = throughHttp(recoveredCore, reopened);
+      const recoveredHttp = await throughHttp();
       await recoveredHttp.client.probe();
       assert.equal(await reopened.readSignedHash(unresolved), sentHash);
       assert.deepEqual(await recoveredHttp.client.lookup(secondCall.operationId), {
@@ -280,6 +331,38 @@ test(withPostgres
       assert.equal(signatures, 2);
       assert.equal(sends, 1);
 
+      // Settle a real partial sale through the same KMS/host/journal path.
+      // Funding and wallet approvals use only the isolated node's unlocked accounts.
+      const localWrite = async (from, to, data) => {
+        const txHash = await rpc('eth_sendTransaction', [{ from, to, data, gas: '0x1e8480' }]);
+        assert.equal((await receipt(txHash)).status, '0x1');
+      };
+      await localWrite(bundle.publicAccounts.faucetOperator, manifest.cashToken,
+        encodeFunctionData({ abi: parseAbi(['function faucet(address,uint256)']), functionName: 'faucet',
+          args: [manifest.fundingVault, 120_000_000n] }));
+      await localWrite(bundle.publicAccounts.holder, manifest.stockToken,
+        encodeFunctionData({ abi: parseAbi(['function approve(address,uint256) returns (bool)']), functionName: 'approve',
+          args: [manifest.redemptionEscrow, 500_000_000n] }));
+      const sellKey = operationKey('sell:kms-host-partial');
+      await localWrite(bundle.publicAccounts.holder, manifest.redemptionEscrow,
+        encodeFunctionData({ abi: ABI, functionName: 'escrowForOrder', args: [sellKey, manifest.stockToken, 500_000_000n] }));
+      const sellCall = redemptionCall(manifest, 'redeem:kms-host-partial', 'REDEEM',
+        escrowIdentity(sellKey, bundle.publicAccounts.holder, manifest.stockToken), '60000000');
+      const sold = await recoveredHttp.client.submit(sellCall);
+      assert.equal((await receipt(sold.txHash)).status, '0x1');
+      assert.deepEqual(await recoveredHttp.client.submit(sellCall), sold);
+      assert.equal(await balance(bundle.publicAccounts.holder), 500_000_000n);
+      assert.equal(await balance(manifest.redemptionEscrow), 0n);
+      assert.equal(await balance(bundle.publicAccounts.holder, manifest.cashToken), 60_000_000n);
+      assert.equal(await balance(manifest.fundingVault, manifest.cashToken), 60_000_000n);
+      assert.equal(signatures, 3);
+      console.log('SIGNER_HOST_TCP_KMS_MINT_REDEEM_RECOVERY_PASSED');
+      const closePromise = recoveredHttp.app.close();
+      assert.equal(closePromise, recoveredHttp.app.close(), 'Repeated shutdown shares one drain');
+      await closePromise;
+      apps.delete(recoveredHttp.app);
+      await assert.rejects(fetch(`${recoveredHttp.app.address}/v1/capabilities`));
+      assert.ok(custodyCloses >= 5, 'Check, failed startup and every closed host release custody');
       const candidate = await lookup.findAtOriginalNonce(unresolved);
       const tampered = createOriginalSignerTransport({ manifest, rpc: signerRpc, custody, intent: reopened,
         lookup: { findAtOriginalNonce: async () => ({ ...candidate, input: '0x1234' }) }, limits });
@@ -309,7 +392,7 @@ test(withPostgres
         lookup: { findAtOriginalNonce: async () => ({ ...candidate, input: '0x1234' }) }, limits });
       await assert.rejects(tampered.findOriginal(second), /SIGNER_ORIGINAL_TRANSACTION_MISMATCH/);
     }
-    assert.equal(signatures, 2, 'Read-only recovery must not ask custody to sign');
+    assert.equal(signatures, withPostgres ? 3 : 2, 'Read-only recovery must not ask custody to sign');
     assert.doesNotMatch(readFileSync(log, 'utf8'), /Private Key:|Account #\d+:/,
       'The isolated node must not print test account key material');
     passed = true;
