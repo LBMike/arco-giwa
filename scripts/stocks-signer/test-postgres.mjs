@@ -76,6 +76,13 @@ try {
   run(process.execPath, ['--test', 'scripts/stocks-signer/original-transport-evm.test.mjs'], { ...testEnv,
     STOCKS_SIGNER_CUSTODY_TEST: 'LOCAL_KEYSTORE',
     STOCKS_SIGNER_TEST_DATABASE_URL: `postgresql://signer_harness@localhost/signer_keystore_test?host=${encodeURIComponent(socket)}` });
+  // First-time shared-admin faucet has its own never-before-seeded journal.
+  run(pg('createdb'), ['-h', socket, '-U', 'signer_harness', 'signer_bootstrap_test']);
+  for (const migration of ['0001_journal.sql', '0002_signed_intent.sql'])
+    run(pg('psql'), ['-h', socket, '-U', 'signer_harness', '-d', 'signer_bootstrap_test', '-v', 'ON_ERROR_STOP=1',
+      '-f', join(root, 'server/src/stocks-signer/migrations', migration)]);
+  run(process.execPath, ['--test', 'scripts/stocks-signer/bootstrap-evm.test.mjs'], { ...testEnv,
+    STOCKS_SIGNER_TEST_DATABASE_URL: `postgresql://signer_harness@localhost/signer_bootstrap_test?host=${encodeURIComponent(socket)}` });
 } finally {
   if (started || existsSync(join(data, 'postmaster.pid'))) {
     const stopped = spawnSync(pg('pg_ctl'), ['-D', data, '-m', 'immediate', '-w', 'stop'], { stdio: 'inherit' });
