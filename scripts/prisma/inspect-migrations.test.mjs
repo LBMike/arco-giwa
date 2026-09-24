@@ -203,3 +203,94 @@ test("DROP CONSTRAINT exemption cannot hide other targets or escape ALTER statem
     'DO $$ BEGIN ALTER TABLE arco_evm.thing DROP CONSTRAINT thing_check; DROP TABLE other.thing; END; $$;',
   ]) assert.ok(inspect(sql).length > 0, sql)
 })
+
+test("simple qualified SELECT aliases are fields within their own query, with quoted case preserved", () => {
+  for (const alias of ['p', 's', '"Proof"']) {
+    assert.deepEqual(inspect(`SELECT ${alias}.id FROM arco_evm.proof AS ${alias} WHERE ${alias}.id='id';`), [])
+    assert.deepEqual(inspect(`DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM arco_evm.proof ${alias} WHERE ${alias}.id=NEW.id AND ${alias}.status=NEW.status) THEN RETURN NEW; END IF; END $$;`), [])
+  }
+  assert.ok(inspect('SELECT proof.id FROM arco_evm.proof "Proof" WHERE proof.id=1;').length > 0)
+})
+
+test("a SELECT alias cannot escape to another statement, SELECT branch or routine", () => {
+  for (const sql of [
+    'SELECT 1 FROM arco_evm.proof p WHERE p.id=1; SELECT p.id;',
+    'SELECT 1 FROM arco_evm.proof p WHERE p.id=1 UNION SELECT p.id;',
+    'SELECT 1 FROM arco_evm.proof p WHERE p.id=1 INTERSECT SELECT p.id;',
+    'SELECT 1 FROM arco_evm.proof p WHERE p.id=1 EXCEPT SELECT p.id;',
+    'SELECT (SELECT p.id) FROM arco_evm.proof p WHERE p.id=1;',
+    'SELECT (SELECT 1 FROM arco_evm.proof p WHERE p.id=1), p.id;',
+    'DO $$ BEGIN SELECT 1 FROM arco_evm.proof p WHERE p.id=1; END $$; DO $$ BEGIN SELECT p.id; END $$;',
+  ]) assert.match(inspect(sql).join('\n'), /non-arco_evm qualifier p/, sql)
+})
+
+test("alias spelling never authorizes a foreign relation, callable, type or chained qualifier", () => {
+  for (const alias of ['p', '"Proof"']) {
+    for (const expression of [
+      `${alias}.fn()`, `${alias}.table_name.id`, `1::${alias}.domain`,
+      `CAST(1 AS ${alias}.domain)`, `'x' COLLATE ${alias}.collation`,
+      `(SELECT 1 FROM ${alias}.secret)`, `(SELECT 1 FROM arco_evm.proof, ${alias}.secret)`,
+      `(SELECT 1 FROM arco_evm.proof JOIN ${alias}.secret ON true)`,
+      `(SELECT 1 FROM (${alias}.secret CROSS JOIN arco_evm.proof))`,
+    ]) assert.ok(inspect(`SELECT 1 FROM arco_evm.proof ${alias} WHERE ${expression} IS NOT NULL;`).length > 0, expression)
+    assert.ok(inspect(`SELECT 1 FROM ${alias}.proof ${alias} WHERE ${alias}.id=1;`).length > 0)
+  }
+})
+
+const recordRoutine = (body, name = 'saved') => `CREATE FUNCTION arco_evm.check_record() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE ${name} arco_evm.proof%ROWTYPE;
+BEGIN ${body} RETURN NEW; END $$;`
+
+test("qualified ROWTYPE records work only in their declared routine", () => {
+  assert.deepEqual(inspect(recordRoutine('SELECT * INTO saved FROM arco_evm.proof; IF saved.id<>NEW.id OR NEW.status IS DISTINCT FROM saved.status THEN RETURN OLD; END IF;')), [])
+  assert.deepEqual(inspect(recordRoutine('IF "Saved".id<>NEW.id THEN RETURN OLD; END IF;', '"Saved"')), [])
+  for (const sql of [
+    recordRoutine('IF saved.id<>NEW.id THEN RETURN OLD; END IF;') + 'SELECT saved.id;',
+    recordRoutine('') + 'CREATE FUNCTION arco_evm.other() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF saved.id=1 THEN RETURN NEW; END IF; END $$;',
+    recordRoutine('DO $inner$ BEGIN SELECT saved.id; END $inner$;'),
+    recordRoutine('DECLARE saved record; BEGIN SELECT saved.id; END;'),
+    recordRoutine('IF saved.id<>NEW.id THEN RETURN OLD; END IF;', '"Saved"'),
+    'CREATE FUNCTION arco_evm.other() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE saved foreign_schema.proof%ROWTYPE; BEGIN SELECT saved.id; END $$;',
+  ]) assert.ok(inspect(sql).length > 0, sql)
+})
+
+test("records including NEW/OLD cannot disguise foreign schema object access", () => {
+  for (const name of ['saved', 'NEW', 'OLD']) {
+    for (const sql of [
+      `SELECT ${name}.fn();`, `SELECT ${name}.proof.id;`, `SELECT 1::${name}.domain;`,
+      `SELECT CAST(1 AS ${name}.domain);`, `SELECT 'x' COLLATE ${name}.collation;`,
+      `SELECT * FROM ${name}.proof;`, `SELECT * FROM arco_evm.proof, ${name}.proof;`,
+      `SELECT * FROM arco_evm.proof JOIN ${name}.proof ON true;`,
+      `UPDATE arco_evm.proof SET id=1 FROM arco_evm.proof, ${name}.other;`,
+      `CREATE TABLE arco_evm.bad (id ${name}.domain);`,
+      `DELETE FROM ${name}.proof;`, `INSERT INTO ${name}.proof VALUES (1);`,
+      `UPDATE ${name}.proof SET id=1;`,
+    ]) assert.ok(inspect(recordRoutine(sql)).length > 0, sql)
+  }
+})
+
+test("public and waitlist names are still rejected even when declared as aliases or records", () => {
+  for (const name of ['public', 'waitlist_record', '"Public"']) {
+    assert.ok(inspect(`SELECT 1 FROM arco_evm.proof ${name} WHERE ${name}.id=1;`).length > 0)
+    assert.ok(inspect(recordRoutine(`IF ${name}.id=1 THEN RETURN NEW; END IF;`, name)).length > 0)
+  }
+})
+
+test("Postgres typed-string constants cannot use an alias/record to name a foreign input type", () => {
+  for (const literal of ["'x'", "E'x'", '$value$x$value$', '$empty$$empty$']) {
+    assert.ok(inspect(`SELECT p.domain ${literal} FROM arco_evm.proof p WHERE true;`).length > 0, literal)
+    for (const name of ['saved', 'NEW', 'OLD'])
+      assert.ok(inspect(recordRoutine(`SELECT ${name}.domain ${literal};`)).length > 0, name + literal)
+  }
+})
+
+test("DDL option values cannot be disguised as declared row fields", () => {
+  for (const sql of [
+    'CREATE TYPE arco_evm.custom (INPUT=saved.read, OUTPUT=saved.write);',
+    'CREATE TYPE arco_evm.custom AS RANGE (SUBTYPE=saved.domain);',
+    'ALTER TYPE arco_evm.custom SET (RECEIVE=saved.receive);',
+    'CREATE TYPE arco_evm.custom (INPUT=NEW.read, OUTPUT=OLD.write);',
+  ]) assert.ok(inspect(recordRoutine(sql)).length > 0, sql)
+  // A top-level CREATE FUNCTION must not suppress fields inside its body.
+  assert.deepEqual(inspect(recordRoutine('IF saved.id=NEW.id THEN RETURN NEW; END IF;')), [])
+})

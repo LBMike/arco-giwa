@@ -7,7 +7,7 @@ const OBJECT_KINDS = new Set(["TABLE", "INDEX", "VIEW", "SEQUENCE", "FUNCTION", 
 
 // A small static guard, not a PostgreSQL parser. Preserve identifiers, ignore
 // comments/literals, and also scan dollar-quoted routine bodies.
-function tokenize(sql, findings, file, routineDepth = 0) {
+function tokenize(sql, findings, file, routineDepth = 0, bodies = { next: 1 }, routineId = 0) {
   const tokens = []
   const routineBody = routineDepth > 0
   let i = 0
@@ -47,24 +47,26 @@ function tokenize(sql, findings, file, routineDepth = 0) {
         } else value += sql[i++]
       }
       if (!closed) findings.push(`${file}: unterminated ${quote === '"' ? "identifier" : "string"}`)
-      tokens.push({ kind: quote === '"' ? "identifier" : "literal", value, routineBody, routineDepth, quoted: quote === '"' })
+      tokens.push({ kind: quote === '"' ? "identifier" : "literal", value, routineBody, routineDepth, routineId, quoted: quote === '"' })
       continue
     }
     const dollar = sql.slice(i).match(/^\$(?:[a-zA-Z_][a-zA-Z0-9_]*)?\$/)?.[0]
     if (dollar) {
       const end = sql.indexOf(dollar, i + dollar.length)
       if (end === -1) { findings.push(`${file}: unterminated dollar-quoted body`); break }
-      tokens.push(...tokenize(sql.slice(i + dollar.length, end), findings, file, routineDepth + 1))
+      tokens.push({ kind: "bodyStart", value: dollar, routineBody, routineDepth, routineId })
+      tokens.push(...tokenize(sql.slice(i + dollar.length, end), findings, file, routineDepth + 1, bodies, bodies.next++))
+      tokens.push({ kind: "bodyEnd", value: dollar, routineBody, routineDepth, routineId })
       i = end + dollar.length
       continue
     }
     const identifier = sql.slice(i).match(/^[a-zA-Z_][a-zA-Z0-9_$]*/)?.[0]
     if (identifier) {
-      tokens.push({ kind: "identifier", value: identifier.toLowerCase(), routineBody, routineDepth })
+      tokens.push({ kind: "identifier", value: identifier.toLowerCase(), routineBody, routineDepth, routineId })
       i += identifier.length
       continue
     }
-    tokens.push({ kind: "punctuation", value: sql[i++], routineBody, routineDepth })
+    tokens.push({ kind: "punctuation", value: sql[i++], routineBody, routineDepth, routineId })
   }
   return tokens
 }
@@ -84,6 +86,124 @@ function skipOptions(tokens, index) {
   return index
 }
 
+// Exempt token positions, never a global list of qualifier names. This guard
+// deliberately supports only simple, qualified SELECT sources and top-level
+// %ROWTYPE declarations used by the migrations; it is not a SQL name resolver.
+function fieldReferences(tokens) {
+  const queries = new Map()
+  for (let start = 0; start < tokens.length; start++) {
+    if (word(tokens, start) !== "SELECT") continue
+    const scope = { alias: null, phases: new Map() }
+    const id = tokens[start].routineId
+    let depth = 0
+    let phase = "expression"
+    for (let i = start + 1; i < tokens.length; i++) {
+      const token = tokens[i]
+      if (token.routineId !== id || (token.kind === "punctuation" && token.value === ";")) break
+      if (token.value === ")" && token.kind === "punctuation" && depth === 0) break
+      const current = word(tokens, i)
+      if (depth === 0 && ["UNION", "INTERSECT", "EXCEPT"].includes(current)) break
+      if (depth === 0 && current === "FROM" && word(tokens, i - 1) !== "DISTINCT") {
+        phase = "relation"
+        // One table, optional AS, then WHERE. JOIN/CTE/derived-table aliases
+        // require a separately supported grammar instead of guessed scope.
+        let alias = i + 4
+        if (word(tokens, alias) === "AS") alias++
+        if (tokens[i + 1]?.value === ALLOWED_SCHEMA && tokens[i + 1]?.kind === "identifier"
+          && tokens[i + 2]?.value === "." && tokens[i + 3]?.kind === "identifier"
+          && tokens[alias]?.kind === "identifier" && word(tokens, alias + 1) === "WHERE") {
+          scope.alias = tokens[alias].value
+        }
+      } else if (depth === 0 && ["WHERE", "HAVING", "GROUP", "ORDER", "LIMIT", "OFFSET", "WINDOW"].includes(current)) {
+        phase = "expression"
+      }
+      // Inner SELECTs are visited later and replace these entries. An outer
+      // alias is never silently granted to a nested or sibling SELECT.
+      scope.phases.set(i, phase)
+      queries.set(i, scope)
+      if (token.kind === "punctuation" && token.value === "(") depth++
+      else if (token.kind === "punctuation" && token.value === ")") depth--
+    }
+  }
+
+  const records = new Map()
+  const starts = new Map()
+  for (let i = 0; i < tokens.length; i++) {
+    const id = tokens[i].routineId
+    if (id > 0 && !starts.has(id)) starts.set(id, i)
+  }
+  for (const [id, start] of starts) {
+    if (word(tokens, start) !== "DECLARE") continue
+    let i = start + 1
+    const names = new Set()
+    while (tokens[i]?.routineId === id && word(tokens, i) !== "BEGIN") {
+      if (tokens[i]?.kind !== "identifier" || tokens[i + 1]?.kind !== "identifier"
+        || tokens[i + 1].value !== ALLOWED_SCHEMA || tokens[i + 2]?.value !== "."
+        || tokens[i + 3]?.kind !== "identifier" || tokens[i + 4]?.value !== "%"
+        || word(tokens, i + 5) !== "ROWTYPE" || tokens[i + 6]?.value !== ";") break
+      names.add(tokens[i].value)
+      i += 7
+    }
+    if (word(tokens, i) !== "BEGIN" || tokens[i]?.routineId !== id) continue
+    // Nested DECLARE can shadow a record; conservatively decline the exemption.
+    if (tokens.slice(i + 1).some(t => t.routineId === id && !t.quoted && t.value === "declare")) continue
+    records.set(id, { names, begin: i })
+  }
+
+  const allowed = new Set()
+  const ddl = new Set()
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (token.kind === "punctuation" && token.value === ";") ddl.delete(token.routineId)
+    if (["CREATE", "ALTER", "DROP"].includes(word(tokens, i))) ddl.add(token.routineId)
+    // DDL options can use '=' before a function/type name, e.g. TYPE INPUT=.
+    // They are not row expressions; dollar bodies have independent identities.
+    if (ddl.has(token.routineId)) continue
+    if (token.kind !== "identifier" || tokens[i - 1]?.value === "." || tokens[i + 1]?.value !== "."
+      || tokens[i + 2]?.kind !== "identifier") continue
+    const query = queries.get(i)
+    const record = records.get(token.routineId)
+    const known = (query?.alias === token.value)
+      || (record && i > record.begin && record.names.has(token.value))
+      || (token.routineBody && ["new", "old"].includes(token.value))
+    if (!known || query?.phases.get(i) === "relation") continue
+    // A function, chained qualifier or type/collation is never a row field.
+    if ([".", "(", "%"].includes(tokens[i + 3]?.value)
+      || ["literal", "bodyStart"].includes(tokens[i + 3]?.kind)
+      || (word(tokens, i + 3) === "E" && tokens[i + 4]?.kind === "literal")) continue
+    const previous = word(tokens, i - 1)
+    const distinctFrom = previous === "FROM" && word(tokens, i - 2) === "DISTINCT"
+      && (word(tokens, i - 3) === "IS" || (word(tokens, i - 3) === "NOT" && word(tokens, i - 4) === "IS"))
+    const expressionWord = ["IF", "ELSIF", "WHEN", "THEN", "ELSE", "AND", "OR", "NOT", "RETURN", "SELECT", "WHERE", "HAVING"].includes(previous)
+    const punctuation = tokens[i - 1]?.kind === "punctuation" ? tokens[i - 1].value : ""
+    const operator = ["=", "<", ">", "!", "+", "-", "*", "/", "|", "&"].includes(punctuation)
+    // Parenthesized expressions/argument lists are allowed only with a known
+    // expression introducer; FROM (alias.table) and DDL/type lists stay closed.
+    let argumentsList = false
+    if (["(", ","].includes(punctuation)) {
+      let nesting = 0
+      for (let at = i - 1; at >= 0 && tokens[at].routineId === token.routineId; at--) {
+        if (tokens[at].kind !== "punctuation") continue
+        if (tokens[at].value === ";") break
+        if (tokens[at].value === ")") nesting++
+        if (tokens[at].value !== "(") continue
+        if (nesting > 0) { nesting--; continue }
+        let before = at - 1
+        while (tokens[before]?.value === "(" && tokens[before]?.routineId === token.routineId) before--
+        const head = word(tokens, before)
+        argumentsList = ["ROW", "COALESCE", "NULLIF", "JSONB_BUILD_OBJECT", "IF", "ELSIF", "WHEN", "NOT", "AND", "OR", "WHERE", "SELECT", "IN"].includes(head)
+          || ["=", "<", ">"].includes(tokens[before]?.value)
+          || (head === "FROM" && word(tokens, before - 1) === "DISTINCT" &&
+            (word(tokens, before - 2) === "IS" || (word(tokens, before - 2) === "NOT" && word(tokens, before - 3) === "IS")))
+        break
+      }
+    }
+    if (distinctFrom || expressionWord || operator || argumentsList
+      || (punctuation === "," && query?.phases.get(i) === "expression")) allowed.add(i)
+  }
+  return allowed
+}
+
 /** Inspect complete, lexically ordered migration history without a DB. */
 export function inspectMigrationHistory(migrations) {
   const findings = []
@@ -91,6 +211,7 @@ export function inspectMigrationHistory(migrations) {
   if (!migrations.length) findings.push("Migration history is empty")
   for (const { file, sql } of [...migrations].sort((a, b) => a.file.localeCompare(b.file))) {
     const tokens = tokenize(sql, findings, file)
+    const fields = fieldReferences(tokens)
     const add = (message) => findings.push(`${file}: ${message}`)
     const requireQualified = (index, context) => {
       const start = skipOptions(tokens, index)
@@ -126,10 +247,9 @@ export function inspectMigrationHistory(migrations) {
       if (current === "SET" && word(tokens, i + 1) === "SCHEMA") add("SET SCHEMA is unsupported")
       if (current === "U" && tokens[i + 1]?.value === "&") add("Unicode-escaped SQL identifiers and literals are unsupported")
       if (current === "EXECUTE" && !["FUNCTION", "PROCEDURE"].includes(word(tokens, i + 1))) add("dynamic EXECUTE is unsupported by the migration isolation guard")
-      // NEW/OLD are trigger row records, not schemas, inside routine bodies.
+      // Only lexically proven expression fields may use a non-schema qualifier.
       if (tokens[i - 1]?.value !== "." && tokens[i + 1]?.value === "." && tokens[i + 2]?.kind === "identifier") {
-        const triggerRecord = token.routineBody && ["new", "old"].includes(token.value)
-        if (token.value !== ALLOWED_SCHEMA && !triggerRecord) add(`references non-${ALLOWED_SCHEMA} qualifier ${token.value}`)
+        if (token.value !== ALLOWED_SCHEMA && !fields.has(i)) add(`references non-${ALLOWED_SCHEMA} qualifier ${token.value}`)
         if (token.value === ALLOWED_SCHEMA && !schemaCreated) add(`references ${ALLOWED_SCHEMA} before its schema bootstrap`)
       }
       if (current === "CREATE") {
