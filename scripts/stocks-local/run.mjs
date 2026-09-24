@@ -11,7 +11,8 @@ assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1', 'Explicit STOCKS_LOCAL_ST
 const uiMode = process.env.STOCKS_LOCAL_UI === '1';
 const browserMode = process.env.STOCKS_LOCAL_BROWSER === '1';
 const ownerMode = process.env.STOCKS_LOCAL_OWNER === '1';
-assert.ok(Number(uiMode) + Number(browserMode) + Number(ownerMode) + Number(process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1') + Number(process.env.STOCKS_LOCAL_STACK_SIGNAL_PROBE === '1') <= 1, 'Choose one fixed local scenario');
+const customerGatewayMode = process.env.STOCKS_LOCAL_CUSTOMER_GATEWAY === '1';
+assert.ok(Number(uiMode) + Number(browserMode) + Number(ownerMode) + Number(customerGatewayMode) + Number(process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1') + Number(process.env.STOCKS_LOCAL_STACK_SIGNAL_PROBE === '1') <= 1, 'Choose one fixed local scenario');
 const root = resolve(import.meta.dirname, '../..');
 const contractsRoot = join(root, 'packages/contracts');
 assert.ok(existsSync(join(root, 'server/dist/stocks-runtime/observer.js')), 'Build the assembled backend/runtime first');
@@ -146,7 +147,7 @@ try {
     await new Promise(() => {}); // Signal-check child deliberately awaits its owned cleanup.
   }
   // Fixed local regression selection only; never accept an arbitrary module path.
-  const { runStack } = await import(ownerMode ? './owner-run.mjs' : browserMode ? './browser-run.mjs' : uiMode ? './ui-run.mjs' : process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1' ? './address-case.mjs' : './stack.mjs');
+  const { runStack } = await import(customerGatewayMode ? '../customer-demo/local-roundtrip.mjs' : ownerMode ? './owner-run.mjs' : browserMode ? './browser-run.mjs' : uiMode ? './ui-run.mjs' : process.env.STOCKS_LOCAL_STACK_CASE_PROBE === '1' ? './address-case.mjs' : './stack.mjs');
   checkRunning();
   const report = await runStack({ rpcUrl, bundle: JSON.parse(readFileSync(bundlePath, 'utf8')),
     databaseUrl: `postgresql://stocks_local@localhost/stocks_local_test?host=${encodeURIComponent(socket)}`, resourceDir: temp, registerCleanup });

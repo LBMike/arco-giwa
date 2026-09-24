@@ -1,0 +1,15 @@
+# GIWA-DEMO-TRADES-003
+
+User authorization: continue GIWA demo development after completing customer reads/authentication. Commander/root approves and owns this bounded connection task; no shared API, schema, dependencies, contract or wallet protocol changes. Base562d0e3; branch codex/giwa-demo-trades-003; worktree /private/tmp/arco-giwa-demo-trades-003. Root is the sole builder; independent agents perform read-only reviews.
+
+Objective: complete the missing4392 transport for the existing Stocks investor flow, so a deployed backend can receive quote, order, original-order recovery and wallet-submission requests. Existing4392 remains reads/auth only until the separate trading activation requirements are satisfied. No public order, wallet signature, deployment, push or merge is authorized by this task.
+
+Allowed: scripts/customer-demo/gateway.ts, gateway.test.ts, new trading-routes.ts, trading-gateway.test.ts and local-roundtrip.mjs; src/demo/giwa/stocks-execution-host/verification/serve.ts; the existing local-only scripts/stocks-local/run.mjs to select the fixed real PostgreSQL/EVM gateway scenario; this task and docs/evidence/giwa-demo-trades-003.md. Existing UI4392 runtime files may be updated only by guarded patches preserving unrelated user changes; no trading flag activation.
+
+Invariants: trading forwarding defaults off and requires explicit authentication. Only existing investor routes at the fixed GIWA API; no admin/faucet/fixture/raw RPC writes. Exact origin, token and bounded JSON checks; no credentials in logs, redirects, cookies, automatic retries or alternate upstream. No financial arithmetic, authoritative backend validation, idempotency key, original hash or outcome reinterpretation changes. The wallet signs only through the existing user-driven flow.
+
+Failures: missing session, foreign/missing origin, invalid method/path/query/body, admin requests, paused/unregistered backend, timeout or lost order response, duplicate submission and recovery. An uncertain upstream response must remain uncertain to the existing client; it must never generate another order or signature.
+
+Validation commands: node --import tsx --test scripts/customer-demo/*.test.ts; STOCKS_LOCAL_STACK_ONLY=1 STOCKS_LOCAL_CUSTOMER_GATEWAY=1 node --import tsx scripts/stocks-local/run.mjs (disposable PostgreSQL and EVM only); npm run typecheck; npm run build; npm run test:frontend; npm run test:server; npm run test:security; npm run prisma:migration:inspect. Reuse existing concurrency/crash/replay/property suites relevant to orders and submissions; no monetary schema/service changes. Never use a personal wallet or current user DB for these tests.
+
+Completed: scoped transport and fixed local scenario implemented; full baseline and dedicated HTTP/PG/EVM proof recorded in docs/evidence/giwa-demo-trades-003.md. Three runtime files integrated into the existing4392 workspace after hash checks, preserving unrelated changes. Current preview stays running with read/auth options only; no public trade activation/restart. External signing custody availability remains a required input for the next signer/rollout task.

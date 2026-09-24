@@ -114,8 +114,10 @@ async function main() {
   const origin = `http://${HOST}:${port}`
   const customerReads = process.argv.includes("--customer-reads")
   const customerAuth = process.argv.includes("--customer-auth")
+  const customerTrades = process.argv.includes("--customer-trades")
   if (customerAuth && !customerReads) throw new FixtureError("CUSTOMER_READS_REQUIRED")
-  const customer = customerReads ? customerGateway({ origin, authEnabled: customerAuth }) : null
+  if (customerTrades && !customerAuth) throw new FixtureError("CUSTOMER_AUTH_REQUIRED")
+  const customer = customerReads ? customerGateway({ origin, authEnabled: customerAuth, tradesEnabled: customerTrades }) : null
   const liveMarket = process.argv.includes("--live-market")
     ? await (await import("../../../../../scripts/stocks-local/live-market")).createLiveMarket() : null
   const harness = await createInProcessStocks({ frontendOrigin: origin })
@@ -351,7 +353,7 @@ async function main() {
   process.on("SIGINT", shutdown)
   process.on("SIGTERM", shutdown)
   const pagePath = customerReads ? "/src/demo/giwa/investor-shell/verification/index.html#/" : PAGE_PATH
-  process.stdout.write(`GIWA Stocks preview (${customerReads ? `real GIWA reads; authentication ${customerAuth ? "connected" : "disconnected"}; trading disconnected` : liveMarket ? "Alpaca IEX display; simulated execution" : "offline"}): ${origin}${pagePath}\n`)
+  process.stdout.write(`GIWA Stocks preview (${customerReads ? `real GIWA reads; authentication ${customerAuth ? "connected" : "disconnected"}; investor requests ${customerTrades ? "connected; backend readiness required" : "disconnected"}` : liveMarket ? "Alpaca IEX display; simulated execution" : "offline"}): ${origin}${pagePath}\n`)
 }
 
 main().catch((error: unknown) => {

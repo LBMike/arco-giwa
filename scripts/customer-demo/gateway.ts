@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { parseSiweMessage } from "viem/siwe"
+import { tradingBody, tradingRead, tradingWrite } from "./trading-routes"
 
 // Existing product services only. Browser input cannot choose an upstream.
 export const CUSTOMER_API = "https://arco-giwa-api.onrender.com"
@@ -98,10 +99,11 @@ async function responseBody(response: Response): Promise<Buffer> {
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
 }
 
-/** Authentication is explicitly enabled only for the existing fixed GIWA API. No trading writes. */
-export function customerGateway({ origin, fetcher = fetch, timeoutMs = 15_000, authEnabled = false }: {
-  origin: string; fetcher?: typeof fetch; timeoutMs?: number; authEnabled?: boolean
+/** Authentication and investor requests are separate opt-ins to the fixed GIWA API. */
+export function customerGateway({ origin, fetcher = fetch, timeoutMs = 15_000, authEnabled = false, tradesEnabled = false }: {
+  origin: string; fetcher?: typeof fetch; timeoutMs?: number; authEnabled?: boolean; tradesEnabled?: boolean
 }) {
+  if (tradesEnabled && !authEnabled) throw new Error("CUSTOMER_AUTH_REQUIRED")
   const parsed = new URL(origin)
   if (parsed.origin !== origin || parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1" || !parsed.port) throw new Error("INVALID_CUSTOMER_ORIGIN")
   const host = parsed.host
@@ -116,14 +118,16 @@ export function customerGateway({ origin, fetcher = fetch, timeoutMs = 15_000, a
     const method = request.method ?? "GET"
     const rpc = raw === "/__giwa/read-rpc" && method === "POST"
     const auth = authEnabled && method === "POST" ? raw === "/api/v1/auth/nonce" ? "nonce" : raw === "/api/v1/auth/verify" ? "verify" : null : null
-    const privateGet = authEnabled && privateRead(raw, method)
+    const privateGet = authEnabled && (privateRead(raw, method) || tradesEnabled && tradingRead(raw, method))
+    const trade = tradesEnabled ? tradingWrite(raw, method) : null
     const fail = (status: number, code: string) => send(response, status, JSON.stringify({ error: code }))
     if (request.headers.host !== host || (request.headers.origin && request.headers.origin !== origin) || request.headers["sec-fetch-site"] === "cross-site") return fail(403, "CUSTOMER_ORIGIN_DENIED")
-    if (!rpc && !auth && !privateGet && !publicRead(raw, method)) return fail(503, raw.startsWith("/api/v1/auth/") ? "CUSTOMER_SIGN_IN_NOT_CONNECTED" : "CUSTOMER_ROUTE_NOT_CONNECTED")
-    if ((rpc || auth) && request.headers.origin !== origin) return fail(403, "CUSTOMER_ORIGIN_DENIED")
-    if ((rpc || auth) && !/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] ?? "")) return fail(415, "CUSTOMER_JSON_REQUIRED")
+    if (!rpc && !auth && !trade && !privateGet && !publicRead(raw, method)) return fail(503, raw.startsWith("/api/v1/auth/") ? "CUSTOMER_SIGN_IN_NOT_CONNECTED" : "CUSTOMER_ROUTE_NOT_CONNECTED")
+    if ((rpc || auth || trade) && request.headers.origin !== origin) return fail(403, "CUSTOMER_ORIGIN_DENIED")
+    if ((rpc || auth || trade) && !/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] ?? "")) return fail(415, "CUSTOMER_JSON_REQUIRED")
+    if (privateGet && (request.headers["transfer-encoding"] || request.headers["content-length"] && request.headers["content-length"] !== "0")) return fail(400, "INVALID_CUSTOMER_REQUEST")
     const bearer = request.headers.authorization
-    if (privateGet && (typeof bearer !== "string" || bearer.length > 4103 || !/^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(bearer))) return fail(401, "CUSTOMER_SESSION_REQUIRED")
+    if ((privateGet || trade) && (typeof bearer !== "string" || bearer.length > 4103 || !/^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(bearer))) return fail(401, "CUSTOMER_SESSION_REQUIRED")
     const abort = new AbortController()
     const close = () => abort.abort()
     response.once("close", close)
@@ -135,7 +139,12 @@ export function customerGateway({ origin, fetcher = fetch, timeoutMs = 15_000, a
         let body: string | undefined
         if (rpc) { body = await readBody(request, abort.signal); validateRpc(body); headers["content-type"] = "application/json" }
         if (auth) { body = authBody(await readBody(request, abort.signal), auth, origin); headers["content-type"] = "application/json" }
-        if (privateGet) headers.authorization = bearer!
+        if (trade) {
+          const text = await readBody(request, abort.signal)
+          try { body = tradingBody(text, trade) } catch { throw new GatewayError(400, "INVALID_CUSTOMER_TRADE") }
+          headers["content-type"] = "application/json"
+        }
+        if (privateGet || trade) headers.authorization = bearer!
         const answer = await fetcher(rpc ? CUSTOMER_RPC : `${CUSTOMER_API}${raw}`, { method, headers, body, signal: abort.signal, redirect: "error", credentials: "omit", cache: "no-store" })
         if (answer.status >= 300 && answer.status < 400) throw new GatewayError(502, "CUSTOMER_API_UNAVAILABLE")
         return { status: answer.status, body: await responseBody(answer) }
