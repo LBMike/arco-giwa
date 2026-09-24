@@ -45,9 +45,17 @@ The user explicitly fixed the customer test environment to:
 
 `http://127.0.0.1:4392/src/demo/giwa/investor-shell/verification/index.html#/portfolio`
 
-The existing page was opened and inspected in the browser. It currently shows the original Connect your wallet state. Its root `/` and the developer execution-fixture URL are not the customer demo entry and are not substitutes.
+The customer page was opened and inspected in the browser. Its root `/` and the developer execution-fixture URL are not the customer demo entry and are not substitutes.
 
-The reviewed two-file patch is `/private/tmp/giwa-demo-portfolio-001-ui4392.patch`. Direct root modification of the UI task's worktree was rejected by automatic approval review under AGENTS.md. No target file was changed by the rejected command. The patch was handed to the existing **UI 수정** task as assigned integrator. No application was confirmed at evidence time; explicit user permission for a two-file worktree exception has been requested. Do not claim this feature is live on4392 yet.
+The reviewed two-file patch is `/private/tmp/giwa-demo-portfolio-001-ui4392.patch`. Direct root modification of the UI task's worktree was initially rejected by automatic approval review under AGENTS.md. After the explicit two-file exception request, the user again instructed continuation. Automatic review accepted the guarded integration on that new authorization. The PortfolioPage target still matched the base, and the new component was absent. Only those two files were written. They now match reviewed implementation commit `d92b968c568b790bb5b05e7096cf2b16efe3cc60` exactly. No existing UI/market/server changes were replaced and the running4392 process was preserved.
+
+Post-integration evidence:
+
+- `npm run typecheck` in the running4392 worktree passed (`/private/tmp/giwa-portfolio-4392-typecheck.log`).
+- Browser shows the new `Stocks portfolio` region, Stocks sign-in state, connection button and `Trade Stocks` link on the canonical customer Portfolio route, including when no wallet is connected.
+- Clicking `Trade Stocks` opens the existing customer Stocks table with40 symbols; browser Back returns to the new Portfolio section.
+- The Portfolio tab is retained as a user-facing deliverable.
+- No personally signed-in balance or public transaction was verified in this browser check. The authentication/runtime limitation below remains separate from the completed two-file UI integration.
 
 Existing customer-preview limitation: normal GiwaStocksHost authentication uses the configured ARCO_API_BASE (default localhost8080), while preview Stocks reads use4392 and the preview fetch guard blocks off-origin authentication. Its same-origin backend is a simulated DB/chain harness with test-only authentication. Do not silently bypass that guard or represent it as personal MetaMask public-GIWA success. A separate user question distinguishes immediately usable demo-account simulation from the eventual personal-wallet/public-network route.
 
