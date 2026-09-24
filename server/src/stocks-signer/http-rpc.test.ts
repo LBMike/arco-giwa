@@ -25,8 +25,10 @@ test('allows only the four signer RPC methods and sends one exact JSON-RPC reque
   assert.equal(await rpc('eth_chainId', []), '0x1');
   assert.equal(await rpc('eth_getBlockByNumber', ['finalized', true]), '0x1');
   assert.equal(await rpc('eth_getTransactionCount', [a(10), '0x1']), '0x1');
+  assert.equal(await rpc('eth_getTransactionCount', [a(10), 'pending']), '0x1');
   assert.equal(await rpc('eth_sendRawTransaction', [raw]), h(22));
-  assert.deepEqual(methods, ['eth_chainId', 'eth_getBlockByNumber', 'eth_getTransactionCount', 'eth_sendRawTransaction']);
+  assert.deepEqual(methods, ['eth_chainId', 'eth_getBlockByNumber', 'eth_getTransactionCount',
+    'eth_getTransactionCount', 'eth_sendRawTransaction']);
 });
 
 test('HTTPS is required except explicitly selected loopback HTTP; URL secrets and redirects are refused', async () => {
@@ -68,7 +70,7 @@ test('rejects forbidden methods and malformed parameters before any network call
     ['eth_getBlockByNumber', ['0x01', false]],
     ['eth_getBlockByNumber', ['0x1', 'true']],
     ['eth_getTransactionCount', [a(0), '0x1']],
-    ['eth_getTransactionCount', [a(10), 'pending']],
+    ['eth_getTransactionCount', [a(10), 'latest']],
     ['eth_sendRawTransaction', []],
     ['eth_sendRawTransaction', ['0x']],
     ['eth_sendRawTransaction', ['0x0']],

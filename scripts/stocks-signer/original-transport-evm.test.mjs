@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -14,9 +14,12 @@ import { authorizedCall } from '../../server/dist/stocks/chain.js';
 import { ABI_DIGEST, callDigest, manifestDigest } from '../../server/dist/stocks/contracts.js';
 import { createStocksSignerCore } from '../../server/dist/stocks-signer/core.js';
 import { httpStocksSignerRpc } from '../../server/dist/stocks-signer/http-rpc.js';
+import { createStocksSignerHttpService } from '../../server/dist/stocks-signer/http-service.js';
 import { createOriginalNonceLookup } from '../../server/dist/stocks-signer/nonce-lookup.js';
 import { createOriginalSignerTransport } from '../../server/dist/stocks-signer/original-transport.js';
 import { PostgresSignerJournal } from '../../server/dist/stocks-signer/postgres-journal.js';
+import { createStocksSignerReadiness } from '../../server/dist/stocks-signer/readiness.js';
+import { externalStocksSigner } from '../../server/dist/stocks-runtime/transport.js';
 
 // Standalone, disposable EVM test. Run after `npm run build:server` with
 // `node --test scripts/stocks-signer/original-transport-evm.test.mjs`.
@@ -44,7 +47,9 @@ function stopped(pid) {
   catch (error) { if (error.code === 'ESRCH') return true; throw error; }
 }
 
-test('one-shot external-custody transport signs, broadcasts and recovers exact original transactions on an isolated EVM',
+test(withPostgres
+  ? 'inactive HTTP signer client uses PostgreSQL and an isolated EVM to recover the exact original'
+  : 'one-shot external-custody transport signs and recovers the exact original on an isolated EVM',
   { timeout: 120_000 }, async t => {
     assert.ok(existsSync(hardhat), 'Install the existing contracts lockfile before this test');
     assert.ok(existsSync(join(root, 'server/dist/stocks-signer/original-transport.js')),
@@ -54,12 +59,17 @@ test('one-shot external-custody transport signs, broadcasts and recovers exact o
     const logFd = openSync(log, 'a', 0o600);
     let node;
     let activePool;
+    const apps = new Set();
     let passed = false;
     t.after(async () => {
       let cleanupError;
       try {
+        for (const app of apps) {
+          try { await app.close(); }
+          catch (error) { cleanupError ??= error; }
+        }
         try { await activePool?.end(); }
-        catch (error) { cleanupError = error; }
+        catch (error) { cleanupError ??= error; }
         if (node?.pid && !stopped(node.pid)) {
           process.kill(-node.pid, 'SIGTERM');
           for (let n = 0; n < 40 && !stopped(node.pid); n++) await delay(50);
@@ -178,8 +188,6 @@ test('one-shot external-custody transport signs, broadcasts and recovers exact o
 
     const firstCall = authorizedCall(manifest, 'mint:transport-evm-first', 'MINT', bundle.publicAccounts.holder, '1000000000');
     const secondCall = authorizedCall(manifest, 'mint:transport-evm-lost-ack', 'MINT', bundle.publicAccounts.otherHolder, '1000000000');
-    const request = call => ({ protocol: 'ARCO_STOCKS_SIGNER_V1', deploymentDigest: digest,
-      callDigest: callDigest(call), call });
     let sentHash;
     let sends = 0;
     const lostAckRpc = async (method, params) => {
@@ -192,27 +200,62 @@ test('one-shot external-custody transport signs, broadcasts and recovers exact o
     };
 
     if (withPostgres) {
+      // The product's existing signer client speaks to the inactive HTTP app
+      // via Fastify inject. Nothing listens on a socket or selects a public
+      // signer endpoint. All chain writes still pass through the restricted
+      // JSON-RPC transport and the dedicated PostgreSQL journal.
+      const throughHttp = (core, durableJournal) => {
+        const token = randomBytes(32).toString('base64url');
+        const app = createStocksSignerHttpService({ manifest, core, bearerToken: token,
+          ready: createStocksSignerReadiness({ manifest, reviewedManifestDigest: digest,
+            reviewedInitialNonce: initialNonce, journal: durableJournal, rpc: signerRpc,
+            operationalReady: async () => true }),
+        });
+        apps.add(app);
+        assert.equal(app.server.listening, false, 'The signer HTTP test must not start a listener');
+        const client = externalStocksSigner({ url: 'https://signer.integration.test/', authorization: token,
+          deploymentDigest: digest, manifest, request: async (url, init) => {
+            const response = await app.inject({ method: init?.method ?? 'GET',
+              url: new URL(String(url)).pathname,
+              headers: Object.fromEntries(new Headers(init?.headers).entries()),
+              ...(init?.body ? { payload: String(init.body) } : {}),
+            });
+            return new Response(response.body, { status: response.statusCode,
+              headers: { 'content-type': 'application/json' } });
+          } });
+        return { app, client };
+      };
       const core = createStocksSignerCore({ manifest, journal, transport });
-      const first = await core.submit(firstCall.operationId, request(firstCall));
+      const firstHttp = throughHttp(core, journal);
+      await firstHttp.client.probe();
+      assert.equal(await firstHttp.client.lookup(firstCall.operationId), null);
+      const first = await firstHttp.client.submit(firstCall);
       assert.equal((await receipt(first.txHash)).status, '0x1');
       assert.equal(await balance(bundle.publicAccounts.holder), 1_000_000_000n);
       const firstRow = await journal.read(firstCall.operationId);
       assert.equal(await journal.readSignedHash(firstRow), first.txHash);
       assert.equal(firstRow.txHash, first.txHash);
-      assert.deepEqual(await core.lookup(firstCall.operationId), first);
+      assert.deepEqual(await firstHttp.client.lookup(firstCall.operationId), first);
+      assert.deepEqual(await firstHttp.client.submit(firstCall), first);
       assert.equal(signatures, 1);
 
       const nonceBefore = BigInt(await rpc('eth_getTransactionCount', [manifest.signerAddress, 'pending']));
       const uncertain = createOriginalSignerTransport({ manifest, rpc: lostAckRpc, custody, intent, lookup, limits });
       const uncertainCore = createStocksSignerCore({ manifest, journal, transport: uncertain });
-      await assert.rejects(uncertainCore.submit(secondCall.operationId, request(secondCall)), /SIGNER_ORIGINAL_OUTCOME_UNKNOWN/);
+      const uncertainHttp = throughHttp(uncertainCore, journal);
+      await uncertainHttp.client.probe();
+      await assert.rejects(uncertainHttp.client.submit(secondCall), /SIGNER_RESPONSE_UNAVAILABLE/);
       assert.equal(sends, 1);
       assert.equal((await receipt(sentHash)).status, '0x1');
       const unresolved = await journal.read(secondCall.operationId);
       assert.equal(unresolved.txHash, null);
       assert.equal(await journal.readSignedHash(unresolved), sentHash);
-      assert.equal(await uncertainCore.submit(secondCall.operationId, request(secondCall)), null);
+      await assert.rejects(uncertainHttp.client.submit(secondCall), /SIGNER_RESPONSE_UNAVAILABLE/);
       assert.equal(sends, 1, 'Repeated submit cannot broadcast the reserved original again');
+      await firstHttp.app.close();
+      apps.delete(firstHttp.app);
+      await uncertainHttp.app.close();
+      apps.delete(uncertainHttp.app);
       await activePool.end();
 
       // A new pool, journal, transport and core read only durable state after
@@ -222,8 +265,13 @@ test('one-shot external-custody transport signs, broadcasts and recovers exact o
       const reopened = new PostgresSignerJournal(activePool, manifest, initialNonce);
       const restarted = createOriginalSignerTransport({ manifest, rpc: signerRpc, custody, intent: reopened, lookup, limits });
       const recoveredCore = createStocksSignerCore({ manifest, journal: reopened, transport: restarted });
+      const recoveredHttp = throughHttp(recoveredCore, reopened);
+      await recoveredHttp.client.probe();
       assert.equal(await reopened.readSignedHash(unresolved), sentHash);
-      assert.deepEqual(await recoveredCore.lookup(secondCall.operationId), {
+      assert.deepEqual(await recoveredHttp.client.lookup(secondCall.operationId), {
+        operationId: secondCall.operationId, callDigest: callDigest(secondCall), txHash: sentHash,
+      });
+      assert.deepEqual(await recoveredHttp.client.submit(secondCall), {
         operationId: secondCall.operationId, callDigest: callDigest(secondCall), txHash: sentHash,
       });
       assert.equal((await reopened.read(secondCall.operationId)).txHash, sentHash);

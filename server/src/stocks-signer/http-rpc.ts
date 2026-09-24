@@ -10,6 +10,7 @@ const responseInvalid = () => new StocksError('SIGNER_RPC_RESPONSE_INVALID', 503
 const unavailable = () => new StocksError('SIGNER_RPC_UNAVAILABLE', 503);
 const quantity = (value: unknown) => typeof value === 'string' && /^0x(0|[1-9a-f][0-9a-f]{0,63})$/.test(value);
 const blockTag = (value: unknown) => value === 'finalized' || quantity(value);
+const nonceTag = (value: unknown) => value === 'pending' || blockTag(value);
 
 function rpcEndpoint(value: string, localHarness: boolean): URL {
   try {
@@ -29,7 +30,7 @@ function validateParams(method: string, params: unknown): void {
   } else if (method === 'eth_getBlockByNumber') {
     if (params.length !== 2 || !blockTag(params[0]) || typeof params[1] !== 'boolean') throw requestInvalid();
   } else if (method === 'eth_getTransactionCount') {
-    if (params.length !== 2 || typeof params[0] !== 'string' || !blockTag(params[1])) throw requestInvalid();
+    if (params.length !== 2 || typeof params[0] !== 'string' || !nonceTag(params[1])) throw requestInvalid();
     try { address(params[0]); } catch { throw requestInvalid(); }
   } else if (method === 'eth_sendRawTransaction') {
     // Matches the verified EIP-1559 transport's 8 KiB signed-byte limit.
