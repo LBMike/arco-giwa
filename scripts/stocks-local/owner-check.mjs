@@ -136,8 +136,32 @@ try {
   passed('fresh backend generation retains the signed session and resumed gate before actual trades');
 
   await local('account-A'); await page.goto(ready.investorUrl); await signIn();
-  await page.getByText('시세 연결 준비 중', { exact: true }).first().waitFor();
-  assert.ok(!report.rejectedRequests.some(request => request.path.startsWith('/api/v1/stocks/market/')), 'Market display routes are mounted without live provider credentials');
+  const marketConnected = records().some(row => row.kind === 'LOCAL_MARKET_CONNECTED');
+  const marketCatalog = await fetch(`${ready.apiBase}/api/v1/stocks/market/catalog`).then(response => response.json());
+  if (marketConnected) {
+    assert.equal(marketCatalog.provider, 'ALPACA');
+    assert.equal(marketCatalog.marketFeed, 'IEX');
+    assert.equal(marketCatalog.data.securities.length, 40);
+    await page.locator('button[data-symbol="SOXL"]').waitFor();
+    const quotes = await fetch(`${ready.apiBase}/api/v1/stocks/market/quotes`).then(response => response.json());
+    const chart = await fetch(`${ready.apiBase}/api/v1/stocks/market/NVDA/chart?range=1D`).then(response => response.json());
+    assert.equal(quotes.provider, 'ALPACA'); assert.equal(quotes.marketFeed, 'IEX');
+    assert.equal(quotes.data?.length, 40);
+    assert.equal(chart.provider, 'ALPACA'); assert.equal(chart.marketFeed, 'IEX');
+    const nvdaMarketPrice = quotes.data.find(row => row.symbol === 'NVDA')?.price;
+    if (nvdaMarketPrice) {
+      const row = page.locator('button[data-symbol="NVDA"]').locator('xpath=ancestor::*[@role="row"]');
+      await until(async () => {
+        const titles = await row.locator('span[title]').evaluateAll(nodes => nodes.map(node => node.getAttribute('title'))).catch(() => []);
+        return titles.some(title => /^\$[0-9]/.test(title ?? ''));
+      }, 'market price rendered in investor table');
+    }
+    passed('4392 catalog, IEX quotes and chart share the investor screen with local contract trading');
+  } else {
+    assert.equal(marketCatalog.data.securities.length, 1);
+    await page.getByText('시세 연결 준비 중', { exact: true }).first().waitFor();
+  }
+  assert.ok(!report.rejectedRequests.some(request => request.path.startsWith('/api/v1/stocks/market/')), 'Market display routes remain readable');
   const wallet = () => page.getByTestId('stocks-wallet-panel');
   const action = name => wallet().locator(`[data-action="${name}"]`);
   const status = () => wallet().getAttribute('data-status');

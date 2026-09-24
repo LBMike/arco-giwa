@@ -95,6 +95,7 @@ try {
     const units = await run('harness-unit', ['--test', '--test-reporter=tap',
       'scripts/stocks-local/browser-server.test.mjs', 'scripts/stocks-local/local-wallet.test.mjs',
       'scripts/stocks-local/owner.test.mjs',
+      'scripts/stocks-local/market-display-proxy.test.mjs',
       'scripts/stocks-local/backend-build.test.mjs',
       'scripts/stocks-local/transport-http.test.mjs',
       'scripts/stocks-local/test-cash.test.mjs',

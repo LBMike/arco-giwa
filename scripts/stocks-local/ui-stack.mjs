@@ -22,11 +22,12 @@ import { localSigner } from './local-signer.mjs';
 import { createShortSessionFixture } from './short-session.mjs';
 import { assertLocalStartupChain } from './startup-chain.mjs';
 import { createTestCashTopUp } from './test-cash.mjs';
+import { createMarketDisplayProxy } from './market-display-proxy.mjs';
 
 const { Pool } = createRequire(import.meta.url)('pg');
 const faucetAbi = parseAbi(['function faucet(address,uint256)']);
 
-export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test', knownHashRecovery = false, operatorDiagnostics = false, operatorControls = false, ownerWorkspace = false, resourceDir }) {
+export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontendOrigin = 'http://stocks-local.test', knownHashRecovery = false, operatorDiagnostics = false, operatorControls = false, ownerWorkspace = false, resourceDir, marketOrigin = 'http://127.0.0.1:4392' }) {
   assert.equal(process.env.STOCKS_LOCAL_STACK_ONLY, '1');
   assert.equal(typeof knownHashRecovery, 'boolean');
   assert.equal(typeof operatorDiagnostics, 'boolean');
@@ -145,6 +146,18 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
   };
   const appEnv = { corsAllowedOrigins: [frontendOrigin], authNonceTtlSeconds: 60, authJwtSecret: authSecret,
     adminOperatorToken: `TEST_HARNESS_ONLY_UNUSED_${randomUUID()}`, registryPath: '/TEST_HARNESS_ONLY_NO_REGISTRY_FILE' };
+  // The owner's market display is read separately from the local contract
+  // execution service. A missing 4392 host leaves the honest unconfigured
+  // pilot display; it must never substitute market prices into trade quotes.
+  let marketDisplay = createStocksMarketDataService();
+  if (ownerWorkspace) {
+    try {
+      marketDisplay = await createMarketDisplayProxy({ origin: marketOrigin });
+      console.log(JSON.stringify({ kind: 'LOCAL_MARKET_CONNECTED', origin: marketOrigin, executionPriceSource: 'FIXED_MOCK_PRICE' }));
+    } catch {
+      console.log(JSON.stringify({ kind: 'LOCAL_MARKET_UNAVAILABLE', origin: marketOrigin, executionPriceSource: 'FIXED_MOCK_PRICE' }));
+    }
+  }
   const tick = () => {
     if (!processing || closed) return Promise.resolve();
     return activeTick ??= runtime.tick().catch(() => { processingErrors.push('LOCAL_UI_RUNTIME_TICK_FAILED'); })
@@ -170,9 +183,8 @@ export async function createLocalUiStack({ rpcUrl, bundle, databaseUrl, frontend
       change: (...args) => controlFaults.unavailable ? Promise.reject(Error('LOCAL_CONTROL_UNAVAILABLE')) : (controlFaults.serviceOverride ?? runtime.control).change(...args),
     };
     const next = buildApp(appEnv, { ...legacy,
-      // Production display routes, explicitly without credentials or external
-      // quotes. The UI shows the NVDA pilot and unconfigured market data.
-      stocksMarketData: createStocksMarketDataService(),
+      // Display-only market reads are isolated from trade quote/settlement.
+      stocksMarketData: marketDisplay,
       stocksTradingControl: controlPort && !controlFaults.disabled ? { service: controlPort, ...resolvers } : undefined,
       stocks: { service: runtime.service, ...resolvers, reconciliationCoverage: runtime.reconciliationCoverage },
       stocksExecution: { service: runtime.execution, ...resolvers },
