@@ -1,0 +1,6 @@
+
+> arco-giwa@0.1.0 test:security
+> node scripts/security/check-env-exposure.mjs && node scripts/security/check-giwa-evm-version.mjs
+
+env exposure check passed
+GIWA evmVersion check passed

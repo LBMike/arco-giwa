@@ -239,3 +239,306 @@ model FeaturedCard {
   @@index([chainId, position])
   @@schema("arco_evm")
 }
+
+// Isolated Stocks testnet domain. SQL migration adds integral-amount, immutable fact,
+// version and balanced journal-pair protections; runtime uses parameterized pg queries.
+model StocksQuote {
+  order StocksOrder?
+  id               String @id
+  actorId          String
+  wallet           String
+  symbol           String
+  quantity         Decimal @db.Decimal
+  cashAmount       Decimal @db.Decimal
+  deploymentDigest String
+  expiresAt        DateTime @db.Timestamptz
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  @@schema("arco_evm")
+}
+model StocksOrder {
+  quote StocksQuote @relation(fields: [quoteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  funding StocksFunding[]
+  operations StocksOutbox[]
+  holding StocksHolding?
+  id               String @id
+  orderKey         String @unique
+  quoteId          String @unique
+  actorId          String
+  wallet           String
+  symbol           String
+  quantity         Decimal @db.Decimal
+  cashAmount       Decimal @db.Decimal
+  idempotencyKey   String
+  deploymentId     String
+  deploymentDigest String
+  quoteExpiresAt   DateTime @db.Timestamptz
+  state            String @default("AWAITING_FUNDING")
+  version          Int @default(0)
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  updatedAt        DateTime @default(now()) @db.Timestamptz
+  @@unique([actorId, idempotencyKey])
+  @@index([actorId, deploymentDigest, createdAt], map: "StocksOrder_actor")
+  @@schema("arco_evm")
+}
+model StocksFunding {
+  order StocksOrder? @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id               String @id
+  orderId          String?
+  payer            String
+  amount           Decimal @db.Decimal
+  status           String
+  reason           String
+  txHash           String
+  proof            Json
+  deploymentDigest String
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  @@schema("arco_evm")
+}
+model StocksOutbox {
+  sellOrderId String?
+  sellOrder StocksSellOrder? @relation(fields: [sellOrderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  order StocksOrder? @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id               String @id
+  orderId          String?
+  kind             String
+  payload          Json
+  deploymentDigest String
+  status           String @default("PENDING")
+  txHash           String?
+  leaseId          String?
+  leaseUntil       DateTime? @db.Timestamptz
+  nextAttemptAt    DateTime @default(now()) @db.Timestamptz
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  @@index([deploymentDigest, status, nextAttemptAt], map: "StocksOutbox_dispatch")
+  @@schema("arco_evm")
+}
+model StocksJournal {
+  id               String @id
+  asset            String
+  debit            String
+  credit           String
+  amount           Decimal @db.Decimal
+  deploymentDigest String
+  blockNumber      Decimal? @db.Decimal
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  @@schema("arco_evm")
+}
+model StocksHolding {
+  order StocksOrder @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  orderId          String @id
+  actorId          String
+  wallet           String
+  symbol           String
+  quantity         Decimal @db.Decimal
+  deploymentId     String
+  deploymentDigest String
+  txHash           String
+  blockHash        String
+  blockNumber      Decimal @db.Decimal
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  @@schema("arco_evm")
+}
+model StocksAudit {
+  id               String @id
+  subject          String
+  action           String
+  detail           Json
+  deploymentDigest String
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  @@schema("arco_evm")
+}
+model StocksProviderReceipt {
+  id               String @id
+  deploymentDigest String
+  requestDigest    String
+  result           Json
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  @@schema("arco_evm")
+}
+
+model StocksSellQuote {
+ id String @id
+ actorId String
+ wallet String
+ symbol String
+ quantity Decimal @db.Decimal
+ cashAmount Decimal @db.Decimal
+ deploymentDigest String
+ expiresAt DateTime @db.Timestamptz
+ createdAt DateTime @default(now()) @db.Timestamptz
+ order StocksSellOrder?
+ @@schema("arco_evm")
+}
+model StocksSellOrder {
+ id String @id
+ orderKey String @unique
+ quoteId String @unique
+ quote StocksSellQuote @relation(fields: [quoteId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+ actorId String
+ wallet String
+ symbol String
+ quantity Decimal @db.Decimal
+ cashAmount Decimal @db.Decimal
+ idempotencyKey String
+ deploymentId String
+ deploymentDigest String
+ quoteExpiresAt DateTime @db.Timestamptz
+ state String @default("AWAITING_ESCROW")
+ version Int @default(0)
+ createdAt DateTime @default(now()) @db.Timestamptz
+ updatedAt DateTime @default(now()) @db.Timestamptz
+ quantityReservation StocksQuantityReservation?
+ cashReservation StocksCashReservation?
+ custody StocksCustody[]
+ operations StocksOutbox[]
+ @@unique([actorId,idempotencyKey])
+ @@index([deploymentDigest,actorId,createdAt],map:"StocksSellOrder_actor")
+ @@schema("arco_evm")
+}
+model StocksQuantityReservation {
+ orderId String @id
+ order StocksSellOrder @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+ deploymentDigest String
+ wallet String
+ quantity Decimal @db.Decimal
+ status String
+ createdAt DateTime @default(now()) @db.Timestamptz
+ @@schema("arco_evm")
+}
+model StocksCustody {
+ id String @id
+ escrowId String
+ orderId String?
+ order StocksSellOrder? @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+ deploymentDigest String
+ payer String
+ quantity Decimal @db.Decimal
+ reason String
+ status String
+ txHash String
+ proof Json
+ createdAt DateTime @default(now()) @db.Timestamptz
+ movements StocksQuantityMovement[]
+ @@unique([deploymentDigest,escrowId])
+ @@schema("arco_evm")
+}
+model StocksQuantityMovement {
+ id String @id
+ deploymentDigest String
+ wallet String
+ custodyId String?
+ custody StocksCustody? @relation(fields: [custodyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+ walletDelta Decimal @db.Decimal
+ escrowDelta Decimal @db.Decimal
+ supplyDelta Decimal @db.Decimal
+ blockNumber Decimal @db.Decimal
+ blockHash String
+ txHash String
+ createdAt DateTime @default(now()) @db.Timestamptz
+ @@schema("arco_evm")
+}
+model StocksCashReservation {
+ orderId String @id
+ order StocksSellOrder @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+ deploymentDigest String
+ scopeKey String
+ amount Decimal @db.Decimal
+ status String
+ proof Json
+ createdAt DateTime @default(now()) @db.Timestamptz
+ @@schema("arco_evm")
+}
+model StocksObserverCursor {
+ deploymentDigest String @id
+ blockNumber Decimal @db.Decimal
+ blockHash String
+ version Int @default(0)
+ updatedAt DateTime @default(now()) @db.Timestamptz
+ @@schema("arco_evm")
+}
+
+model StocksLiquidityBinding {
+ scopeKey String @id
+ deploymentDigest String @unique
+ createdAt DateTime @default(now()) @db.Timestamptz
+ @@schema("arco_evm")
+}
+
+// Enrolled only atomically with newly created orders; no historical backfill.
+model StocksWalletSubmissionEnrollment {
+  submissions StocksWalletSubmission[]
+  side             String
+  orderId          String
+  intentKey        String @unique
+  actorId          String
+  wallet           String
+  deploymentDigest String
+  orderBinding     String
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  @@id([side, orderId])
+  @@schema("arco_evm")
+}
+model StocksWalletSubmission {
+  receiptProof StocksWalletSubmissionProof?
+  enrollment StocksWalletSubmissionEnrollment @relation(fields: [side, orderId], references: [side, orderId], onDelete: Restrict, onUpdate: Restrict)
+  claimId           String @id
+  intentKey         String
+  stage             String
+  transactionDigest String
+  transaction       Json
+  actorId           String
+  wallet            String
+  side              String
+  orderId           String
+  deploymentDigest  String
+  status            String
+  txHash            String?
+  createdAt         DateTime @default(now()) @db.Timestamptz
+  updatedAt         DateTime @default(now()) @db.Timestamptz
+  @@unique([intentKey, stage])
+  @@schema("arco_evm")
+}
+
+model StocksWalletSubmissionProof {
+  submission StocksWalletSubmission @relation(fields: [claimId], references: [claimId], onDelete: Restrict, onUpdate: Restrict)
+  claimId String @id
+  intentKey String
+  transactionDigest String
+  deploymentDigest String
+  txHash String
+  status String
+  blockNumber Decimal @db.Decimal
+  blockHash String
+  proofDigest String
+  evidence Json
+  createdAt DateTime @default(now()) @db.Timestamptz
+  @@schema("arco_evm")
+}
+
+model StocksTradingControl {
+  deploymentDigest String @id
+  paused Boolean @default(true)
+  version Int @default(0)
+  updatedAt DateTime? @db.Timestamptz
+  operatorId String?
+  reason String?
+  events StocksTradingControlEvent[]
+  @@schema("arco_evm")
+}
+
+model StocksTradingControlEvent {
+  id String @id
+  deploymentDigest String
+  control StocksTradingControl @relation(fields: [deploymentDigest], references: [deploymentDigest], onDelete: Restrict, onUpdate: Restrict)
+  version Int
+  expectedVersion Int
+  previousPaused Boolean
+  paused Boolean
+  operatorId String
+  reason String
+  idempotencyKey String
+  createdAt DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz
+  @@unique([deploymentDigest, version])
+  @@unique([deploymentDigest, idempotencyKey])
+  @@schema("arco_evm")
+}

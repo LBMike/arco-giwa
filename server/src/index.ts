@@ -1,4 +1,11 @@
+import { StocksSubmissionDiagnosticsService } from './stocks-submission-diagnostics/service.js'
 import { pathToFileURL } from "node:url"
+import { configuredStocksRuntime, stocksAutodispatch } from "./stocks-runtime/runtime.js"
+import { closeOnce, installServerShutdown, startManagedStocksServer } from "./stocks-runtime/lifecycle.js"
+import { stocksSessionResolvers } from "./stocks-runtime/session.js"
+import { StocksSubmissionsService } from "./stocks-submissions/service.js"
+import { configuredStocksMarketData } from "./stocks-market-runtime/config.js"
+import type { StocksMarketDataService } from "./stocks-market-data/index.js"
 import { createPublicClient, http, keccak256, parseAbi, toBytes, type Hex } from "viem"
 import { buildApp, type PauseStateVaultRef, type VaultPauseState } from "./app.js"
 import { FUNCTION_PAUSE_SELECTORS } from "./evm/admin-transactions.js"
@@ -15,9 +22,29 @@ import { PrismaArcoService } from "./services/prisma-arco-service.js"
 import { fetchUsdRates } from "./services/usd-rates.js"
 import { readRegistryFile } from "./registry/io.js"
 
-export async function startServer(envSource: NodeJS.ProcessEnv = process.env) {
+export async function startServer(envSource: NodeJS.ProcessEnv = process.env, cliOwnsSignals = false) {
   const env = validateServerEnv(envSource)
+  const autodispatch = stocksAutodispatch(envSource)
+  const stocksMarketData = configuredStocksMarketData(envSource)
   const prisma = createPrismaClient()
+  const closeDatabase = closeOnce(() => prisma.$disconnect())
+  try {
+    return await composeServer(envSource, env, prisma, closeDatabase, autodispatch, cliOwnsSignals, stocksMarketData)
+  } catch (error) {
+    await closeDatabase()
+    throw error
+  }
+}
+
+async function composeServer(
+  envSource: NodeJS.ProcessEnv,
+  env: ReturnType<typeof validateServerEnv>,
+  prisma: ReturnType<typeof createPrismaClient>,
+  closeDatabase: () => Promise<void>,
+  autodispatch: boolean,
+  cliOwnsSignals: boolean,
+  stocksMarketData: StocksMarketDataService,
+) {
   const arco = new PrismaArcoService(prisma)
   const registry = new EvmRegistryService(arco)
   const portfolio = new EvmPortfolioService(arco)
@@ -266,27 +293,49 @@ export async function startServer(envSource: NodeJS.ProcessEnv = process.env) {
     cursorName: "giwa",
     maxLagBlocks: 100,
   })
-  const app = buildApp(
-    {
-      corsAllowedOrigins: env.corsAllowedOrigins,
-      authNonceTtlSeconds: env.authNonceTtlSeconds,
-      authJwtSecret: env.authJwtSecret,
-      adminOperatorToken: env.adminOperatorToken,
-      registryPath: env.registryPath,
+  const app = await startManagedStocksServer({
+    createRuntime: () => configuredStocksRuntime(envSource, env.databaseUrl),
+    buildApp: stocks => {
+      const sessions = stocks ? stocksSessionResolvers(env.authJwtSecret,
+        env.corsAllowedOrigins.map(origin => new URL(origin).host), stocks.operators) : undefined
+      return buildApp(
+        {
+          corsAllowedOrigins: env.corsAllowedOrigins,
+          authNonceTtlSeconds: env.authNonceTtlSeconds,
+          authJwtSecret: env.authJwtSecret,
+          adminOperatorToken: env.adminOperatorToken,
+          registryPath: env.registryPath,
+        },
+        {
+          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits, stocksMarketData,
+          stocks: stocks ? {
+            service: stocks.service,
+            reconciliationCoverage: stocks.reconciliationCoverage,
+            ...sessions,
+          } : undefined,
+          stocksExecution: stocks ? { service: stocks.execution, resolveActor: sessions!.resolveActor } : undefined,
+          stocksRuntimeStatus: stocks ? { getSnapshot: stocks.status, resolveOperator: sessions!.resolveOperator } : undefined,
+          stocksTradingControl: stocks?.control ? { service: stocks.control, resolveOperator: sessions!.resolveOperator } : undefined,
+          stocksSubmissionDiagnostics: stocks ? { service: new StocksSubmissionDiagnosticsService(stocks.service), resolveOperator: sessions!.resolveOperator } : undefined,
+          stocksSubmissions: stocks ? {
+            service: new StocksSubmissionsService(stocks.service, stocks.submissionReceipts),
+            resolveActor: sessions!.resolveActor,
+          } : undefined,
+        },
+      )
     },
-    { arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits },
-  )
-
-  // Bind dual-stack (IPv6 + IPv4). Browsers resolve "localhost" to ::1 (IPv6) first, so an
-  // IPv4-only bind ("0.0.0.0") leaves http://localhost:8080 unreachable → "Failed to fetch".
-  // "::" listens on both ::1 and 127.0.0.1 and also stops a stray IPv6 process squatting on :8080.
-  await app.listen({ host: "::", port: env.port })
+    // Dual-stack preserves existing localhost IPv4/IPv6 behavior.
+    listen: app => app.listen({ host: "::", port: env.port }),
+    closeDatabase,
+    autodispatch,
+    onApp: cliOwnsSignals ? installServerShutdown : undefined,
+  })
   return { app, chainId: GIWA_CHAIN_ID }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  startServer().catch((error) => {
-    console.error(error)
+  startServer(process.env, true).catch(() => {
+    console.error("SERVER_START_FAILED")
     process.exit(1)
   })
 }

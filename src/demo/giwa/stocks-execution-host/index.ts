@@ -1,0 +1,3 @@
+// Public surface of the /stocks wallet execution host. The testing/ harness and verification/ page are not exported.
+export { createExecutionRegistry, executionIdentityKey, type ExecutionCapability, type ExecutionHostView, type ExecutionOwner, type ExecutionRegistry, type ExecutionRegistryOptions, type OwnerLookup } from "./registry"
+export { StocksExecutionProvider, StocksExecutionSessionNotice, StocksOrderExecution, useStocksExecutionCapability, useStocksOrderExecutionSlot, type ExecutionClockSeam, type StocksExecutionProviderProps, type StocksOrderExecutionProps } from "./StocksExecutionProvider"

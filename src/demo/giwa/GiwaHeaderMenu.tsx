@@ -1,33 +1,66 @@
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { useLocation, useNavigate } from "react-router-dom"
+import { useLocation } from "react-router-dom"
 import { Menu, X } from "lucide-react"
-import { GIWA_ADMIN_ROUTE, GIWA_PORTFOLIO_ROUTE, GIWA_PREPROD_ROUTE, GIWA_SAVINGS_ROUTE } from "./routes"
 import { GIWA_FOOTER_LINKS } from "./footer-links"
+import { GiwaSidebarNav } from "./GiwaSidebarNav"
 
-// Mobile-only (lg:hidden) header menu: a hamburger that opens a slide-up bottom sheet with the
-// nav (hidden in the header below lg), the test-funds action (moved here on mobile), and the
-// footer links. Sheet mechanics mirror GiwaInvestDock (open/visible state, rAF slide-up, backdrop
-// tap-to-dismiss, body-scroll lock, role=dialog aria-modal, X close, safe-area). Desktop (>= lg)
-// header is unchanged — this whole component renders nothing visible there.
+// Below-xl menu: a trigger in the top bar that opens a modal LEFT drawer with the shell nav (the
+// desktop sidebar is hidden below xl), the test-funds action (below lg) and the footer links.
+// Keyboard: focus moves to Close on open, Tab/Shift+Tab stay inside, Escape closes, focus returns to
+// the trigger. Also closes on route change, on backdrop tap, and when the viewport reaches xl.
 const SLIDE_MS = 300
+const XL_QUERY = "(min-width: 1280px)"
 // calc(env(...)) needs real spaces, so apply via inline style (Tailwind arbitrary values escape them).
-const SAFE_AREA_PB = "calc(env(safe-area-inset-bottom) + 0.75rem)"
+const SAFE_AREA_PB = "calc(env(safe-area-inset-bottom) + 1rem)"
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+const FOCUS_RING =
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
+
+function isOtherLayer(element: Element) {
+  return element.shadowRoot !== null || element.closest('[aria-modal="true"], [role="dialog"]') !== null
+}
 
 export function GiwaHeaderMenu({ isAdmin, testFunds }: { isAdmin: boolean; testFunds?: ReactNode }) {
   const { pathname } = useLocation()
-  const navigate = useNavigate()
+  const dialogId = useId()
+  // open = requested state; mounted keeps the portal through the slide-out; visible drives the slide.
   const [open, setOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
   const [visible, setVisible] = useState(false)
-  const closeTimer = useRef<number | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLDivElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const wasOpen = useRef(false)
 
+  const close = useCallback(() => setOpen(false), [])
+
+  function show() {
+    setMounted(true)
+    setOpen(true)
+  }
+
+  // Open: focus Close, slide in on the next frame. Close: slide out, return focus to the trigger
+  // (only after an actual open, never on mount or on a route change while closed), then unmount.
   useEffect(() => {
-    if (!open) return
-    const raf = requestAnimationFrame(() => setVisible(true))
-    return () => cancelAnimationFrame(raf)
+    if (open) {
+      wasOpen.current = true
+      closeRef.current?.focus({ preventScroll: true })
+      const raf = window.requestAnimationFrame(() => setVisible(true))
+      return () => window.cancelAnimationFrame(raf)
+    }
+    setVisible(false)
+    if (!wasOpen.current) return
+    wasOpen.current = false
+    triggerRef.current?.focus({ preventScroll: true })
+    // At xl the trigger is display:none and cannot take focus; hand it to the main landmark instead.
+    if (document.activeElement !== triggerRef.current) document.getElementById("giwa-main")?.focus({ preventScroll: true })
+    const timer = window.setTimeout(() => setMounted(false), SLIDE_MS)
+    return () => window.clearTimeout(timer)
   }, [open])
 
-  // Body-scroll lock while the sheet is mounted.
+  // Body-scroll lock while open.
   useEffect(() => {
     if (!open) return
     const previous = document.body.style.overflow
@@ -37,128 +70,138 @@ export function GiwaHeaderMenu({ isAdmin, testFunds }: { isAdmin: boolean; testF
     }
   }, [open])
 
-  // Force-close on route change (browser back while open; also unifies the nav-tap path). A
-  // no-op on mount and while already closed.
+  // Close on route change (nav tap, browser back). A no-op while closed.
   useEffect(() => {
-    if (closeTimer.current) {
-      window.clearTimeout(closeTimer.current)
-      closeTimer.current = null
-    }
     setOpen(false)
-    setVisible(false)
   }, [pathname])
 
-  useEffect(
-    () => () => {
-      if (closeTimer.current) window.clearTimeout(closeTimer.current)
-    },
-    [],
-  )
-
-  function close() {
-    setVisible(false) // slide down + fade
-    closeTimer.current = window.setTimeout(() => {
+  // The drawer is xl:hidden; close it when the viewport reaches xl so no invisible trap stays active.
+  useEffect(() => {
+    if (!open || typeof window.matchMedia !== "function") return
+    const query = window.matchMedia(XL_QUERY)
+    if (query.matches) {
       setOpen(false)
-      closeTimer.current = null
-    }, SLIDE_MS)
-  }
+      return
+    }
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setOpen(false)
+    }
+    query.addEventListener("change", onChange)
+    return () => query.removeEventListener("change", onChange)
+  }, [open])
 
-  const navItems = [
-    { label: "Savings", to: GIWA_SAVINGS_ROUTE, active: pathname.startsWith(GIWA_SAVINGS_ROUTE) },
-    { label: "Products", to: GIWA_PREPROD_ROUTE, active: pathname === GIWA_PREPROD_ROUTE },
-    { label: "Portfolio", to: GIWA_PORTFOLIO_ROUTE, active: pathname.startsWith(GIWA_PORTFOLIO_ROUTE) },
-    ...(isAdmin ? [{ label: "Admin", to: GIWA_ADMIN_ROUTE, active: pathname.startsWith(GIWA_ADMIN_ROUTE) }] : []),
-  ]
+  // Escape + focus trap. Document-level so it also applies when focus has fallen to <body>. Keys that
+  // belong to another layer opened on top (e.g. a wallet sign-in modal started from the drawer's test-funds
+  // action, often inside a shadow root) are left alone.
+  useEffect(() => {
+    if (!open) return
+    function onKeyDown(event: KeyboardEvent) {
+      const drawer = drawerRef.current
+      const current = document.activeElement
+      if (drawer && current && current !== document.body && !drawer.contains(current) && isOtherLayer(current)) return
+      if (event.key === "Escape") {
+        event.preventDefault()
+        setOpen(false)
+        return
+      }
+      if (event.key !== "Tab" || !drawer) return
+      const focusable = Array.from(drawer.querySelectorAll<HTMLElement>(FOCUSABLE))
+      if (focusable.length === 0) {
+        event.preventDefault()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+      const inside = active !== null && drawer.contains(active)
+      const atEdge = event.shiftKey ? active === first : active === last
+      if (!inside || atEdge) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+      }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [open])
 
   return (
-    <div className="lg:hidden">
-      {/* Hamburger trigger */}
+    <div className="xl:hidden">
       <button
+        ref={triggerRef}
         type="button"
         aria-label="Open menu"
         aria-expanded={open}
-        onClick={() => setOpen(true)}
-        className="inline-flex size-9 items-center justify-center rounded-md text-[var(--color-arco-ink)] hover:bg-[var(--color-arco-chip)]"
+        aria-controls={dialogId}
+        onClick={show}
+        className={`inline-flex size-11 items-center justify-center rounded-md text-[var(--color-arco-ink)] hover:bg-[var(--color-arco-chip)] ${FOCUS_RING}`}
       >
-        <Menu className="size-5" />
+        <Menu aria-hidden="true" className="size-5" />
       </button>
 
-      {open && createPortal(
-        // Portal to <body>: the header's backdrop-blur creates a containing block, which would trap
-        // a position:fixed sheet inside the ~76px header. Re-wrap in `arco-demo` so the theme tokens
-        // (scoped to .arco-demo, which we've just escaped) still resolve.
-        <div className="arco-demo">
-        {/* lg:hidden here too: the sheet is portaled OUT of the lg:hidden trigger wrapper, so it
-            needs its own guard to vanish at >= lg (e.g. opened on mobile, then resized to desktop). */}
-        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
-          {/* Backdrop — tap to dismiss */}
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={close}
-            className={`absolute inset-0 bg-[var(--color-arco-overlay)] transition-opacity duration-300 ${visible ? "opacity-100" : "opacity-0"}`}
-          />
-          {/* Sheet */}
-          <div
-            className={`absolute inset-x-0 bottom-0 flex max-h-[90vh] flex-col rounded-t-[var(--radius-strategy)] bg-[var(--color-arco-page)] transition-transform duration-300 ${
-              visible ? "translate-y-0" : "translate-y-full"
-            }`}
-            style={{ boxShadow: "var(--shadow-control)" }}
-          >
-            {/* Logo + title + close */}
-            <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-arco-border)] px-4 py-3">
-              <div className="flex items-center gap-2">
-                <img src="/arco-icon.svg" alt="Arco" className="h-[26px] w-[28px] shrink-0" />
-                <span className="text-sm font-medium text-[var(--color-arco-ink)]">Menu</span>
+      {mounted &&
+        createPortal(
+          // Portal to <body>: the header's backdrop-blur creates a containing block that would trap a
+          // position:fixed drawer inside the 76px bar. Re-wrap in `arco-demo` so the scoped theme
+          // tokens resolve, and guard with xl:hidden (the portal escapes the trigger's wrapper).
+          <div className="arco-demo xl:hidden">
+            <div
+              aria-hidden="true"
+              onClick={close}
+              className={`fixed inset-0 z-50 bg-[var(--color-arco-overlay)] transition-opacity duration-300 motion-reduce:transition-none ${
+                visible ? "opacity-100" : "opacity-0"
+              }`}
+            />
+            <div
+              ref={drawerRef}
+              id={dialogId}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Menu"
+              className={`fixed inset-y-0 left-0 z-50 flex w-[min(300px,86vw)] flex-col border-r border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] transition-transform duration-300 motion-reduce:transition-none ${
+                visible ? "translate-x-0" : "-translate-x-full"
+              }`}
+              style={{ boxShadow: "var(--shadow-control)" }}
+            >
+              <div className="flex min-h-[76px] shrink-0 items-center justify-between border-b border-[var(--color-arco-border)] pl-6 pr-3">
+                <div className="flex items-center gap-2">
+                  <img src="/arco-icon.svg" alt="Arco" className="h-[26px] w-[28px] shrink-0" />
+                  <span className="text-sm font-medium text-[var(--color-arco-ink)]">Menu</span>
+                </div>
+                <button
+                  ref={closeRef}
+                  type="button"
+                  onClick={close}
+                  aria-label="Close menu"
+                  className={`inline-flex size-11 items-center justify-center rounded-[var(--radius-pill)] text-[var(--color-arco-muted)] hover:bg-[var(--color-arco-chip)] hover:text-[var(--color-arco-ink)] ${FOCUS_RING}`}
+                >
+                  <X aria-hidden="true" className="size-5" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={close}
-                aria-label="Close"
-                className="inline-flex size-8 items-center justify-center rounded-[var(--radius-pill)] text-[var(--color-arco-muted)] hover:bg-[var(--color-arco-chip)] hover:text-[var(--color-arco-ink)]"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
 
-            <div className="overflow-y-auto px-4" style={{ paddingBottom: SAFE_AREA_PB }}>
-              {/* Nav — tap navigates; the route-change effect closes the sheet */}
-              <nav className="flex flex-col py-2">
-                {navItems.map((item) => (
-                  <button
-                    key={item.to}
-                    type="button"
-                    onClick={() => navigate(item.to)}
-                    className={`py-3 text-left text-lg ${
-                      item.active ? "font-medium text-[var(--color-arco-ink)]" : "text-[var(--color-arco-text-soft)]"
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </nav>
+              <div className="flex-1 overflow-y-auto px-3 pt-4" style={{ paddingBottom: SAFE_AREA_PB }}>
+                {/* Tapping the current page's link changes no route, so close explicitly as well. */}
+                <GiwaSidebarNav isAdmin={isAdmin} onNavigate={close} />
 
-              {/* Test-funds action (moved into the sheet on mobile) */}
-              {testFunds && <div className="border-t border-[var(--color-arco-border)] py-4">{testFunds}</div>}
+                {testFunds && (
+                  <div className="mt-4 border-t border-[var(--color-arco-border)] px-3 py-4 lg:hidden">{testFunds}</div>
+                )}
 
-              {/* Footer links */}
-              <div className="flex flex-col gap-3 border-t border-[var(--color-arco-border)] py-4">
-                {GIWA_FOOTER_LINKS.map((link) => (
-                  <a
-                    key={link.label}
-                    href={link.href}
-                    className="text-sm text-[var(--color-arco-muted)] transition-colors hover:text-[var(--color-arco-ink)]"
-                  >
-                    {link.label}
-                  </a>
-                ))}
+                <div className="mt-4 flex flex-col gap-3 border-t border-[var(--color-arco-border)] px-3 py-4">
+                  {GIWA_FOOTER_LINKS.map((link) => (
+                    <a
+                      key={link.label}
+                      href={link.href}
+                      className={`text-sm text-[var(--color-arco-muted)] transition-colors hover:text-[var(--color-arco-ink)] ${FOCUS_RING}`}
+                    >
+                      {link.label}
+                    </a>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-        </div>,
-        document.body,
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

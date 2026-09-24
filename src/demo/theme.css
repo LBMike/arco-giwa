@@ -136,6 +136,10 @@
   --color-arco-chart-area: rgba(31, 42, 92, 0.12); /* area gradient top (Figma #1F2A5C) */
   --color-arco-up: #179386;              /* positive change (Figma) */
   --color-arco-down: #dc2626;            /* negative change (fallback; Figma shows only positive) */
+  /* Positive change as small TEXT on light surfaces. --color-arco-up is 3.78:1 on #fff, below AA 4.5:1 for 14px text;
+     this is the Figma Ondo up colour: 5.40:1 on --color-arco-surface, 5.09:1 on --color-arco-page and 4.87:1 under the
+     6% --color-row-hover-weak overlay. Graphics (sparklines, status dots) keep --color-arco-up (non-text, >= 3:1). */
+  --color-arco-up-text: #007a4b;
   /* Holdings "Price/24hΔ" gain/loss pair. Deliberately NOT --color-arco-up/down: those two also
      carry success/error meaning across the app (checkmarks, FRESH/STALE, paused, form errors),
      so recolouring them would leak this change into ~60 unrelated call sites. */

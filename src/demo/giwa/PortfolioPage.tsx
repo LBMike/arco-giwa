@@ -13,7 +13,7 @@ import { apyChangePct, priceReturnPct } from "./detail-charts"
 import { buildNetRateSeries, buildNetWorthSeries } from "./portfolio-series"
 import { nextSort, sortByNumericKey } from "./sort"
 import { GIWA_CHAIN_ID } from "./config"
-import { GIWA_PREPROD_ROUTE } from "./routes"
+import { GIWA_FUNDS_ROUTE } from "./routes"
 import type { GiwaCatalogItem, GiwaPortfolio, HexAddress } from "./types"
 import { useGiwaWallet } from "./wallet"
 import { aumLabel } from "../data/products"
@@ -270,7 +270,7 @@ export default function GiwaPortfolioPage() {
               body="Deposit into a product to start building your portfolio."
               action={
                 <Link
-                  to={GIWA_PREPROD_ROUTE}
+                  to={GIWA_FUNDS_ROUTE}
                   className="mt-1 inline-flex items-center justify-center rounded-[var(--radius-control)] border border-[var(--color-arco-border)] px-4 py-2 text-sm font-medium text-[var(--color-arco-ink)]"
                 >
                   Browse products

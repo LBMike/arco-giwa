@@ -95,7 +95,8 @@ test("GIWA providers scope Dynamic wallet modal and keep injected fallback branc
   assert.match(source, /<DynamicContextProvider[\s\S]*<WagmiProvider[\s\S]*<QueryClientProvider[\s\S]*<DynamicWagmiConnector/)
   assert.match(source, /walletConnectors: \[EthereumWalletConnectors\]/)
   assert.match(source, /evmNetworks: \(networks\) => mergeNetworks\(\[dynamicGiwaNetwork\], networks\)/)
-  assert.match(source, /<GiwaWalletProvider>{children}<\/GiwaWalletProvider>/)
+  assert.match(source, /<GiwaWalletProvider><GiwaStocksHost>{children}<\/GiwaStocksHost><\/GiwaWalletProvider>/)
+  assert.match(source, /<DynamicGiwaWalletProvider><GiwaStocksHost>{children}<\/GiwaStocksHost><\/DynamicGiwaWalletProvider>/)
 })
 
 test("wallet client source uses Dynamic when configured and preserves injected fallback", () => {

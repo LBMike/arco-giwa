@@ -1,0 +1,22 @@
+✔ execution plugin authenticates before input, rejects query/body, sets no-store and sanitizes denials (36.014084ms)
+✔ policy is read-only, start-anchored and capped by DB deadline after evidence wait (8.088042ms)
+✔ wrong owner fails before evidence work and historical enrollment mismatch fails closed (0.645042ms)
+✔ policy denies expired-proof after awaited work (0.43475ms)
+✔ policy denies future-proof after awaited work (0.398625ms)
+✔ policy denies extended-proof after awaited work (0.374458ms)
+✔ policy denies digest after awaited work (1.140791ms)
+✔ policy denies manifest after awaited work (0.354958ms)
+✔ policy denies pause after awaited work (0.410042ms)
+✔ policy denies event-loop after awaited work (0.327708ms)
+✔ policy denies db-expiry after awaited work (0.416417ms)
+✔ pause change after final DB await is rechecked; raw DB exceptions are sanitized (0.497667ms)
+✔ deployment returns public evidence without renewal even when trading is paused (0.219333ms)
+✔ independent clocks never extend the lease and do not require exact alignment (0.434292ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 195.895834

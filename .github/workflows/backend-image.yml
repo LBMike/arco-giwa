@@ -1,0 +1,27 @@
+name: Backend image
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Build locally on this runner. Never log in to or publish to a registry.
+      - name: Build backend image without deployment credentials
+        run: docker build --tag arco-giwa-api:ci .
+      - name: Check isolated container startup and shutdown
+        run: node scripts/stocks-deploy/check-image.mjs arco-giwa-api:ci

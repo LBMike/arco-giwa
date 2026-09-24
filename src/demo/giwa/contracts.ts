@@ -15,6 +15,7 @@ import {
 import { GIWA_PUBLIC_RPC, giwaSepolia } from "./config"
 import { vaultAddressForOperation, type ProductOperation } from "./operation-routing"
 import type { GiwaCatalogItem, HexAddress, UnsignedAdminTransaction } from "./types"
+import type { ActiveWalletSource } from "./stocks-wallet-source/types"
 
 const faucetAbi = parseAbi(["function drip(address token)"])
 const faucetWithDripAllAbi = parseAbi(["function drip(address token)", "function dripAll()"])
@@ -55,7 +56,8 @@ export function fromBaseUnits(value: bigint, decimals: number) {
   return formatUnits(value, decimals)
 }
 
-type ActiveWalletClient = Pick<WalletClient, "sendTransaction" | "writeContract">
+type ActiveWalletClient = Pick<WalletClient, "sendTransaction" | "writeContract"> &
+  Partial<Pick<WalletClient, "getAddresses" | "getChainId" | "signMessage">>
 type SimulateContractClient = {
   simulateContract(args: Record<string, unknown>): Promise<{ request: unknown }>
 }
@@ -63,14 +65,26 @@ type ContractWriter = {
   writeContract(request: unknown): Promise<Hex>
 }
 
-let walletSource: { mode: "injected" } | { mode: "dynamic"; client: ActiveWalletClient | null } = { mode: "injected" }
+type DynamicRawProvider = Extract<ActiveWalletSource, { mode: "dynamic" }>["rawProvider"]
+let walletSource: { mode: "injected" } | { mode: "dynamic"; client: ActiveWalletClient | null; rawProvider?: DynamicRawProvider; readRawProvider?: () => DynamicRawProvider } = { mode: "injected" }
 
 export function setInjectedWalletSource() {
   walletSource = { mode: "injected" }
 }
 
-export function setDynamicWalletClient(client: ActiveWalletClient | null) {
-  walletSource = { mode: "dynamic", client }
+export function setDynamicWalletClient(client: ActiveWalletClient | null, rawProvider?: DynamicRawProvider, readRawProvider?: () => DynamicRawProvider) {
+  walletSource = { mode: "dynamic", client, ...(client && rawProvider ? { rawProvider, readRawProvider } : {}) }
+}
+
+/** Read-only view of the active source object. It creates no client and issues no request. */
+export function activeWalletSource(): ActiveWalletSource {
+  if (walletSource.mode === "dynamic") {
+    const { client, rawProvider, readRawProvider } = walletSource
+    if (!rawProvider) return { mode: "dynamic", client }
+    try { return { mode: "dynamic", client, rawProvider: readRawProvider ? readRawProvider() : rawProvider } }
+    catch { return { mode: "dynamic", client, rawProvider: null } }
+  }
+  return { mode: "injected", provider: typeof window === "undefined" ? null : window.ethereum ?? null }
 }
 
 function browserProvider() {

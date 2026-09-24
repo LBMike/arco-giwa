@@ -1,0 +1,13 @@
+{
+  "temp": "/private/tmp/stocks-submissions-pg-3gdOB3",
+  "data": "/private/tmp/stocks-submissions-pg-3gdOB3/data",
+  "socket": "/private/tmp/stocks-submissions-pg-3gdOB3/socket",
+  "tcp": false,
+  "started": true,
+  "stopped": true,
+  "restarts": 1,
+  "pids": [
+    23383,
+    23471
+  ]
+}

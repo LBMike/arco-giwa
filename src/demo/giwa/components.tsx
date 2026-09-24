@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { useDemoPresentation } from "./demo-presentation"
+import { useEffect, useMemo, useState } from "react"
+import { Link, useNavigate } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertCircle,
@@ -7,12 +8,10 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Copy,
   ExternalLink,
   Info,
   Loader2,
   LogOut,
-  Search,
   ShieldCheck,
   Wallet,
 } from "lucide-react"
@@ -42,13 +41,27 @@ import { compareNullLast } from "./sort"
 import { buildActivityFeed, type ActivityRow } from "./activity-feed"
 import { isVaultCategory, type VaultCategory } from "../../../shared/vault-taxonomy"
 import { isAdminAddress, parseAdminAddresses } from "./admin-access"
-import { GIWA_ADMIN_ROUTE, GIWA_PORTFOLIO_ROUTE, GIWA_PREPROD_ROUTE, GIWA_SAVINGS_ROUTE, giwaProductPath } from "./routes"
+import { GIWA_PREPROD_ROUTE, giwaProductPath } from "./routes"
+import { GiwaProductSearch } from "./GiwaProductSearch"
 import { GiwaHeaderMenu } from "./GiwaHeaderMenu"
 import { BrandMark } from "../components/BrandMark"
 import { ASSET_MANAGERS, ISSUERS, ISSUER_OPTIONS, aumLabel, apyLabel, productById } from "../data/products"
 import { ACAPIX_INSTANT_FEES } from "../data/acapix-detail"
-import { Input } from "@/components/ui/input"
 import { GiwaMultiSelect } from "./GiwaMultiSelect"
+import {
+  AmountBlock,
+  AmountField,
+  INVEST_CTA,
+  INVEST_CTA_BUSY,
+  INVEST_CTA_READY,
+  INVEST_NOTICE,
+  INVEST_PANEL_CARD,
+  INVEST_TAB,
+  INVEST_TAB_ACTIVE,
+  INVEST_TAB_INACTIVE,
+  INVEST_TAB_TRACK,
+  InfoRow,
+} from "./invest-panel-ui"
 
 // VISIBILITY gate only (not security): the admin nav link is shown solely to allowlisted
 // wallets. Real enforcement is server requireOperator + on-chain FEED_ADMIN_ROLE.
@@ -376,17 +389,6 @@ export function GiwaNetworkIcon({ size = 20 }: { size?: number }) {
   )
 }
 
-function HeaderNavLink({ to, active, children }: { to: string; active: boolean; children: ReactNode }) {
-  return (
-    <Link to={to} className="relative px-4 text-base leading-6 text-[var(--color-arco-text)]">
-      {children}
-      {active && (
-        <span className="absolute -bottom-[5px] left-1/4 right-1/4 h-[0.5px] min-w-[50px] bg-[var(--color-arco-ink)]" />
-      )}
-    </Link>
-  )
-}
-
 export function GiwaWalletButton() {
   const wallet = useGiwaWallet()
 
@@ -543,7 +545,7 @@ export function TestFundsButton({ admin = false }: { admin?: boolean }) {
         {phase === "confirming" ? "Confirming" : "Mint test assets"}
       </button>
       {(cooldownNotice || message || balances.length > 0) && (
-        <div className="absolute right-0 top-[calc(100%+8px)] z-50 w-[280px] rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-3 text-xs shadow-[var(--shadow-table)]">
+        <div className="absolute inset-x-0 top-[calc(100%+8px)] z-50 rounded-[var(--radius-card)] lg:left-auto lg:w-[280px] bg-[var(--color-arco-surface)] p-3 text-xs shadow-[var(--shadow-table)]">
           {cooldownNotice && <p className="text-[var(--color-arco-ink)]">{cooldownNotice}</p>}
           {message && <p className={phase === "failed" ? "text-red-700" : "text-[var(--color-arco-text-soft)]"}>{message}</p>}
           {balances.length > 0 && (
@@ -562,42 +564,41 @@ export function TestFundsButton({ admin = false }: { admin?: boolean }) {
   )
 }
 
-export function GiwaHeader({ admin = false }: { admin?: boolean }) {
+// VISIBILITY only (see ADMIN_ALLOWLIST): shows the Admin nav item to allowlisted wallets.
+export function useGiwaIsAdmin(): boolean {
   const { address } = useGiwaWallet()
-  const { pathname } = useLocation()
-  const isAdmin = isAdminAddress(address, ADMIN_ALLOWLIST)
+  return isAdminAddress(address, ADMIN_ALLOWLIST)
+}
+
+// Top bar of the investor shell. Below xl it carries the menu trigger + logo (the sidebar is hidden);
+// the nav itself lives in GiwaSidebarNav. Height stays 76px at every width: SectionNav (top-[76px])
+// and the invest panel (top-[104px]) stick beneath it.
+export function GiwaHeader({ admin = false }: { admin?: boolean }) {
+  const isAdmin = useGiwaIsAdmin()
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-arco-border)] bg-[var(--color-arco-page-80)] backdrop-blur">
-      <div className="mx-auto flex min-h-[76px] max-w-[var(--container-page)] items-center justify-between gap-4 px-8 pb-[6px] pt-[22px]">
-        <div className="flex items-center gap-6">
-          <Link to={GIWA_PREPROD_ROUTE} aria-label="Arco home" className="flex items-center">
+      <div className="mx-auto flex min-h-[76px] w-full max-w-[1512px] items-center justify-between gap-3 px-4 md:px-8">
+        <div className="flex items-center gap-2 xl:hidden">
+          <GiwaHeaderMenu isAdmin={isAdmin} testFunds={admin ? undefined : <TestFundsButton admin={admin} />} />
+          <Link
+            to={GIWA_PREPROD_ROUTE}
+            aria-label="Arco home"
+            className="flex items-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
+          >
             <img src="/arco-icon.svg" alt="Arco" className="h-[33px] w-[35px] shrink-0" />
           </Link>
-          {/* Desktop nav — hidden below lg (mobile uses the hamburger sheet). */}
-          <nav className="hidden items-center lg:flex">
-            <HeaderNavLink to={GIWA_SAVINGS_ROUTE} active={pathname.startsWith(GIWA_SAVINGS_ROUTE)}>
-              Savings
-            </HeaderNavLink>
-            <HeaderNavLink to={GIWA_PREPROD_ROUTE} active={pathname === GIWA_PREPROD_ROUTE}>
-              Products
-            </HeaderNavLink>
-            <HeaderNavLink to={GIWA_PORTFOLIO_ROUTE} active={pathname.startsWith(GIWA_PORTFOLIO_ROUTE)}>
-              Portfolio
-            </HeaderNavLink>
-            {isAdmin && (
-              <HeaderNavLink to={GIWA_ADMIN_ROUTE} active={pathname.startsWith(GIWA_ADMIN_ROUTE)}>
-                Admin
-              </HeaderNavLink>
-            )}
-          </nav>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="w-9 shrink-0 sm:w-full sm:min-w-0 sm:max-w-[448px] sm:shrink">
+          <GiwaProductSearch />
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <GiwaWalletButton />
-          {/* Mint test assets: desktop header only; on mobile it moves into the menu sheet. */}
-          <div className="hidden lg:block">
-            <TestFundsButton admin={admin} />
-          </div>
-          <GiwaHeaderMenu isAdmin={isAdmin} testFunds={<TestFundsButton admin={admin} />} />
+          {/* Mint test assets: top bar from lg; below lg it lives in the menu drawer. */}
+          {!admin && (
+            <div className="hidden lg:block">
+              <TestFundsButton admin={admin} />
+            </div>
+          )}
         </div>
       </div>
     </header>
@@ -684,6 +685,7 @@ export function GiwaStrategyCards({
   active: GiwaCategory[]
   onToggle: (category: GiwaCategory) => void
 }) {
+  const demo = useDemoPresentation()
   return (
     <section className="space-y-3">
       <h2 className="pl-1 text-lg font-medium text-[var(--color-arco-ink)]">Strategies</h2>
@@ -705,7 +707,7 @@ export function GiwaStrategyCards({
               <div className="space-y-1">
                 <h3 className="text-lg font-medium leading-6 text-[var(--color-arco-cream)]">{strategy.title}</h3>
                 <p className="line-clamp-2 h-10 max-w-[280px] text-sm leading-5 text-[var(--color-arco-cream)] opacity-80">
-                  {strategy.blurb}
+                  {demo && strategy.category === "U.S Treasuries" ? "Money-market funds and U.S. Treasury strategies." : demo && strategy.category === "Prime Credit" ? "Alternative-credit strategies for income-focused portfolios." : strategy.blurb}
                 </p>
               </div>
               <span className="rounded-[4px] bg-[var(--color-arco-overlay)] px-1 py-0.5 text-xs font-medium text-[var(--color-arco-cream)]">
@@ -731,7 +733,7 @@ const NETWORK_LOGOS: Record<string, string> = {
   Giwa: "/logos/giwa.png",
 }
 
-// Multi-select filter bar: Category · Denomination · Issuer · Network + name/address search.
+// Multi-select filter bar: Category · Denomination · Issuer · Network. Product search lives in the header.
 // Options are DERIVED from the current rows' unique mapped values (ordered by the canonical lists),
 // so every option actually filters and no row is left unfilterable. Issuer rows carry a logo.
 export function GiwaFilterBar({
@@ -786,15 +788,6 @@ export function GiwaFilterBar({
           selected={filters.network}
           onChange={(next) => onChange({ network: next })}
         />
-      </div>
-      <div className="relative min-w-[200px] flex-1">
-        <Input
-          value={filters.search}
-          onChange={(event) => onChange({ search: event.target.value })}
-          placeholder="Search name or address"
-          className="h-11 rounded-[5px] border-0 bg-[var(--color-arco-surface)] pr-10 text-sm shadow-[0_0_0_0.5px_var(--color-arco-border)] placeholder:text-[var(--color-arco-muted)]"
-        />
-        <Search className="pointer-events-none absolute right-4 top-1/2 size-4 -translate-y-1/2 text-[var(--color-arco-muted)]" />
       </div>
     </div>
   )
@@ -943,6 +936,7 @@ function GiwaProductRow({
 // set (Product | Base Asset | Asset Manager | Issuer | AUM | APY | Network) over REAL
 // GIWA registry rows. Kept SEPARATE from GiwaProductsTable so Admin's ProductCatalogList
 // (operational columns: decimals / registry load-state / vault route) stays unchanged.
+const CATALOG_HEAD = "px-1.5 py-2.5 text-base font-medium text-[var(--color-arco-chip-ink)]"
 const CATALOG_COLS =
   "grid-cols-[minmax(190px,1.5fr)_0.85fr_1.15fr_0.9fr_1fr_0.9fr_0.55fr]"
 
@@ -1024,19 +1018,18 @@ export function GiwaCatalogTable({
 
   return (
     <div
-      className="overflow-x-auto rounded-[var(--radius-card)] bg-[var(--color-arco-surface-30)] p-5"
-      style={{ boxShadow: "var(--shadow-table)" }}
+      className="w-full overflow-x-auto rounded-2xl bg-[var(--color-arco-surface)] p-4 sm:p-6"
       data-testid="giwa-catalog"
     >
-      <div className={`grid min-w-[1000px] ${CATALOG_COLS} items-center px-1.5 pb-2`}>
-        <span className={HEAD}>Product</span>
-        <span className={`${HEAD} text-center`}>Base Asset</span>
-        <span className={`${HEAD} text-center`}>Asset Manager</span>
-        <span className={`${HEAD} text-center`}>Issuer</span>
+      <div className={`grid min-w-[1000px] ${CATALOG_COLS} items-center border-y border-[var(--color-arco-border)] px-1.5 py-1`}>
+        <span className={CATALOG_HEAD}>Product</span>
+        <span className={`${CATALOG_HEAD} text-center`}>Base Asset</span>
+        <span className={`${CATALOG_HEAD} text-center`}>Asset Manager</span>
+        <span className={`${CATALOG_HEAD} text-center`}>Issuer</span>
         <button
           type="button"
           onClick={() => onSort?.("aum")}
-          className={`${HEAD} flex items-center justify-center gap-1 text-center hover:text-[var(--color-arco-ink)]`}
+          className={`${CATALOG_HEAD} flex items-center justify-center gap-1 text-center hover:text-[var(--color-arco-ink)]`}
         >
           AUM
           <SortChevrons active={sortKey === "aum" ? sortDir : undefined} />
@@ -1044,20 +1037,20 @@ export function GiwaCatalogTable({
         <button
           type="button"
           onClick={() => onSort?.("apy")}
-          className={`${HEAD} flex items-center justify-center gap-1 text-center hover:text-[var(--color-arco-ink)]`}
+          className={`${CATALOG_HEAD} flex items-center justify-center gap-1 text-center hover:text-[var(--color-arco-ink)]`}
         >
           APY
           <SortChevrons active={sortKey === "apy" ? sortDir : undefined} />
         </button>
-        <span className={`${HEAD} text-center`}>Network</span>
+        <span className={`${CATALOG_HEAD} text-center`}>Network</span>
       </div>
 
       {sorted.length === 0 ? (
-        <div className="flex min-w-[1000px] flex-col items-center gap-3 rounded-[var(--radius-row)] bg-[var(--color-arco-surface)] px-6 py-14 text-center">
+        <div className="flex min-w-[1000px] flex-col items-center gap-3 border-b border-[var(--color-arco-border)] px-6 py-14 text-center">
           <p className="text-sm text-[var(--color-arco-muted)]">No products match your filters.</p>
         </div>
       ) : (
-        <div className="flex min-w-[1000px] flex-col gap-2.5">
+        <div className="flex min-w-[1000px] flex-col">
           {sorted.map((product) => (
             <GiwaCatalogRow
               key={product.productId}
@@ -1099,10 +1092,6 @@ function GiwaCatalogRow({
   const managerLogo = config.assetManagerImageUrl ?? am?.logo
   const issuerLabel = config.issuerName ?? iss?.label ?? null
   const issuerLogo = config.issuerImageUrl ?? iss?.logo
-  const rowBg =
-    config.pinned || productCategory(product) === "Arco Saving"
-      ? "bg-[var(--color-row-saving)]"
-      : "bg-[var(--color-arco-surface)]"
   const baseSymbol = baseAssetSymbol(product.paymentAssetSymbol)
   // Published rate wins, then the legacy profile (built-ins stay byte-identical); implied
   // APY only fills the gap for vaults with neither (e.g. newly-registered ones).
@@ -1123,12 +1112,10 @@ function GiwaCatalogRow({
       tabIndex={0}
       onClick={onSelect}
       onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && onSelect()}
-      className={`group relative grid h-[59px] cursor-pointer ${CATALOG_COLS} items-center rounded-[var(--radius-row)] px-1.5 outline-none transition-[box-shadow] focus-visible:ring-2 focus-visible:ring-[var(--color-arco-ink-40)] ${
-        selected ? "ring-2 ring-[var(--color-arco-ink-40)]" : ""
-      } ${rowBg}`}
+      className={`group relative grid min-h-[72px] cursor-pointer ${CATALOG_COLS} items-center border-b border-[var(--color-arco-border)] px-1.5 py-3 outline-none transition-colors hover:bg-[var(--color-arco-surface-muted)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-arco-ink-40)] ${
+        selected ? "bg-[var(--color-arco-chip)]" : "bg-[var(--color-arco-surface)]"
+      }`}
     >
-      <span className="pointer-events-none absolute inset-0 rounded-[var(--radius-row)] bg-transparent backdrop-blur-0 transition-all duration-150 group-hover:bg-[var(--color-row-hover-weak)] group-hover:backdrop-blur-[1px]" />
-
       <div className="relative z-10 flex items-center gap-2.5 pl-1">
         <GiwaBrandMark src={vaultImage} label={product.symbol} size={35} />
         <div className="flex flex-col">
@@ -1175,131 +1162,6 @@ function GiwaCatalogRow({
       <div className="relative z-10 flex justify-center">
         <GiwaNetworkIcon size={20} />
       </div>
-    </div>
-  )
-}
-
-function AmountField({
-  caption,
-  symbol,
-  icon,
-  value,
-  onChange,
-  readOnly,
-  balance,
-  onMax,
-  subValue,
-}: {
-  caption: string
-  symbol: string
-  icon?: ReactNode
-  value: string
-  onChange?: (value: string) => void
-  readOnly?: boolean
-  balance?: string
-  onMax?: () => void
-  subValue?: string
-}) {
-  return (
-    <div className="p-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-[var(--color-arco-muted)]">{caption}</p>
-        {balance !== undefined && (
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-[var(--color-arco-muted)]">Balance: {balance}</span>
-            {onMax && (
-              <button
-                type="button"
-                onClick={onMax}
-                className="rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-arco-text-soft)]"
-              >
-                MAX
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-[var(--color-arco-ink)]">
-          {icon}
-          {symbol}
-          <button
-            type="button"
-            aria-label={`Copy ${symbol} address`}
-            className="inline-flex text-[var(--color-arco-muted)]"
-          >
-            <Copy className="size-3.5" />
-          </button>
-        </span>
-        <input
-          inputMode="decimal"
-          value={value}
-          readOnly={readOnly}
-          onChange={(event) => {
-            const next = event.target.value
-            // Accept only "" or a non-negative decimal (mid-typing "1." allowed); reject "-", "+",
-            // "e", letters, and multiple dots — so a typed/pasted "-1" is dropped and the controlled
-            // input keeps its prior value. Covers "You pay" + "Amount to redeem" (shared input).
-            if (/^\d*\.?\d*$/.test(next)) onChange?.(next)
-          }}
-          className="w-full bg-transparent text-right tabular-nums text-lg text-[var(--color-arco-ink)] outline-none placeholder:text-[var(--color-arco-muted)]"
-          placeholder="0.0"
-        />
-      </div>
-      {subValue !== undefined && (
-        <p className="mt-0.5 text-right tabular-nums text-[11px] text-[var(--color-arco-muted)]">{subValue}</p>
-      )}
-    </div>
-  )
-}
-
-function AmountBlock({ children }: { children: ReactNode }) {
-  return (
-    <div className="relative divide-y divide-[var(--color-arco-border)] overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)]">
-      {children}
-      <span className="pointer-events-none absolute left-1/2 top-1/2 z-10 inline-flex size-[21px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)]">
-        <ArrowDown className="size-3.5 text-[var(--color-arco-muted)]" />
-      </span>
-    </div>
-  )
-}
-
-function InfoRow({
-  label,
-  value,
-  expandable,
-  children,
-}: {
-  label: string
-  value?: ReactNode
-  expandable?: boolean
-  children?: ReactNode
-}) {
-  const [open, setOpen] = useState(false)
-
-  if (expandable) {
-    return (
-      <div className="border-t border-[var(--color-arco-border)]">
-        <button
-          type="button"
-          onClick={() => setOpen((current) => !current)}
-          aria-expanded={open}
-          className="flex w-full items-center justify-between py-2.5 text-sm"
-        >
-          <span className="text-[var(--color-arco-text-soft)]">{label}</span>
-          <ChevronDown
-            className={`size-3.5 text-[var(--color-arco-muted)] transition-transform ${open ? "rotate-180" : ""}`}
-          />
-        </button>
-        {open && children && <div className="pb-3">{children}</div>}
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex items-center justify-between border-t border-[var(--color-arco-border)] py-2.5 text-sm">
-      <span className="text-[var(--color-arco-text-soft)]">{label}</span>
-      <span className="tabular-nums text-[var(--color-arco-ink)]">{value}</span>
     </div>
   )
 }
@@ -1530,7 +1392,7 @@ export function GiwaInvestPanel({
   }
 
   return (
-    <div className={`${variant === "sidebar" ? "sticky top-[104px]" : ""} rounded-[var(--radius-strategy)] bg-[var(--color-arco-surface)] p-4 shadow-[var(--shadow-control)]`}>
+    <div className={`${variant === "sidebar" ? "sticky top-[104px]" : ""} ${INVEST_PANEL_CARD}`}>
       <div className="flex items-center justify-between">
         <button
           type="button"
@@ -1542,17 +1404,13 @@ export function GiwaInvestPanel({
         </button>
       </div>
 
-      <div className="mt-3 grid grid-cols-3 rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] p-0.5 text-sm">
+      <div className={`mt-3 grid grid-cols-3 ${INVEST_TAB_TRACK}`}>
         {(["invest", "redeem", "pending"] as const).map((item) => (
           <button
             key={item}
             type="button"
             onClick={() => onOperationChange(item === "invest" ? "deposit" : item === "redeem" ? "redeemInstant" : "claimRedeem")}
-            className={`rounded-[var(--radius-pill)] py-1.5 capitalize ${
-              tab === item
-                ? "bg-[var(--color-arco-surface)] font-medium text-[var(--color-arco-ink)] shadow-[var(--shadow-control)]"
-                : "text-[var(--color-arco-muted)]"
-            }`}
+            className={`${INVEST_TAB} capitalize ${tab === item ? INVEST_TAB_ACTIVE : INVEST_TAB_INACTIVE}`}
           >
             {item}
           </button>
@@ -1650,7 +1508,7 @@ export function GiwaInvestPanel({
               )}
             </div>
             {liquidityShort && !pausedNotice && !insufficientBalance && (
-              <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3 text-xs text-[var(--color-arco-text-soft)]">
+              <div className={`${INVEST_NOTICE} text-[var(--color-arco-text-soft)]`}>
                 <AlertCircle className="mt-0.5 size-4 shrink-0" />
                 <span className="break-words">
                   {`Instant liquidity is ${compactNumber(liquidityInPaymentAsset ?? 0)} ${product.paymentAssetSymbol}. This is processed as a redemption request — your ${product.symbol} is redeemed now and the ${product.paymentAssetSymbol} payout follows after processing.`}
@@ -1661,11 +1519,7 @@ export function GiwaInvestPanel({
               type="button"
               disabled={busy || phase === "missing-payment-token" || Boolean(pausedNotice) || insufficientBalance}
               onClick={runPrimary}
-              className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-card)] py-3 text-sm font-medium ${
-                busy
-                  ? "bg-[var(--color-arco-surface-muted)] text-[var(--color-arco-muted)]"
-                  : "bg-[var(--color-arco-ink)] text-[var(--color-arco-on-dark)] disabled:opacity-50"
-              }`}
+              className={`${INVEST_CTA} ${busy ? INVEST_CTA_BUSY : INVEST_CTA_READY}`}
             >
               {busy && <Loader2 className="size-4 animate-spin" />}
               {busy ? "Processing the transaction" : actionLabel}
@@ -1675,19 +1529,19 @@ export function GiwaInvestPanel({
       </div>
 
       {pausedNotice && (
-        <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3 text-xs text-[var(--color-arco-text-soft)]">
+        <div className={`${INVEST_NOTICE} text-[var(--color-arco-text-soft)]`}>
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <span className="break-words">{pausedNotice}</span>
         </div>
       )}
       {(error || phase === "failed") && (
-        <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3 text-xs text-[var(--color-arco-down)]">
+        <div className={`${INVEST_NOTICE} text-[var(--color-arco-down)]`}>
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <span className="break-words">{error ?? "Transaction failed"}</span>
         </div>
       )}
       {(phase === "success" || phase === "pending-redemption") && (
-        <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3 text-xs">
+        <div className={INVEST_NOTICE}>
           <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[var(--color-arco-up)]" />
           <div className="flex flex-col gap-0.5">
             <span className="font-medium text-[var(--color-arco-ink)]">{successLabel ?? "Transaction confirmed"}</span>

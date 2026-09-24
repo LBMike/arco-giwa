@@ -2,10 +2,15 @@ import React, { Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
 import { createBrowserRouter, Navigate, RouterProvider, useLocation, useParams } from 'react-router-dom'
 import { GIWA_ADMIN_OPERATIONS_ROUTE, GIWA_ADMIN_ROUTE, GIWA_PREPROD_ROUTE } from './demo/giwa/routes'
+import { stocksRoutes } from './demo/giwa/stocks-market/routes'
+import { DemoPresentationContext } from './demo/giwa/demo-presentation'
+import { GIWA_CUSTOMER_PRESENTATION } from './demo/giwa/config'
 import './index.css'
 import './demo/theme.css'
 
 const GiwaPreprodApp = lazy(() => import('./demo/giwa/GiwaPreprodApp').then((mod) => ({ default: mod.GiwaPreprodApp })))
+const GiwaPreprodProviders = lazy(() => import('./demo/giwa/providers').then((mod) => ({ default: mod.GiwaPreprodProviders })))
+const GiwaHomePage = lazy(() => import('./demo/giwa/HomePage'))
 const GiwaInvestorPage = lazy(() => import('./demo/giwa/Investor'))
 const RequireGiwaAdmin = lazy(() => import('./demo/giwa/RequireGiwaAdmin').then((mod) => ({ default: mod.RequireGiwaAdmin })))
 const GiwaAdminLayout = lazy(() => import('./demo/giwa/GiwaAdminLayout').then((mod) => ({ default: mod.GiwaAdminLayout })))
@@ -35,11 +40,13 @@ function LegacyAppRedirect() {
 
 const router = createBrowserRouter([
   { path: '/app/*', element: <LegacyAppRedirect /> },
+  ...stocksRoutes(giwaRoute(<GiwaPreprodApp />)),
   {
     path: GIWA_PREPROD_ROUTE,
     element: giwaRoute(<GiwaPreprodApp />),
     children: [
-      { index: true, element: giwaRoute(<GiwaInvestorPage />) },
+      { index: true, element: giwaRoute(<GiwaHomePage />) },
+      { path: 'funds', element: giwaRoute(<GiwaInvestorPage />) },
       { path: 'savings', element: giwaRoute(<GiwaSavingsPage />) },
       { path: 'portfolio', element: giwaRoute(<GiwaPortfolioPage />) },
       { path: 'product/:id', element: giwaRoute(<GiwaProductDetailPage />) },
@@ -68,6 +75,10 @@ const router = createBrowserRouter([
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <RouterProvider router={router} />
+    <Suspense fallback={null}>
+      <DemoPresentationContext.Provider value={GIWA_CUSTOMER_PRESENTATION}>
+        <GiwaPreprodProviders><RouterProvider router={router} /></GiwaPreprodProviders>
+      </DemoPresentationContext.Provider>
+    </Suspense>
   </React.StrictMode>,
 )

@@ -1,5 +1,14 @@
 # arco-giwa
 
+## Stocks를 직접 실행하고 수정하기
+
+[한국어 운영·개발 안내](docs/stocks-owner-guide.md)를 먼저 읽으세요.
+`npm run stocks:setup`으로 준비하고, `npm run stocks:doctor`로 설치 상태를 확인한 뒤
+`npm run stocks:dev`로 운영자·투자자 화면을 엽니다. 개인 지갑이나 공개 DB 설정 없이
+로컬 테스트 계정으로 거래 중지/재개, 매수·매도와 복구를 확인할 수 있습니다.
+이 모드는 실행마다 새 임시 DB·체인을 만들며 종료 시 삭제합니다. API 재시작은 같은
+실행 안에서 기록을 유지합니다. 공개 서비스나 실제 주식 거래 모드가 아닙니다.
+
 Standalone GIWA product: the Vite/React investor + admin app, the Fastify API, the
 on-chain indexer, and the contracts ops package for the vault set **live on GIWA
 Sepolia (chain 91342)**.

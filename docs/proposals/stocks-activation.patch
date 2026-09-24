@@ -1,0 +1,81 @@
+--- a/server/src/app.ts
++++ b/server/src/app.ts
+@@ -1,5 +1,6 @@
+ import { createRequire } from "node:module"
+ import cors from "@fastify/cors"
++import { stocksPlugin, type StocksPluginOptions } from "./stocks/plugin.js"
+ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify"
+ import { generateNonce, SiweMessage } from "siwe"
+ import { formatUnits, getAddress, isAddress, type Address } from "viem"
+@@ -70,6 +71,7 @@
+ }
+ 
+ export type ArcoAppServices = {
++  readonly stocks?: StocksPluginOptions
+   readonly arco: PrismaArcoService
+   readonly registry: EvmRegistryService
+   readonly portfolio: EvmPortfolioService
+@@ -1254,6 +1256,7 @@
+     reply.code(400).send({ error: errorMessage(error) })
+   })
+ 
++  if (services.stocks) app.register(stocksPlugin, services.stocks)
+   return app
+ }
+ 
+--- a/server/src/index.ts
++++ b/server/src/index.ts
+@@ -1,4 +1,6 @@
+ import { pathToFileURL } from "node:url"
++import { configuredStocksRuntime } from "./stocks-runtime/runtime.js"
++import { stocksSessionResolvers } from "./stocks-runtime/session.js"
+ import { createPublicClient, http, keccak256, parseAbi, toBytes, type Hex } from "viem"
+ import { buildApp, type PauseStateVaultRef, type VaultPauseState } from "./app.js"
+ import { FUNCTION_PAUSE_SELECTORS } from "./evm/admin-transactions.js"
+@@ -266,6 +268,14 @@
+     cursorName: "giwa",
+     maxLagBlocks: 100,
+   })
++  // Proposed only: no public-network wiring is applied by this artifact.
++  const stocks = await configuredStocksRuntime(envSource, env.databaseUrl)
++  const stocksOptions = stocks ? {
++    service: stocks.service,
++    reconciliationCoverage: stocks.reconciliationCoverage,
++    ...stocksSessionResolvers(env.authJwtSecret,
++      env.corsAllowedOrigins.map(origin => new URL(origin).host), stocks.operators),
++  } : undefined
+   const app = buildApp(
+     {
+       corsAllowedOrigins: env.corsAllowedOrigins,
+@@ -274,13 +284,29 @@
+       adminOperatorToken: env.adminOperatorToken,
+       registryPath: env.registryPath,
+     },
+-    { arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits },
++    { arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits, stocks: stocksOptions },
+   )
+ 
+   // Bind dual-stack (IPv6 + IPv4). Browsers resolve "localhost" to ::1 (IPv6) first, so an
+   // IPv4-only bind ("0.0.0.0") leaves http://localhost:8080 unreachable → "Failed to fetch".
+   // "::" listens on both ::1 and 127.0.0.1 and also stops a stray IPv6 process squatting on :8080.
+-  await app.listen({ host: "::", port: env.port })
++  let stocksTimer: ReturnType<typeof setInterval> | undefined
++  if (stocks) app.addHook("onClose", async () => {
++    if (stocksTimer) clearInterval(stocksTimer)
++    await stocks.close()
++  })
++  try {
++    await app.listen({ host: "::", port: env.port })
++    if (stocks && envSource.STOCKS_AUTODISPATCH === "1") {
++      // Explicit opt-in after external signing and activation approval.
++      await stocks.tick()
++      stocksTimer = setInterval(() => { void stocks.tick() }, 2000)
++      stocksTimer.unref()
++    }
++  } catch (error) {
++    await app.close()
++    throw error
++  }
+   return { app, chainId: GIWA_CHAIN_ID }
+ }
+ 

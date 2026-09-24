@@ -1,0 +1,762 @@
+{
+  "task": "RWA-UI-002",
+  "purpose": "Provenance of the Stocks list logos. Local same-origin files only; no hotlink, tracking URL or runtime logo API. Review notes: docs/evidence/rwa-ui-claude-20260916/logo-provenance-review.json.",
+  "retrievedDate": "2026-09-16",
+  "policy": [
+    "ETF rows use the fund issuer brand, never an underlying company.",
+    "One file may serve several instruments of the same issuer (Direxion, iShares, ProShares, Invesco, Roundhill).",
+    "Files are PNG only (SVG sources were rasterised); every file starts with the PNG signature and carries no data after IEND.",
+    "The UI attaches a logo only when the verified ticker AND the ISIN match an entry below (src/dd-demo-ui/app/data/stocks-logos-v1.ts)."
+  ],
+  "coverage": {
+    "instruments": 40,
+    "of": 40,
+    "missing": []
+  },
+  "files": [
+    {
+      "file": "direxion.png",
+      "path": "/logos/stocks/direxion.png",
+      "brand": "Direxion (ETF issuer)",
+      "instruments": [
+        {
+          "ticker": "SOXL",
+          "rank": 1,
+          "isin": "US25459W4583"
+        },
+        {
+          "ticker": "SOXS",
+          "rank": 6,
+          "isin": "US25461H2913"
+        },
+        {
+          "ticker": "KORU",
+          "rank": 12,
+          "isin": "US25461A3876"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 11560,
+      "sha256": "952d3970119cde1d317d3d7f8d3ee2cbbdc39db0327f7557e551af047e0567e0",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.direxion.com/_next/static/media/logo.7d7cf584.svg",
+      "sourcePage": "https://www.direxion.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "micron.png",
+      "path": "/logos/stocks/micron.png",
+      "brand": "Micron Technology, Inc.",
+      "instruments": [
+        {
+          "ticker": "MU",
+          "rank": 2,
+          "isin": "US5951121038"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 7641,
+      "sha256": "b362aaf07cb3d20bca4d1952175b78d08b2428c598831e17daa3def576443b10",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.micron.com/content/dam/micron/connectedassets/micron/global/imported-images/icons/logos/micron-logo-black.png",
+      "sourcePage": "https://www.micron.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "tesla.png",
+      "path": "/logos/stocks/tesla.png",
+      "brand": "Tesla, Inc.",
+      "instruments": [
+        {
+          "ticker": "TSLA",
+          "rank": 3,
+          "isin": "US88160R1014"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 9378,
+      "sha256": "55083441b0220a61267f7f44f685ef0634c5c46f995df804fc80d1d3b0f46d47",
+      "sourceKind": "ISSUER_OFFICIAL_SOCIAL_OR_APP_ICON",
+      "sourceUrl": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/a3/94/dd/a394dd9c-c513-ed5e-a84a-ee015dab7a25/ProdAppIcon-0-0-1x_U007emarketing-0-6-0-85-220.png/512x512bb.png",
+      "sourcePage": "https://apps.apple.com/us/app/tesla/id582007913",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "sandisk.png",
+      "path": "/logos/stocks/sandisk.png",
+      "brand": "Sandisk Corporation (2025 spin-off, current brand)",
+      "instruments": [
+        {
+          "ticker": "SNDK",
+          "rank": 4,
+          "isin": "US80004C2008"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 8600,
+      "sha256": "62ebfbbe5d2d3c50b3cb3b222c455dcb7581f85e02bcf22c42ae0dc331cdc1dd",
+      "sourceKind": "ISSUER_OFFICIAL_SOCIAL_OR_APP_ICON",
+      "sourceUrl": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/f9/d5/67/f9d56728-dcc5-0df8-4ba6-670cde24a842/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.png",
+      "sourcePage": "https://apps.apple.com/us/app/sandisk/id6504174888",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "alphabet.png",
+      "path": "/logos/stocks/alphabet.png",
+      "brand": "Alphabet Inc. (Class A, GOOGL). Delivered mark: the official Google 'G' icon published by Google.",
+      "instruments": [
+        {
+          "ticker": "GOOGL",
+          "rank": 5,
+          "isin": "US02079K3059"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 15627,
+      "sha256": "4748acd83e0a0e61cb3b9afd1ff3efb56d372247864a61795862c5b020b6b017",
+      "sourceKind": "OTHER_IDENTIFIED_RELIABLE_SOURCE",
+      "sourceUrl": "https://www.google.com/images/branding/googleg/2x/googleg_standard_color_128dp.png",
+      "sourcePage": "https://www.google.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "ishares.png",
+      "path": "/logos/stocks/ishares.png",
+      "brand": "iShares by BlackRock (ETF issuer)",
+      "instruments": [
+        {
+          "ticker": "SGOV",
+          "rank": 7,
+          "isin": "US46436E7186"
+        },
+        {
+          "ticker": "SOXX",
+          "rank": 33,
+          "isin": "US4642875235"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 23977,
+      "sha256": "4868ca0e46b410909aef19947f9a323906f063f2b497d08b1bde77bdebf6d617",
+      "sourceKind": "ISSUER_OFFICIAL_SOCIAL_OR_APP_ICON",
+      "sourceUrl": "https://yt3.googleusercontent.com/2qRRvTydymK3nHctnVFH3hdzAbtvfm-FB_7lUKa1Sc1do5KgsOtsi95IDYK7Ms0iHzyV0aZY=s512-c-k-c0x00ffffff-no-rj-rp",
+      "sourcePage": "https://www.youtube.com/user/isharesetfs",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "spacex.png",
+      "path": "/logos/stocks/spacex.png",
+      "brand": "Space Exploration Technologies Corp. (SpaceX)",
+      "instruments": [
+        {
+          "ticker": "SPCX",
+          "rank": 8,
+          "isin": "US84615Q1031"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 8773,
+      "sha256": "ac810052e976f66ba1145ab263b6caf93742dd240142a8f2dc1ce57b096a3c98",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.spacex.com/main.d7d1373e1b935cc7.js",
+      "sourcePage": "https://www.spacex.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "schwab.png",
+      "path": "/logos/stocks/schwab.png",
+      "brand": "Schwab Asset Management / Charles Schwab (ETF issuer of SCHD)",
+      "instruments": [
+        {
+          "ticker": "SCHD",
+          "rank": 9,
+          "isin": "US8085247976"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 20721,
+      "sha256": "521f41e59cb65c1716d87719af7e31b4a631d6f3cad7d3fd9a153c1859979917",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.schwab.com/themes/custom/sch_beacon_retail/favicons/apple-icon.png",
+      "sourcePage": "https://www.schwab.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "nvidia.png",
+      "path": "/logos/stocks/nvidia.png",
+      "brand": "NVIDIA Corporation",
+      "instruments": [
+        {
+          "ticker": "NVDA",
+          "rank": 10,
+          "isin": "US67066G1040"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 15461,
+      "sha256": "19a3460e5581c5454ea7799743834df95a43240db1a240b8259649c66162ab3e",
+      "sourceKind": "ISSUER_PRESS_OR_BRAND_KIT",
+      "sourceUrl": "https://www.nvidia.com/content/dam/en-zz/Solutions/about-nvidia/logo-and-brand/nvidia-logo-vert.svg",
+      "sourcePage": "https://www.nvidia.com/en-us/about-nvidia/legal-info/logo-brand-usage/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "vanguard.png",
+      "path": "/logos/stocks/vanguard.png",
+      "brand": "Vanguard",
+      "instruments": [
+        {
+          "ticker": "VOO",
+          "rank": 11,
+          "isin": "US9229083632"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 9894,
+      "sha256": "5b42d055a53464ced8be57c44515b3d5061c40c73a750eb9378bde42eec5b1f6",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://n4v.web.vanguard.com/secure-site-components.es.js",
+      "sourcePage": "https://investor.vanguard.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "broadcom.png",
+      "path": "/logos/stocks/broadcom.png",
+      "brand": "Broadcom Inc.",
+      "instruments": [
+        {
+          "ticker": "AVGO",
+          "rank": 13,
+          "isin": "US11135F1012"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 16241,
+      "sha256": "d7e4069baca8db0a16c27a869257a84cec3cbe00e690eeb0005a9e2bb5c64cf4",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.broadcom.com/img/broadcom-logo.svg",
+      "sourcePage": "https://www.broadcom.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "ionq.png",
+      "path": "/logos/stocks/ionq.png",
+      "brand": "IonQ, Inc.",
+      "instruments": [
+        {
+          "ticker": "IONQ",
+          "rank": 14,
+          "isin": "US46222L1089"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 14518,
+      "sha256": "1412d62bf2fa7682461c719ca8ec35649496a559aa6ea4234a29acd86220aed0",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://cdn.prod.website-files.com/68836cf9cff21bf9efa61419/69134555b96bed09364a35dc_IonQ%20Webclip.png",
+      "sourcePage": "https://www.ionq.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "strategy.png",
+      "path": "/logos/stocks/strategy.png",
+      "brand": "Strategy Inc",
+      "instruments": [
+        {
+          "ticker": "MSTR",
+          "rank": 15,
+          "isin": "US5949724083"
+        }
+      ],
+      "format": "png",
+      "width": 200,
+      "height": 200,
+      "bytes": 8477,
+      "sha256": "1e2527c49715b6c707ee2ae17af9a8edf81e167e98591d16826fddb07e179df8",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.strategy.com/apple-touch-icon.png",
+      "sourcePage": "https://www.strategy.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "meta.png",
+      "path": "/logos/stocks/meta.png",
+      "brand": "Meta Platforms, Inc.",
+      "instruments": [
+        {
+          "ticker": "META",
+          "rank": 16,
+          "isin": "US30303M1027"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 16225,
+      "sha256": "ce0372b74de41c3cb800f1ac4dc315a1d6bcd3b571f1c4eb79b4954d82b74324",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://static.xx.fbcdn.net/rsrc.php/yO/r/8S6ZPxM3N1I.svg",
+      "sourcePage": "https://www.meta.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "proshares.png",
+      "path": "/logos/stocks/proshares.png",
+      "brand": "ProShares",
+      "instruments": [
+        {
+          "ticker": "TQQQ",
+          "rank": 17,
+          "isin": "US74347X8314"
+        },
+        {
+          "ticker": "QLD",
+          "rank": 21,
+          "isin": "US74347R2067"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 8865,
+      "sha256": "a218fd58987ef2dc7bcdb49c86cdad797d2b897ab615b3465d0b35fe8e4351eb",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.proshares.com/globalassets/proshares/ps-logo_new.png",
+      "sourcePage": "https://www.proshares.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "invesco.png",
+      "path": "/logos/stocks/invesco.png",
+      "brand": "Invesco",
+      "instruments": [
+        {
+          "ticker": "QQQM",
+          "rank": 18,
+          "isin": "US46138G6492"
+        },
+        {
+          "ticker": "QQQ",
+          "rank": 25,
+          "isin": "US46090E1038"
+        }
+      ],
+      "format": "png",
+      "width": 180,
+      "height": 180,
+      "bytes": 1173,
+      "sha256": "2c2d479fdf3d7ebcefff53a6407e4f43ca83b0ed6f60a4de908e0d0af66b1fc9",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.invesco.com/etc.clientlibs/invesco/clientlibs/main/resources/images/apple-touch-icon.png",
+      "sourcePage": "https://www.invesco.com/us/en/country-splash.html",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "amazon.png",
+      "path": "/logos/stocks/amazon.png",
+      "brand": "Amazon.com, Inc.",
+      "instruments": [
+        {
+          "ticker": "AMZN",
+          "rank": 19,
+          "isin": "US0231351067"
+        }
+      ],
+      "format": "png",
+      "width": 180,
+      "height": 180,
+      "bytes": 4366,
+      "sha256": "f8184c36ab5439a22007f105d0366f10bbb782ab1d379e38759e452965c18805",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.aboutamazon.com/_next/static/media/apple-touch-icon.706b1b87.png",
+      "sourcePage": "https://www.aboutamazon.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "iren.png",
+      "path": "/logos/stocks/iren.png",
+      "brand": "IREN Limited",
+      "instruments": [
+        {
+          "ticker": "IREN",
+          "rank": 20,
+          "isin": "AU0000185993"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 9505,
+      "sha256": "258f644293993b05828c483cddf653b3e2cd208165b687c2c334549a6a1ba60b",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://iren.com/icons/logo.svg",
+      "sourcePage": "https://iren.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "sk-hynix.png",
+      "path": "/logos/stocks/sk-hynix.png",
+      "brand": "SK hynix Inc.",
+      "instruments": [
+        {
+          "ticker": "SKHY",
+          "rank": 22,
+          "isin": "US78392B2060"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 15798,
+      "sha256": "e7dfd93b22963741911769745d9583a09c5b3691767047cd88d1b7e574863100",
+      "sourceKind": "ISSUER_PRESS_OR_BRAND_KIT",
+      "sourceUrl": "https://mis-prod-koce-skhynixhomepage-cdn-01-ep.azureedge.net/img/content/img_ci01.png",
+      "sourcePage": "https://www.skhynix.com/company/UI-FR-CP0402/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "merck.png",
+      "path": "/logos/stocks/merck.png",
+      "brand": "Merck & Co., Inc. (Rahway, NJ, USA; MSD outside US/Canada)",
+      "instruments": [
+        {
+          "ticker": "MRK",
+          "rank": 23,
+          "isin": "US58933Y1055"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 14310,
+      "sha256": "a0007ae533cc29c04a22513131efb2a8216618388f97cd109a1caba00db7ac25",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.merck.com/wp-content/uploads/sites/124/2025/08/site-logo.svg",
+      "sourcePage": "https://www.merck.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "marvell.png",
+      "path": "/logos/stocks/marvell.png",
+      "brand": "Marvell Technology, Inc.",
+      "instruments": [
+        {
+          "ticker": "MRVL",
+          "rank": 24,
+          "isin": "US5738741041"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 6982,
+      "sha256": "86da56957909529b470722dfeec31ea844e99bad2eb4bb2b2f7a93132e2d7f54",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://d1io3yog0oux5.cloudfront.net/_c31b1bec09c37904cd59e3e1257fbcd5/marvell/db/3760/34708/image.png",
+      "sourcePage": "https://investor.marvell.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "nuscale.png",
+      "path": "/logos/stocks/nuscale.png",
+      "brand": "NuScale Power Corporation",
+      "instruments": [
+        {
+          "ticker": "SMR",
+          "rank": 26,
+          "isin": "US67079K1007"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 14956,
+      "sha256": "14d412aaf89d82822425e73400cbf8d979141a76b0bfce5e29bff841af994e0d",
+      "sourceKind": "ISSUER_PRESS_OR_BRAND_KIT",
+      "sourceUrl": "https://www.nuscalepower.com/hubfs/nuscale-logo-1.jpg",
+      "sourcePage": "https://www.nuscalepower.com/news/media-center",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "jpmorgan.png",
+      "path": "/logos/stocks/jpmorgan.png",
+      "brand": "J.P. Morgan Asset Management (JPMorgan Chase & Co.)",
+      "instruments": [
+        {
+          "ticker": "JEPQ",
+          "rank": 27,
+          "isin": "US46654Q2030"
+        }
+      ],
+      "format": "png",
+      "width": 192,
+      "height": 192,
+      "bytes": 4150,
+      "sha256": "1375f1caa41c30b500294e920405a578d33ba616776118be1cb057a3c000f3f2",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.jpmorgan.com/etc.clientlibs/cws/clientlibs/clientlib-base/resources/jpm/images/jpm-favicon-152.png",
+      "sourcePage": "https://www.jpmorgan.com/global",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "lumentum.png",
+      "path": "/logos/stocks/lumentum.png",
+      "brand": "Lumentum Holdings Inc.",
+      "instruments": [
+        {
+          "ticker": "LITE",
+          "rank": 28,
+          "isin": "US55024U1097"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 12543,
+      "sha256": "d90b3a37627357009d4ca291a51bee1106ffb14e196f63dc28178a1104831e02",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.lumentum.com/images/favicon/Favicon-32.svg",
+      "sourcePage": "https://www.lumentum.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "bloom-energy.png",
+      "path": "/logos/stocks/bloom-energy.png",
+      "brand": "Bloom Energy Corporation",
+      "instruments": [
+        {
+          "ticker": "BE",
+          "rank": 29,
+          "isin": "US0937121079"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 21057,
+      "sha256": "e88ce29897c1174e7467e13fcae71be1a060a42a02d95ed7c07e2e1f671d67b7",
+      "sourceKind": "ISSUER_PRESS_OR_BRAND_KIT",
+      "sourceUrl": "https://www.bloomenergy.com/wp-content/uploads/be-logos.zip",
+      "sourcePage": "https://www.bloomenergy.com/press-kit/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "roundhill.png",
+      "path": "/logos/stocks/roundhill.png",
+      "brand": "Roundhill Investments",
+      "instruments": [
+        {
+          "ticker": "DRAM",
+          "rank": 30,
+          "isin": "US77926X3200"
+        },
+        {
+          "ticker": "RAM",
+          "rank": 35,
+          "isin": "US26923V4150"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 15618,
+      "sha256": "9d0bf25399ac710de2f55bb0aaa56c492ab055277e6a634e65b2947e0bbf83f7",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.roundhillinvestments.com/assets/img/roundhill-round-logo-black.svg",
+      "sourcePage": "https://www.roundhillinvestments.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "nebius.png",
+      "path": "/logos/stocks/nebius.png",
+      "brand": "Nebius Group N.V.",
+      "instruments": [
+        {
+          "ticker": "NBIS",
+          "rank": 31,
+          "isin": "NL0009805522"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 8531,
+      "sha256": "32aa80b34e9621e4128b21dd9423ee9d3553c3bfb6a9716cbbf3aa998eb029fa",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://nebius.com/favicon/web-app-manifest-512x512.png",
+      "sourcePage": "https://nebius.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "palantir.png",
+      "path": "/logos/stocks/palantir.png",
+      "brand": "Palantir Technologies Inc.",
+      "instruments": [
+        {
+          "ticker": "PLTR",
+          "rank": 32,
+          "isin": "US69608A1088"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 15107,
+      "sha256": "f66e76117a939c67f9d72fcf0585eca050dcc0a1536b0ff23ba5b9f31958fc03",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.palantir.com/assets/xrfr7uokpv1b/5MGQnj3IDJpURPzBDnXklZ/b7eed64a4f71a959250e19ec76bdf5de/Palantir_Chevron.png",
+      "sourcePage": "https://www.palantir.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "intel.png",
+      "path": "/logos/stocks/intel.png",
+      "brand": "Intel Corporation",
+      "instruments": [
+        {
+          "ticker": "INTC",
+          "rank": 34,
+          "isin": "US4581401001"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 8568,
+      "sha256": "a14343d50094552dcce18cacce3a48cfb1a248b888da66c34a5b00a6700ee746",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://d1io3yog0oux5.cloudfront.net/_3ccf9cf30376bf77bbb27f582e51d00d/intel/files/theme/images/header-logo.svg",
+      "sourcePage": "https://www.intc.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "oracle.png",
+      "path": "/logos/stocks/oracle.png",
+      "brand": "Oracle Corporation",
+      "instruments": [
+        {
+          "ticker": "ORCL",
+          "rank": 36,
+          "isin": "US68389X1054"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 10675,
+      "sha256": "403c27ec05cf2fbb840911bb2457c7e7e308ad700bf2cff07f26fd1548f82bb4",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.oracle.com/asset/web/favicons/favicon-270.png",
+      "sourcePage": "https://www.oracle.com/database/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "moderna.png",
+      "path": "/logos/stocks/moderna.png",
+      "brand": "Moderna, Inc.",
+      "instruments": [
+        {
+          "ticker": "MRNA",
+          "rank": 37,
+          "isin": "US60770K1079"
+        }
+      ],
+      "format": "png",
+      "width": 180,
+      "height": 180,
+      "bytes": 4446,
+      "sha256": "0b30f09a8ba30a83a4c349bcf7a65bcdbb961f29c2c3f666610f491315bbaa87",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.modernatx.com/assets/favicons/apple-touch-icon.png",
+      "sourcePage": "https://www.modernatx.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "circle.png",
+      "path": "/logos/stocks/circle.png",
+      "brand": "Circle Internet Group, Inc.",
+      "instruments": [
+        {
+          "ticker": "CRCL",
+          "rank": 38,
+          "isin": "US1725731079"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 33445,
+      "sha256": "76739a5747aaa5f12d4ffc8dd973c318cd4e6efa0d636ee0d25dba550fbed8ce",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://cdn.prod.website-files.com/668c08d1b8a9330bd1d786ad/669a20df8ac2810a6dd50e67_favicon-256.svg",
+      "sourcePage": "https://www.circle.com/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "bitmine.png",
+      "path": "/logos/stocks/bitmine.png",
+      "brand": "Bitmine Immersion Technologies, Inc.",
+      "instruments": [
+        {
+          "ticker": "BMNR",
+          "rank": 39,
+          "isin": "US09175A2069"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 6578,
+      "sha256": "ac6fd134d260e9ada68267ef660d2b9753541a72f1252c8b93301b631dae469d",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://www.bitminetech.io/bitmine/favicon-512.png",
+      "sourcePage": "https://www.bitminetech.io/",
+      "retrievedDate": "2026-09-16"
+    },
+    {
+      "file": "rocket-lab.png",
+      "path": "/logos/stocks/rocket-lab.png",
+      "brand": "Rocket Lab Corporation (Rocket Lab USA)",
+      "instruments": [
+        {
+          "ticker": "RKLB",
+          "rank": 40,
+          "isin": "US7731211089"
+        }
+      ],
+      "format": "png",
+      "width": 256,
+      "height": 256,
+      "bytes": 8890,
+      "sha256": "5e07e54c661f3ebc2453825d715aad995ccd154b9508526ba9483a2faefb6417",
+      "sourceKind": "ISSUER_OFFICIAL_SITE",
+      "sourceUrl": "https://rocketlabcorp.com/_resources/themes/base/production/images/og_logo.jpg",
+      "sourcePage": "https://rocketlabcorp.com/apple-touch-icon.png",
+      "retrievedDate": "2026-09-16"
+    }
+  ]
+}

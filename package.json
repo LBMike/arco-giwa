@@ -7,6 +7,15 @@
     "node": ">=22"
   },
   "scripts": {
+    "product:dev": "node --import tsx scripts/product-preview/serve.mjs",
+    "stocks:container:build": "docker build --tag arco-giwa-api:local .",
+    "stocks:container:check": "node scripts/stocks-deploy/check-image.mjs",
+    "stocks:setup": "node scripts/stocks-local/owner.mjs setup",
+    "stocks:doctor": "node scripts/stocks-local/owner.mjs check",
+    "stocks:dev": "node scripts/stocks-local/owner.mjs start",
+    "stocks:recovery:check": "node scripts/stocks-local/owner.mjs recovery",
+    "stocks:integration:prepare": "node scripts/stocks-preflight/prepare-integration.mjs",
+    "stocks:connection:check": "node scripts/stocks-preflight/check-connection.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "build:server": "tsc -p server/tsconfig.json",
@@ -14,6 +23,7 @@
     "build:giwa": "npm run build",
     "preview": "vite preview",
     "test": "npm run test:security && npm run test:server && npm run test:frontend",
+    "test:preview": "node --test scripts/product-preview/gateway.test.mjs scripts/product-preview/serve.test.mjs",
     "test:security": "node scripts/security/check-env-exposure.mjs && node scripts/security/check-giwa-evm-version.mjs",
     "test:server": "npm run build:server && node --test \"server/dist/**/*.test.js\"",
     "test:frontend": "TMPDIR=/private/tmp node --import tsx --test \"src/demo/giwa/**/*.test.tsx\"",

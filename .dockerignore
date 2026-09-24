@@ -1,0 +1,35 @@
+# Allowlist build inputs: local credentials, sessions and generated data never
+# enter the build context, even if a future Dockerfile adds a broad COPY.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!tsconfig.json
+!prisma.config.ts
+!prisma/
+!prisma/schema.prisma
+!prisma/migrations/
+!prisma/migrations/**
+!server/
+!server/tsconfig.json
+!server/src/
+!server/src/**
+!scripts/
+!scripts/prisma/
+!scripts/prisma/generate.mjs
+!scripts/stocks-preflight/
+!scripts/stocks-preflight/*.mjs
+!scripts/stocks-deploy/
+!scripts/stocks-deploy/healthcheck*.mjs
+!deployments/
+!deployments/91342/
+!deployments/91342/arco-giwa-preprod.json
+# Keep these exclusions last, including within allowed source directories.
+**/.env
+**/.env.*
+**/.secrets
+**/.secrets/**
+**/.git
+**/.git/**
+**/node_modules
+**/node_modules/**

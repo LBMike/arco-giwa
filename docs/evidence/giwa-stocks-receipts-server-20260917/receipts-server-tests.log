@@ -1,0 +1,228 @@
+
+> arco-giwa@0.1.0 test:server
+> npm run build:server && node --test "server/dist/**/*.test.js"
+
+
+> arco-giwa@0.1.0 build:server
+> tsc -p server/tsconfig.json
+
+✔ public routes and readiness do not require admin credentials (125.280667ms)
+✔ catalog route serializes BigInt-backed registry rows as decimal strings (27.805125ms)
+✔ featured cards: add starts hidden, public read is shown-only, admin can register/hide/remove (38.886417ms)
+✔ featured cards: max 3 total rows; duplicate 409; non-eligible + about>140 rejected (57.344041ms)
+✔ featured cards: a hidden vault cannot be featured (26.481125ms)
+✔ SIWE nonce is single-use and attestations require a valid session (53.699667ms)
+✔ admin endpoints are gated and return unsigned transactions only (16.193333ms)
+✔ vault-management admin routes: withdraw, pending list, payout double-pay guard, settle (14.526916ms)
+✔ deposit-limits builds setLimits with human->raw per decimals (payment vs 18-dec shares), targeting the deposit vault (14.160541ms)
+✔ redemption-limits builds setLimits with shares/payment scaling, targeting the redemption vault (14.158875ms)
+✔ limit routes reject a 0 cap (400) and malformed/missing fields (400); no >= constraint blocks (14.671ms)
+✔ GET limits de-scales raw on-chain values to human units per decimals; 503 when the reader is absent (26.483542ms)
+✔ release recovers a cancelled payout (SETTLING -> REQUESTED) but never re-opens SETTLED (13.343834ms)
+✔ market + history routes return nav/apy from indexed PriceUpdated (apy only for configured products) (12.674875ms)
+✔ market impliedApy: registered non-builtin with ≥2 posts computes; <2 posts and built-ins stay null (apy unchanged) (12.617542ms)
+✔ monitoring routes require the operator credential (12.344833ms)
+✔ monitoring overview sums TVL and outstanding/today pending values (23.773708ms)
+✔ monitoring overview: unpriceable vaults are 0-contribution in TVL (flagged incomplete); pending totals stay null-guarded (22.075ms)
+✔ monitoring overview TVL partial-sums non-null vaults and is null only when all are null (21.927667ms)
+✔ monitoring vaults aggregates flows, apy trend, depositors and pending per product (22.203833ms)
+✔ monitoring detail returns trends, depositor and requester lists (404 unknown product) (12.37725ms)
+✔ vault-config GET requires the operator credential and returns defaults for all products (13.115292ms)
+✔ vault-config PUT validates cards, category taxonomy, address, and product id (12.721416ms)
+✔ public catalog carries the nested vaultConfig (saved values + defaults, hidden NOT filtered) (12.730833ms)
+✔ function-pause route emits pauseFn/unpauseFn calldata for the kind's selectors (16.821125ms)
+✔ catalog carries nested pauseState from the reader (defaults false without one) (27.255875ms)
+✔ CORS preflight allows PUT with content-type and x-operator-token for the app origin (13.735916ms)
+✔ register-product guards: operator token, file-visibility 409, address mismatch 400 (14.862334ms)
+✔ register-product enforces on-chain role wiring and custody references (39.849625ms)
+✔ register-product success inserts the DB row + hidden config and surfaces unverified custody (14.077083ms)
+✔ registry validation keeps the six launch products required but allows extras (37.946375ms)
+✔ server vault-config taxonomy matches shared/vault-taxonomy.ts (drift guard) (2.430959ms)
+✔ vault-config PUT validates + persists kind (product|saving), rejecting other values (15.199041ms)
+✔ vault-config PUT validates + persists the display-profile fields (56.866292ms)
+✔ vault-config PUT validates + persists portfolio slice arrays (22.832ms)
+✔ vault-config PUT validates + persists accept-assets (real + dummy), rejecting dangling/duplicate (18.583208ms)
+✔ vault-config kind flip to product leaves stored accept-assets dormant (untouched, un-revalidated) (17.062042ms)
+✔ vault-config PUT round-trips accept-asset sortOrder (nullable integer ≥0) (14.586042ms)
+✔ savings-order route reorders across vaults, preserves other fields + unlisted order, rejects unknown (15.324625ms)
+✔ vault-config PUT validates + persists the AUM display field (14.0275ms)
+✔ vault-config PUT validates + persists the More-info docs URLs (same rule as image URLs) (14.191417ms)
+✔ vault-config PUT validates the More-info show toggles as booleans, defaulting true (14.788833ms)
+✔ backfill sets blockTimestamp on every null row and fetches each block once (0.38875ms)
+✔ indexer inserts events idempotently and preserves redemption locked assets-out (35.325791ms)
+✔ indexer resumes from the persisted cursor (18.987291ms)
+✔ indexer rewinds when the stored cursor block hash no longer matches (22.689708ms)
+✔ B: a vault registered after startup is gap-backfilled from its deploymentBlock (chunked) + marked (2.709042ms)
+✔ B: restart does not re-backfill an already-marked vault (0.831209ms)
+✔ B: first adoption seeds existing vaults WITHOUT backfilling them (0.581ms)
+✔ B: a vault whose deploymentBlock is ahead of the cursor is marked without a gap-backfill (0.174583ms)
+✔ B: gap-backfill and the forward poll cover disjoint ranges — no double-index at the boundary (1.425ms)
+✔ registryIndexedAddresses is registry-derived — a newly-registered vault's 4 contracts get watched (0.361875ms)
+✔ registryIndexedAddresses drops products' missing (null/undefined) addresses (0.251917ms)
+✔ productForVault resolves any registry product by redemption vault (case-insensitive) (0.290625ms)
+✔ readiness check does not echo raw infrastructure errors (5.341334ms)
+✔ dry-run GIWA registry validates without fabricated addresses (20.553542ms)
+✔ GIWA registry rejects prague evmVersion on the GIWA path (29.319167ms)
+✔ registry sync upserts networks, assets, and products without touching legacy data (1.958166ms)
+✔ indexed event writes are idempotent on chainId txHash logIndex (0.105667ms)
+✔ indexed event persists blockTimestamp and activity returns it (0.093167ms)
+✔ auth nonce is single-use and rejects reuse or expiry (0.165542ms)
+✔ portfolio service exposes activity, redemptions, and faucet status from Prisma service (0.710666ms)
+✔ exact numeric tokens retain large integer, exponent and 18 fraction digits (1.668875ms)
+✔ exact parser accepts escaped strings and isolates prototype names (0.233375ms)
+✔ malformed JSON and duplicate keys are rejected (0.552625ms)
+✔ numeric schema changes and unbounded precision/magnitude are rejected (0.176875ms)
+✔ missing key is explicit and makes no I/O; catalog remains available (0.816459ms)
+✔ catalog validates bounds, duplicates, injection and verification provenance (0.378167ms)
+✔ 40 symbols use one explicitly filtered request; omitted symbols are unavailable (18.884333ms)
+✔ delayed snapshots work without lastTrade and use minute timestamp not updated (0.320542ms)
+✔ empty reset objects never turn into zero/current prices (0.0855ms)
+✔ mismatched, duplicate tickers and future timestamps fail closed (0.121541ms)
+✔ singleflight serves a concurrent list storm with one call (17.499917ms)
+✔ fetch age is separate from source age and old observations are explicit (0.665541ms)
+✔ successful fetch does not make a one-hour-old trade fresh for real-time/delayed/unknown feeds (1.205833ms)
+✔ failed refresh retains bounded stale data, negative-caches, and finally expires (1.765083ms)
+✔ out-of-order snapshot refresh is rejected and preserves prior observation (1.238833ms)
+✔ missing/reset snapshot does not erase the last accepted source high-water (0.472333ms)
+✔ per-symbol high-water survives partial omissions and failed batches advance no symbol (1.868167ms)
+✔ 429 cools down every provider key including profiles and charts (0.867334ms)
+✔ global request budget cannot be bypassed with resource/range changes (0.373125ms)
+✔ 403 and malformed provider responses are sanitized with no fabricated data (0.61425ms)
+✔ profiles return nullable facts and only same-origin icon paths (0.548375ms)
+✔ profile ticker, market, locale and currency must match (0.391375ms)
+✔ logo allowlist rejects SVG, credentials, queries, SSRF, encoded paths and lookalikes (3.989834ms)
+✔ chart uses fixed ranges, 50000 base aggregate limit, and exact OHLCV (0.43275ms)
+✔ holiday/no-trade chart is empty rather than zero, and partial pagination is explicit (0.199875ms)
+✔ impossible OHLC, out-of-order/duplicate/future/out-of-window bars fail closed (0.896125ms)
+✔ fixed ranges reject impossible aggregate density before retaining chart data (5.935083ms)
+✔ ignored abort and stalled body both obey the total deadline (43.568459ms)
+✔ an event-loop-stalled late success is discarded before publication (26.739333ms)
+✔ declared and streamed oversized responses are rejected (2.488417ms)
+✔ network failures and redirect responses cannot leak URLs or bodies (4.716417ms)
+✔ logo proxy validates MIME and signature and caches raster bytes (0.672667ms)
+✔ optional plugin validates route/query boundaries and never accepts arbitrary symbols (42.935209ms)
+✔ optional display service omission preserves route absence and legacy behavior (27.659167ms)
+✔ startup factory without a key exposes pilot and unconfigured endpoints with network zero (57.168416ms)
+✔ explicit provider configuration shares cache, preserves decimal strings and keeps keys server-side (51.259ms)
+✔ invalid symbols/ranges and arbitrary universe queries are rejected before provider access (19.413958ms)
+✔ provider denial is availability data and raw credentials/errors are never public (24.081667ms)
+✔ display catalog grants no trading capability or authority and does not replace existing handlers (31.548417ms)
+✔ invalid server config fails without echoing input or making provider calls (1.892833ms)
+✔ buildApp without Stocks preserves legacy health/auth/catalog and has no Stocks routes (105.015417ms)
+✔ buildApp configured Stocks exposes signed-session BUY/SELL and named read-only admin while retaining legacy routes (47.888ms)
+✔ buildApp Stocks rejects forged identities/roles and exposes no arbitrary settlement or admin mutation routes (23.575458ms)
+✔ Disabled lifecycle starts no work; repeated start and close own one timer and resource (42.690625ms)
+✔ Close during initial tick drains it and never installs a later timer (0.985542ms)
+✔ A scheduled rejection stops the timer and closes the runtime instead of unhandled rejection or repeated dispatch (0.712875ms)
+✔ Every partial startup failure closes acquired runtime and database once (4.93325ms)
+✔ Server composition without a runtime preserves the listener and closes its database; no-dispatch runtime never ticks (10.473917ms)
+✔ CLI signal ownership drains one close and removes listeners; ordinary composition installs none (3.079875ms)
+✔ A second signal during blocked resource cleanup remains intercepted until all resources close (0.597292ms)
+✔ Stocks session resolver binds signed domain, chain, wallet and named operator; body/header roles do not elevate (2.603459ms)
+✔ Stocks HTTP RPC is read only, validates envelopes, disallows credential URLs and redirects (23.759333ms)
+✔ Signer HTTP ambiguity propagates as UNKNOWN-class failure without automatic retry (26.860459ms)
+✔ Signer protocol binds original call and capability policy; lookup has no side effects (4.693334ms)
+✔ Signer rejects mutated target or operation before HTTP and snapshots configuration (5.720042ms)
+✔ Stocks runtime is absent by default and rejects incomplete or old activation configs (0.218ms)
+✔ Stocks dispatch flags fail closed before file, RPC, signer or database access (0.139209ms)
+✔ Observation readiness expires without another tick and immediately closes after failure or clock reversal (0.08125ms)
+✔ Finalized observer retains its cursor for unapplied settlement or nonfinal evidence and resumes idempotently (4.041ms)
+✔ submission app wiring is optional and preserves legacy endpoints (40.743083ms)
+✔ submission app reuses wallet authentication and rejects legacy operator, wrong chain and wrong domain (10.95775ms)
+✔ submission routes inherit the explicit CORS allowlist (9.267167ms)
+✔ BUY/SELL planner derives bounded exact approval and target operation using physical lower-case identity (43.948084ms)
+✔ plugin authentication occurs before parsing, query rejection and internal failures expose no private data (82.536833ms)
+﹣ real PG: simultaneous same-physical claims grant exactly once and recreated service never re-grants lost response (0.577959ms) # SKIP
+﹣ real PG: APPROVAL and TRANSFER share one physical lock and neither can bypass the other (0.082416ms) # SKIP
+﹣ real PG: immutable binding and monotonic hash observations, client terminal reports never unlock (0.057ms) # SKIP
+﹣ real PG: owner wallet side deployment and exact calldata cannot be forged (0.0525ms) # SKIP
+﹣ real PG: new orders enroll atomically; historical rows and existing-row idempotent retry never enroll (0.064792ms) # SKIP
+﹣ real PG: audit failure rolls claim and new-order enrollment back atomically (0.058834ms) # SKIP
+﹣ real PG: pause/expiry reject first claim but preserve inspect and outcome recovery (0.071916ms) # SKIP
+﹣ real PG: SELL enrollment and real plugin responses; auth precedes malformed JSON (0.055917ms) # SKIP
+﹣ real PG BUY: trusted approval unlocks separate transfer; terminal evidence is durable and monotonic (0.687167ms) # SKIP
+﹣ real PG SELL: trusted approval unlocks separate transfer; terminal evidence is durable and monotonic (0.058041ms) # SKIP
+﹣ real PG reverted approval never unlocks; proof missing cannot produce terminal state (0.035125ms) # SKIP
+﹣ real PG reconciliation audit rollback, wrong owner and RPC timeout cannot write late proof (0.030667ms) # SKIP
+✔ trusted BUY APPROVAL accepts exact finalized semantics and separately bound revert (14.428584ms)
+✔ trusted BUY TRANSFER accepts exact finalized semantics and separately bound revert (1.480042ms)
+✔ trusted SELL APPROVAL accepts exact finalized semantics and separately bound revert (0.879917ms)
+✔ trusted SELL TRANSFER accepts exact finalized semantics and separately bound revert (5.245333ms)
+✔ hostile receipt rejects network (0.27025ms)
+✔ hostile receipt rejects checkpoint (0.628ms)
+✔ hostile receipt rejects code (0.770333ms)
+✔ hostile receipt rejects sender (0.468375ms)
+✔ hostile receipt rejects target (0.629583ms)
+✔ hostile receipt rejects calldata (5.314333ms)
+✔ hostile receipt rejects value (0.997583ms)
+✔ hostile receipt rejects transactionHash (0.437792ms)
+✔ hostile receipt rejects receiptHash (0.713334ms)
+✔ hostile receipt rejects blockHash (1.180292ms)
+✔ hostile receipt rejects blockNumber (0.491958ms)
+✔ hostile receipt rejects removed (1.094958ms)
+✔ hostile receipt rejects duplicate (0.653167ms)
+✔ hostile receipt rejects missingApproval (0.718208ms)
+✔ hostile receipt rejects wrongApproval (0.706667ms)
+✔ hostile receipt rejects wrongApprovalOwner (0.823833ms)
+✔ hostile receipt rejects wrongApprovalSpender (1.063375ms)
+✔ hostile receipt rejects wrongApprovalToken (0.429709ms)
+✔ hostile receipt rejects revertedLogs (0.347334ms)
+✔ hostile receipt rejects malformedApproval (0.846375ms)
+✔ pending/missing finality is observational; final reorg and transport secrets fail closed (1.410875ms)
+✔ timeout discards late result and schedules no next RPC (21.497167ms)
+✔ BUY transfer success cannot omit or forge economic movement (0.75275ms)
+✔ SELL transfer success cannot omit or forge economic movement (0.946458ms)
+﹣ PG concurrent duplicate commands create one immutable quote/order and reject key/body reuse (0.5645ms) # SKIP
+﹣ PG buy to mint, duplicate chain replay, exact portfolio JSON and actor object authorization (0.112917ms) # SKIP
+﹣ PG concurrent event replay credits once and concurrent workers dispatch one broker request (0.061917ms) # SKIP
+﹣ PG broker timeout after receipt persisted recovers by original operation lookup across worker restart (0.057083ms) # SKIP
+﹣ PG signer timeout after submission recovers original hash, never resubmits, pause still permits confirmation (0.060042ms) # SKIP
+﹣ PG unknown absent signer outcome stays unknown with funds retained, never returns to pending (0.196833ms) # SKIP
+﹣ PG pause blocks new broker/mint dispatch and unpause allows original pending intent (0.683125ms) # SKIP
+﹣ PG wrong-wallet dust remains suspense and cannot block legitimate exact funding (0.0685ms) # SKIP
+﹣ PG expired inclusion held and refunded with independent finalized evidence, order closes (0.046042ms) # SKIP
+﹣ PG timely included deposit remains eligible after finality delay; late observer time is irrelevant (0.08025ms) # SKIP
+﹣ PG under/over/unknown order/direct transfer retained in suspense; unidentified cannot refund (0.046375ms) # SKIP
+﹣ PG completed purchase survives second distinct payment and its refund (0.030166ms) # SKIP
+﹣ PG unsupported partial broker result and forged mint evidence hold, never grant holdings (0.025083ms) # SKIP
+﹣ PG journal pairs append-only, integral bounded amounts, order snapshots, stale version and atomic rollback (0.021458ms) # SKIP
+﹣ PG deployment reset cannot claim old intent or expose old holdings; reconciliation needs coverage and independent balances (0.017959ms) # SKIP
+﹣ PG adversarial broker/signer mutations cannot change durable authorized quantity or call (0.0215ms) # SKIP
+﹣ PG actual child SIGKILL after durable broker acceptance recovers original operation without resubmission (0.02575ms) # SKIP
+﹣ PG same cash movement cannot credit twice after attribution conflict; zero transfers ignored and direct cash mint held (0.058709ms) # SKIP
+﹣ PG deterministic varied-order conservation property across permutation, replay and refunds (0.0355ms) # SKIP
+﹣ PG already-expired immutable quote cannot create an order (0.0255ms) # SKIP
+﹣ SELL PG exact buy/escrow/redeem conserves wallet, escrow, supply and cash; replay grants nothing (0.044375ms) # SKIP
+﹣ SELL PG concurrent reservations cannot oversell and actor/idempotency/floor guards hold (0.022458ms) # SKIP
+﹣ SELL PG liquidity excludes suspense, unfinished buys and previous sell claims before any broker dispatch (0.020917ms) # SKIP
+﹣ SELL PG rejected broker returns exact escrow; partial and unknown keep custody and cash held (0.027792ms) # SKIP
+﹣ SELL PG wrong wallet cannot poison owner; late and mismatched escrow remain returnable custody (0.017917ms) # SKIP
+﹣ SELL PG process crash after mock sale acceptance recovers one redemption intent; lost signer ack never resubmits (0.02025ms) # SKIP
+﹣ SELL PG malformed/reverted redemption cannot burn projection or consume payout reservation (0.017375ms) # SKIP
+﹣ SELL PG real suspense and unfinished BUY cash are excluded even when chain balance is ample (0.016708ms) # SKIP
+﹣ SELL PG stale high chain snapshot cannot reuse cash consumed after snapshot before liquidity lock (0.0165ms) # SKIP
+﹣ SELL PG same physical vault rejects deployment, network alias and checkpoint ledger splits (0.017666ms) # SKIP
+﹣ SELL PG escrow/supply/cash reconcile at one cutoff after finalized atomic redemption (0.021792ms) # SKIP
+﹣ SELL PG expired reservation release needs finalized observer coverage; later escrow is still held for return (0.018084ms) # SKIP
+✔ exact decimal math rejects floats, exponents, precision loss, zero and overflow (0.723ms)
+✔ manifest requires GIWA demo, exact ABI, finality, restricted nonupgradeable deployment and test cash (1.912125ms)
+✔ physical liquidity scope ignores aliases and checkpoints but distinguishes cash pools (0.197458ms)
+✔ verifier deep freezes manifest and confirms canonical finalized attributed deposit (2.637334ms)
+✔ unfinalized, reorg and pending receipts cannot produce evidence (0.294875ms)
+✔ raw funding rejects chain, code, target, calldata, token, payer, movement and failed receipts (4.252375ms)
+✔ unknown unrelated log ignored, malformed known event rejected, direct transfer retained unallocated (0.942791ms)
+✔ mint confirmation binds operation/call/recipient/quantity and ERC20 zero-address transfer (0.768334ms)
+✔ read-only RPC adapter requests finalized tag and rejects malformed quantities and log identity (0.385917ms)
+✔ HTTP fails closed without resolvers; forged role/wallet rejected and no money mutation/admin writes exposed (38.461875ms)
+✔ RPC adapter to verifier accepts real ERC20 mint zero-from topic and verifies its movement (0.648ms)
+✔ canonical call digest survives JSONB key reordering and binds every call identity field (0.239708ms)
+✔ manifest v2 rejects old generation, missing escrow and duplicate constructor targets (0.098209ms)
+✔ escrow verifier binds composite identity, owner, quantity and atomic burn/payout pair (1.143416ms)
+ℹ tests 212
+ℹ suites 0
+ℹ pass 168
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 44
+ℹ todo 0
+ℹ duration_ms 1380.059667

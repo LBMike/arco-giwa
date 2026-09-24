@@ -1,5 +1,13 @@
+import { stocksExecutionPlugin, type StocksExecutionPluginOptions } from './stocks-execution/plugin.js'
+import { stocksSubmissionDiagnosticsPlugin, type StocksSubmissionDiagnosticsPluginOptions } from './stocks-submission-diagnostics/plugin.js'
+import { stocksRuntimeStatusPlugin, type StocksRuntimeStatusPluginOptions } from './stocks-runtime-status/plugin.js'
+import { stocksReadinessPlugin } from './stocks-runtime-status/readiness.js'
+import { stocksTradingControlPlugin, type StocksTradingControlPluginOptions } from './stocks-trading-control/plugin.js'
 import { createRequire } from "node:module"
 import cors from "@fastify/cors"
+import { stocksPlugin, type StocksPluginOptions } from "./stocks/plugin.js"
+import { stocksSubmissionsPlugin, type StocksSubmissionsPluginOptions } from "./stocks-submissions/plugin.js"
+import { stocksMarketDataPlugin, type StocksMarketDataService } from "./stocks-market-data/index.js"
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify"
 import { generateNonce, SiweMessage } from "siwe"
 import { formatUnits, getAddress, isAddress, type Address } from "viem"
@@ -70,6 +78,13 @@ export type VaultLimitsRaw = {
 }
 
 export type ArcoAppServices = {
+  readonly stocksSubmissionDiagnostics?: StocksSubmissionDiagnosticsPluginOptions
+  readonly stocksRuntimeStatus?: StocksRuntimeStatusPluginOptions
+  readonly stocksTradingControl?: StocksTradingControlPluginOptions
+  readonly stocksExecution?: StocksExecutionPluginOptions
+  readonly stocksSubmissions?: StocksSubmissionsPluginOptions
+  readonly stocksMarketData?: StocksMarketDataService
+  readonly stocks?: StocksPluginOptions
   readonly arco: PrismaArcoService
   readonly registry: EvmRegistryService
   readonly portfolio: EvmPortfolioService
@@ -1254,6 +1269,16 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     reply.code(400).send({ error: errorMessage(error) })
   })
 
+  if (services.stocks) app.register(stocksPlugin, services.stocks)
+  if (services.stocksRuntimeStatus) {
+    app.register(stocksRuntimeStatusPlugin, services.stocksRuntimeStatus)
+    app.register(stocksReadinessPlugin, { getSnapshot: services.stocksRuntimeStatus.getSnapshot })
+  }
+  if (services.stocksTradingControl) app.register(stocksTradingControlPlugin, services.stocksTradingControl)
+  if (services.stocksSubmissionDiagnostics) app.register(stocksSubmissionDiagnosticsPlugin, services.stocksSubmissionDiagnostics)
+  if (services.stocksExecution) app.register(stocksExecutionPlugin, services.stocksExecution)
+  if (services.stocksSubmissions) app.register(stocksSubmissionsPlugin, services.stocksSubmissions)
+  if (services.stocksMarketData) app.register(stocksMarketDataPlugin, { service: services.stocksMarketData })
   return app
 }
 

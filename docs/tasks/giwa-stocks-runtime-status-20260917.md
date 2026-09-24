@@ -1,0 +1,11 @@
+# GIWA-STOCKS-RUNTIME-STATUS-001
+
+Base af614a4. Claude owns UI; this task adds backend-only operator diagnostics.
+
+GET `/api/v1/admin/stocks/runtime` uses existing signed-session `resolveOperator` and requires a nonempty named operatorId plus `stocks:read`. Never accept the legacy shared operator token, browser role or user payload as authorization. Resolve operator before parsing input or calling snapshot. Reject query parameters and GET request bodies. Success and errors are no-store. Runtime absent: route absent (404). No DB/RPC/signer request, timer start, tick or pause mutation on reads.
+
+Snapshot schema is `server/src/stocks-runtime-status/contracts.ts`. Return existing PROFILE, ISO observedAt, and data whitelisting every snapshot field except observedAt (only outer envelope). No extra runtime/config/error properties may escape. Sanitize snapshot failures as fixed 503 `RUNTIME_STATUS_UNAVAILABLE`; invalid or missing operator gets 403 `OPERATOR_FORBIDDEN`; invalid inputs get 400. No-store must cover all responses including auth and malformed payload errors.
+
+`pauseReasons` are deterministic in declared order: stopped -> RUNTIME_STOPPED, autodispatch false -> AUTODISPATCH_DISABLED, configuredPause true -> CONFIGURED_PAUSE, observerStatus not CURRENT -> OBSERVER_NOT_CURRENT. `newOrdersPaused` is whether this list is nonempty. freshnessLimitMs is 60000, executionAuthorization always false. RuntimeState STOPPED iff observer STOPPED for production snapshots. CURRENT requires lastCurrentAt and finite nonnegative lastCurrentAgeMs <=60000. Stale/invalid clocks cannot grant CURRENT. Both wall and monotonic elapsed times must stay within the current observation's freshness bound. Diagnostics are process-local, not reconciliation/settlement evidence or order execution permission.
+
+Root owns health/runtime snapshot and app/index wiring + actual app integration tests. API builder owns plugin.ts and plugin.test.ts under stocks-runtime-status plus the API guide; does not edit the schema. Reviewer reads independently first and checks immutable final candidate later. All own worktrees/clones stay separate. Do not modify src UI, contracts, deployed registry, schema, existing mutation endpoints or live services. Do not start PostgreSQL without arranging sole test slot with root.

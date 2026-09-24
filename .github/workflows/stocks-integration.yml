@@ -1,0 +1,121 @@
+name: Stocks integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Stocks / isolated-contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/contracts
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      DOTENV_CONFIG_PATH: /dev/null
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack yarn install --immutable
+      - name: Typecheck deployment tools and boundary tests
+        run: >-
+          corepack yarn tsc --noEmit --target ES2020 --module commonjs
+          --esModuleInterop --strict --skipLibCheck --types node,mocha
+          scripts/stocks/deployment-http.ts scripts/stocks/public-deployment-json.ts
+          scripts/stocks/prepare-deployment.ts scripts/stocks/verify-deployment.ts
+          test/stocks/deployment-http.test.ts test/stocks/public-deployment-json.test.ts
+      # Isolated config: no dotenv, public network, keystore or existing registry.
+      - run: corepack yarn hardhat --config hardhat.stocks.config.ts test
+      - run: git diff --exit-code -- yarn.lock
+
+  local-integration:
+    name: Stocks / ${{ matrix.scenario }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [postgres, signer-journal, operator-control, operator-control-ui, operator-diagnostics, known-hash-ui, browser-lifecycle, owner-workspace]
+    defaults:
+      run:
+        shell: bash
+    env:
+      TMPDIR: /tmp
+      STOCKS_PG_BIN: /usr/lib/postgresql/16/bin
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      DOTENV_CONFIG_PATH: /dev/null
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # Latest 22.x; DOM tests require >=22.15.
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            scripts/stocks-ci/package-lock.json
+
+      - name: Install locked dependencies
+        run: |
+          npm ci
+          npm ci --prefix scripts/stocks-ci --ignore-scripts
+
+      - name: Install locked contract dependencies
+        working-directory: packages/contracts
+        run: corepack yarn install --immutable
+
+      - name: Prepare PostgreSQL binaries
+        run: |
+          if [[ ! -x "$STOCKS_PG_BIN/initdb" ]]; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y postgresql-16
+          fi
+          "$STOCKS_PG_BIN/initdb" --version
+
+      - name: Build generated client and server
+        run: |
+          npm run prisma:generate
+          npm run build:server
+
+      - name: Build contract artifacts with the pinned package manager
+        working-directory: packages/contracts
+        run: corepack yarn compile
+
+      - name: Confirm dependency locks were not rewritten
+        run: git diff --exit-code -- package-lock.json scripts/stocks-ci/package-lock.json packages/contracts/yarn.lock
+
+      - name: Verify idle database failure and reconnect in an owned database
+        if: matrix.scenario == 'operator-control'
+        env:
+          STOCKS_SUBMISSIONS_EVIDENCE_DIR: ${{ runner.temp }}/stocks-database-failure
+        run: node scripts/stocks-submissions/test-postgres.mjs server/dist/stocks-runtime/database-failure.postgres.test.js
+
+      - name: Verify the inactive signer journal in a disposable PostgreSQL database
+        if: matrix.scenario == 'signer-journal'
+        run: node scripts/stocks-signer/test-postgres.mjs
+
+      - name: Install pinned Chromium and system libraries
+        if: matrix.scenario != 'postgres' && matrix.scenario != 'signer-journal' && matrix.scenario != 'operator-control'
+        run: node scripts/stocks-ci/node_modules/playwright/cli.js install --with-deps chromium
+
+      - name: Verify real local services and cleanup
+        if: matrix.scenario != 'signer-journal'
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: node scripts/stocks-ci/run.mjs "$SCENARIO" "$RUNNER_TEMP/stocks-ci-evidence"
+
+      # Reports and screenshots stay on the runner. External artifact upload is
+      # intentionally not configured; it requires separate authorization.

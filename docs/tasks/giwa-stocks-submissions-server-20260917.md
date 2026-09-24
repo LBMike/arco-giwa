@@ -1,0 +1,11 @@
+# GIWA-STOCKS-SUBMISSIONS-001 server
+
+User explicitly authorized continued development and delegation. Base 00ddcf49f2b7f8814f9e0093d39efd449d118031, separate clone /private/tmp/arco-giwa-stocks-submissions-server-20260917, branch codex/giwa-stocks-submissions-server-20260917.
+
+Plan before code: add stocks-submissions planner/validation/service/plugin/tests; Prisma model and new additive migration; dedicated disposable PG harness and evidence docs. Root owns app/index and browser agent owns adapter. Exports: new StocksSubmissionsService(stocksService), methods inspect(actor,side,orderId), claim(actor,body), record(actor,body); stocksSubmissionsPlugin(app,{service,resolveActor}).
+
+Derive exact EIP55 transactions and canonical SHA256 identities from current authoritative order and manifest using the existing Stocks ABI. Durable unique physical intentKey+stage excludes actor/deployment aliases. Lock order and physical intent, require activation/pause and DB deadline for claim, insert and audit atomically. Only insert winner returns REQUEST_MAY_START; retries return null. Inspect/outcome recovery preserves claims after expiry/pause. Unresolved approval blocks transfer; no client terminal statuses, delete, reset or claim expiry.
+
+Verification: exact planner parity, plugin auth/envelope and strict inputs; fresh real Unix-socket-only PostgreSQL for concurrent inserts, service/process recreation, dropped response, rollback, immutable records, stage/order/owner/deployment boundaries, expired/paused recovery, hash conflicts. Root allocated exclusive disposable PG slot. Harness owns a fresh mkdtemp data/socket directory and performs finally shutdown; no existing DB, public RPC, actual wallet or activation changes. No installs, push or merge. Dependency lock compared before read-only node_modules symlink reuse.
+
+Root expanded ownership to minimal BUY/SELL createOrder hooks after independent contract review identified historical-order uncertainty. Added immutable enrollment inserted only with brand-new orders in the same transaction, never existing-row retries or migration backfill. Historical absent journal is not treated as evidence of no prior wallet call. This gate cannot prevent direct raw contract calls outside the controlled application.

@@ -13,6 +13,7 @@ import {
   giwaSepolia,
 } from "./config"
 import { DynamicGiwaWalletProvider, GiwaWalletProvider } from "./wallet"
+import { GiwaStocksHost } from "./stocks-host/GiwaStocksHost"
 
 const giwaWagmiConfig = createConfig({
   chains: [giwaSepolia],
@@ -52,7 +53,7 @@ export function GiwaPreprodProviders({ children }: { children: ReactNode }) {
           <WagmiProvider config={giwaWagmiConfig}>
             <QueryClientProvider client={queryClient}>
               <DynamicWagmiConnector suppressChainMismatchError>
-                <DynamicGiwaWalletProvider>{children}</DynamicGiwaWalletProvider>
+                <DynamicGiwaWalletProvider><GiwaStocksHost>{children}</GiwaStocksHost></DynamicGiwaWalletProvider>
               </DynamicWagmiConnector>
             </QueryClientProvider>
           </WagmiProvider>
@@ -64,7 +65,7 @@ export function GiwaPreprodProviders({ children }: { children: ReactNode }) {
   return (
     <GiwaProviderBoundary dynamicEnabled={false}>
       <QueryClientProvider client={queryClient}>
-        <GiwaWalletProvider>{children}</GiwaWalletProvider>
+        <GiwaWalletProvider><GiwaStocksHost>{children}</GiwaStocksHost></GiwaWalletProvider>
       </QueryClientProvider>
     </GiwaProviderBoundary>
   )

@@ -1,0 +1,36 @@
+✔ trusted BUY APPROVAL accepts exact finalized semantics and separately bound revert (10.541583ms)
+✔ trusted BUY TRANSFER accepts exact finalized semantics and separately bound revert (2.315125ms)
+✔ trusted SELL APPROVAL accepts exact finalized semantics and separately bound revert (1.0245ms)
+✔ trusted SELL TRANSFER accepts exact finalized semantics and separately bound revert (1.683292ms)
+✔ hostile receipt rejects network (0.235542ms)
+✔ hostile receipt rejects checkpoint (0.203667ms)
+✔ hostile receipt rejects code (0.201917ms)
+✔ hostile receipt rejects sender (0.216666ms)
+✔ hostile receipt rejects target (0.27475ms)
+✔ hostile receipt rejects calldata (0.307875ms)
+✔ hostile receipt rejects value (0.20225ms)
+✔ hostile receipt rejects transactionHash (0.712167ms)
+✔ hostile receipt rejects receiptHash (0.243125ms)
+✔ hostile receipt rejects blockHash (0.174708ms)
+✔ hostile receipt rejects blockNumber (0.148292ms)
+✔ hostile receipt rejects removed (0.215625ms)
+✔ hostile receipt rejects duplicate (0.254625ms)
+✔ hostile receipt rejects missingApproval (0.248791ms)
+✔ hostile receipt rejects wrongApproval (0.410042ms)
+✔ hostile receipt rejects wrongApprovalOwner (0.450958ms)
+✔ hostile receipt rejects wrongApprovalSpender (0.417583ms)
+✔ hostile receipt rejects wrongApprovalToken (0.242125ms)
+✔ hostile receipt rejects revertedLogs (0.224ms)
+✔ hostile receipt rejects malformedApproval (0.446208ms)
+✔ pending/missing finality is observational; final reorg and transport secrets fail closed (0.4565ms)
+✔ timeout discards late result and schedules no next RPC (22.713917ms)
+✔ BUY transfer success cannot omit or forge economic movement (1.25575ms)
+✔ SELL transfer success cannot omit or forge economic movement (0.446375ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 251.343958

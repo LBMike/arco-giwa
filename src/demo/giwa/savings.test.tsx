@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { buildSavingsAccounts, defaultSavingsSelection } from "./savings"
+import { buildSavingsAccounts, defaultSavingsSelection, resolveSavingsSelection } from "./savings"
 import { vaultConfigOf } from "./catalog"
 import type { GiwaAcceptAsset, GiwaCatalogItem, GiwaVaultConfig } from "./types"
 import type { GiwaMarketEntry } from "./api"
@@ -143,4 +143,17 @@ test("buildSavingsAccounts: a newly-added asset (no sortOrder) trails the ordere
   ]
   const accounts = buildSavingsAccounts(catalog, [])
   assert.deepEqual(accounts.map((a) => a.symbol), ["USDC", "NEWCOIN"]) // ordered card first; the new (unset) one trails
+})
+
+
+test("Savings deep links retain unique account identity for duplicate symbols and support older asset-only links", () => {
+  const catalog = [
+    vault("usd-one", "arcoUSD1", { kind: "saving", acceptAssets: [accept("USDC", "usd-one", false)] }),
+    vault("usd-two", "arcoUSD2", { kind: "saving", acceptAssets: [accept("USDC", "usd-two", false), accept("RLUSD", null, true)] }),
+  ]
+  const accounts = buildSavingsAccounts(catalog, [])
+  assert.equal(resolveSavingsSelection(accounts, "real:usd-two:USDC", "USDC")?.vault?.productId, "usd-two")
+  assert.equal(resolveSavingsSelection(accounts, null, "USDC")?.vault?.productId, "usd-one")
+  assert.equal(resolveSavingsSelection(accounts, "missing", "USDC")?.vault?.productId, "usd-one")
+  assert.equal(resolveSavingsSelection(accounts, "dummy:usd-two:RLUSD", "RLUSD")?.vault?.productId, "usd-one")
 })
