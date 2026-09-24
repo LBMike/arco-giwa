@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createPublicKey, randomBytes, randomUUID } from 'node:crypto';
-import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -13,6 +14,7 @@ import pg from 'pg';
 import { authorizedCall, escrowIdentity, redemptionCall } from '../../server/dist/stocks/chain.js';
 import { ABI, ABI_DIGEST, callDigest, manifestDigest, operationKey } from '../../server/dist/stocks/contracts.js';
 import { createKmsCustody } from '../../server/dist/stocks-signer/custody-kms.js';
+import { createLocalKeystoreCustody } from '../../server/dist/stocks-signer/custody-local.js';
 import { startStocksSignerHost } from '../../server/dist/stocks-signer/host.js';
 import { parseSignerHostConfig } from '../../server/dist/stocks-signer/host-config.js';
 import { httpStocksSignerRpc } from '../../server/dist/stocks-signer/http-rpc.js';
@@ -28,11 +30,14 @@ import { externalStocksSigner } from '../../server/dist/stocks-runtime/transport
 const root = resolve(import.meta.dirname, '../..');
 const contractsRoot = join(root, 'packages/contracts');
 const hardhat = join(contractsRoot, 'node_modules/.bin/hardhat');
-const fixtureAccount = mnemonicToAccount('test test test test test test test test test test test junk', { addressIndex: 1 });
+const publicTestMnemonic = 'test test test test test test test test test test test junk';
+const fixtureAccount = mnemonicToAccount(publicTestMnemonic, { addressIndex: 1 });
 const limits = { maxGas: 2_000_000n, maxFeePerGas: 3_000_000_000n, maxTotalFeeWei: 6_000_000_000_000_000n };
 const postgresUrl = process.env.STOCKS_SIGNER_TEST_DATABASE_URL;
 const withPostgres = process.env.STOCKS_SIGNER_TEST_ONLY === '1' && !!postgresUrl;
+const localKeystore = process.env.STOCKS_SIGNER_CUSTODY_TEST === 'LOCAL_KEYSTORE';
 if (postgresUrl && !withPostgres) throw Error('Owned signer test database requires STOCKS_SIGNER_TEST_ONLY=1');
+if (localKeystore && !withPostgres) throw Error('Local keystore mode requires the owned PostgreSQL test runner');
 
 async function freePort() {
   const socket = createServer();
@@ -48,7 +53,7 @@ function stopped(pid) {
 }
 
 test(withPostgres
-  ? 'runnable KMS signer host uses TCP, PostgreSQL and an isolated EVM to recover the exact original'
+  ? `runnable ${localKeystore ? 'encrypted keystore' : 'KMS'} signer host uses TCP, PostgreSQL and an isolated EVM to recover the exact original`
   : 'one-shot external-custody transport signs and recovers the exact original on an isolated EVM',
   { timeout: 120_000 }, async t => {
     assert.ok(existsSync(hardhat), 'Install the existing contracts lockfile before this test');
@@ -146,7 +151,7 @@ test(withPostgres
     if (withPostgres) {
       const target = new URL(postgresUrl);
       assert.equal(target.hostname, 'localhost');
-      assert.equal(target.pathname, '/signer_test');
+      assert.equal(target.pathname, localKeystore ? '/signer_keystore_test' : '/signer_test');
       assert.match(decodeURIComponent(target.searchParams.get('host') ?? ''), /\/stocks-signer-pg-[^/]+\/socket$/);
       initialNonce = BigInt(await rpc('eth_getTransactionCount', [manifest.signerAddress, 'pending'])).toString();
       activePool = new pg.Pool({ connectionString: postgresUrl, max: 4 });
@@ -168,7 +173,19 @@ test(withPostgres
       x: Buffer.from(publicKey.slice(1, 33)).toString('base64url'),
       y: Buffer.from(publicKey.slice(33)).toString('base64url') }, format: 'jwk' }).export({ format: 'der', type: 'spki' });
     const fees = { gas: 1_000_000n, maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n };
-    const makeCustody = () => createKmsCustody({ identity: { region: 'ap-northeast-2', keyArn,
+    let localWallet;
+    if (localKeystore) {
+      const requireContracts = createRequire(join(contractsRoot, 'package.json'));
+      requireContracts('ts-node').register({ project: join(contractsRoot, 'tsconfig.json') });
+      const { Wallet } = requireContracts('ethers');
+      const { unlockLocalDeploymentWallet } = requireContracts('./scripts/stocks/local-keystore.ts');
+      const file = join(temp, 'test-wallet.json');
+      const password = randomBytes(32).toString('base64url');
+      const wallet = Wallet.fromMnemonic(publicTestMnemonic, "m/44'/60'/0'/0/1");
+      writeFileSync(file, await wallet.encrypt(password, { scrypt: { N: 16384 } }), { flag: 'wx', mode: 0o600 });
+      localWallet = await unlockLocalDeploymentWallet(file, manifest.signerAddress, async () => password);
+    }
+    const makeKmsCustody = () => createKmsCustody({ identity: { region: 'ap-northeast-2', keyArn,
       signerAddress: manifest.signerAddress }, fees, limits, port: {
       async getPublicKey() {
         if (!kmsAvailable) throw Error('TEST_ONLY_KMS_UNAVAILABLE');
@@ -191,6 +208,18 @@ test(withPostgres
       },
       destroy() { custodyCloses++; },
     } });
+    const makeCustody = () => {
+      if (!localKeystore) return makeKmsCustody();
+      const local = createLocalKeystoreCustody({ signerAddress: manifest.signerAddress, fees, limits,
+        signTransaction: async tx => {
+          signatures++; signatureStarted?.();
+          if (heldSignature) await heldSignature;
+          return localWallet.signTransaction(tx);
+        } });
+      let closed = false;
+      return { ...local, ready: async () => kmsAvailable && await local.ready(),
+        close: () => { if (!closed) { closed = true; custodyCloses++; local.close(); } } };
+    };
     const custody = makeCustody();
     t.after(() => custody.close());
     const transport = createOriginalSignerTransport({ manifest, rpc: signerRpc, custody, intent, lookup, limits });
@@ -225,12 +254,13 @@ test(withPostgres
     };
 
     if (withPostgres) {
-      // Real TCP uses the production host composition and KMS DER adapter.
-      // Only the KMS wire port and RPC destination are test-owned substitutes.
+      // Real TCP uses the production host composition with either a KMS wire
+      // fixture or the real encrypted-wallet loader and local custody adapter.
       const hostConfig = parseSignerHostConfig({ schemaVersion: 1, profile: 'DEMO_TESTNET', manifest,
         reviewedManifestDigest: digest, reviewedInitialNonce: initialNonce, rpcUrl: 'https://sepolia-rpc.giwa.io',
         listen: { host: '127.0.0.1', port: 8081 },
-        custody: { type: 'AWS_KMS', region: 'ap-northeast-2', keyArn, exclusiveAccountControlConfirmed: true },
+        custody: localKeystore ? { type: 'LOCAL_KEYSTORE', exclusiveAccountControlConfirmed: true }
+          : { type: 'AWS_KMS', region: 'ap-northeast-2', keyArn, exclusiveAccountControlConfirmed: true },
         transaction: Object.fromEntries(Object.entries(fees).map(([k, v]) => [k, String(v)])),
         limits: Object.fromEntries(Object.entries(limits).map(([k, v]) => [k, String(v)])),
       });
@@ -356,7 +386,7 @@ test(withPostgres
       assert.equal(await balance(bundle.publicAccounts.holder, manifest.cashToken), 60_000_000n);
       assert.equal(await balance(manifest.fundingVault, manifest.cashToken), 60_000_000n);
       assert.equal(signatures, 3);
-      console.log('SIGNER_HOST_TCP_KMS_MINT_REDEEM_RECOVERY_PASSED');
+      console.log(localKeystore ? 'SIGNER_HOST_TCP_KEYSTORE_MINT_REDEEM_RECOVERY_PASSED' : 'SIGNER_HOST_TCP_KMS_MINT_REDEEM_RECOVERY_PASSED');
       const closePromise = recoveredHttp.app.close();
       assert.equal(closePromise, recoveredHttp.app.close(), 'Repeated shutdown shares one drain');
       await closePromise;

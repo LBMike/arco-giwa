@@ -1,18 +1,18 @@
 import { immutable, StocksError, type SqlPool } from '../stocks/contracts.js';
 import type { JsonRpcTransport } from '../stocks/rpc.js';
 import { createStocksSignerCore } from './core.js';
-import type { createKmsCustody } from './custody-kms.js';
 import type { SignerHostConfig } from './host-config.js';
 import { createStocksSignerHttpService } from './http-service.js';
 import { createOriginalNonceLookup } from './nonce-lookup.js';
 import { createOriginalSignerTransport } from './original-transport.js';
+import type { ExternalTransactionCustody } from './original-transport.js';
 import { PostgresSignerJournal } from './postgres-journal.js';
 import { createStocksSignerReadiness } from './readiness.js';
 
 /** Owns the supplied pool/custody from entry, including every startup failure. */
 export async function startStocksSignerHost(options: {
   config: SignerHostConfig; pool: SqlPool & { end(): Promise<void> }; rpc: JsonRpcTransport;
-  custody: Pick<ReturnType<typeof createKmsCustody>, 'ready' | 'signOriginal' | 'close'>;
+  custody: ExternalTransactionCustody & { ready(): Promise<boolean>; close(): void };
   bearerToken: string; mode: 'check' | 'serve'; signal?: AbortSignal;
 }) {
   let closing = false;
@@ -25,7 +25,7 @@ export async function startStocksSignerHost(options: {
       closePromise = (async () => {
         try {
           // A disconnected HTTP socket is not evidence that its async signing
-          // work ended. Drain admitted operations explicitly before PG/KMS.
+          // work ended. Drain admitted operations explicitly before PG/custody.
           const results = await Promise.allSettled([app?.close(), ...active]);
           if (results[0].status === 'rejected') throw new Error('SIGNER_HOST_CLOSE_FAILED');
         }

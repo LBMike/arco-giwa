@@ -5,7 +5,8 @@ import type { SignedTransactionLimits } from './original-transport.js';
 export type SignerHostConfig = Readonly<{
   manifest: Manifest; reviewedManifestDigest: string; reviewedInitialNonce: string;
   rpcUrl: string; listen: Readonly<{ host: '127.0.0.1' | '0.0.0.0'; port: number }>;
-  custody: Readonly<{ type: 'AWS_KMS'; region: string; keyArn: string; exclusiveAccountControlConfirmed: true }>;
+  custody: Readonly<{ type: 'AWS_KMS'; region: string; keyArn: string; exclusiveAccountControlConfirmed: true }>
+    | Readonly<{ type: 'LOCAL_KEYSTORE'; exclusiveAccountControlConfirmed: true }>;
   transaction: KmsFees; limits: SignedTransactionLimits;
 }>;
 const fail = () => new StocksError('SIGNER_HOST_CONFIGURATION_INVALID', 503);
@@ -31,10 +32,17 @@ export function parseSignerHostConfig(value: unknown): SignerHostConfig {
     const listen = record(row.listen, 'host,port');
     if (!['127.0.0.1', '0.0.0.0'].includes(listen.host as string) || !Number.isSafeInteger(listen.port)
       || (listen.port as number) < 1024 || (listen.port as number) > 65535) throw fail();
-    const custody = record(row.custody, 'type,region,keyArn,exclusiveAccountControlConfirmed');
-    if (custody.type !== 'AWS_KMS' || custody.exclusiveAccountControlConfirmed !== true
-      || typeof custody.region !== 'string' || typeof custody.keyArn !== 'string') throw fail();
-    validateKmsIdentity({ region: custody.region, keyArn: custody.keyArn, signerAddress: manifest.signerAddress });
+    const local = row.custody && typeof row.custody === 'object' && !Array.isArray(row.custody)
+      && (row.custody as Record<string, unknown>).type === 'LOCAL_KEYSTORE';
+    const custody = record(row.custody, local ? 'type,exclusiveAccountControlConfirmed' : 'type,region,keyArn,exclusiveAccountControlConfirmed');
+    if (custody.exclusiveAccountControlConfirmed !== true) throw fail();
+    if (local) {
+      // A separately secured HTTPS ingress may forward here; never expose a plaintext key host.
+      if (listen.host !== '127.0.0.1') throw fail();
+    } else {
+      if (custody.type !== 'AWS_KMS' || typeof custody.region !== 'string' || typeof custody.keyArn !== 'string') throw fail();
+      validateKmsIdentity({ region: custody.region, keyArn: custody.keyArn, signerAddress: manifest.signerAddress });
+    }
     const tx = record(row.transaction, 'gas,maxFeePerGas,maxPriorityFeePerGas');
     const cap = record(row.limits, 'maxGas,maxFeePerGas,maxTotalFeeWei');
     const transaction = { gas: decimal(tx.gas), maxFeePerGas: decimal(tx.maxFeePerGas), maxPriorityFeePerGas: decimal(tx.maxPriorityFeePerGas) };

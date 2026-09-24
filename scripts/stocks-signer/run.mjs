@@ -23,6 +23,7 @@ try {
   if (args.length !== 3 || args[0] !== '--config' || !['--check', '--serve'].includes(args[2]))
     throw Error('INVALID_ARGUMENTS');
   const config = parseSignerHostConfig(await readStocksPublicJson(args[1]));
+  if (config.custody.type !== 'AWS_KMS') throw Error('KMS_CONFIGURATION_REQUIRED');
   const connectionString = process.env.STOCKS_SIGNER_DATABASE_URL;
   const bearerToken = process.env.STOCKS_SIGNER_TOKEN;
   if (!connectionString || connectionString.length > 4096 || !/^postgres(?:ql)?:\/\//.test(connectionString)

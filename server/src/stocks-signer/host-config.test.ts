@@ -25,3 +25,16 @@ test('strict public configuration freezes manifest and parses exact decimal amou
     { manifest: { ...config().manifest, privateKey: 'REJECT_INPUT' } }])
     assert.throws(() => parseSignerHostConfig({ ...config(), ...patch }), /^Error: SIGNER_HOST_CONFIGURATION_INVALID$/);
 });
+test('local keystore host configuration has no credential fields and only binds loopback', () => {
+  const local = { ...config(), custody: { type: 'LOCAL_KEYSTORE', exclusiveAccountControlConfirmed: true } };
+  const parsed = parseSignerHostConfig(local);
+  assert.equal(parsed.custody.type, 'LOCAL_KEYSTORE');
+  assert.equal(parsed.listen.host, '127.0.0.1');
+  for (const patch of [{ listen: { host: '0.0.0.0', port: 8081 } },
+    { custody: { ...local.custody, password: 'REJECT_INPUT' } },
+    { custody: { ...local.custody, privateKey: 'REJECT_INPUT' } },
+    { custody: { ...local.custody, keystorePath: '/must-use-local-cli' } },
+    { custody: { ...local.custody, exclusiveAccountControlConfirmed: false } },
+    { custody: { ...local.custody, region: 'ap-northeast-2' } }])
+    assert.throws(() => parseSignerHostConfig({ ...local, ...patch }), /^Error: SIGNER_HOST_CONFIGURATION_INVALID$/);
+});
