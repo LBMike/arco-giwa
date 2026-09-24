@@ -20,6 +20,7 @@ import { StocksExecutionService } from '../stocks-execution/service.js';
 import { StocksTradingControlService } from '../stocks-trading-control/service.js';
 import { StocksTradingControlPolicy } from '../stocks-trading-control/policy.js';
 import { watchStocksPoolErrors } from './database-failure.js';
+import { validateLocalCustomerRuntime } from './local-customer.js';
 
 export type StocksRuntimeConfig = {
   profile: 'DEMO_TESTNET'; manifest: Manifest & { schemaVersion: 2; redemptionEscrow: `0x${string}` };
@@ -33,24 +34,26 @@ export function stocksAutodispatch(env: NodeJS.ProcessEnv): boolean {
   ensure(!enabled || env.STOCKS_MODE === 'DEMO_TESTNET', 'STOCKS_AUTODISPATCH_REQUIRES_TESTNET');
   return enabled;
 }
-export function parseStocksRuntimeConfig(value: unknown): StocksRuntimeConfig {
+export function parseStocksRuntimeConfig(value: unknown, localCustomer = false): StocksRuntimeConfig {
   ensure(value !== null && typeof value === 'object' && !Array.isArray(value), 'INVALID_STOCKS_CONFIG');
   const row = value as StocksRuntimeConfig;
   ensure(row.profile === 'DEMO_TESTNET' && row.manifest?.schemaVersion === 2 && row.contractPolicyVerified === true && typeof row.paused === 'boolean', 'INVALID_STOCKS_ACTIVATION');
   ensure(row.operatorControls === undefined || typeof row.operatorControls === 'boolean', 'INVALID_STOCKS_OPERATOR_CONTROLS');
   freezeManifest(row.manifest);
-  endpoint(row.rpcUrl); endpoint(row.signerUrl);
+  endpoint(row.rpcUrl);
   const operators = parseStocksOperators(row.operators);
+  if (localCustomer) validateLocalCustomerRuntime({ ...row, operators });
+  else endpoint(row.signerUrl);
   return { ...structuredClone(row), operators };
 }
 
 // Optional composition: absence leaves every legacy route and worker unchanged.
 // This function never creates tables, deploys contracts, or handles signing keys.
-export async function configuredStocksRuntime(env: NodeJS.ProcessEnv, fallbackDatabaseUrl: string) {
+export async function configuredStocksRuntime(env: NodeJS.ProcessEnv, fallbackDatabaseUrl: string, localCustomer = false) {
   const autodispatch = stocksAutodispatch(env);
   if (env.STOCKS_MODE === undefined || env.STOCKS_MODE === 'DISABLED') return null;
   ensure(env.STOCKS_MODE === 'DEMO_TESTNET' && env.STOCKS_CONFIG_PATH && env.STOCKS_SIGNER_TOKEN, 'STOCKS_CONFIGURATION_REQUIRED');
-  const config = parseStocksRuntimeConfig(await readStocksPublicJson(env.STOCKS_CONFIG_PATH));
+  const config = parseStocksRuntimeConfig(await readStocksPublicJson(env.STOCKS_CONFIG_PATH), localCustomer);
   const require = createRequire(import.meta.url);
   const { Pool } = require('pg') as { Pool: new (options: unknown) => SqlPool & { end(): Promise<void>; on(event: 'error', listener: () => void): unknown } };
   const pool = new Pool({ connectionString: env.STOCKS_DATABASE_URL ?? fallbackDatabaseUrl, max: 8, connectionTimeoutMillis: 10000, statement_timeout: 30000 });
@@ -58,7 +61,7 @@ export async function configuredStocksRuntime(env: NodeJS.ProcessEnv, fallbackDa
   watchStocksPoolErrors(pool, () => runtime);
   try {
     const transport = httpStocksRpc(config.rpcUrl);
-    const signer = externalStocksSigner({ url: config.signerUrl, authorization: env.STOCKS_SIGNER_TOKEN, deploymentDigest: manifestDigest(config.manifest), manifest: config.manifest });
+    const signer = externalStocksSigner({ url: config.signerUrl, authorization: env.STOCKS_SIGNER_TOKEN, deploymentDigest: manifestDigest(config.manifest), manifest: config.manifest, localHarness: localCustomer });
     runtime = await createStocksRuntime({ manifest: config.manifest, pool, transport, signer, autodispatch, paused: config.paused, operators: config.operators, operatorControls: config.operatorControls });
     return runtime;
   } catch (error) { await pool.end(); throw error; }

@@ -1,6 +1,7 @@
 import { StocksSubmissionDiagnosticsService } from './stocks-submission-diagnostics/service.js'
 import { pathToFileURL } from "node:url"
 import { configuredStocksRuntime, stocksAutodispatch } from "./stocks-runtime/runtime.js"
+import { validateLocalCustomerEnvironment } from "./stocks-runtime/local-customer.js"
 import { closeOnce, installServerShutdown, startManagedStocksServer } from "./stocks-runtime/lifecycle.js"
 import { stocksSessionResolvers } from "./stocks-runtime/session.js"
 import { StocksSubmissionsService } from "./stocks-submissions/service.js"
@@ -22,7 +23,12 @@ import { PrismaArcoService } from "./services/prisma-arco-service.js"
 import { fetchUsdRates } from "./services/usd-rates.js"
 import { readRegistryFile } from "./registry/io.js"
 
-export async function startServer(envSource: NodeJS.ProcessEnv = process.env, cliOwnsSignals = false) {
+export async function startServer(envSource: NodeJS.ProcessEnv = process.env, cliOwnsSignals = false, localCustomer = false) {
+  if (localCustomer) {
+    // Prisma consumes process.env too: a different object must never split DB identity.
+    if (envSource !== process.env) throw Error("LOCAL_CUSTOMER_ENVIRONMENT_MISMATCH")
+    validateLocalCustomerEnvironment(envSource)
+  }
   const env = validateServerEnv(envSource)
   const autodispatch = stocksAutodispatch(envSource)
   const stocksMarketData = configuredStocksMarketData(envSource)
@@ -30,7 +36,7 @@ export async function startServer(envSource: NodeJS.ProcessEnv = process.env, cl
   const prisma = createPrismaClient()
   const closeDatabase = closeOnce(() => prisma.$disconnect())
   try {
-    return await composeServer(envSource, env, prisma, closeDatabase, autodispatch, cliOwnsSignals, stocksMarketData, stocksMarketClock)
+    return await composeServer(envSource, env, prisma, closeDatabase, autodispatch, cliOwnsSignals, stocksMarketData, stocksMarketClock, localCustomer)
   } catch (error) {
     await closeDatabase()
     throw error
@@ -46,6 +52,7 @@ async function composeServer(
   cliOwnsSignals: boolean,
   stocksMarketData: StocksMarketDataService,
   stocksMarketClock: ReturnType<typeof configuredStocksMarketClock>,
+  localCustomer: boolean,
 ) {
   const arco = new PrismaArcoService(prisma)
   const registry = new EvmRegistryService(arco)
@@ -296,7 +303,7 @@ async function composeServer(
     maxLagBlocks: 100,
   })
   const app = await startManagedStocksServer({
-    createRuntime: () => configuredStocksRuntime(envSource, env.databaseUrl),
+    createRuntime: () => configuredStocksRuntime(envSource, env.databaseUrl, localCustomer),
     buildApp: stocks => {
       const sessions = stocks ? stocksSessionResolvers(env.authJwtSecret,
         env.corsAllowedOrigins.map(origin => new URL(origin).host), stocks.operators) : undefined
@@ -327,7 +334,7 @@ async function composeServer(
       )
     },
     // Dual-stack preserves existing localhost IPv4/IPv6 behavior.
-    listen: app => app.listen({ host: "::", port: env.port }),
+    listen: app => app.listen({ host: localCustomer ? "127.0.0.1" : "::", port: env.port }),
     closeDatabase,
     autodispatch,
     onApp: cliOwnsSignals ? installServerShutdown : undefined,

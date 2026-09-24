@@ -116,9 +116,11 @@ async function main() {
   const customerReads = process.argv.includes("--customer-reads")
   const customerAuth = process.argv.includes("--customer-auth")
   const customerTrades = process.argv.includes("--customer-trades")
+  const localCustomer = process.argv.includes("--local-customer")
   if (customerAuth && !customerReads) throw new FixtureError("CUSTOMER_READS_REQUIRED")
   if (customerTrades && !customerAuth) throw new FixtureError("CUSTOMER_AUTH_REQUIRED")
-  const customer = customerReads ? customerGateway({ origin, authEnabled: customerAuth, tradesEnabled: customerTrades }) : null
+  if (localCustomer && (!customerReads || !customerAuth || !customerTrades || port !== 4392)) throw new FixtureError("INVALID_LOCAL_CUSTOMER_MODE")
+  const customer = customerReads ? customerGateway({ origin, authEnabled: customerAuth, tradesEnabled: customerTrades, localCustomer }) : null
   const liveMarket = process.argv.includes("--live-market")
     ? await (await import("../../../../../scripts/stocks-local/live-market")).createLiveMarket() : null
   // Fastify.inject() buffers until a response ends, so the preview relays finite

@@ -5,6 +5,7 @@ import { tradingBody, tradingRead, tradingWrite } from "./trading-routes"
 // Existing product services only. Browser input cannot choose an upstream.
 export const CUSTOMER_API = "https://arco-giwa-api.onrender.com"
 export const CUSTOMER_RPC = "https://sepolia-rpc.giwa.io"
+export const LOCAL_CUSTOMER_API = "http://127.0.0.1:4393"
 const MAX_REQUEST = 64 * 1024
 const MAX_RESPONSE = 4_000_000
 const RPC_READS = new Set(["eth_chainId", "eth_blockNumber", "eth_call", "eth_getBalance", "eth_getCode", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getLogs"])
@@ -100,10 +101,11 @@ async function responseBody(response: Response): Promise<Buffer> {
 }
 
 /** Authentication and investor requests are separate opt-ins to the fixed GIWA API. */
-export function customerGateway({ origin, fetcher = fetch, timeoutMs = 15_000, authEnabled = false, tradesEnabled = false }: {
-  origin: string; fetcher?: typeof fetch; timeoutMs?: number; authEnabled?: boolean; tradesEnabled?: boolean
+export function customerGateway({ origin, fetcher = fetch, timeoutMs = 15_000, authEnabled = false, tradesEnabled = false, localCustomer = false }: {
+  origin: string; fetcher?: typeof fetch; timeoutMs?: number; authEnabled?: boolean; tradesEnabled?: boolean; localCustomer?: boolean
 }) {
   if (tradesEnabled && !authEnabled) throw new Error("CUSTOMER_AUTH_REQUIRED")
+  if (localCustomer && (origin !== "http://127.0.0.1:4392" || !authEnabled || !tradesEnabled)) throw new Error("INVALID_LOCAL_CUSTOMER_GATEWAY")
   const parsed = new URL(origin)
   if (parsed.origin !== origin || parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1" || !parsed.port) throw new Error("INVALID_CUSTOMER_ORIGIN")
   const host = parsed.host
@@ -145,7 +147,8 @@ export function customerGateway({ origin, fetcher = fetch, timeoutMs = 15_000, a
           headers["content-type"] = "application/json"
         }
         if (privateGet || trade) headers.authorization = bearer!
-        const answer = await fetcher(rpc ? CUSTOMER_RPC : `${CUSTOMER_API}${raw}`, { method, headers, body, signal: abort.signal, redirect: "error", credentials: "omit", cache: "no-store" })
+        const localRoute = localCustomer && (auth || raw.startsWith("/api/v1/stocks/"))
+        const answer = await fetcher(rpc ? CUSTOMER_RPC : `${localRoute ? LOCAL_CUSTOMER_API : CUSTOMER_API}${raw}`, { method, headers, body, signal: abort.signal, redirect: "error", credentials: "omit", cache: "no-store" })
         if (answer.status >= 300 && answer.status < 400) throw new GatewayError(502, "CUSTOMER_API_UNAVAILABLE")
         return { status: answer.status, body: await responseBody(answer) }
       }
