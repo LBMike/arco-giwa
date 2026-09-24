@@ -72,6 +72,15 @@ export class PostgresSignerJournal implements DurableSignerJournal {
     return nonce(account.nextNonce);
   }
 
+  private matchOperation(stored: SignerOperation, expected: Readonly<SignerOperation>): void {
+    const canonical = canonicalStocksSignerCall(this.manifest, expected.call);
+    ensure(expected.operationId === canonical.call.operationId && expected.deploymentDigest === this.digest
+      && expected.callDigest === canonical.digest && callDigest(expected.call) === canonical.digest
+      && stored.operationId === expected.operationId && stored.deploymentDigest === expected.deploymentDigest
+      && stored.callDigest === expected.callDigest && stored.originalNonce === expected.originalNonce
+      && canonicalJson(stored.call) === canonicalJson(expected.call), 'SIGNER_IMMUTABLE_OPERATION_CONFLICT', 409);
+  }
+
   async reserve(input: Omit<SignerOperation, 'originalNonce' | 'txHash'>): Promise<{ created: boolean; operation: SignerOperation }> {
     const canonical = canonicalStocksSignerCall(this.manifest, input.call);
     ensure(input.operationId === canonical.call.operationId && input.deploymentDigest === this.digest
@@ -116,6 +125,45 @@ export class PostgresSignerJournal implements DurableSignerJournal {
     });
   }
 
+  /** Commit the verified signed bytes' hash before the first RPC broadcast. */
+  async recordSignedHash(operation: Readonly<SignerOperation>, signedHash: string): Promise<string> {
+    hash(signedHash);
+    return this.transaction(true, async db => {
+      await this.account(db, true);
+      const found = (await db.query(`SELECT ${operationColumns} FROM stocks_signer.operation
+        WHERE "operationId"=$1 AND "chainId"=91342 AND "signerAddress"=$2 FOR UPDATE`,
+      [operation.operationId, this.signerAddress])).rows[0];
+      ensure(found, 'SIGNER_OPERATION_UNKNOWN', 404);
+      const stored = operationRow(found);
+      this.matchOperation(stored, operation);
+      const existing = (await db.query(`SELECT "signedHash" FROM stocks_signer.signed_intent
+        WHERE "operationId"=$1 FOR UPDATE`, [operation.operationId])).rows[0];
+      if (existing) {
+        ensure(existing.signedHash === signedHash, 'SIGNER_SIGNED_HASH_CONFLICT', 409);
+        return existing.signedHash as string;
+      }
+      ensure(stored.txHash === null, 'SIGNER_SIGNED_HASH_CONFLICT', 409);
+      await db.query(`INSERT INTO stocks_signer.signed_intent ("operationId","signedHash") VALUES ($1,$2)`,
+        [operation.operationId, signedHash]);
+      return signedHash;
+    });
+  }
+
+  /** Read only the immutable hash already committed for this exact operation. */
+  async readSignedHash(operation: Readonly<SignerOperation>): Promise<string | null> {
+    return this.transaction(false, async db => {
+      await this.account(db, false);
+      const found = (await db.query(`SELECT ${operationColumns} FROM stocks_signer.operation
+        WHERE "operationId"=$1 AND "chainId"=91342 AND "signerAddress"=$2`,
+      [operation.operationId, this.signerAddress])).rows[0];
+      ensure(found, 'SIGNER_OPERATION_UNKNOWN', 404);
+      this.matchOperation(operationRow(found), operation);
+      const intent = (await db.query(`SELECT "signedHash" FROM stocks_signer.signed_intent
+        WHERE "operationId"=$1`, [operation.operationId])).rows[0];
+      return intent ? hash(intent.signedHash) : null;
+    });
+  }
+
   async recordHash(operationId: string, expectedDigest: string, txHash: string): Promise<SignerOperation> {
     hash(txHash);
     return this.transaction(true, async db => {
@@ -126,6 +174,10 @@ export class PostgresSignerJournal implements DurableSignerJournal {
       ensure(found, 'SIGNER_OPERATION_UNKNOWN', 404);
       const stored = operationRow(found);
       ensure(stored.deploymentDigest === this.digest && stored.callDigest === expectedDigest, 'SIGNER_IMMUTABLE_OPERATION_CONFLICT', 409);
+      const intent = (await db.query(`SELECT "signedHash" FROM stocks_signer.signed_intent
+        WHERE "operationId"=$1`, [operationId])).rows[0];
+      ensure(intent, 'SIGNER_SIGNED_INTENT_REQUIRED', 503);
+      ensure(intent.signedHash === txHash, 'SIGNER_SIGNED_INTENT_MISMATCH', 409);
       if (stored.txHash !== null) {
         ensure(stored.txHash === txHash, 'SIGNER_HASH_CONFLICT', 409);
         return stored;

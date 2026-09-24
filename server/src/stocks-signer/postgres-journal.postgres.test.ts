@@ -64,6 +64,10 @@ test('PostgreSQL signer journal requires an explicit seeded account and original
     assert.equal(result.created, true);
     assert.equal(result.operation.originalNonce, '7');
     assert.equal(result.operation.txHash, null);
+    assert.equal(await journal.readSignedHash(result.operation), null);
+    await assert.rejects(journal.recordHash(call.operationId, callDigest(call), h(39)), /SIGNER_SIGNED_INTENT_REQUIRED/);
+    assert.equal(await journal.recordSignedHash(result.operation, h(39)), h(39));
+    assert.equal(await journal.readSignedHash(result.operation), h(39));
     const account = (await pool.query('SELECT "nextNonce"::text AS nonce FROM stocks_signer.account_nonce WHERE "signerAddress"=$1',
       [address(manifest.signerAddress)])).rows[0];
     assert.equal(account.nonce, '8');
@@ -86,12 +90,25 @@ test('PostgreSQL reserves one immutable original, blocks later nonce while unkno
     await assert.rejects(journal.reserve(input(manifest, changed)), /SIGNER_IMMUTABLE_OPERATION_CONFLICT/);
     await assert.rejects(journal.reserve(input(manifest, second)), /SIGNER_ORIGINAL_OUTCOME_UNKNOWN/);
     assert.equal(await journal.read(second.operationId), null);
+    await assert.rejects(journal.recordHash(first.operationId, callDigest(first), h(40)), /SIGNER_SIGNED_INTENT_REQUIRED/);
+    assert.equal(await journal.recordSignedHash(original.operation, h(40)), h(40));
+    assert.equal(await journal.recordSignedHash(original.operation, h(40)), h(40));
+    await assert.rejects(journal.recordSignedHash({ ...original.operation, originalNonce: '20' }, h(40)),
+      /SIGNER_IMMUTABLE_OPERATION_CONFLICT/);
+    await assert.rejects(journal.readSignedHash({ ...original.operation, callDigest: 'f'.repeat(64) }),
+      /SIGNER_IMMUTABLE_OPERATION_CONFLICT/);
+    await assert.rejects(journal.recordSignedHash(original.operation, h(41)), /SIGNER_SIGNED_HASH_CONFLICT/);
+    await assert.rejects(journal.recordHash(first.operationId, callDigest(first), h(41)), /SIGNER_SIGNED_INTENT_MISMATCH/);
     assert.equal((await journal.recordHash(first.operationId, callDigest(first), h(40))).txHash, h(40));
     assert.equal((await journal.recordHash(first.operationId, callDigest(first), h(40))).txHash, h(40));
-    await assert.rejects(journal.recordHash(first.operationId, callDigest(first), h(41)), /SIGNER_HASH_CONFLICT/);
+    await assert.rejects(journal.recordHash(first.operationId, callDigest(first), h(41)), /SIGNER_SIGNED_INTENT_MISMATCH/);
     const next = await journal.reserve(input(manifest, second));
     assert.equal(next.operation.originalNonce, '20');
     assert.equal(next.operation.operationId, second.operationId);
+    await assert.rejects(journal.recordSignedHash(next.operation, h(40)), /SIGNER_JOURNAL_UNAVAILABLE/);
+    assert.equal(await journal.recordSignedHash(next.operation, h(42)), h(42));
+    await assert.rejects(pool.query(`UPDATE stocks_signer.operation SET "txHash"=$2,"hashRecordedAt"=clock_timestamp()
+      WHERE "operationId"=$1`, [second.operationId, h(43)]), /SIGNER_OPERATION_SIGNED_INTENT_MISMATCH/);
     const forged = authorizedCall(manifest, 'mint:forged-complete', 'MINT', a(10), '12');
     await assert.rejects(pool.query(`INSERT INTO stocks_signer.operation
       ("operationId","chainId","signerAddress","deploymentDigest","callDigest",call,"originalNonce","txHash","hashRecordedAt")
@@ -103,6 +120,11 @@ test('PostgreSQL reserves one immutable original, blocks later nonce while unkno
     await assert.rejects(pool.query('UPDATE stocks_signer.operation SET call=$2::jsonb WHERE "operationId"=$1',
       [first.operationId, JSON.stringify(changed)]), /SIGNER_OPERATION_IMMUTABLE/);
     await assert.rejects(pool.query('DELETE FROM stocks_signer.operation WHERE "operationId"=$1', [first.operationId]), /SIGNER_OPERATION_DELETE_FORBIDDEN/);
+    await assert.rejects(pool.query('UPDATE stocks_signer.signed_intent SET "signedHash"=$2 WHERE "operationId"=$1',
+      [first.operationId, h(41)]), /SIGNER_SIGNED_INTENT_IMMUTABLE/);
+    await assert.rejects(pool.query('DELETE FROM stocks_signer.signed_intent WHERE "operationId"=$1',
+      [first.operationId]), /SIGNER_SIGNED_INTENT_IMMUTABLE/);
+    await assert.rejects(pool.query('TRUNCATE stocks_signer.signed_intent'), /SIGNER_SIGNED_INTENT_IMMUTABLE/);
     await assert.rejects(pool.query('UPDATE stocks_signer.account_nonce SET "nextNonce"=0 WHERE "signerAddress"=$1',
       [address(manifest.signerAddress)]), /SIGNER_ACCOUNT_NONCE_MUTATION_FORBIDDEN/);
   } finally { await pool.end(); }
@@ -117,6 +139,7 @@ test('PostgreSQL reserves one immutable original, blocks later nonce while unkno
     await assert.rejects(journal.reserve(input(manifest, later)), /SIGNER_ORIGINAL_OUTCOME_UNKNOWN/);
     const pending = await journal.read(pendingId);
     assert.ok(pending);
+    assert.equal(await journal.readSignedHash(pending), h(42));
     await journal.recordHash(pendingId, pending.callDigest, h(42));
     assert.equal((await journal.reserve(input(manifest, later))).operation.originalNonce, '21');
   } finally { await reopened.end(); }
@@ -143,7 +166,7 @@ test('two PostgreSQL adapters serialize competing first reservations for one phy
   } finally { await poolA.end(); await poolB.end(); }
 });
 
-test('concurrent repeats of one operation share its original nonce and hash CAS is first-writer-wins', { skip: !enabled }, async () => {
+test('concurrent repeats of one operation share its original nonce and one immutable signed hash', { skip: !enabled }, async () => {
   const poolA = new Pool({ connectionString, max: 2 });
   const poolB = new Pool({ connectionString, max: 2 });
   const manifest = manifestFor(204);
@@ -157,15 +180,20 @@ test('concurrent repeats of one operation share its original nonce and hash CAS 
     assert.equal(aResult.operation.originalNonce, '101');
     assert.equal(bResult.operation.originalNonce, '101');
     const hashes = await Promise.allSettled([
-      aJournal.recordHash(call.operationId, callDigest(call), h(80)),
-      bJournal.recordHash(call.operationId, callDigest(call), h(81)),
+      aJournal.recordSignedHash(aResult.operation, h(80)),
+      bJournal.recordSignedHash(bResult.operation, h(81)),
     ]);
     assert.equal(hashes.filter(outcome => outcome.status === 'fulfilled').length, 1);
     assert.equal(hashes.filter(outcome => outcome.status === 'rejected').length, 1);
     const winner = hashes.find(outcome => outcome.status === 'fulfilled');
     assert.ok(winner && winner.status === 'fulfilled');
-    assert.equal((await aJournal.read(call.operationId))?.txHash, winner.value.txHash);
-    assert.equal((await bJournal.recordHash(call.operationId, callDigest(call), winner.value.txHash!)).txHash, winner.value.txHash);
+    assert.equal(await aJournal.readSignedHash(aResult.operation), winner.value);
+    assert.equal(await bJournal.readSignedHash(bResult.operation), winner.value);
+    assert.equal((await aJournal.read(call.operationId))?.txHash, null);
+    await assert.rejects(bJournal.recordHash(call.operationId, callDigest(call), winner.value === h(80) ? h(81) : h(80)),
+      /SIGNER_SIGNED_INTENT_MISMATCH/);
+    assert.equal((await bJournal.recordHash(call.operationId, callDigest(call), winner.value)).txHash, winner.value);
+    assert.equal((await aJournal.recordHash(call.operationId, callDigest(call), winner.value)).txHash, winner.value);
     assert.equal((await poolA.query('SELECT "nextNonce"::text AS nonce FROM stocks_signer.account_nonce WHERE "signerAddress"=$1',
       [address(manifest.signerAddress)])).rows[0].nonce, '102');
   } finally { await poolA.end(); await poolB.end(); }
@@ -181,10 +209,12 @@ test('different deployments on the same physical signer share one unresolved-non
     const journalB = new PostgresSignerJournal(pool, manifestB, '500');
     const first = authorizedCall(manifestA, 'mint:deployment-a', 'MINT', a(10), '10');
     const second = authorizedCall(manifestB, 'mint:deployment-b', 'MINT', a(10), '11');
-    assert.equal((await journalA.reserve(input(manifestA, first))).operation.originalNonce, '500');
+    const original = await journalA.reserve(input(manifestA, first));
+    assert.equal(original.operation.originalNonce, '500');
     const reusedId = authorizedCall(manifestB, first.operationId, 'MINT', a(10), '10');
     await assert.rejects(journalB.reserve(input(manifestB, reusedId)), /SIGNER_IMMUTABLE_OPERATION_CONFLICT/);
     await assert.rejects(journalB.reserve(input(manifestB, second)), /SIGNER_ORIGINAL_OUTCOME_UNKNOWN/);
+    await journalA.recordSignedHash(original.operation, h(82));
     await journalA.recordHash(first.operationId, callDigest(first), h(82));
     assert.equal((await journalB.reserve(input(manifestB, second))).operation.originalNonce, '501');
   } finally { await pool.end(); }
@@ -200,7 +230,8 @@ test('core with PostgreSQL journal keeps unknown send inert until original-ID lo
     const next = authorizedCall(manifest, 'mint:core-next', 'MINT', a(10), '11');
     let sends = 0, recovery = 0;
     const core = createStocksSignerCore({ manifest, journal, transport: {
-      sendOnce: async operation => { sends++; assert.equal(operation.originalNonce, '1'); throw Error('SIMULATED_LOST_RESPONSE'); },
+      sendOnce: async operation => { sends++; assert.equal(operation.originalNonce, '1');
+        await journal.recordSignedHash(operation, h(70)); throw Error('SIMULATED_LOST_RESPONSE'); },
       findOriginal: async operation => { recovery++; assert.equal(operation.originalNonce, '1'); return recovery === 1 ? null : h(70); },
     } });
     await assert.rejects(core.submit(first.operationId, request(manifest, first)), /SIGNER_ORIGINAL_OUTCOME_UNKNOWN/);

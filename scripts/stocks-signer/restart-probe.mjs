@@ -23,13 +23,18 @@ try {
       ("chainId","signerAddress","networkInstance","checkpointNumber","checkpointHash","initialNonce","nextNonce")
       VALUES (91342,$1,$2,$3,$4,612,612)`, [address(manifest.signerAddress), manifest.networkInstance,
       manifest.checkpointNumber, manifest.checkpointHash]);
-    assert.equal((await journal.reserve(input(first))).operation.originalNonce, '612');
-    console.log('SIGNER_RESTART_ORIGINAL_RESERVED');
+    const original = await journal.reserve(input(first));
+    assert.equal(original.operation.originalNonce, '612');
+    assert.equal(await journal.recordSignedHash(original.operation, h(83)), h(83));
+    assert.equal(await journal.readSignedHash(original.operation), h(83));
+    console.log('SIGNER_RESTART_SIGNED_ORIGINAL_DURABLE');
   } else {
     const original = await journal.read(first.operationId);
     assert.equal(original?.originalNonce, '612');
     assert.equal(original?.txHash, null);
+    assert.equal(await journal.readSignedHash(original), h(83));
     await assert.rejects(journal.reserve(input(next)), /SIGNER_ORIGINAL_OUTCOME_UNKNOWN/);
+    await assert.rejects(journal.recordHash(first.operationId, callDigest(first), h(84)), /SIGNER_SIGNED_INTENT_MISMATCH/);
     await journal.recordHash(first.operationId, callDigest(first), h(83));
     assert.equal((await journal.reserve(input(next))).operation.originalNonce, '613');
     console.log('SIGNER_RESTART_ORIGINAL_RECOVERED');

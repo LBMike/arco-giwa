@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -32,6 +33,31 @@ try {
   run(pg('createdb'), ['-h', socket, '-U', 'signer_harness', 'signer_test']);
   run(pg('psql'), ['-h', socket, '-U', 'signer_harness', '-d', 'signer_test', '-v', 'ON_ERROR_STOP=1',
     '-f', join(root, 'server/src/stocks-signer/migrations/0001_journal.sql')]);
+  run(pg('psql'), ['-h', socket, '-U', 'signer_harness', '-d', 'signer_test', '-v', 'ON_ERROR_STOP=1',
+    '-f', join(root, 'server/src/stocks-signer/migrations/0002_signed_intent.sql')]);
+  // Old rows have no authenticated signed bytes. Prove the additive migration
+  // refuses them atomically instead of silently creating unresolvable records.
+  run(pg('createdb'), ['-h', socket, '-U', 'signer_harness', 'signer_migration_guard']);
+  run(pg('psql'), ['-h', socket, '-U', 'signer_harness', '-d', 'signer_migration_guard', '-v', 'ON_ERROR_STOP=1',
+    '-f', join(root, 'server/src/stocks-signer/migrations/0001_journal.sql')]);
+  run(pg('psql'), ['-h', socket, '-U', 'signer_harness', '-d', 'signer_migration_guard', '-v', 'ON_ERROR_STOP=1', '-c', `
+    INSERT INTO stocks_signer.account_nonce
+      ("chainId","signerAddress","networkInstance","checkpointNumber","checkpointHash","initialNonce","nextNonce")
+      VALUES (91342,'0x${'1'.repeat(40)}','TEST_HARNESS_ONLY_NETWORK_V1','1','0x${'2'.repeat(64)}',0,0);
+    INSERT INTO stocks_signer.operation
+      ("operationId","chainId","signerAddress","deploymentDigest","callDigest",call,"originalNonce")
+      VALUES ('mint:migration-guard',91342,'0x${'1'.repeat(40)}','${'a'.repeat(64)}','${'b'.repeat(64)}','{}'::jsonb,0);
+  `]);
+  const denied = spawnSync(pg('psql'), ['-h', socket, '-U', 'signer_harness', '-d', 'signer_migration_guard',
+    '-v', 'ON_ERROR_STOP=1', '-f', join(root, 'server/src/stocks-signer/migrations/0002_signed_intent.sql')],
+  { cwd: root, encoding: 'utf8' });
+  assert.notEqual(denied.status, 0);
+  assert.match(denied.stderr, /SIGNER_SIGNED_INTENT_MIGRATION_REQUIRES_EMPTY_OPERATION_TABLE/);
+  const rolledBack = spawnSync(pg('psql'), ['-h', socket, '-U', 'signer_harness', '-d', 'signer_migration_guard',
+    '-t', '-A', '-c', "SELECT to_regclass('stocks_signer.signed_intent') IS NULL"], { cwd: root, encoding: 'utf8' });
+  assert.equal(rolledBack.status, 0);
+  assert.equal(rolledBack.stdout.trim(), 't');
+  console.log('SIGNER_SIGNED_INTENT_MIGRATION_GUARD_PASSED');
   run('npm', ['run', 'build:server']);
   const connection = `postgresql://signer_harness@localhost/signer_test?host=${encodeURIComponent(socket)}`;
   const testEnv = { ...process.env, STOCKS_SIGNER_TEST_ONLY: '1', STOCKS_SIGNER_TEST_DATABASE_URL: connection };
@@ -40,6 +66,7 @@ try {
   stop();
   start();
   run(process.execPath, ['scripts/stocks-signer/restart-probe.mjs', 'verify'], testEnv);
+  run(process.execPath, ['--test', 'scripts/stocks-signer/original-transport-evm.test.mjs'], testEnv);
 } finally {
   if (started || existsSync(join(data, 'postmaster.pid'))) {
     const stopped = spawnSync(pg('pg_ctl'), ['-D', data, '-m', 'immediate', '-w', 'stop'], { stdio: 'inherit' });
