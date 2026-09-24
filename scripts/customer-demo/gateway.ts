@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
+import { parseSiweMessage } from "viem/siwe"
 
 // Existing product services only. Browser input cannot choose an upstream.
 export const CUSTOMER_API = "https://arco-giwa-api.onrender.com"
@@ -17,6 +18,34 @@ function publicRead(raw: string, method: string): boolean {
     || /^\/api\/v1\/(portfolio|activity|redemptions)\/0x[a-fA-F0-9]{40}$/.test(raw)
     || /^\/api\/v1\/faucet\/0x[a-fA-F0-9]{40}\/status$/.test(raw)
     || raw === "/api/v1/stocks/catalog"
+}
+
+function privateRead(raw: string, method: string): boolean {
+  return method === "GET" && (/^\/api\/v1\/stocks\/(portfolio|orders|sell-orders)$/.test(raw)
+    || /^\/api\/v1\/stocks\/(orders|sell-orders)\/[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$/.test(raw))
+}
+
+function authBody(text: string, kind: "nonce" | "verify", origin: string): string {
+  let value: Record<string, unknown>
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error()
+    value = parsed as Record<string, unknown>
+  } catch { throw new GatewayError(400, "INVALID_CUSTOMER_AUTH") }
+  const domain = new URL(origin).host
+  if (kind === "nonce") {
+    if (value.domain !== domain || typeof value.walletAddress !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(value.walletAddress)
+      || Object.keys(value).some(key => !["walletAddress", "domain"].includes(key))) throw new GatewayError(400, "INVALID_CUSTOMER_AUTH_SCOPE")
+    return JSON.stringify({ walletAddress: value.walletAddress, domain })
+  }
+  if (typeof value.message !== "string" || typeof value.signature !== "string" || !/^0x[a-fA-F0-9]{130}$/.test(value.signature)
+    || Object.keys(value).some(key => !["message", "signature"].includes(key))) throw new GatewayError(400, "INVALID_CUSTOMER_AUTH")
+  let message
+  try { message = parseSiweMessage(value.message) } catch { throw new GatewayError(400, "INVALID_CUSTOMER_AUTH") }
+  if (message.domain !== domain || message.uri !== origin || message.chainId !== 91342 || message.version !== "1"
+    || (message.scheme !== undefined && message.scheme !== "http")) throw new GatewayError(400, "INVALID_CUSTOMER_AUTH_SCOPE")
+  // The existing backend remains responsible for cryptographic verification and single-use nonce consumption.
+  return JSON.stringify({ message: value.message, signature: value.signature })
 }
 
 function readBody(request: IncomingMessage, signal: AbortSignal): Promise<string> {
@@ -69,9 +98,9 @@ async function responseBody(response: Response): Promise<Buffer> {
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
 }
 
-/** Fixed public reads only. Auth/credentials, private reads and writes remain disconnected. */
-export function customerGateway({ origin, fetcher = fetch, timeoutMs = 15_000 }: {
-  origin: string; fetcher?: typeof fetch; timeoutMs?: number
+/** Authentication is explicitly enabled only for the existing fixed GIWA API. No trading writes. */
+export function customerGateway({ origin, fetcher = fetch, timeoutMs = 15_000, authEnabled = false }: {
+  origin: string; fetcher?: typeof fetch; timeoutMs?: number; authEnabled?: boolean
 }) {
   const parsed = new URL(origin)
   if (parsed.origin !== origin || parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1" || !parsed.port) throw new Error("INVALID_CUSTOMER_ORIGIN")
@@ -86,11 +115,15 @@ export function customerGateway({ origin, fetcher = fetch, timeoutMs = 15_000 }:
     if (!raw.startsWith("/api/") && !raw.startsWith("/__fixture/") && !raw.startsWith("/__giwa/")) { next(); return }
     const method = request.method ?? "GET"
     const rpc = raw === "/__giwa/read-rpc" && method === "POST"
+    const auth = authEnabled && method === "POST" ? raw === "/api/v1/auth/nonce" ? "nonce" : raw === "/api/v1/auth/verify" ? "verify" : null : null
+    const privateGet = authEnabled && privateRead(raw, method)
     const fail = (status: number, code: string) => send(response, status, JSON.stringify({ error: code }))
     if (request.headers.host !== host || (request.headers.origin && request.headers.origin !== origin) || request.headers["sec-fetch-site"] === "cross-site") return fail(403, "CUSTOMER_ORIGIN_DENIED")
-    if (!rpc && !publicRead(raw, method)) return fail(503, raw.startsWith("/api/v1/auth/") ? "CUSTOMER_SIGN_IN_NOT_CONNECTED" : "CUSTOMER_ROUTE_NOT_CONNECTED")
-    if (rpc && request.headers.origin !== origin) return fail(403, "CUSTOMER_ORIGIN_DENIED")
-    if (rpc && !request.headers["content-type"]?.startsWith("application/json")) return fail(415, "CUSTOMER_JSON_REQUIRED")
+    if (!rpc && !auth && !privateGet && !publicRead(raw, method)) return fail(503, raw.startsWith("/api/v1/auth/") ? "CUSTOMER_SIGN_IN_NOT_CONNECTED" : "CUSTOMER_ROUTE_NOT_CONNECTED")
+    if ((rpc || auth) && request.headers.origin !== origin) return fail(403, "CUSTOMER_ORIGIN_DENIED")
+    if ((rpc || auth) && !/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] ?? "")) return fail(415, "CUSTOMER_JSON_REQUIRED")
+    const bearer = request.headers.authorization
+    if (privateGet && (typeof bearer !== "string" || bearer.length > 4103 || !/^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(bearer))) return fail(401, "CUSTOMER_SESSION_REQUIRED")
     const abort = new AbortController()
     const close = () => abort.abort()
     response.once("close", close)
@@ -101,6 +134,8 @@ export function customerGateway({ origin, fetcher = fetch, timeoutMs = 15_000 }:
         const headers: Record<string, string> = { accept: "application/json" }
         let body: string | undefined
         if (rpc) { body = await readBody(request, abort.signal); validateRpc(body); headers["content-type"] = "application/json" }
+        if (auth) { body = authBody(await readBody(request, abort.signal), auth, origin); headers["content-type"] = "application/json" }
+        if (privateGet) headers.authorization = bearer!
         const answer = await fetcher(rpc ? CUSTOMER_RPC : `${CUSTOMER_API}${raw}`, { method, headers, body, signal: abort.signal, redirect: "error", credentials: "omit", cache: "no-store" })
         if (answer.status >= 300 && answer.status < 400) throw new GatewayError(502, "CUSTOMER_API_UNAVAILABLE")
         return { status: answer.status, body: await responseBody(answer) }
