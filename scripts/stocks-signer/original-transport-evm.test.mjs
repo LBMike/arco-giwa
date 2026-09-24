@@ -13,6 +13,7 @@ import pg from 'pg';
 import { authorizedCall } from '../../server/dist/stocks/chain.js';
 import { ABI_DIGEST, callDigest, manifestDigest } from '../../server/dist/stocks/contracts.js';
 import { createStocksSignerCore } from '../../server/dist/stocks-signer/core.js';
+import { httpStocksSignerRpc } from '../../server/dist/stocks-signer/http-rpc.js';
 import { createOriginalNonceLookup } from '../../server/dist/stocks-signer/nonce-lookup.js';
 import { createOriginalSignerTransport } from '../../server/dist/stocks-signer/original-transport.js';
 import { PostgresSignerJournal } from '../../server/dist/stocks-signer/postgres-journal.js';
@@ -116,7 +117,8 @@ test('one-shot external-custody transport signs, broadcasts and recovers exact o
     assert.equal(bundle.publicAccounts.operator, fixtureAccount.address.toLowerCase());
     const manifest = bundle.manifest;
     const digest = manifestDigest(manifest);
-    const lookup = createOriginalNonceLookup({ manifest, rpc });
+    const signerRpc = httpStocksSignerRpc(rpcUrl, true);
+    const lookup = createOriginalNonceLookup({ manifest, rpc: signerRpc });
     // Standalone mode keeps an in-memory intent; the owned-PostgreSQL mode
     // below proves the same real EVM path with durable journal and core.
     const signedHashes = new Map();
@@ -156,7 +158,7 @@ test('one-shot external-custody transport signs, broadcasts and recovers exact o
         nonce: Number(request.nonce), to: request.to, data: request.data, value: request.value,
         gas: 1_000_000n, maxFeePerGas: 2_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n });
     } };
-    const transport = createOriginalSignerTransport({ manifest, rpc, custody, intent, lookup, limits });
+    const transport = createOriginalSignerTransport({ manifest, rpc: signerRpc, custody, intent, lookup, limits });
     const operation = async (id, recipient) => {
       const call = authorizedCall(manifest, id, 'MINT', recipient, '1000000000');
       return { operationId: id, deploymentDigest: digest, callDigest: callDigest(call), call,
@@ -183,10 +185,10 @@ test('one-shot external-custody transport signs, broadcasts and recovers exact o
     const lostAckRpc = async (method, params) => {
       if (method === 'eth_sendRawTransaction') {
         sends++;
-        sentHash = await rpc(method, params);
+        sentHash = await signerRpc(method, params);
         throw Error('TEST_ONLY_LOST_BROADCAST_ACK');
       }
-      return rpc(method, params);
+      return signerRpc(method, params);
     };
 
     if (withPostgres) {
@@ -218,7 +220,7 @@ test('one-shot external-custody transport signs, broadcasts and recovers exact o
       // server before invoking this EVM scenario.
       activePool = new pg.Pool({ connectionString: postgresUrl, max: 4 });
       const reopened = new PostgresSignerJournal(activePool, manifest, initialNonce);
-      const restarted = createOriginalSignerTransport({ manifest, rpc, custody, intent: reopened, lookup, limits });
+      const restarted = createOriginalSignerTransport({ manifest, rpc: signerRpc, custody, intent: reopened, lookup, limits });
       const recoveredCore = createStocksSignerCore({ manifest, journal: reopened, transport: restarted });
       assert.equal(await reopened.readSignedHash(unresolved), sentHash);
       assert.deepEqual(await recoveredCore.lookup(secondCall.operationId), {
@@ -231,7 +233,7 @@ test('one-shot external-custody transport signs, broadcasts and recovers exact o
       assert.equal(sends, 1);
 
       const candidate = await lookup.findAtOriginalNonce(unresolved);
-      const tampered = createOriginalSignerTransport({ manifest, rpc, custody, intent: reopened,
+      const tampered = createOriginalSignerTransport({ manifest, rpc: signerRpc, custody, intent: reopened,
         lookup: { findAtOriginalNonce: async () => ({ ...candidate, input: '0x1234' }) }, limits });
       await assert.rejects(tampered.findOriginal(unresolved), /SIGNER_ORIGINAL_TRANSACTION_MISMATCH/);
     } else {
@@ -249,13 +251,13 @@ test('one-shot external-custody transport signs, broadcasts and recovers exact o
       await assert.rejects(uncertain.sendOnce(second), /SIGNER_ORIGINAL_OUTCOME_UNKNOWN/);
       assert.equal(sends, 1);
       assert.equal((await receipt(sentHash)).status, '0x1');
-      const restarted = createOriginalSignerTransport({ manifest, rpc, custody, intent, lookup, limits });
+      const restarted = createOriginalSignerTransport({ manifest, rpc: signerRpc, custody, intent, lookup, limits });
       assert.equal(await restarted.findOriginal(second), sentHash);
       assert.equal(await balance(bundle.publicAccounts.otherHolder), 1_000_000_000n);
       assert.equal(BigInt(await rpc('eth_getTransactionCount', [manifest.signerAddress, 'pending'])), nonceBefore + 1n);
       assert.equal(signatures, 2);
       const candidate = await lookup.findAtOriginalNonce(second);
-      const tampered = createOriginalSignerTransport({ manifest, rpc, custody, intent,
+      const tampered = createOriginalSignerTransport({ manifest, rpc: signerRpc, custody, intent,
         lookup: { findAtOriginalNonce: async () => ({ ...candidate, input: '0x1234' }) }, limits });
       await assert.rejects(tampered.findOriginal(second), /SIGNER_ORIGINAL_TRANSACTION_MISMATCH/);
     }
