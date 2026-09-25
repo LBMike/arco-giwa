@@ -26,6 +26,10 @@ export type GiwaStocksAdminFeatureProps = {
   /** Clock for "loaded at" / elapsed labels. Defaults to Date.now. */
   readonly now?: () => number
   readonly initialSection?: StocksAdminSection
+  /** Controlled section: a host navigation owns it, and the feature's own section tabs are not shown. */
+  readonly section?: StocksAdminSection
+  /** Told when the feature itself moves to another section ("Open detail" opens Orders). */
+  readonly onSectionChange?: (section: StocksAdminSection) => void
   /** Optional host hook shown as a button on the signed-out and 401 states. */
   readonly onSignInRequired?: () => void
 }

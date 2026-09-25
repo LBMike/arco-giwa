@@ -2,12 +2,13 @@ import { useMemo, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, CheckCircle2, ChevronDown, Loader2 } from "lucide-react"
 import { giwaApi } from "./api"
+import type { AdminAuth } from "./api"
 import { vaultConfigOf, vaultDisplayName } from "./catalog"
 import { buildSavingsAccounts, type SavingsAccount } from "./savings"
 import { BrandMark } from "../components/BrandMark"
 import { explorerAddress } from "./wallet"
 import { shortAddr } from "../lib/format"
-import { useGiwaAdmin } from "./GiwaAdminLayout"
+import { AdminWriteGroup, useGiwaAdmin } from "./admin-context"
 import type { GiwaCatalogItem, GiwaVaultConfig } from "./types"
 import { VAULT_CATEGORIES, type VaultCategory } from "../../../shared/vault-taxonomy"
 import { bpsToPercentInput, parseDecimalInput, percentInputToBps, validateAcceptAssets, validatePortfolioSlices } from "./display-profile"
@@ -145,7 +146,7 @@ export function buildAcceptAssetsForSave(
 }
 
 export default function GiwaAdminConfigPage() {
-  const { operatorToken } = useGiwaAdmin()
+  const { auth } = useGiwaAdmin()
   // The merged catalog includes hidden vaults (hidden is investor-UI declutter, not
   // access control) — the config page must show every vault.
   const catalogQuery = useQuery({ queryKey: ["giwa", "catalog", "admin"], queryFn: giwaApi.catalog })
@@ -161,18 +162,20 @@ export default function GiwaAdminConfigPage() {
         <h1 className="mt-1 text-3xl font-semibold text-[var(--color-arco-ink)]">Vault configuration</h1>
       </section>
 
-      {!operatorToken ? (
+      {!auth.ready ? (
         <Card>
           <p className="text-sm text-[var(--color-arco-muted)]">Enter the operator token above to edit vault config.</p>
         </Card>
       ) : (
         <>
           <AddVaultCard products={products} />
-          <RegisterVaultCard operatorToken={operatorToken} />
+          <AdminWriteGroup>
+            <RegisterVaultCard auth={auth} />
+          </AdminWriteGroup>
         </>
       )}
 
-      {!operatorToken ? null : catalogQuery.isLoading ? (
+      {!auth.ready ? null : catalogQuery.isLoading ? (
         <Card>
           <p className="text-sm text-[var(--color-arco-muted)]">
             <Loader2 className="mr-1.5 inline size-3.5 animate-spin" />
@@ -190,15 +193,17 @@ export default function GiwaAdminConfigPage() {
           {savingsAccounts.length > 0 && (
             // Keyed by the account set/order so it re-seeds when the catalog changes (asset added/
             // removed, or another editor saved) but preserves state during an in-progress reorder.
-            <SavingsOrderCard
-              key={savingsAccounts.map((account) => `${account.vaultId}:${account.symbol}`).join("|")}
-              accounts={savingsAccounts}
-              products={products}
-              operatorToken={operatorToken}
-            />
+            <AdminWriteGroup>
+              <SavingsOrderCard
+                key={savingsAccounts.map((account) => `${account.vaultId}:${account.symbol}`).join("|")}
+                accounts={savingsAccounts}
+                products={products}
+                auth={auth}
+              />
+            </AdminWriteGroup>
           )}
           {products.map((product) => (
-            <VaultConfigCard key={product.productId} product={product} operatorToken={operatorToken} />
+            <VaultConfigCard key={product.productId} product={product} auth={auth} />
           ))}
         </>
       )}
@@ -455,7 +460,7 @@ const REGISTER_SLOTS = [
 ] as const
 
 // Exported for the render-harness verification.
-export function RegisterVaultCard({ operatorToken }: { operatorToken: string }) {
+export function RegisterVaultCard({ auth }: { auth: AdminAuth }) {
   const queryClient = useQueryClient()
   const [productId, setProductId] = useState("")
   const [addresses, setAddresses] = useState<Record<(typeof REGISTER_SLOTS)[number]["key"], string>>({
@@ -475,7 +480,7 @@ export function RegisterVaultCard({ operatorToken }: { operatorToken: string }) 
     setError(null)
     setResult(null)
     try {
-      const response = await giwaApi.admin.registerProduct(operatorToken, productId.trim(), {
+      const response = await giwaApi.admin.registerProduct(auth, productId.trim(), {
         productToken: addresses.productToken.trim(),
         depositVault: addresses.depositVault.trim(),
         redemptionVault: addresses.redemptionVault.trim(),
@@ -589,11 +594,11 @@ export function RegisterVaultCard({ operatorToken }: { operatorToken: string }) 
 function SavingsOrderCard({
   accounts,
   products,
-  operatorToken,
+  auth,
 }: {
   accounts: SavingsAccount[]
   products: GiwaCatalogItem[]
-  operatorToken: string
+  auth: AdminAuth
 }) {
   const queryClient = useQueryClient()
   const [rows, setRows] = useState(accounts)
@@ -621,7 +626,7 @@ function SavingsOrderCard({
     setError(null)
     try {
       await giwaApi.admin.saveSavingsOrder(
-        operatorToken,
+        auth,
         rows.map((row) => ({ productId: row.vaultId, symbol: row.symbol })),
       )
       // Refetch every catalog variant so the per-vault editors AND the investor Savings selector
@@ -703,7 +708,7 @@ function SavingsOrderCard({
   )
 }
 
-export function VaultConfigCard({ product, operatorToken }: { product: GiwaCatalogItem; operatorToken: string }) {
+export function VaultConfigCard({ product, auth }: { product: GiwaCatalogItem; auth: AdminAuth }) {
   const queryClient = useQueryClient()
   const saved = vaultConfigOf(product)
 
@@ -876,7 +881,7 @@ export function VaultConfigCard({ product, operatorToken }: { product: GiwaCatal
         // Only present for a saving vault; omitted for a product vault (leaves stored value dormant).
         ...(acceptAssets !== undefined ? { acceptAssets } : {}),
       }
-      await giwaApi.admin.saveVaultConfig(operatorToken, product.productId, patch)
+      await giwaApi.admin.saveVaultConfig(auth, product.productId, patch)
       // Prefix-matches every catalog variant (investor, detail, admin) so the public
       // list, product detail and this page all refresh with the new config.
       await queryClient.invalidateQueries({ queryKey: ["giwa", "catalog"] })
@@ -916,6 +921,7 @@ export function VaultConfigCard({ product, operatorToken }: { product: GiwaCatal
       </button>
 
       {expanded && (
+        <AdminWriteGroup>
         <div className="mt-4 space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             <PillToggle active={pinned} onToggle={() => setPinned((value) => !value)} label="Pin to top" />
@@ -1250,6 +1256,7 @@ export function VaultConfigCard({ product, operatorToken }: { product: GiwaCatal
         )}
       </div>
         </div>
+        </AdminWriteGroup>
       )}
     </Card>
   )

@@ -3,10 +3,11 @@ import { useQuery } from "@tanstack/react-query"
 import { formatUnits } from "viem"
 import { AlertCircle, CheckCircle2, ChevronDown, Loader2, Send } from "lucide-react"
 import { giwaApi } from "./api"
+import type { AdminAuth } from "./api"
 import { pauseStateOf, vaultConfigOf } from "./catalog"
 import { GIWA_CHAIN_ID } from "./config"
 import { afterConfirmedReceipt, readTokenBalance, sendPreparedTransaction, toBaseUnits } from "./contracts"
-import { useGiwaAdmin } from "./GiwaAdminLayout"
+import { AdminWriteGroup, useGiwaAdmin } from "./admin-context"
 import { UNLIMITED_HUMAN, allowanceBelowCap, isPositiveHuman, resolveLimit, usdHint } from "./limits-helpers"
 import type { GiwaCatalogItem, GiwaRedemption, HexAddress, UnsignedAdminTransaction } from "./types"
 import { BrandMark } from "../components/BrandMark"
@@ -37,7 +38,7 @@ function trimAmount(value: string) {
 }
 
 export function VaultOperationsPanel() {
-  const { operatorToken, wallet } = useGiwaAdmin()
+  const { auth, wallet } = useGiwaAdmin()
 
   const catalogQuery = useQuery({ queryKey: ["giwa", "catalog", "vault-admin"], queryFn: giwaApi.catalog })
   const marketQuery = useQuery({
@@ -47,8 +48,8 @@ export function VaultOperationsPanel() {
   })
   const pendingQuery = useQuery({
     queryKey: ["giwa", "admin-pending-redemptions"],
-    queryFn: () => giwaApi.admin.pendingRedemptions(operatorToken),
-    enabled: Boolean(operatorToken),
+    queryFn: () => giwaApi.admin.pendingRedemptions(auth),
+    enabled: auth.ready,
     refetchInterval: 30_000,
   })
 
@@ -69,7 +70,7 @@ export function VaultOperationsPanel() {
           <VaultCard
             key={product.productId}
             product={product}
-            operatorToken={operatorToken}
+            auth={auth}
             walletAddress={wallet.address}
             navBase={entry?.navBase ?? null}
             navUsd={entry?.navUsd ?? null}
@@ -133,7 +134,7 @@ function LimitField({
 
 function VaultCard({
   product,
-  operatorToken,
+  auth,
   walletAddress,
   navBase,
   navUsd,
@@ -142,7 +143,7 @@ function VaultCard({
   onSettled,
 }: {
   product: GiwaCatalogItem
-  operatorToken: string
+  auth: AdminAuth
   walletAddress: HexAddress | null
   navBase: number | null
   navUsd: number | null
@@ -203,8 +204,8 @@ function VaultCard({
   // Current on-chain limits (already de-scaled to human units by the server).
   const limitsQuery = useQuery({
     queryKey: ["giwa", "vault-limits", product.productId],
-    queryFn: () => giwaApi.admin.limits(operatorToken, product.productId),
-    enabled: expanded && Boolean(operatorToken && product.depositVaultAddress && product.redemptionVaultAddress),
+    queryFn: () => giwaApi.admin.limits(auth, product.productId),
+    enabled: expanded && auth.ready && Boolean(product.depositVaultAddress && product.redemptionVaultAddress),
     refetchInterval: 60_000,
   })
   const cur = limitsQuery.data?.limits
@@ -237,7 +238,7 @@ function VaultCard({
   ) {
     setActionError(null)
     try {
-      if (!operatorToken) throw new Error("Operator token must be entered at runtime")
+      if (!auth.ready) throw new Error("Operator token must be entered at runtime")
       if (!walletAddress) throw new Error("Connect the operator wallet first")
       setPhase("preparing")
       const { transaction } = await prepare()
@@ -288,11 +289,11 @@ function VaultCard({
     let claimed = false
     let hash: HexAddress | null = null
     try {
-      if (!operatorToken) throw new Error("Operator token must be entered at runtime")
+      if (!auth.ready) throw new Error("Operator token must be entered at runtime")
       if (!walletAddress) throw new Error("Connect the operator wallet first")
       const amount = payoutBaseAmount(row)
       setRow(row.requestId, "preparing", "")
-      const { transaction } = await giwaApi.admin.payout(operatorToken, row.requestId, amount.toString())
+      const { transaction } = await giwaApi.admin.payout(auth, row.requestId, amount.toString())
       claimed = true // the request is now SETTLING server-side
       setRow(row.requestId, "signing")
       hash = await sendPreparedTransaction(walletAddress, transaction)
@@ -301,7 +302,7 @@ function VaultCard({
       // verified on-chain payout.
       await afterConfirmedReceipt(hash, async () => undefined)
       setRow(row.requestId, "settling")
-      await giwaApi.admin.settle(operatorToken, row.requestId, hash)
+      await giwaApi.admin.settle(auth, row.requestId, hash)
       setRow(row.requestId, "completed")
       onSettled()
     } catch (error) {
@@ -313,7 +314,7 @@ function VaultCard({
       const safeToRelease = claimed && (!hash || message.includes("reverted"))
       if (safeToRelease) {
         try {
-          await giwaApi.admin.release(operatorToken, row.requestId)
+          await giwaApi.admin.release(auth, row.requestId)
         } catch {
           // stays SETTLING; the manual Release button below recovers it
         }
@@ -329,8 +330,8 @@ function VaultCard({
 
   async function releaseRow(row: GiwaRedemption) {
     try {
-      if (!operatorToken) throw new Error("Operator token must be entered at runtime")
-      await giwaApi.admin.release(operatorToken, row.requestId)
+      if (!auth.ready) throw new Error("Operator token must be entered at runtime")
+      await giwaApi.admin.release(auth, row.requestId)
       setRow(row.requestId, "idle", "")
       onSettled()
     } catch (error) {
@@ -379,7 +380,7 @@ function VaultCard({
       </button>
 
       {expanded && (
-        <>
+        <AdminWriteGroup className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         {/* Section A — deposit-asset withdrawal */}
         <div className="rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3">
@@ -413,7 +414,7 @@ function VaultCard({
                   setWithdrawPhase,
                   () =>
                     giwaApi.admin.withdraw(
-                      operatorToken,
+                      auth,
                       product.productId,
                       (withdrawTo.trim() || configuredAdminAddress || walletAddress || "") as string,
                       toBaseUnits(withdrawDefaultAmount(), paymentDecimals).toString(),
@@ -457,7 +458,7 @@ function VaultCard({
                   setFundPhase,
                   () =>
                     giwaApi.admin.liquidity(
-                      operatorToken,
+                      auth,
                       product.productId,
                       toBaseUnits(fundAmount, paymentDecimals).toString(),
                     ),
@@ -510,7 +511,7 @@ function VaultCard({
                   void runAction(
                     setDepLimitsPhase,
                     () =>
-                      giwaApi.admin.setDepositLimits(operatorToken, product.productId, {
+                      giwaApi.admin.setDepositLimits(auth, product.productId, {
                         minimumDeposit: resolveLimit(depMin, cur.deposit.minimumDeposit),
                         maxSupplyCap: resolveLimit(depCap, cur.deposit.maxSupplyCap),
                         vaultMintAllowance: resolveLimit(depAllow, cur.deposit.vaultMintAllowance),
@@ -543,7 +544,7 @@ function VaultCard({
                   void runAction(
                     setRedLimitsPhase,
                     () =>
-                      giwaApi.admin.setRedemptionLimits(operatorToken, product.productId, {
+                      giwaApi.admin.setRedemptionLimits(auth, product.productId, {
                         minimumRedeem: resolveLimit(redMin, cur.redemption.minimumRedeem),
                         vaultRedeemAllowance: resolveLimit(redAllow, cur.redemption.vaultRedeemAllowance),
                       }),
@@ -668,7 +669,7 @@ function VaultCard({
           </div>
         )}
       </div>
-        </>
+        </AdminWriteGroup>
       )}
     </section>
   )

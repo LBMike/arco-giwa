@@ -2,6 +2,9 @@ import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { AlertCircle, CheckCircle2, Clock, Loader2, RefreshCw, Send, ShieldAlert } from "lucide-react"
 import { giwaApi, type GiwaPriceHistoryPoint } from "./api"
+import { useAdminWriteAccess } from "./admin-context"
+import { useOnchainRole } from "./admin-roles"
+import type { AdminAuth } from "./api"
 import { GIWA_CHAIN_ID, GIWA_LIVE_REFETCH } from "./config"
 import { afterConfirmedReceipt, readPriceFeedState, readShareSupply, sendPreparedTransaction } from "./contracts"
 import { computeNavPrice, elapsedDays, fromAnswer, impliedAprPercent, impliedApyPercent, isStale, toAnswer, validateAnswer } from "./price-policy"
@@ -15,16 +18,19 @@ const STALENESS_PRESETS = [7, 30, 365] as const
 
 export function PriceFeedAdminPanel({
   product,
-  operatorToken,
+  auth,
   walletAddress,
   onConfirmed,
 }: {
   product: GiwaCatalogItem
-  operatorToken: string
+  auth: AdminAuth
   walletAddress: HexAddress | null
   onConfirmed?: () => void | Promise<void>
 }) {
   const priceFeed = product.priceFeedAddress
+  const { canWrite, readOnlyReason } = useAdminWriteAccess()
+  // Posting is signed by the connected wallet; the feed checks FEED_ADMIN_ROLE itself.
+  const feedRole = useOnchainRole(priceFeed ?? null, "FEED_ADMIN_ROLE", "price feed", walletAddress)
   const statusQuery = useQuery({
     queryKey: ["giwa", "price-feed", priceFeed],
     queryFn: () => readPriceFeedState(priceFeed as HexAddress),
@@ -45,8 +51,8 @@ export function PriceFeedAdminPanel({
   // operator-guarded monitoring endpoint — same queryKey as AdminMonitoring so the cache is shared.
   const monitoringQuery = useQuery({
     queryKey: ["giwa", "monitoring-vaults"],
-    queryFn: () => giwaApi.monitoring.vaults(operatorToken, GIWA_CHAIN_ID),
-    enabled: Boolean(operatorToken),
+    queryFn: () => giwaApi.monitoring.vaults(auth, GIWA_CHAIN_ID),
+    enabled: auth.ready,
   })
   // Previous posted price — same queryKey as the posting-history table below and the detail page.
   const historyQuery = useQuery({
@@ -104,7 +110,8 @@ export function PriceFeedAdminPanel({
 
   function baseDisabledReason(): string | null {
     if (!priceFeed) return "No price feed deployed for this product"
-    if (!operatorToken) return "Enter the operator token above"
+    if (!auth.ready) return "Enter the operator token above"
+    if (!canWrite) return readOnlyReason ?? "This operator cannot prepare price updates"
     if (busy) return "A transaction is in progress"
     return null
   }
@@ -127,7 +134,7 @@ export function PriceFeedAdminPanel({
     setPhase("ready")
     setPrepared(null)
     try {
-      if (!operatorToken) throw new Error("Enter the operator token above")
+      if (!auth.ready) throw new Error("Enter the operator token above")
       if (!priceFeed) throw new Error("This product has no deployed price feed")
       const tx = await build()
       setPrepared(tx)
@@ -140,7 +147,7 @@ export function PriceFeedAdminPanel({
   function prepareBaseline() {
     void runPrepare(
       "Set 1:1 baseline (price 1.0)",
-      async () => (await giwaApi.admin.price(operatorToken, product.productId, toAnswer(1).toString())).transaction,
+      async () => (await giwaApi.admin.price(auth, product.productId, toAnswer(1).toString())).transaction,
     )
   }
 
@@ -150,7 +157,7 @@ export function PriceFeedAdminPanel({
       `Update ${product.symbol} price to ${formatPrice(previewPrice)} (NAV ${nav} ${product.paymentAssetSymbol} ÷ ${trimNumber(sharesOutstanding as number, 4)} shares)`,
       async () => {
         if (previewBounds && !previewBounds.ok) throw new Error(previewBounds.reason ?? "Resulting price is out of bounds")
-        return (await giwaApi.admin.price(operatorToken, product.productId, previewAnswer.toString())).transaction
+        return (await giwaApi.admin.price(auth, product.productId, previewAnswer.toString())).transaction
       },
     )
   }
@@ -163,7 +170,7 @@ export function PriceFeedAdminPanel({
     }
     void runPrepare(
       `Set ${product.symbol} staleness window to ${formatDuration(seconds)}`,
-      async () => (await giwaApi.admin.setHealthyDiff(operatorToken, product.productId, String(seconds))).transaction,
+      async () => (await giwaApi.admin.setHealthyDiff(auth, product.productId, String(seconds))).transaction,
     )
   }
 
@@ -381,13 +388,18 @@ export function PriceFeedAdminPanel({
         <button
           type="button"
           onClick={() => void sign()}
-          disabled={!prepared || !walletAddress || busy}
+          disabled={!prepared || !walletAddress || busy || !canWrite || feedRole.status === "missing"}
           className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-control)] bg-[var(--color-arco-ink)] px-4 py-2.5 text-sm font-medium text-[var(--color-arco-on-dark)] disabled:opacity-50"
         >
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
           Sign with connected wallet
         </button>
         {!walletAddress && <FieldNote>Connect the Tier 2 operator wallet to sign.</FieldNote>}
+        {feedRole.status === "missing" && (
+          <p role="alert" className="mt-2 text-[11px] text-[var(--color-arco-down)]" data-testid="price-feed-role-missing">
+            {feedRole.message}
+          </p>
+        )}
 
         {phase !== "ready" && (
           <div className="mt-3 flex items-center gap-2 rounded-[var(--radius-control)] bg-[var(--color-arco-surface-muted)] p-3 text-sm">

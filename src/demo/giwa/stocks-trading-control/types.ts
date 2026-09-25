@@ -164,4 +164,9 @@ export type GiwaStocksTradingControlFeatureProps = {
   /** Client-side wait for a POST answer before the outcome is treated as unknown. */
   readonly commandTimeoutMs?: number
   readonly onSignInRequired?: () => void
+  /**
+   * From the host's GET /api/v1/admin/session: false when this operator lacks stocks:control, which
+   * disables starting a change here. Omitted: the page does not guess. The server decides either way.
+   */
+  readonly canControl?: boolean
 }

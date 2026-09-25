@@ -11,7 +11,7 @@ import {
   type GiwaMonitoringVault,
 } from "./api"
 import { GIWA_CHAIN_ID } from "./config"
-import { useGiwaAdmin } from "./GiwaAdminLayout"
+import { useGiwaAdmin } from "./admin-context"
 import { explorerAddress } from "./wallet"
 
 // v1 monitoring: aggregated on-the-fly from indexed events (no snapshots). Deposit/redeem
@@ -20,31 +20,31 @@ import { explorerAddress } from "./wallet"
 // and depositor-count-over-time arrive with block-timestamp indexing (v2).
 
 export default function GiwaAdminMonitoringPage() {
-  const { operatorToken } = useGiwaAdmin()
+  const { auth } = useGiwaAdmin()
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const overviewQuery = useQuery({
     queryKey: ["giwa", "monitoring-overview"],
-    queryFn: () => giwaApi.monitoring.overview(operatorToken, GIWA_CHAIN_ID),
-    enabled: Boolean(operatorToken),
+    queryFn: () => giwaApi.monitoring.overview(auth, GIWA_CHAIN_ID),
+    enabled: auth.ready,
     refetchInterval: 60_000,
   })
   const vaultsQuery = useQuery({
     queryKey: ["giwa", "monitoring-vaults"],
-    queryFn: () => giwaApi.monitoring.vaults(operatorToken, GIWA_CHAIN_ID),
-    enabled: Boolean(operatorToken),
+    queryFn: () => giwaApi.monitoring.vaults(auth, GIWA_CHAIN_ID),
+    enabled: auth.ready,
     refetchInterval: 60_000,
   })
   const detailQuery = useQuery({
     queryKey: ["giwa", "monitoring-detail", selectedId],
-    queryFn: () => giwaApi.monitoring.detail(operatorToken, GIWA_CHAIN_ID, selectedId as string),
-    enabled: Boolean(operatorToken && selectedId),
+    queryFn: () => giwaApi.monitoring.detail(auth, GIWA_CHAIN_ID, selectedId as string),
+    enabled: auth.ready && Boolean(selectedId),
     refetchInterval: 60_000,
   })
 
   return (
     <MonitoringView
-      hasToken={Boolean(operatorToken)}
+      hasToken={auth.ready}
       overview={overviewQuery.data ?? null}
       overviewLoading={overviewQuery.isLoading}
       overviewError={overviewQuery.isError ? errorText(overviewQuery.error) : null}

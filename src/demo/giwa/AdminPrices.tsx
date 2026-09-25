@@ -15,11 +15,11 @@ import {
   trimNumber,
 } from "./PriceFeedAdminPanel"
 import { fromAnswer, impliedApyPercent, isStale, SECONDS_PER_DAY } from "./price-policy"
-import { useGiwaAdmin } from "./GiwaAdminLayout"
+import { useGiwaAdmin } from "./admin-context"
 import type { GiwaCatalogItem, HexAddress } from "./types"
 
 export default function GiwaAdminPricesPage() {
-  const { operatorToken, wallet } = useGiwaAdmin()
+  const { auth, wallet } = useGiwaAdmin()
   const queryClient = useQueryClient()
   const catalogQuery = useQuery({ queryKey: ["giwa", "catalog", "admin"], queryFn: giwaApi.catalog })
   const [selectedId, setSelectedId] = useState("acapix")
@@ -40,7 +40,7 @@ export default function GiwaAdminPricesPage() {
         <PriceFeedAdminPanel
           key={selected.productId}
           product={selected}
-          operatorToken={operatorToken}
+          auth={auth}
           walletAddress={wallet.address ?? null}
           onConfirmed={async () => {
             // A NAV post confirmed. PRICE reads live on-chain (updates on the next refetch);

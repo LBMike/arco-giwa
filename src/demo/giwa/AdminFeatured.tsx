@@ -2,9 +2,10 @@ import { useState, type ReactNode } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Loader2, Plus, Trash2 } from "lucide-react"
 import { giwaApi, hasDeploymentAddresses } from "./api"
+import type { AdminAuth } from "./api"
 import { vaultConfigOf, vaultDisplayName, vaultImageFor } from "./catalog"
 import { GiwaBrandMark } from "./components"
-import { useGiwaAdmin } from "./GiwaAdminLayout"
+import { AdminWriteGroup, useGiwaAdmin } from "./admin-context"
 import type { GiwaCatalogItem, GiwaFeaturedCard } from "./types"
 
 // Products-page hero carousel manager. A small ordered collection (max 3) of DEPLOYED,
@@ -19,14 +20,14 @@ function errorText(error: unknown) {
 }
 
 export default function GiwaAdminFeaturedPage() {
-  const { operatorToken } = useGiwaAdmin()
+  const { auth } = useGiwaAdmin()
   // The catalog carries every vault (incl. hidden) so a featured card's identity still
   // resolves in this list even if its vault was later hidden from the investor products list.
   const catalogQuery = useQuery({ queryKey: ["giwa", "catalog", "admin"], queryFn: giwaApi.catalog })
   const featuredQuery = useQuery({
     queryKey: ["giwa", "featured", "admin"],
-    queryFn: () => giwaApi.admin.featured(operatorToken),
-    enabled: Boolean(operatorToken),
+    queryFn: () => giwaApi.admin.featured(auth),
+    enabled: auth.ready,
   })
   const products = catalogQuery.data ?? []
   const cards = featuredQuery.data ?? []
@@ -44,13 +45,15 @@ export default function GiwaAdminFeaturedPage() {
         </span>
       </section>
 
-      {!operatorToken ? (
+      {!auth.ready ? (
         <Card>
           <p className="text-sm text-[var(--color-arco-muted)]">Enter the operator token above to manage featured cards.</p>
         </Card>
       ) : (
         <>
-          <AddFeaturedCard products={products} cards={cards} operatorToken={operatorToken} />
+          <AdminWriteGroup>
+            <AddFeaturedCard products={products} cards={cards} auth={auth} />
+          </AdminWriteGroup>
 
           {featuredQuery.isLoading ? (
             <Card>
@@ -71,14 +74,15 @@ export default function GiwaAdminFeaturedPage() {
             </Card>
           ) : (
             cards.map((card, index) => (
-              <FeaturedCardRow
-                key={card.id}
-                card={card}
-                product={productById.get(card.productId)}
-                operatorToken={operatorToken}
-                neighborAbove={cards[index - 1]}
-                neighborBelow={cards[index + 1]}
-              />
+              <AdminWriteGroup key={card.id}>
+                <FeaturedCardRow
+                  card={card}
+                  product={productById.get(card.productId)}
+                  auth={auth}
+                  neighborAbove={cards[index - 1]}
+                  neighborBelow={cards[index + 1]}
+                />
+              </AdminWriteGroup>
             ))
           )}
         </>
@@ -92,11 +96,11 @@ export default function GiwaAdminFeaturedPage() {
 function AddFeaturedCard({
   products,
   cards,
-  operatorToken,
+  auth,
 }: {
   products: GiwaCatalogItem[]
   cards: GiwaFeaturedCard[]
-  operatorToken: string
+  auth: AdminAuth
 }) {
   const queryClient = useQueryClient()
   const featuredIds = new Set(cards.map((card) => card.productId))
@@ -113,7 +117,7 @@ function AddFeaturedCard({
     setError(null)
     setPhase("saving")
     try {
-      await giwaApi.admin.addFeatured(operatorToken, { productId, shown: false })
+      await giwaApi.admin.addFeatured(auth, { productId, shown: false })
       await queryClient.invalidateQueries({ queryKey: ["giwa", "featured"] })
       setProductId("")
       setPhase("idle")
@@ -187,13 +191,13 @@ function AddFeaturedCard({
 function FeaturedCardRow({
   card,
   product,
-  operatorToken,
+  auth,
   neighborAbove,
   neighborBelow,
 }: {
   card: GiwaFeaturedCard
   product: GiwaCatalogItem | undefined
-  operatorToken: string
+  auth: AdminAuth
   neighborAbove?: GiwaFeaturedCard
   neighborBelow?: GiwaFeaturedCard
 }) {
@@ -224,8 +228,8 @@ function FeaturedCardRow({
   async function swapWith(neighbor: GiwaFeaturedCard | undefined) {
     if (!neighbor) return
     await run(async () => {
-      await giwaApi.admin.saveFeatured(operatorToken, card.id, { position: neighbor.position })
-      await giwaApi.admin.saveFeatured(operatorToken, neighbor.id, { position: card.position })
+      await giwaApi.admin.saveFeatured(auth, card.id, { position: neighbor.position })
+      await giwaApi.admin.saveFeatured(auth, neighbor.id, { position: card.position })
     })
   }
 
@@ -297,7 +301,7 @@ function FeaturedCardRow({
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={() => void run(() => giwaApi.admin.saveFeatured(operatorToken, card.id, { about: about.trim() || null }))}
+          onClick={() => void run(() => giwaApi.admin.saveFeatured(auth, card.id, { about: about.trim() || null }))}
           disabled={phase === "saving" || overLimit}
           className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--color-arco-ink)] px-4 text-xs font-medium text-[var(--color-arco-on-dark)] disabled:opacity-50"
         >
@@ -308,7 +312,7 @@ function FeaturedCardRow({
         {card.shown ? (
           <button
             type="button"
-            onClick={() => void run(() => giwaApi.admin.saveFeatured(operatorToken, card.id, { shown: false }))}
+            onClick={() => void run(() => giwaApi.admin.saveFeatured(auth, card.id, { shown: false }))}
             disabled={phase === "saving"}
             className="inline-flex h-9 items-center rounded-md bg-[var(--color-arco-chip)] px-4 text-xs font-medium text-[var(--color-arco-text-soft)] disabled:opacity-50"
           >
@@ -317,7 +321,7 @@ function FeaturedCardRow({
         ) : (
           <button
             type="button"
-            onClick={() => void run(() => giwaApi.admin.saveFeatured(operatorToken, card.id, { shown: true }))}
+            onClick={() => void run(() => giwaApi.admin.saveFeatured(auth, card.id, { shown: true }))}
             disabled={phase === "saving"}
             className="inline-flex h-9 items-center rounded-md bg-[var(--color-arco-ink)] px-4 text-xs font-medium text-[var(--color-arco-on-dark)] disabled:opacity-50"
           >
@@ -328,7 +332,7 @@ function FeaturedCardRow({
         <button
           type="button"
           onClick={() => {
-            if (window.confirm(`Remove the featured card for ${name}?`)) void run(() => giwaApi.admin.removeFeatured(operatorToken, card.id))
+            if (window.confirm(`Remove the featured card for ${name}?`)) void run(() => giwaApi.admin.removeFeatured(auth, card.id))
           }}
           disabled={phase === "saving"}
           className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[var(--color-arco-border)] px-3 text-xs font-medium text-[var(--color-arco-down)] disabled:opacity-50"

@@ -71,7 +71,17 @@ function StocksAdminScopeOwner(props: GiwaStocksAdminFeatureProps) {
   const now = props.now ?? Date.now
   const [store] = useState(() => new StocksAdminStore({ ...props, now }))
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
-  const [section, setSection] = useState<StocksAdminSection>(props.initialSection ?? "overview")
+  const [localSection, setLocalSection] = useState<StocksAdminSection>(props.initialSection ?? "overview")
+  // A host navigation may own the section; the feature then only reports its own moves.
+  const section = props.section ?? localSection
+  const onSectionChange = props.onSectionChange
+  const setSection = useCallback(
+    (next: StocksAdminSection) => {
+      setLocalSection(next)
+      onSectionChange?.(next)
+    },
+    [onSectionChange],
+  )
   const clock = useTicker(now, 15_000)
 
   useCommitEffect(() => {
@@ -93,13 +103,14 @@ function StocksAdminScopeOwner(props: GiwaStocksAdminFeatureProps) {
       setSection("orders")
       store.selectOrder(orderId)
     },
-    [store],
+    [store, setSection],
   )
 
   return (
     <StocksAdminView
       snapshot={snapshot}
       section={section}
+      showSectionTabs={props.section === undefined}
       now={clock}
       onSectionChange={setSection}
       onLoad={(key) => store.load(key)}
@@ -116,6 +127,8 @@ function StocksAdminScopeOwner(props: GiwaStocksAdminFeatureProps) {
 export type StocksAdminViewProps = {
   snapshot: StocksAdminSnapshot
   section: StocksAdminSection
+  /** False when a host navigation shows the sections instead (defaults to true). */
+  showSectionTabs?: boolean
   now: number
   onSectionChange: (section: StocksAdminSection) => void
   onLoad: (key: ListResourceKey) => void
@@ -130,6 +143,7 @@ export type StocksAdminViewProps = {
 /** Pure view of a store snapshot (rendered directly by SSR tests). */
 export function StocksAdminView(props: StocksAdminViewProps) {
   const { snapshot, section, now } = props
+  const showTabs = props.showSectionTabs !== false
   const ids = useId()
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([])
   const rootRef = useRef<HTMLDivElement>(null)
@@ -203,8 +217,8 @@ export function StocksAdminView(props: StocksAdminViewProps) {
       {snapshot.access !== "ok" ? (
         <AccessPanel access={snapshot.access} onRetry={props.onRetryAccess} onSignInRequired={props.onSignInRequired} />
       ) : (
-        <div className="grid w-full min-w-0 gap-4 lg:grid-cols-[208px_minmax(0,1fr)]">
-          <div
+        <div className={showTabs ? "grid w-full min-w-0 gap-4 lg:grid-cols-[208px_minmax(0,1fr)]" : "w-full min-w-0"}>
+          {showTabs && <div
             role="tablist"
             aria-label="Stocks admin sections"
             className="grid min-w-0 grid-cols-2 gap-1 rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-1 shadow-[var(--shadow-control)] sm:flex sm:flex-wrap lg:flex-col lg:self-start"
@@ -235,12 +249,13 @@ export function StocksAdminView(props: StocksAdminViewProps) {
                 </button>
               )
             })}
-          </div>
+          </div>}
           <div
             ref={panelRef}
-            role="tabpanel"
+            role={showTabs ? "tabpanel" : "region"}
             id={`${ids}-panel-${section}`}
-            aria-labelledby={`${ids}-tab-${section}`}
+            aria-labelledby={showTabs ? `${ids}-tab-${section}` : undefined}
+            aria-label={showTabs ? undefined : SECTIONS[activeIndex]?.label}
             tabIndex={0}
             className={`min-w-0 rounded-[var(--radius-card)] ${FOCUS_RING}`}
           >

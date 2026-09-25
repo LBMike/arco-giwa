@@ -1,5 +1,7 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, Outlet, useLocation } from "react-router-dom"
+import { GiwaAdminContext } from "./admin-context"
+import { operatorTokenAuth } from "./api"
 import { AdminNotice } from "./components"
 import {
   GIWA_ADMIN_CONFIG_ROUTE,
@@ -25,26 +27,17 @@ function storedOperatorToken() {
   return window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? ""
 }
 
-type GiwaAdminContextValue = {
-  operatorToken: string
-  setOperatorToken: (value: string) => void
-  clearOperatorToken: () => void
-  wallet: ReturnType<typeof useGiwaWallet>
-}
-
-const GiwaAdminContext = createContext<GiwaAdminContextValue | null>(null)
-
-export function useGiwaAdmin() {
-  const context = useContext(GiwaAdminContext)
-  if (!context) throw new Error("useGiwaAdmin must be used inside GiwaAdminLayout")
-  return context
-}
+// Pages read credentials through admin-context; kept here for existing imports.
+export { useGiwaAdmin } from "./admin-context"
 
 export function GiwaAdminLayout() {
   const wallet = useGiwaWallet()
   const wasConnected = useRef(wallet.connected)
   const { pathname } = useLocation()
   const [operatorToken, setOperatorToken] = useState(storedOperatorToken)
+  // Legacy mode: the shared token (honored by the server only with ADMIN_LEGACY_TOKEN_AUTH=1)
+  // grants every Vault admin route, so writes stay enabled here.
+  const auth = useMemo(() => operatorTokenAuth(operatorToken), [operatorToken])
 
   function persistToken(value: string) {
     setOperatorToken(value)
@@ -62,9 +55,7 @@ export function GiwaAdminLayout() {
   }, [wallet.connected])
 
   return (
-    <GiwaAdminContext.Provider
-      value={{ operatorToken, setOperatorToken: persistToken, clearOperatorToken, wallet }}
-    >
+    <GiwaAdminContext.Provider value={{ auth, canWrite: true, readOnlyReason: null, wallet }}>
       <div className="w-full space-y-6">
         <nav className="flex items-center gap-2 border-b border-[var(--color-arco-border)] pb-[6px]">
           {ADMIN_TABS.map((tab) => (

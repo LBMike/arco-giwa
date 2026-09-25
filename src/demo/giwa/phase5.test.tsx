@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { GIWA_LIVE_REFETCH, GIWA_PROVIDER_HIERARCHY, dynamicGiwaNetwork, GIWA_PUBLIC_RPC } from "./config"
-import { normalizeCatalog } from "./api"
+import { normalizeCatalog, operatorTokenAuth } from "./api"
 import { assertRequiredPaymentAsset } from "./catalog"
 import { GiwaCatalogTable, GiwaInvestPanel, ProductCatalogList } from "./components"
 import {
@@ -932,7 +932,7 @@ test("VaultConfigCard is collapsed by default (compact header + badges, form hid
   const configured = { ...product, productId: "abtc", symbol: "aBTC", vaultConfig: vaultConfig({ pinned: true, hidden: true }) }
   const html = renderToStaticMarkup(
     <QueryClientProvider client={client}>
-      <VaultConfigCard product={configured as never} operatorToken="t" />
+      <VaultConfigCard product={configured as never} auth={operatorTokenAuth("t")} />
     </QueryClientProvider>,
   )
   assert.match(html, /aBTC/) // symbol in the header
