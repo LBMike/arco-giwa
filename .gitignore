@@ -25,6 +25,7 @@ keystore*
 
 # Vite writes these temp files when loading a TS config — not source
 vite.config.ts.timestamp-*.mjs
+vite.admin.config.ts.timestamp-*.mjs
 
 indexer.log
 # transient render-snapshot harnesses (repo-root, outside tsconfig include; deleted after use)
