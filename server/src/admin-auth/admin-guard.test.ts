@@ -76,6 +76,7 @@ const KNOWN = [
   'GET /api/v1/admin/stocks/orders/:id',
   'GET /api/v1/admin/stocks/reconciliations',
   'GET /api/v1/admin/stocks/audit',
+  'GET /api/v1/admin/stocks/held',
   'GET /api/v1/admin/stocks/runtime',
   'GET /api/v1/admin/stocks/trading-control',
   'POST /api/v1/admin/stocks/trading-control',

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { ensure, PROFILE, StocksError, validateActor, type Actor, type Operator } from './contracts.js';
 import { reconcileStocks, type CoveragePort } from './reconciliation.js';
 import { StocksService } from './service.js';
+import { parseHeldQuery, readHeldPayments } from './held.js';
 export type StocksPluginOptions = {
     service: StocksService;
     resolveActor?: (request: FastifyRequest) => Promise<Actor | null>;
@@ -93,4 +94,6 @@ export async function stocksPlugin(app: FastifyInstance, options: StocksPluginOp
             id: string;
         };
     }>('/api/v1/admin/stocks/orders/:id', async (r) => { await operator(r); const detail = await s.repo.adminOrder(r.params.id); ensure(detail, 'ORDER_NOT_FOUND', 404); return envelope(detail); });
+    // Read-only: payments and escrows the observer held without creating an order, newest first, one page per call.
+    app.get('/api/v1/admin/stocks/held', async (r) => { await operator(r); return envelope(await readHeldPayments(s.repo, parseHeldQuery(r.query))); });
 }
