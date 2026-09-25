@@ -11,6 +11,22 @@ export function endpoint(value: string, localHarness = false): URL {
   ensure(!url.username && !url.password && !url.hash && !url.search && (url.protocol === 'https:' || (localHarness && local && url.protocol === 'http:')), 'INVALID_STOCKS_ENDPOINT');
   return url;
 }
+/**
+ * A signer on the hosting platform's private network (e.g. a Render private service
+ * addressed as `http://arco-stocks-signer:4394`). Only a single DNS label with an
+ * explicit port qualifies: public names always contain a dot, IP literals and
+ * localhost are excluded. Bearer authentication still applies. RPC URLs never use this.
+ */
+export function isPrivateNetworkSignerUrl(url: URL): boolean {
+  return url.protocol === 'http:' && url.port !== '' && url.hostname !== 'localhost'
+    && /^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(url.hostname);
+}
+export function signerEndpoint(value: string, localHarness = false): URL {
+  const url = new URL(value);
+  if (!isPrivateNetworkSignerUrl(url)) return endpoint(value, localHarness);
+  ensure(!url.username && !url.password && !url.hash && !url.search, 'INVALID_STOCKS_ENDPOINT');
+  return url;
+}
 export function httpStocksRpc(url: string, localHarness = false, request: HttpFetch = fetch): JsonRpcTransport {
   const target = endpoint(url, localHarness);
   const readMethods = new Set(['eth_chainId', 'eth_getBlockByNumber', 'eth_getTransactionByHash', 'eth_getTransactionReceipt', 'eth_getCode', 'eth_getStorageAt', 'eth_call', 'eth_getLogs']);
@@ -28,7 +44,7 @@ export type ExternalSignerOptions = { url: string; authorization: string; deploy
 // This is an external signing-service client, never a wallet/key implementation.
 // A timeout is propagated without retry; the worker must use lookup(original ID).
 export function externalStocksSigner(options: ExternalSignerOptions): SignerPort & { probe(): Promise<void> } {
-  const base = endpoint(options.url, options.localHarness);
+  const base = signerEndpoint(options.url, options.localHarness);
   ensure(base.pathname === '/' && options.authorization.length > 0, 'INVALID_SIGNER_CONFIGURATION');
   const request = options.request ?? fetch;
   const expected = freezeManifest(options.manifest);

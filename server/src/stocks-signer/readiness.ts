@@ -44,7 +44,7 @@ function block(value: unknown, expectedNumber?: bigint): bigint {
   return number;
 }
 
-async function chainNonces(manifest: Manifest, rpc: JsonRpcTransport): Promise<{ checkpoint: bigint; finalized: bigint; pending: bigint }> {
+export async function chainNonces(manifest: Manifest, rpc: JsonRpcTransport): Promise<{ checkpoint: bigint; finalized: bigint; pending: bigint }> {
   const checkpointNumber = BigInt(manifest.checkpointNumber);
   const checkpointTag = `0x${checkpointNumber.toString(16)}`;
   if (await rpc('eth_chainId', []) !== '0x164ce') throw Error('SIGNER_READINESS_NETWORK_MISMATCH');
