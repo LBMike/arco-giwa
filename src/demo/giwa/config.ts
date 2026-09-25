@@ -30,6 +30,12 @@ export const GIWA_STOCKS_DEMO_MARKET = viteEnv.VITE_STOCKS_DEMO_MARKET === "true
 // Comma-separated operator wallet addresses allowed to SEE the GIWA admin page.
 // Visibility gate only — real enforcement is server requireOperator + on-chain FEED_ADMIN_ROLE.
 export const GIWA_ADMIN_ADDRESSES_RAW = viteEnv.VITE_GIWA_ADMIN_ADDRESSES || ""
+// Build-time address of the separate admin console (docs/admin-console.md). Set, the customer app's /admin, /admin/*
+// and /admin/stocks redirect there and the build leaves the legacy admin pages out of the bundle; unset (local demo),
+// the legacy in-app admin stays. Read as import.meta.env?.… rather than through viteEnv so that the build inlines the
+// value and drops the routes it rules out.
+export const GIWA_ADMIN_CONSOLE_URL: string | undefined =
+  (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_ADMIN_CONSOLE_URL || undefined
 
 export const giwaSepolia = defineChain({
   id: GIWA_CHAIN_ID,

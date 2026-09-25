@@ -11,6 +11,8 @@ const allowedSecretLikeViteKeys = new Set([
   // Public wallet addresses gating admin-page VISIBILITY only — real enforcement is the
   // server's requireOperator + on-chain FEED_ADMIN_ROLE (see src/demo/giwa/config.ts).
   "VITE_GIWA_ADMIN_ADDRESSES",
+  // Public address of the separate admin console, a build-time redirect target (docs/admin-console.md).
+  "VITE_ADMIN_CONSOLE_URL",
 ])
 
 const sourceDirs = ["src", "server", "scripts"]
