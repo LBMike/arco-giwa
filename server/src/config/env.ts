@@ -1,9 +1,10 @@
+import { parseAdminOperatorsEnv, type AdminOperator } from "../admin-auth/operators.js"
+
 const SERVER_ONLY_KEYS = [
   "DATABASE_URL",
   "DIRECT_URL",
   "INDEXER_RPC_URL",
   "AUTH_JWT_SECRET",
-  "ADMIN_OPERATOR_TOKEN",
 ] as const
 
 const FRONTEND_PUBLIC_KEYS = [
@@ -22,7 +23,12 @@ export type ServerEnv = {
   readonly directUrl: string
   readonly indexerRpcUrl: string
   readonly authJwtSecret: string
+  /** Legacy shared operator token ("" when unset); required and honored only when adminLegacyTokenAuth. */
   readonly adminOperatorToken: string
+  /** ADMIN_LEGACY_TOKEN_AUTH=1 re-enables x-operator-token on the Vault admin routes. */
+  readonly adminLegacyTokenAuth: boolean
+  /** ADMIN_OPERATORS: the Vault operator directory. Unset or [] denies every Vault admin route. */
+  readonly adminOperators: readonly AdminOperator[]
   readonly giwaChainId: number
   readonly indexerConfirmations: number
   readonly indexerMaxBlockRange: bigint
@@ -53,6 +59,25 @@ export function validateServerEnv(env: NodeJS.ProcessEnv): ServerEnv {
     if (key.includes("SECRET") || key.endsWith("_KEY")) {
       throw new Error(`${key} looks secret-like and must not be VITE_*`)
     }
+  }
+
+  const legacyTokenFlag = env.ADMIN_LEGACY_TOKEN_AUTH ?? ""
+  if (!["", "0", "1"].includes(legacyTokenFlag)) {
+    throw new Error("ADMIN_LEGACY_TOKEN_AUTH must be 1 (enabled) or 0/unset (disabled)")
+  }
+  const adminLegacyTokenAuth = legacyTokenFlag === "1"
+  if (adminLegacyTokenAuth && !env.ADMIN_OPERATOR_TOKEN) {
+    throw new Error("ADMIN_OPERATOR_TOKEN is required when ADMIN_LEGACY_TOKEN_AUTH=1")
+  }
+
+  let adminOperators: AdminOperator[]
+  try {
+    adminOperators = parseAdminOperatorsEnv(env.ADMIN_OPERATORS)
+  } catch {
+    // Never echo the configured value.
+    throw new Error(
+      'ADMIN_OPERATORS must be a JSON array of {"wallet","operatorId","permissions":["vault:read"|"vault:write"]} with unique wallets and ids',
+    )
   }
 
   const corsAllowedOrigins = parseCorsAllowedOrigins(env.CORS_ALLOWED_ORIGINS)
@@ -87,7 +112,9 @@ export function validateServerEnv(env: NodeJS.ProcessEnv): ServerEnv {
     directUrl: env.DIRECT_URL!,
     indexerRpcUrl: env.INDEXER_RPC_URL!,
     authJwtSecret: env.AUTH_JWT_SECRET!,
-    adminOperatorToken: env.ADMIN_OPERATOR_TOKEN!,
+    adminOperatorToken: env.ADMIN_OPERATOR_TOKEN ?? "",
+    adminLegacyTokenAuth,
+    adminOperators,
     giwaChainId,
     indexerConfirmations,
     indexerMaxBlockRange,
