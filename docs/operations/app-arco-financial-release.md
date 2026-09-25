@@ -131,10 +131,10 @@ npm run stocks:integration:prepare -- \
 
 1. 로컬 어드민 Stocks 화면의 Trading control에서 거래를 멈추고, Overview의 Unfinished orders가 0건인지 확인합니다. 운영자 중지는 DB에 저장되므로 Render에서도 그대로 유지됩니다.
 2. Render에 Secret File을 올리고 `STOCKS_CONFIG_PATH`, `STOCKS_SIGNER_TOKEN`만 먼저 넣습니다. `STOCKS_MODE`는 아직 `DISABLED`로 둡니다.
-3. Render Shell에서 읽기 전용 사전 검사를 돌립니다(`docs/contracts/stocks-preflight-v1.md`).
+3. Render Shell에서 읽기 전용 사전 검사를 돌립니다(`docs/contracts/stocks-preflight-v1.md`). DB, 체인, 서명기 연결을 확인하므로 서명기가 먼저 준비되어 있어야 합니다.
 
    ```sh
-   STOCKS_MODE=DEMO_TESTNET node scripts/stocks-preflight/run.mjs --online
+   STOCKS_MODE=DEMO_TESTNET STOCKS_AUTODISPATCH=1 node scripts/stocks-preflight/run.mjs --online
    ```
 
 4. 로컬 데모의 API(4493)를 끕니다. 같은 DB를 두 곳에서 관찰·정산하지 않게 하기 위해서입니다. B라면 서명기만 켜 둡니다.
