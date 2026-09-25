@@ -13,7 +13,15 @@ type Route = "catalog" | "quote" | "sell-quote" | "order" | "sell-order" | "orde
 const PROFILE = { profile: "DEMO_TESTNET", valuePolicy: "TEST_VALUE_ONLY", brokerMode: "MOCK_BROKER", chainId: 91342, priceSource: "FIXED_MOCK_PRICE" }
 const QUANTITY = /^(0|[1-9]\d*)(\.\d+)?$/
 
-export type FakeCatalogMode = "registered" | "not-registered" | "not-activated" | "invalid"
+export type FakeCatalogMode = "registered" | "not-registered" | "not-activated" | "invalid" | "direct"
+
+/** The contracts the "direct" catalog publishes (platform tUSDC; the rest are fixture addresses). */
+export const DIRECT_CONTRACTS = Object.freeze({
+  cashToken: "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+  fundingVault: "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  stockToken: "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+  redemptionEscrow: "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+} as const)
 
 type Held = { route: Route; release: () => void }
 
@@ -110,6 +118,19 @@ export function createFakeStocksServer(options: FakeStocksServerOptions = {}) {
     }
     if (method === "GET" && path === "/api/v1/stocks/catalog") {
       if (catalogMode === "invalid") return { route: "catalog", response: json(200, { ...PROFILE, instruments: [{ symbol: "NVDA", quantityScale: 9, price: 120, priceSource: "FIXED_MOCK_PRICE", orderCapability: "CHECK_PAUSE_AT_ORDER" }], cashSymbol: "ARCO_TEST_USDC", deploymentId, observedAt: iso(nowMs()) }) }
+      if (catalogMode === "direct") {
+        return {
+          route: "catalog",
+          response: json(200, {
+            ...PROFILE,
+            instruments: [{ symbol: "NVDA", quantityScale: 9, price: "120.000000", priceSource: "FIXED_MOCK_PRICE", orderCapability: "CHECK_PAUSE_AT_ORDER", tokenAddress: DIRECT_CONTRACTS.stockToken }],
+            contracts: DIRECT_CONTRACTS,
+            cashSymbol: "tUSDC",
+            deploymentId,
+            observedAt: iso(nowMs()),
+          }),
+        }
+      }
       return {
         route: "catalog",
         response: json(200, {
@@ -127,15 +148,20 @@ export function createFakeStocksServer(options: FakeStocksServerOptions = {}) {
     const ready = () => (catalogMode === "not-activated" ? refuse("STOCKS_NOT_ACTIVATED", 503) : paused ? refuse("STOCKS_PAUSED", 503) : null)
 
     if (method === "POST" && (route === "quote" || route === "sell-quote")) {
-      const row = exactKeys(body, ["symbol", "quantity"])
+      // A Buy may be quoted for an exact cash amount: the quantity it buys at the fixture's price, rounded down.
+      const byCash = route === "quote" && body !== null && typeof body === "object" && Object.prototype.hasOwnProperty.call(body, "cashAmount")
+      const row = exactKeys(body, ["symbol", byCash ? "cashAmount" : "quantity"])
       if (row === null) return { route, response: refuse("UNEXPECTED_FIELDS") }
       if (typeof row.symbol !== "string") return { route, response: refuse("INVALID_SYMBOL") }
       const blocked = ready()
       if (blocked) return { route, response: blocked }
       if (row.symbol !== "NVDA") return { route, response: refuse("UNSUPPORTED_SYMBOL") }
-      const quantity = units(row.quantity, 9)
+      const paid = byCash ? units(row.cashAmount, 6) : null
+      if (typeof paid === "string") return { route, response: refuse(paid) }
+      const quantity = paid !== null ? (paid * 1000000000n) / 120000000n : units(row.quantity, 9)
       if (typeof quantity === "string") return { route, response: refuse(quantity) }
-      const cash = route === "quote" ? (quantity * 120000000n + 999999999n) / 1000000000n : (quantity * 120000000n) / 1000000000n
+      if (quantity <= 0n) return { route, response: refuse("QUOTE_TOO_SMALL") }
+      const cash = paid !== null ? paid : route === "quote" ? (quantity * 120000000n + 999999999n) / 1000000000n : (quantity * 120000000n) / 1000000000n
       if (cash <= 0n) return { route, response: refuse("ZERO_SELL_PAYOUT") }
       const created = nowMs()
       const quote = {

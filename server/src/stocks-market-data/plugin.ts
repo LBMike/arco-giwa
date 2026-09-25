@@ -75,6 +75,7 @@ export async function stocksMarketDataPlugin(app: FastifyInstance, { service, ma
     heartbeat.unref();
   });
   app.get(`${ROOT}/:symbol/profile`, async r => { query(r); return service.profile(symbol(r)); });
+  app.get(`${ROOT}/:symbol/dividend`, async r => { query(r); return service.dividend(symbol(r)); });
   app.get(`${ROOT}/:symbol/chart`, async r => {
     query(r, ['range']); const range = (r.query as { range?: unknown }).range;
     if (typeof range !== 'string' || !Object.prototype.hasOwnProperty.call(RANGE_RULES, range)) throw new InputError('INVALID_QUERY', 400);

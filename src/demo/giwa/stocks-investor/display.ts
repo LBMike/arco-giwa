@@ -24,7 +24,7 @@ export function formatPrice(value: string): string {
 }
 
 export function cashLabel(symbol: StocksCashSymbol): string {
-  return symbol === "ARCO_TEST_USDC" ? "ARCO_TEST_USDC (test cash)" : "ARCO_TEST_RLUSD (test cash)"
+  return `${symbol} (test cash)`
 }
 
 /** Absolute UTC, second precision: "2026-09-17 01:02:03 UTC". */

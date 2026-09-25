@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef } from "react"
 import { useGiwaStocksHost } from "./StocksHostProvider"
+import { signInFailureMessage } from "./sign-in-errors"
 
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect
 const focusRing = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
@@ -27,7 +28,7 @@ export function StocksSignIn() {
             : host.snapshot.error === "SESSION_EXPIRED" ? "Your Stocks session expired. Sign in again."
               : host.snapshot.error === "SESSION_REJECTED" ? "Your Stocks session is no longer valid. Sign in again."
                 : hostUnavailable ? "Stocks sign-in is not available on this page. Reload the page; if this continues, contact operations."
-                  : failed ? "Stocks sign-in could not be completed. Try again."
+                  : failed ? signInFailureMessage(host.snapshot.error)
                     : "Sign in to view your Stocks account."
   // Where the user's focus and pointer are. Only a section the user is working in may move focus.
   useEffect(() => {

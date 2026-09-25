@@ -3,11 +3,12 @@ import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 // server market contract (catalog, quotes, profile, chart) or the curated display metadata; nothing from the Figma capture.
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import type { MarketClient } from "./client"
-import type { Chart, Envelope, NvdaLiveSnapshot, Profile, Quote, Range, Security } from "./contracts"
+import type { Chart, Dividend, Envelope, NvdaLiveSnapshot, Profile, Quote, Range, Security } from "./contracts"
 import { RANGES } from "./contracts"
 import { curatedStock, type CuratedStock } from "./curated"
-import { assetSize, barRange, changeParts, compactDollars, dollars, exact, FEED_LABELS, marketSourceLabel, priceLabel, time } from "./display"
+import { assetSize, barRange, changeParts, compactDollars, dollars, exact, FEED_LABELS, marketSourceLabel, priceLabel, time, windowChange } from "./display"
 import { MarketChart, type ChartSelection } from "./MarketChart"
+import { scaled } from "./validate"
 import type { StocksSelection } from "./selection"
 import { StockLogo } from "./StockLogo"
 import { MarketStatus as Status, StatusBadge, Triangle, type Capabilities } from "./StocksMarketTable"
@@ -52,34 +53,37 @@ export function QuoteChange({ quote }: { quote: Quote | null }) {
   const text = amount && percent ? `$${amount.magnitude} (${percent.magnitude}%)` : amount ? `$${amount.magnitude}` : `${percent!.magnitude}%`
   if (lead.direction === "flat") return <span className="text-[var(--color-arco-text-soft)]">{text}</span>
   const up = lead.direction === "up"
-  return <span className={`inline-flex items-center gap-1 ${up ? "text-[var(--color-arco-up-text)]" : "text-[var(--color-arco-down)]"}`}><Triangle up={up} /><span className="sr-only">{up ? "상승 " : "하락 "}</span>{text}</span>
+  return <span className={`inline-flex items-center gap-1 ${up ? "text-[var(--color-arco-up-text)]" : "text-[var(--color-arco-down)]"}`}><Triangle up={up} /><span className="sr-only">{up ? "Up " : "Down "}</span>{text}</span>
 }
 
 export function PeriodTabs({ range, onRange }: { range: Range; onRange: (range: Range) => void }) {
-  return <div role="group" aria-label="차트 기간" className="inline-flex max-w-full flex-wrap gap-1 rounded bg-[var(--color-arco-stock-chart-chip)] p-0.5">
+  return <div role="group" aria-label="Chart period" className="inline-flex max-w-full flex-wrap gap-1 rounded bg-[var(--color-arco-stock-chart-chip)] p-0.5">
     {RANGES.map(value => <button type="button" key={value} aria-pressed={range === value} onClick={() => onRange(value)} className={`h-7 min-w-9 rounded px-2 text-sm font-medium ${FOCUS} ${range === value ? "bg-[var(--color-arco-surface)] text-[var(--color-arco-ink)] shadow-[var(--shadow-control)] ring-1 ring-inset ring-[var(--color-arco-ink)]" : "text-[var(--color-arco-chip-ink)] hover:text-[var(--color-arco-ink)]"}`}>{value}</button>)}
   </div>
 }
 
 type Quotes = ReadState<Envelope<Quote[]>>
 /** Price header (once per symbol; it stays while a range loads), period buttons outside anything keyed by range, then the chart. */
-export function PriceCard({ quote, quotes, selection, range, onRange, children, marketSession = null, liveConnection = "off" }: { quote: Quote | null; quotes: Quotes; selection: ChartSelection | null; range: Range; onRange: (range: Range) => void; children: ReactNode; marketSession?: NvdaLiveSnapshot["marketSession"] | null; liveConnection?: MarketLiveConnection }) {
+export function PriceCard({ quote, quotes, day = null, selection, range, onRange, children, marketSession = null, liveConnection = "off" }: { quote: Quote | null; quotes: Quotes; day?: Chart | null; selection: ChartSelection | null; range: Range; onRange: (range: Range) => void; children: ReactNode; marketSession?: NvdaLiveSnapshot["marketSession"] | null; liveConnection?: MarketLiveConnection }) {
   const demo = useDemoPresentation()
   const bar = selection?.bar ?? null
   const feed = selection?.feedDelay ?? (quotes.phase === "ready" ? quotes.value.feedDelay : "UNKNOWN")
-  return <section aria-label="시세와 차트" className="min-w-0 space-y-5 rounded-[32px] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-4 sm:p-6">
+  const suppressRoutineStale = demo && quote?.status === "STALE" && quote.price !== null
+  const dayChange = range === "1D" ? day ? windowChange(day, quote) : "—" : null
+  const dayChangeTone = dayChange?.startsWith("−") ? "text-[var(--color-arco-down)]" : dayChange?.startsWith("+") ? "text-[var(--color-arco-up-text)]" : "text-[var(--color-arco-text-soft)]"
+  return <section aria-label="Price and chart" className="min-w-0 space-y-5 rounded-[32px] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-4 sm:p-6">
     <div className="space-y-2" aria-live="polite" aria-atomic="true">
-      <p className="text-sm text-[var(--color-arco-chip-ink)]">{demo ? "Price · USD" : selection ? `${selection.interval} 구간 종가 · 시각은 봉 시작` : "기초 주식 시세 · USD"}</p>
+      <p className="text-sm text-[var(--color-arco-chip-ink)]">{demo ? "Price · USD" : selection ? `${selection.interval} bar close · time marks bar start` : "Underlying stock price · USD"}</p>
       <p title={dollars(bar?.close ?? quote?.price ?? null)} className="break-all text-[40px] font-medium leading-[1.05] tracking-[-0.03em] tabular-nums text-[var(--color-arco-ink)] sm:text-5xl">{priceLabel(bar?.close ?? quote?.price ?? null)}</p>
-      {/* Hidden (not removed) while a bar is picked: the change is against the previous close, not the picked bar. */}
-      <p className={`flex flex-wrap items-center gap-x-1.5 text-sm ${selection ? "invisible" : ""}`}><QuoteChange quote={quote} /><span className="text-[var(--color-arco-chip-ink)]">전일 종가 대비</span></p>
+      {/* The 1D return and line use the same baseline; the table labels its separate previous-close change. */}
+      <p className={`flex flex-wrap items-center gap-x-1.5 text-sm ${selection ? "invisible" : ""}`}>{dayChange === null ? <QuoteChange quote={quote} /> : <strong className={dayChangeTone}>{dayChange}</strong>}<span className="text-[var(--color-arco-chip-ink)]">{dayChange === null ? "vs. previous close" : day?.fallback === "PREVIOUS_SESSION" ? "이전 거래일 대비" : day?.seed ? "최근 24시간 대비" : "관측 구간 대비"}</span></p>
       <p className="text-xs text-[var(--color-arco-text-soft)]">{time(bar?.timestamp ?? quote?.sourceTimestamp ?? null)}<DemoDetails> · {FEED_LABELS[feed]}</DemoDetails></p>
-      {marketSession ? <p className="text-xs text-[var(--color-arco-text-soft)]">미국 주식시장 · {marketSession.state === "OPEN" ? "장중" : marketSession.state === "CLOSED" ? "장 마감" : "장 상태 확인 중"}</p> : null}
-      {liveConnection === "reconnecting" ? <p role="status" className="text-xs text-[var(--color-arco-text-soft)]">시세 연결을 다시 시도하고 있습니다</p> : null}
+      {!demo && marketSession ? <p className="text-xs text-[var(--color-arco-text-soft)]">US stock market · {marketSession.state === "OPEN" ? "Open" : marketSession.state === "CLOSED" ? "Closed" : "Session status unavailable"}</p> : null}
+      {liveConnection === "reconnecting" ? <p role="status" className="text-xs text-[var(--color-arco-text-soft)]">Reconnecting to market data…</p> : null}
     </div>
-    {/* This symbol's own quote status (STALE included), or the envelope's when the response has no row for it. Not the envelope's
-        when a row exists: one stale symbol marks the whole envelope STALE. Shown whatever state the chart below is in. */}
-    {quotes.phase !== "ready" ? <Status status={quotes.phase} /> : (quote?.status ?? quotes.value.status) !== "AVAILABLE" ? <Status status={quote?.status ?? quotes.value.status} /> : null}
+    {/* This symbol's own quote status, or the envelope's when the response has no row for it. A priced stale quote needs no
+        routine banner in the demo; loading, missing prices, and errors still explain unavailable values. */}
+    {quotes.phase !== "ready" ? <Status status={quotes.phase} /> : (quote?.status ?? quotes.value.status) !== "AVAILABLE" && !suppressRoutineStale ? <Status status={quote?.status ?? quotes.value.status} /> : null}
     <PeriodTabs range={range} onRange={onRange} />
     {children}
   </section>
@@ -93,9 +97,11 @@ function StatList({ rows }: { rows: StatRow[] }) {
     <dd title={row.title} className={`min-w-0 text-right text-sm text-[var(--color-arco-ink)] ${row.wrap ? "flex flex-wrap justify-end gap-1" : "truncate"}`}>{row.value}</dd>
   </div>)}</dl>
 }
-const KIND = { STOCK: "주식", ETF: "ETF" } as const
+const KIND = { STOCK: "Stock", ETF: "ETF" } as const
 function categories(curated: CuratedStock | null, securityType: string | null): string[] {
-  const parts = [curated ? KIND[curated.kind] : null, curated?.detail === "LEVERAGED_OR_INVERSE" ? "레버리지·인버스" : curated?.detail === "ADS" ? "ADS" : null, securityType]
+  const providerKind = securityType === "CS" ? "Common Stock" : securityType
+  const kind = curated?.kind === "STOCK" && providerKind === "Common Stock" ? providerKind : curated ? KIND[curated.kind] : null
+  const parts = [kind, curated?.detail === "LEVERAGED_OR_INVERSE" ? "Leveraged / Inverse" : curated?.detail === "ADS" ? "ADS" : null, providerKind]
   // The provider's type can repeat the curated kind (ETF · ETF): each label once.
   return [...new Set(parts.filter((item): item is string => Boolean(item)))]
 }
@@ -131,15 +137,13 @@ export function AboutCard({ security, profile }: { security: Security; profile: 
   const curated = curatedStock(security.symbol)
   const name = data?.name ?? security.name
   const kinds = categories(curated, data?.securityType ?? null)
-  const exchange = data?.exchange ?? security.exchange ?? null
   const isin = security.isin ?? curated?.isin ?? null
   const candidates: (StatRow | null)[] = [
     { label: "Underlying Asset Name", value: name, title: name },
     { label: "Underlying Asset Ticker", value: security.symbol },
     kinds.length ? { label: "Category", value: kinds.map(kind => <span key={kind} className="inline-flex h-5 items-center rounded-full bg-[var(--color-arco-chip)] px-1.5 text-xs font-medium text-[var(--color-arco-chip-ink)]">{kind}</span>), title: kinds.join(" · "), wrap: true } : null,
-    exchange ? { label: "Exchange", value: exchange } : null,
     data?.industry ? { label: "Industry", value: data.industry, title: data.industry } : null,
-    data?.website ? { label: "Website", value: <a href={data.website} target="_blank" rel="noopener noreferrer" className={`rounded-sm underline-offset-2 hover:underline ${FOCUS}`}>{host(data.website)}<span className="sr-only"> (새 창)</span></a>, title: data.website } : null,
+    data?.website ? { label: "Website", value: <a href={data.website} target="_blank" rel="noopener noreferrer" className={`rounded-sm underline-offset-2 hover:underline ${FOCUS}`}>{host(data.website)}<span className="sr-only"> (opens in a new tab)</span></a>, title: data.website } : null,
     isin ? { label: "ISIN", value: isin } : null,
   ]
   const rows = candidates.filter((row): row is StatRow => row !== null)
@@ -147,12 +151,12 @@ export function AboutCard({ security, profile }: { security: Security; profile: 
   return <section aria-labelledby={id} className={CARD}>
     <h2 id={id} className="text-2xl font-medium leading-[1.05] tracking-[-0.01em] text-[var(--color-arco-ink)]">About</h2>
     {/* "No provider description" only for a profile that loaded; loading, failed and unavailable reads say so in the status below. */}
-    <DemoDetails>{data && (data.description ? <div className="mt-3"><Description key={data.description} text={data.description} /></div> : <p className="mt-3 text-sm text-[var(--color-arco-text-soft)]">공급자 설명 없음</p>)}</DemoDetails>
+    <DemoDetails>{data && (data.description ? <div className="mt-3"><Description key={data.description} text={data.description} /></div> : <p className="mt-3 text-sm text-[var(--color-arco-text-soft)]">No provider description</p>)}</DemoDetails>
     <div className="mt-3 grid grid-cols-1 md:grid-cols-2 md:gap-x-6 lg:grid-cols-1 2xl:grid-cols-2"><StatList rows={rows.slice(0, half)} /><StatList rows={rows.slice(half)} /></div>
-    {demo && (profile.phase !== "ready" || profile.value.status !== "AVAILABLE") ? <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{profile.phase === "loading" ? "기업정보 불러오는 중…" : profile.phase === "error" ? "기업정보를 불러올 수 없습니다" : profile.value.status === "STALE" ? "마지막 확인 기업정보" : profile.value.status === "UNCONFIGURED" ? "기업정보 연결 준비 중" : "기업정보를 불러올 수 없습니다"}</p> : null}
-    <DemoDetails><section aria-label="기업정보 상태" className="mt-4 space-y-1 text-xs text-[var(--color-arco-text-soft)]">
-      <p role="status">{profile.phase === "loading" ? "기업정보 불러오는 중…" : profile.phase === "error" ? "기업정보를 불러올 수 없습니다" : profile.value.status === "STALE" ? "기업정보 · 마지막 확인 정보 · 오래된 데이터" : profile.value.status === "UNCONFIGURED" ? "기업정보 연결 준비 중" : profile.value.status === "UNAVAILABLE" ? "기업정보를 불러올 수 없습니다" : "기업정보 · 공급자 참조 데이터"}</p>
-      {profile.phase === "ready" && data && <p>기업정보 최근 수집: {time(profile.value.fetchedAt)} · 공급자 기준일: {data.sourceDate ?? "미확인"}. 시세 관측 시각과 별개입니다.</p>}
+    {demo && (profile.phase !== "ready" || profile.value.status !== "AVAILABLE") ? <p role="status" className="text-sm text-[var(--color-arco-text-soft)]">{profile.phase === "loading" ? "Loading company profile…" : profile.phase === "error" ? "Company profile unavailable" : profile.value.status === "STALE" ? "Last verified company profile" : profile.value.status === "UNCONFIGURED" ? "Company profile connection pending" : "Company profile unavailable"}</p> : null}
+    <DemoDetails><section aria-label="Company profile status" className="mt-4 space-y-1 text-xs text-[var(--color-arco-text-soft)]">
+      <p role="status">{profile.phase === "loading" ? "Loading company profile…" : profile.phase === "error" ? "Company profile unavailable" : profile.value.status === "STALE" ? "Company profile · last verified · stale data" : profile.value.status === "UNCONFIGURED" ? "Company profile connection pending" : profile.value.status === "UNAVAILABLE" ? "Company profile unavailable" : "Company profile · provider reference data"}</p>
+      {profile.phase === "ready" && data && <p>Company profile fetched: {time(profile.value.fetchedAt)} · provider data date: {data.sourceDate ?? "unknown"}. Separate from the quote observation time.</p>}
     </section></DemoDetails>
   </section>
 }
@@ -169,24 +173,66 @@ const price = (value: string | null): Pick<StatRow, "value" | "title"> => ({ val
  * Statistics: open/high/low of the latest observed trading session come only from a loaded AVAILABLE 1D chart (the same series the list's
  * sparkline uses); the quote supplies previous close and session volume, the profile the market cap. Missing values are "—".
  */
-export function StatisticsCard({ symbol, quote, quotes, profile, day }: { symbol: string; quote: Quote | null; quotes: Quotes; profile: ReadState<Envelope<Profile>>; day: Chart | null }) {
+export function StatisticsCard({ symbol, quote, quotes, profile, day, dividendContent }: { symbol: string; quote: Quote | null; quotes: Quotes; profile: ReadState<Envelope<Profile>>; day: Chart | null; dividendContent?: ReactNode }) {
   const id = useId()
   const span = day ? barRange(day) : null
   const data = profile.phase === "ready" ? profile.value.data : null
   const size = assetSize(curatedStock(symbol)?.kind === "ETF" || data?.securityType === "ETF", data, quote)
   const feed = FEED_LABELS[quotes.phase === "ready" ? quotes.value.feedDelay : "UNKNOWN"]
-  const source = quotes.phase === "ready" && quotes.value.provider ? marketSourceLabel(quotes.value) : "시세 공급원 확인 중"
+  const source = quotes.phase === "ready" && quotes.value.provider ? marketSourceLabel(quotes.value) : "Checking market data source"
+  const spanNote = !span ? "Shown when the 1D chart has a usable observed price line." : day?.fallback === "PREVIOUS_SESSION" ? `Previous trading session fallback · observed ${day.interval} bars` : `Recent 24 hours · observed ${day!.interval} bars${day!.history === "TRUNCATED" ? " · partial history" : ""}`
   return <section aria-labelledby={id} className={CARD}>
     <h2 id={id} className="text-2xl font-medium leading-[1.05] tracking-[-0.01em] text-[var(--color-arco-ink)]">Statistics</h2>
     <div className="mt-3 grid grid-cols-1 gap-y-4 md:grid-cols-2 md:gap-x-6 lg:grid-cols-1 2xl:grid-cols-2">
-      <StatGroup title="Underlying Asset Price" qualifier="1D" rows={[{ label: "Open", ...price(span?.open ?? null) }, { label: "High", ...price(span?.high ?? null) }, { label: "Low", ...price(span?.low ?? null) }]} note={span ? `최근 관측 거래일 · 반환된 1D ${day!.interval} 봉의 첫 시가·최고가·최저가${day!.history === "TRUNCATED" ? " · 일부 구간만 반환된 기준" : ""}` : "현재 1D 차트 관측값(봉 2개 이상)이 있을 때만 표시합니다."} />
-      <StatGroup title="Underlying Asset Statistics" rows={[{ label: size.label, value: compactDollars(size.value), title: size.title }, { label: "세션 거래량", title: quotes.phase === "ready" && quotes.value.provider === "ALPACA" ? marketSourceLabel(quotes.value) : undefined, value: quote?.sessionVolume == null ? "—" : `${exact(quote.sessionVolume)} 주` }, { label: "전일 종가", ...price(quote?.previousClose ?? null) }]} />
+      <StatGroup title="Underlying Asset Price" qualifier="1D" rows={[{ label: "Open", ...price(span?.open ?? null) }, { label: "High", ...price(span?.high ?? null) }, { label: "Low", ...price(span?.low ?? null) }]} note={spanNote} />
+      <StatGroup title="Underlying Asset Statistics" rows={[{ label: size.label, value: compactDollars(size.value), title: size.title }, { label: "Session Volume", title: quotes.phase === "ready" && quotes.value.provider === "ALPACA" ? marketSourceLabel(quotes.value) : undefined, value: quote?.sessionVolume == null ? "—" : `${exact(quote.sessionVolume)} shares` }, { label: "Previous Close", ...price(quote?.previousClose ?? null) }]} />
     </div>
+    {dividendContent}
     <DemoDetails><div className="mt-4 space-y-1 text-xs text-[var(--color-arco-text-soft)]">
-      <p>{source} · {feed} · 시세 관측: {time(quote?.sourceTimestamp ?? null)}. 주식 시세·기업 시가총액은 ARCO 토큰 가격·유동성·보유량이 아닙니다.</p>
-      {symbol === "NVDA" && <p>NVDA 모의 주문은 주문 패널에서 진행합니다. 표시 시세는 체결에 사용하지 않습니다.</p>}
+      <p>{source} · {feed} · quote observed: {time(quote?.sourceTimestamp ?? null)}. Stock prices and company market cap are separate from ARCO token price, liquidity, and holdings.</p>
+      {symbol === "NVDA" && <p>Place simulated NVDA orders in the order panel. Displayed market prices are not used for execution.</p>}
     </div></DemoDetails>
   </section>
+}
+
+function payoutFrequency(frequency: number): string {
+  if (frequency === 1) return "Annually"
+  if (frequency === 2) return "Semiannually"
+  if (frequency === 4) return "Quarterly"
+  if (frequency === 12) return "Monthly"
+  if (frequency === 52) return "Weekly"
+  if (frequency === 365) return "Daily"
+  return `${frequency} times per year`
+}
+
+/** The latest split-adjusted recurring payment annualized at the displayed share price, rounded to two percentage decimals. */
+function indicativeDividendYield(dividend: Dividend, quote: Quote | null): string | null {
+  const usable = quote?.status === "AVAILABLE" || (quote?.status === "STALE" && quote.observationAgeMs !== null && quote.observationAgeMs <= 7 * 86400000)
+  if (dividend.splitAdjustedCashAmount === null || quote?.symbol !== dividend.symbol || !usable || quote.price === null || quote.sourceTimestamp === null) return null
+  const price = scaled(quote.price)
+  if (price <= 0n) return null
+  const hundredths = (scaled(dividend.splitAdjustedCashAmount) * BigInt(dividend.frequency) * 10_000n + price / 2n) / price
+  return `${hundredths / 100n}.${String(hundredths % 100n).padStart(2, "0")}%`
+}
+
+export function DividendGroup({ dividend, quote }: { dividend: Dividend; quote: Quote | null }) {
+  const yieldLabel = indicativeDividendYield(dividend, quote)
+  const rows: StatRow[] = [
+    ...(yieldLabel === null ? [] : [{ label: "Indicative Dividend Yield", value: yieldLabel }]),
+    { label: "Payout Frequency", value: payoutFrequency(dividend.frequency) },
+    { label: "Latest Dividend Amount", value: dollars(dividend.cashAmount), title: `Ex-dividend date: ${dividend.exDividendDate}${dividend.payDate ? ` · Payment date: ${dividend.payDate}` : ""}` },
+  ]
+  return <div className="mt-4 min-w-0">
+    <StatGroup title="Underlying Asset Dividend" rows={rows} />
+  </div>
+}
+
+function StockDividendRead({ client, name, quote }: { client: MarketClient; name: string; quote: Quote | null }) {
+  const load = useCallback((signal: AbortSignal) => client.dividend(name, signal), [client, name])
+  // The shared free-plan request budget may be busy with list profiles; retry while this detail stays visible.
+  const response = useOwnedRead(JSON.stringify([client.baseUrl, name]), load, 60_000)
+  if (response.phase !== "ready" || response.value.status !== "AVAILABLE" || response.value.data?.symbol !== name) return null
+  return <DividendGroup dividend={response.value.data} quote={quote} />
 }
 
 export type SecurityDetailViewProps = {
@@ -204,15 +250,16 @@ export type SecurityDetailViewProps = {
   headingRef?: RefObject<HTMLHeadingElement>
   marketSession?: NvdaLiveSnapshot["marketSession"] | null
   liveConnection?: MarketLiveConnection
+  dividendContent?: ReactNode
 }
-export function SecurityDetailView({ security, profile, quote, quotes, capabilities, day, range, onRange, selection, chart, headingRef, marketSession, liveConnection }: SecurityDetailViewProps) {
+export function SecurityDetailView({ security, profile, quote, quotes, capabilities, day, range, onRange, selection, chart, headingRef, marketSession, liveConnection, dividendContent }: SecurityDetailViewProps) {
   const headingId = useId()
   const data = profile.phase === "ready" ? profile.value.data : null
   return <article aria-labelledby={headingId} className="min-w-0 space-y-4">
     <DetailHeader symbol={security.symbol} name={data?.name ?? security.name} logoUrl={data?.logoUrl ?? null} capabilities={capabilities} headingRef={headingRef} headingId={headingId} />
-    <PriceCard quote={quote} quotes={quotes} selection={selection} range={range} onRange={onRange} marketSession={marketSession} liveConnection={liveConnection}>{chart}</PriceCard>
+    <PriceCard quote={quote} quotes={quotes} day={day} selection={selection} range={range} onRange={onRange} marketSession={marketSession} liveConnection={liveConnection}>{chart}</PriceCard>
     <AboutCard security={security} profile={profile} />
-    <StatisticsCard symbol={security.symbol} quote={quote} quotes={quotes} profile={profile} day={day} />
+    <StatisticsCard symbol={security.symbol} quote={quote} quotes={quotes} profile={profile} day={day} dividendContent={dividendContent} />
   </article>
 }
 
@@ -224,10 +271,11 @@ export function SecurityDetail({ client, security, quote, quotes, capabilities, 
   const heading = useRef<HTMLHeadingElement>(null)
   useDetailFocus(selection, heading, anchor, true)
   return <SecurityDetailView security={security} profile={profile} quote={quote} quotes={quotes} capabilities={capabilities} day={day} range={range} onRange={value => { setPicked(null); setRange(value) }} selection={picked} headingRef={heading} marketSession={marketSession} liveConnection={liveConnection}
-    chart={<ChartRead key={JSON.stringify([client.baseUrl, security.symbol, range])} client={client} name={security.symbol} range={range} onSeries={onSeries} onSelection={setPicked} />} />
+    dividendContent={curatedStock(security.symbol)?.kind === "STOCK" ? <StockDividendRead client={client} name={security.symbol} quote={quote} /> : null}
+    chart={<ChartRead key={JSON.stringify([client.baseUrl, security.symbol, range])} client={client} name={security.symbol} range={range} latestQuote={quote} onSeries={onSeries} onSelection={setPicked} />} />
 }
 
-function ChartRead({ client, name, range, onSeries, onSelection }: { client: MarketClient; name: string; range: Range; onSeries: (symbol: string, chart: Chart | null) => void; onSelection: (selection: ChartSelection | null) => void }) {
+function ChartRead({ client, name, range, latestQuote, onSeries, onSelection }: { client: MarketClient; name: string; range: Range; latestQuote: Quote | null; onSeries: (symbol: string, chart: Chart | null) => void; onSelection: (selection: ChartSelection | null) => void }) {
   const load = useCallback((signal: AbortSignal) => client.chart(name, range, signal), [client, name, range])
   const chart = useOwnedRead(JSON.stringify([client.baseUrl, name, range]), load, 60_000)
   // Once this owner's 1D read finishes, the list gets its series only if it is current (AVAILABLE, 2+ bars); a STALE,
@@ -237,9 +285,9 @@ function ChartRead({ client, name, range, onSeries, onSelection }: { client: Mar
   useEffect(() => {
     if (range !== "1D" || settled === null) return
     const data = settled !== "error" && settled.status === "AVAILABLE" ? settled.data : null
-    onSeries(name, data && data.bars.length >= 2 ? data : null)
+    onSeries(name, data && (data.bars.length >= 2 || data.fallbackBars.length >= 2 || (data.seed && data.bars.length >= 1)) ? data : null)
   }, [range, name, settled, onSeries])
-  return chart.phase === "ready" ? <MarketChart response={chart.value} onSelection={onSelection} /> : <div className="flex min-h-[220px] items-center sm:min-h-[300px]"><Status status={chart.phase} /></div>
+  return chart.phase === "ready" ? <MarketChart response={chart.value} latestQuote={latestQuote} onSelection={onSelection} /> : <div className="flex min-h-[220px] items-center sm:min-h-[300px]"><Status status={chart.phase} /></div>
 }
 
 /** Without a ready market catalog only NVDA (the tradable symbol) and the curated 40 count as known market-data securities. */
@@ -257,7 +305,7 @@ export function UnavailableDetail({ symbol, status, capabilities, selection, anc
   useDetailFocus(selection, heading, anchor, settled)
   return <article aria-labelledby={headingId} className="min-w-0 space-y-4">
     <DetailHeader symbol={symbol} name={curatedStock(symbol)?.name ?? symbol} logoUrl={null} capabilities={known ? capabilities : null} headingRef={heading} headingId={headingId} />
-    <section aria-label="시세와 차트" className={`${CARD} space-y-2`}>{status}{known ? null : <p className="text-sm text-[var(--color-arco-text-soft)]">{symbol}은 아직 시장정보 목록에서 확인되지 않은 종목입니다.</p>}</section>
+    <section aria-label="Price and chart" className={`${CARD} space-y-2`}>{status}{known ? null : <p className="text-sm text-[var(--color-arco-text-soft)]">{symbol} has not been verified in the market data catalog.</p>}</section>
   </article>
 }
 
@@ -267,8 +315,8 @@ export function NotFoundDetail({ symbol, selection, anchor }: { symbol: string; 
   const heading = useRef<HTMLHeadingElement>(null)
   useDetailFocus(selection, heading, anchor, true)
   return <article aria-labelledby={headingId} className={CARD}>
-    <h1 id={headingId} ref={heading} tabIndex={-1} className={`rounded-sm text-2xl font-medium text-[var(--color-arco-ink)] ${FOCUS}`}>종목을 찾을 수 없습니다</h1>
-    <p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">{symbol}은 서버 시장정보 목록에 없는 종목입니다. 목록에서 종목을 선택하세요.</p>
-    <button type="button" onClick={selection.closeDetail} className={`mt-4 inline-flex h-9 items-center rounded-lg border border-[var(--color-arco-border)] px-3 text-sm font-medium text-[var(--color-arco-ink)] ${FOCUS}`}>목록으로</button>
+    <h1 id={headingId} ref={heading} tabIndex={-1} className={`rounded-sm text-2xl font-medium text-[var(--color-arco-ink)] ${FOCUS}`}>Security not found</h1>
+    <p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">{symbol} is not in the server market data catalog. Select a security from the list.</p>
+    <button type="button" onClick={selection.closeDetail} className={`mt-4 inline-flex h-9 items-center rounded-lg border border-[var(--color-arco-border)] px-3 text-sm font-medium text-[var(--color-arco-ink)] ${FOCUS}`}>Back to list</button>
   </article>
 }

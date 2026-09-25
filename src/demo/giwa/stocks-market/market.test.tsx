@@ -3,9 +3,10 @@ import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { createMarketClient, normalizeApiBase, type MarketEventSourceFactory } from "./client"
 import { fixtureCatalog, fixtureChart, fixtureEnvelope, fixtureMarketFetch, fixtureProfile, fixtureQuote } from "./fixtures"
-import { decimal, envelope, parseCatalog, parseChart, parseNvdaLiveSnapshot, parseProfile, parseQuotes, safeLogo } from "./validate"
+import { decimal, envelope, parseCatalog, parseChart, parseDividend, parseNvdaLiveSnapshot, parseProfile, parseQuotes, safeLogo } from "./validate"
 import { chartPoints, dollars, windowChange } from "./display"
 import { MarketChart } from "./MarketChart"
+import { DemoPresentationContext } from "../demo-presentation"
 
 test("strict display context and bounded symbols reject malformed or mixed contracts", () => {
   assert.equal(envelope(fixtureEnvelope(fixtureCatalog()), parseCatalog).data?.securities.length, 2)
@@ -29,18 +30,28 @@ test("profile logo accepts only the matching symbol's same-API proxy, never remo
   for (const value of ["https://api.massive.com/icon?apiKey=secret", "//evil.invalid/icon", "/api/v1/stocks/market/AAPL/logo", "/api/v1/stocks/market/NVDA/logo?key=x"]) assert.throws(() => safeLogo(value, "https://api.fixture", "NVDA"))
   assert.throws(() => parseProfile({ ...fixtureProfile(), website: "javascript:alert(1)" }, "NVDA", "https://api.fixture"))
 })
+test("dividend contract keeps exact provider amounts and rejects malformed payments", async () => {
+  const row = { symbol: "NVDA", currency: "USD", cashAmount: "0.22", splitAdjustedCashAmount: "0.22", frequency: 4, exDividendDate: "2026-09-10", payDate: "2026-10-01" }
+  assert.deepEqual(parseDividend(row, "NVDA"), row)
+  assert.equal(parseDividend({ ...row, splitAdjustedCashAmount: null }, "NVDA").splitAdjustedCashAmount, null)
+  for (const bad of [{ symbol: "AAPL" }, { currency: "EUR" }, { cashAmount: 0.22 }, { cashAmount: "0" }, { splitAdjustedCashAmount: "-0.22" }, { frequency: 0 }, { frequency: 4.5 }, { exDividendDate: "2026-02-30" }, { payDate: "yesterday" }]) assert.throws(() => parseDividend({ ...row, ...bad }, "NVDA"))
+  const client = createMarketClient("https://api.fixture", async url => Response.json(url.endsWith("/NVDA/dividend") ? fixtureEnvelope(row) : { ...fixtureEnvelope(null, "UNAVAILABLE"), reason: "NOT_FOUND" }))
+  assert.equal((await client.dividend("NVDA", new AbortController().signal)).data?.cashAmount, "0.22")
+  assert.equal((await client.dividend("AAPL", new AbortController().signal)).data, null)
+})
 test("chart rejects wrong symbol/range, out-of-order/future bars and impossible OHLC", () => {
   const good = fixtureChart()
   assert.equal(parseChart(good, "NVDA", "1D").bars.length, 12)
   for (const bad of [{ ...good, symbol: "AAPL" }, { ...good, range: "1M" }, { ...good, bars: [...good.bars].reverse() }, { ...good, bars: [{ ...good.bars[0], close: "999" }] }, { ...good, bars: [{ ...good.bars[0], timestamp: "2099-01-01T00:00:00.000Z" }] }, { ...good, complete: false }]) assert.throws(() => parseChart(bad, "NVDA", "1D"))
 })
-test("returned-window change uses exact closes, not snapshot daily percentage; gaps are segmented", () => {
+test("returned-window change uses exact closes, not snapshot daily percentage; 1D gaps carry the last price", () => {
   const chart = fixtureChart(); const bars = chart.bars; chart.bars = [bars[0], { ...bars[2], close: "187" }]
   assert.equal(windowChange(chart), "+10.00%")
   assert.notEqual(windowChange(chart), `${fixtureQuote().changePercent}%`)
-  assert.deepEqual(chartPoints(chart).map(p => p.segment), [0, 0], "nearby observed closes can form one line without an invented bar")
+  assert.ok(chartPoints(chart).length > chart.bars.length, "the display grid fills intermediate 5-minute slots")
+  assert.ok(chartPoints(chart).every(point => point.segment === 0), "one continuous 1D line")
   chart.bars = [bars[0], bars[4]]
-  assert.deepEqual(chartPoints(chart).map(p => p.segment), [0, 1], "a longer unobserved interval remains a visible gap")
+  assert.ok(chartPoints(chart).some(point => point.carried), "a sparse IEX interval carries its actual last price")
   chart.bars = chart.bars.slice(0, 1); assert.equal(windowChange(chart), "—")
 })
 test("historical closes stay connected across market closures without inventing observations", () => {
@@ -79,12 +90,24 @@ test("bounded transport terminates ignored-abort fetches, bad HTTP and oversized
 })
 test("keyless/empty/one/partial/stale charts have explicit distinct presentation without invented observations", () => {
   const keyless = renderToStaticMarkup(<MarketChart response={{ status: "UNCONFIGURED", reason: "NOT_CONFIGURED", fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: null }} />)
-  assert.match(keyless, /시세 연결 준비 중/); assert.doesNotMatch(keyless, /recharts|\$0/)
+  assert.match(keyless, /Chart · Market data connection pending/); assert.doesNotMatch(keyless, /recharts|\$0/)
   for (const kind of ["empty", "one", "partial", "stale"]) {
     const chart = fixtureChart(); if (kind === "empty") { chart.bars = []; chart.history = "EMPTY" }; if (kind === "one") chart.bars = chart.bars.slice(0, 1); if (kind === "partial") { chart.history = "TRUNCATED"; chart.complete = false }
     const html = renderToStaticMarkup(<MarketChart response={{ status: kind === "stale" ? "STALE" : "AVAILABLE", reason: null, fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: chart }} />)
-    assert.match(html, new RegExp(kind === "empty" ? "반환된 차트 관측값이 없습니다" : kind === "one" ? "관측값 1개" : kind === "partial" ? "일부 이력만 반환됨" : "마지막 확인 시세 · 오래된 데이터"))
+    assert.match(html, new RegExp(kind === "empty" ? "No chart observations returned" : kind === "one" ? "One observation" : kind === "partial" ? "Partial history returned" : "Last observed prices · stale data"))
   }
+})
+test("1D chart names its rolling window in Korean while preserving raw OHLCV values", () => {
+  const chart = fixtureChart()
+  const response = { status: "AVAILABLE", reason: null, fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: chart } as const
+  const full = renderToStaticMarkup(<MarketChart response={response} />)
+  const preview = renderToStaticMarkup(<DemoPresentationContext.Provider value><MarketChart response={response} /></DemoPresentationContext.Provider>)
+  for (const html of [full, preview]) assert.match(html, /최근 24시간/)
+  assert.match(full, /Exact OHLCV source data \(12 observations\)/)
+  assert.match(full, /Bar start \(New York\)/)
+  assert.match(full, /Underlying asset volume/)
+  assert.match(full, />1000<\/td>/)
+  assert.match(preview, /최근 24시간 주가 차트 · 방향키로 가격 확인/)
 })
 
 test("monotonic elapsed guard rejects late success before a delayed timeout callback can run", async () => {

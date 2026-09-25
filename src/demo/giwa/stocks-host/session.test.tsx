@@ -5,6 +5,8 @@ import { parseSiweMessage } from "viem/siwe"
 import { SiweMessage } from "siwe"
 import { createStocksHostSession, type HostContext, type MessageRequest } from "./session"
 import { investorSession, adminSession } from "./adapters"
+import { createWalletMessageSigner, type MessageWallet } from "./wallet-bridge"
+import { signInFailureMessage } from "./sign-in-errors"
 
 const A = "0x1111111111111111111111111111111111111111"
 const B = "0x2222222222222222222222222222222222222222"
@@ -236,6 +238,34 @@ test("malformed or mismatched nonce/verify responses and raw wallet errors never
   const f = fixture({ signing: async () => { throw new Error("https://rpc.secret/key-private") } })
   assert.equal(await f.controller.signIn(), null); assert.equal(f.controller.getSnapshot().error, "SIGN_IN_FAILED")
   assert.equal(f.calls.length, 1); f.controller.dispose()
+})
+
+test("wallet failures keep safe reasons without submitting verification or exposing provider details", async () => {
+  const sensitive = "https://rpc.secret/key-private signature=private"
+  const base: MessageWallet = { getAddresses: async () => [A], getChainId: async () => 91342, signMessage: async () => SIG as `0x${string}` }
+  const circular: { message: string; cause?: unknown } = { message: sensitive }; circular.cause = circular
+  const cases: [() => MessageWallet, string][] = [
+    [() => { throw new Error(sensitive) }, "SIGN_IN_WALLET_UNAVAILABLE"],
+    [() => ({ ...base, getAddresses: async () => [B] }), "SIGN_IN_WALLET_MISMATCH"],
+    [() => ({ ...base, getChainId: async () => 1 }), "SIGN_IN_WALLET_MISMATCH"],
+    [() => ({ ...base, getAddresses: async () => { throw new Error(sensitive) } }), "SIGN_IN_WALLET_UNAVAILABLE"],
+    ...[
+      [{ cause: { code: 4001, message: sensitive } }, "WALLET_REQUEST_REJECTED"],
+      [{ code: -32002, data: sensitive }, "WALLET_REQUEST_PENDING"],
+      [{ code: "4001", message: sensitive }, "WALLET_SIGNATURE_FAILED"],
+      [circular, "WALLET_SIGNATURE_FAILED"],
+    ].map(([error, code]) => [() => ({ ...base, signMessage: async () => { throw error } }), code] as [() => MessageWallet, string]),
+  ]
+  for (const [client, code] of cases) {
+    const f = fixture({ signing: createWalletMessageSigner(client) })
+    assert.equal(await f.controller.signIn(), null)
+    assert.equal(f.controller.getSnapshot().error, code)
+    assert.equal(f.controller.getSnapshot().session, null)
+    assert.equal(f.calls.length, 1, "only the nonce was requested; failed signing never reaches verify")
+    assert.doesNotMatch(signInFailureMessage(code), /rpc.secret|key-private|signature=private/)
+    f.controller.dispose()
+  }
+  assert.equal(signInFailureMessage(sensitive), "Stocks sign-in could not be completed. Try again.")
 })
 
 test("nonce and JWT binding/expiry are checked before publishing a session", async () => {

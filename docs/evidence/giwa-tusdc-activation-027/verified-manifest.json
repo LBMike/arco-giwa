@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 3,
+  "profile": "DEMO_TESTNET",
+  "chainId": 91342,
+  "deploymentId": "giwa-stocks-tusdc-f22bcaaade91db47b3b26ba66858af45abc12d7b81cf6bc527c1b60479ea5511",
+  "networkInstance": "giwa-tusdc-91342-36959627-874cf95da8005a77",
+  "checkpointNumber": "36959627",
+  "checkpointHash": "0x874cf95da8005a77e3644e37dfa03635535800c940075e29acac775aa9dfdf58",
+  "abiDigest": "a0d31f9e9c54e63b38215aa64b271ff08d72d16b3a893dfa64652e4eabdaf974",
+  "finalityPolicy": "FINALIZED",
+  "cashToken": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633",
+  "cashSymbol": "tUSDC",
+  "cashScale": 6,
+  "stockToken": "0x512ab500f2188d92a6e74d3df8fdbe7a07176f80",
+  "quantityScale": 9,
+  "fundingVault": "0xfee20054736ef175afadfda59e3c7250d28ec707",
+  "mintController": "0xf50cfed8725b433a70fb71fe499dd4feb211a41d",
+  "redemptionEscrow": "0x4552c08515b7d792eb8ae46ca267a52719ffc0bc",
+  "signerAddress": "0xfdcf58e2954988e5bf0446aaf1284a1069136f29",
+  "codeHashes": {
+    "0xfee20054736ef175afadfda59e3c7250d28ec707": "0xace86f7bf08f4bd1d97f55b1186c8b52772d159baf060dd9d2505d335564a28a",
+    "0xf50cfed8725b433a70fb71fe499dd4feb211a41d": "0x55ddf2c8382d1aa68ddff599272f46c6e3093e03525fd5b6dabdf30be226f251",
+    "0x512ab500f2188d92a6e74d3df8fdbe7a07176f80": "0xdcb5670f2ef0bdf55e5355bedc20630f91463967dadbb968c80e51ddf42972d5",
+    "0x4552c08515b7d792eb8ae46ca267a52719ffc0bc": "0xa6e1b604b955c10e043abc3e23070ad4e5d9308a723a4a2be17c5dd7420bbf78",
+    "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633": "0x4d9be648c5bf39973670d9f8b481d5d0b971e6a2db2deccc6b98cde21c5dd83e"
+  },
+  "cashIdentity": {
+    "kind": "ERC1967",
+    "implementation": "0x127b8beae9b6efceff5fbd24c314a4c3ea08e00b",
+    "implementationCodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+    "proxyAdmin": "0x848ae1a652db347f5a8a6c74cef3006d64e7d64e",
+    "proxyAdminCodeHash": "0x4e8a5693ecb0da4b8382ea10c4a2de307f3aefc5e894324ea538d420ee085cbc"
+  },
+  "restrictedTransfers": true,
+  "nonUpgradeable": false,
+  "stockContractsNonUpgradeable": true
+}

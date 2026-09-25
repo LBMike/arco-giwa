@@ -45,6 +45,8 @@ import { GIWA_PREPROD_ROUTE, giwaProductPath } from "./routes"
 import { GiwaProductSearch } from "./GiwaProductSearch"
 import { GiwaHeaderMenu } from "./GiwaHeaderMenu"
 import { BrandMark } from "../components/BrandMark"
+import { DigiFTReferenceRow } from "./DigiFTReferenceRow"
+import type { DigiFTReferenceAsset } from "./digift-reference-assets"
 import { ASSET_MANAGERS, ISSUERS, ISSUER_OPTIONS, aumLabel, apyLabel, productById } from "../data/products"
 import { ACAPIX_INSTANT_FEES } from "../data/acapix-detail"
 import { GiwaMultiSelect } from "./GiwaMultiSelect"
@@ -982,6 +984,7 @@ function legacyProfile(product: GiwaCatalogItem): {
 
 export function GiwaCatalogTable({
   rows,
+  referenceRows = [],
   selectedProductId,
   sortKey,
   sortDir,
@@ -991,6 +994,7 @@ export function GiwaCatalogTable({
   impliedApyByProductId,
 }: {
   rows: GiwaCatalogItem[]
+  referenceRows?: readonly DigiFTReferenceAsset[]
   selectedProductId: string
   sortKey: "aum" | "apy"
   sortDir: "asc" | "desc"
@@ -1045,7 +1049,7 @@ export function GiwaCatalogTable({
         <span className={`${CATALOG_HEAD} text-center`}>Network</span>
       </div>
 
-      {sorted.length === 0 ? (
+      {sorted.length === 0 && referenceRows.length === 0 ? (
         <div className="flex min-w-[1000px] flex-col items-center gap-3 border-b border-[var(--color-arco-border)] px-6 py-14 text-center">
           <p className="text-sm text-[var(--color-arco-muted)]">No products match your filters.</p>
         </div>
@@ -1061,10 +1065,27 @@ export function GiwaCatalogTable({
               onSelect={() => onSelect(product.productId)}
             />
           ))}
+          {referenceRows.map((asset) => (
+            <DigiFTReferenceRow
+              key={asset.id}
+              asset={asset}
+              gridColumnsClassName={CATALOG_COLS}
+              onSelect={() => onSelect(asset.id)}
+            />
+          ))}
         </div>
       )}
     </div>
   )
+}
+
+// These captured manager icons have matching local assets. Resolve only the
+// known source URLs so an admin-supplied replacement still takes precedence.
+const LOCAL_MANAGER_LOGOS: Readonly<Record<string, string>> = {
+  "https://pbs.twimg.com/profile_images/1800482990062989312/a59zSH1W_400x400.jpg": "/logos/bny-investments.jpg",
+  "https://pbs.twimg.com/profile_images/1145608301033533440/6vNXqPlJ_400x400.jpg": "/logos/umint.svg",
+  "https://img.rwa.xyz/content/entity-icons/128/color/franklin_templeton.png": "/logos/franklin.png",
+  "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTJErgRf7Zuo6Xesl4Y06aSYkJBZed-lfwF6XVyJaCEgtB8f9Y3fWRpp98&s=10": "/logos/aksia.svg",
 }
 
 function GiwaCatalogRow({
@@ -1089,7 +1110,7 @@ function GiwaCatalogRow({
   const vaultImage = vaultImageFor(product)
   const subtitle = config.category ? categoryTitle(config.category) : productType(product)
   const managerLabel = config.assetManagerName ?? am?.label ?? null
-  const managerLogo = config.assetManagerImageUrl ?? am?.logo
+  const managerLogo = LOCAL_MANAGER_LOGOS[config.assetManagerImageUrl ?? ""] ?? config.assetManagerImageUrl ?? am?.logo
   const issuerLabel = config.issuerName ?? iss?.label ?? null
   const issuerLogo = config.issuerImageUrl ?? iss?.logo
   const baseSymbol = baseAssetSymbol(product.paymentAssetSymbol)
@@ -1805,15 +1826,20 @@ export function GiwaHoldingsTable({
             const symbol = product?.symbol ?? String(positionValue(position, "symbol") ?? "Product")
             // Config-first identity — same resolvers as the products vault list (GiwaCatalogRow).
             const config = product ? vaultConfigOf(product) : undefined
+            // A holding outside the GIWA catalog (a Stocks token) names itself: displayName, categoryLabel, imageUrl.
+            const own = (key: string) => {
+              const value = positionValue(position, key)
+              return typeof value === "string" && value ? value : undefined
+            }
             const priceCell = priceCells?.[index] ?? null
             return (
               <div key={`${symbol}-${index}`} className={`relative grid h-[59px] ${HOLDING_COLS} items-center rounded-[var(--radius-row)] bg-[var(--color-arco-surface)] px-1.5`}>
                 <div className="flex items-center gap-2.5 pl-1">
-                  <GiwaBrandMark src={product ? vaultImageFor(product) : undefined} label={symbol} size={35} />
+                  <GiwaBrandMark src={product ? vaultImageFor(product) : own("imageUrl")} label={symbol} size={35} />
                   <div className="flex flex-col">
-                    <span className="text-base font-medium leading-5 text-[var(--color-arco-ink)]">{config?.displayName ?? symbol}</span>
+                    <span className="text-base font-medium leading-5 text-[var(--color-arco-ink)]">{config?.displayName ?? (product ? symbol : own("displayName") ?? symbol)}</span>
                     <span className="mt-1 w-fit rounded-full bg-[var(--color-arco-chip)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--color-arco-ink)] ring-[0.5px] ring-[var(--color-arco-border)]">
-                      {product ? (config?.category ? categoryTitle(config.category) : productType(product)) : "Position"}
+                      {product ? (config?.category ? categoryTitle(config.category) : productType(product)) : own("categoryLabel") ?? "Position"}
                     </span>
                   </div>
                 </div>

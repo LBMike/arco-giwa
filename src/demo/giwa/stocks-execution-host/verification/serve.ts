@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url"
 
 import { getAddress } from "viem"
 import { customerGateway } from "../../../../../scripts/customer-demo/gateway"
+import { customerDynamicEnvironment, customerUiFileSystem, customerUiRedirect } from "../../../../../scripts/customer-demo/ui-config"
 import { createSnapshotStreamHub } from "../../../../../server/src/stocks-market-data/live-stream"
 
 import type { Side } from "../../stocks-wallet/types"
@@ -117,6 +118,7 @@ async function main() {
   const customerAuth = process.argv.includes("--customer-auth")
   const customerTrades = process.argv.includes("--customer-trades")
   const localCustomer = process.argv.includes("--local-customer")
+  const dynamicEnvironmentId = customerDynamicEnvironment(process.argv.slice(2), customerReads, localCustomer)
   if (customerAuth && !customerReads) throw new FixtureError("CUSTOMER_READS_REQUIRED")
   if (customerTrades && !customerAuth) throw new FixtureError("CUSTOMER_AUTH_REQUIRED")
   if (localCustomer && (!customerReads || !customerAuth || !customerTrades || port !== 4392)) throw new FixtureError("INVALID_LOCAL_CUSTOMER_MODE")
@@ -316,6 +318,12 @@ async function main() {
           // Never serve server-only credential files through Vite.
           const decoded = decodeURIComponent(route)
           if (decoded.includes(".secrets") || /(?:^|[/.])\.env(?:[./]|$)/.test(decoded)) return sendJson(response, 403, { error: "FORBIDDEN" })
+          const customerEntry = customerUiRedirect(method, url, localCustomer)
+          if (customerEntry) {
+            response.writeHead(302, { location: customerEntry, "cache-control": "no-store" })
+            response.end()
+            return
+          }
           if (liveMarket && route.startsWith("/api/v1/stocks/market/")) {
             if (request.headers.host !== `${HOST}:${port}` || (request.headers.origin && request.headers.origin !== origin) || request.headers["sec-fetch-site"] === "cross-site") return sendJson(response, 403, { error: "FORBIDDEN" })
             if (method !== "GET") return sendJson(response, 405, { error: "METHOD_NOT_ALLOWED" })
@@ -378,15 +386,18 @@ async function main() {
   const server = await vite.createServer({
     root,
     configFile: `${root}vite.config.ts`,
-    // No .env file is read: the page receives its API base and wallet from the fixture, never from VITE_*.
+    // No .env file is read. The customer wallet receives only its explicit public project ID.
     envDir: fileURLToPath(new URL("./", import.meta.url)),
     // Keep Vite's dependency cache out of the shared node_modules symlink target.
     cacheDir: `${tmpdir()}/arco-giwa-stocks-verification-vite-cache`,
     appType: "mpa",
     clearScreen: false,
     logLevel: "warn",
-    ...(customerReads ? { define: { "import.meta.env.VITE_ARCO_API_BASE": JSON.stringify(origin) } } : {}),
-    server: { host: HOST, port, strictPort: true, open: false, hmr: { host: HOST, port }, fs: { deny: ["**/.env*", "**/*.{crt,pem}", "**/.git/**", "**/.secrets/**"] } },
+    ...(customerReads ? { define: {
+      "import.meta.env.VITE_ARCO_API_BASE": JSON.stringify(origin),
+      "import.meta.env.VITE_DYNAMIC_ENVIRONMENT_ID": JSON.stringify(dynamicEnvironmentId),
+    } } : {}),
+    server: { host: HOST, port, strictPort: true, open: false, hmr: { host: HOST, port }, fs: customerUiFileSystem(root) },
     plugins: [fixturePlugin],
   })
   await server.listen()

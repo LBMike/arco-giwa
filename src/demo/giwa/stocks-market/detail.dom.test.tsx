@@ -69,7 +69,7 @@ test("the /stocks aside keeps its tree position and order per mode; the order pa
     const order = () => [...element.querySelectorAll("[data-probe]")].map(node => node.getAttribute("data-probe"))
     const grid = () => element.querySelector("[data-probe]")!.parentElement!.parentElement!
     const heading = () => element.querySelector("article h1")
-    const back = () => [...element.querySelectorAll("button")].find(item => item.textContent === "Stocks & ETFs 목록으로") as HTMLButtonElement
+    const back = () => [...element.querySelectorAll("button")].find(item => item.textContent === "Stocks & ETFs list") as HTMLButtonElement
 
     assert.deepEqual(order(), ["sign-in", "notice", "trade"], "list: sign-in, session notice, then the order section")
     const baseline = { ...mounts }
@@ -108,7 +108,7 @@ test("the /stocks aside keeps its tree position and order per mode; the order pa
 
     // A symbol the market catalog does not list: the aside is told, so it does not offer the view-only card.
     await run(() => { router.navigate("/stocks?symbol=ZZZZ") })
-    assert.equal(heading()!.textContent, "종목을 찾을 수 없습니다")
+    assert.equal(heading()!.textContent, "Security not found")
     assert.equal(views[views.length - 1].unverified, true)
     assert.deepEqual(order(), ["trade", "sign-in", "notice"])
     assert.equal(calls.some(url => url.includes("ZZZZ")), false)
@@ -158,10 +158,10 @@ test("without a ready market catalog an unknown symbol is unverified: no view-on
         assert.ok(views.length > 0 && views.every(view => view.unverified === !known), `${where}: unverified=${!known} in every render (never a first-commit card)`)
         assert.equal(element.querySelectorAll('[data-probe="view-only"]').length, known && symbol !== "NVDA" ? 1 : 0, `${where}: view-only card`)
         const header = article.querySelector("header")!.textContent!
-        if (known) assert.match(header, /시장정보만|모의 주문|확인 중|상태 확인 불가/, `${where}: the order-capability badge stays`)
+        if (known) assert.match(header, /Market data only|Demo trading|Checking|Status unavailable/, `${where}: the order-capability badge stays`)
         else {
-          assert.doesNotMatch(header, /시장정보만|모의 주문|확인 중|상태 확인 불가|미활성/, `${where}: no badge for an unverified symbol`)
-          assert.match(article.textContent!, new RegExp(`${symbol}은 아직 시장정보 목록에서 확인되지 않은 종목입니다\\.`))
+          assert.doesNotMatch(header, /Market data only|Demo trading|Checking|Status unavailable|Inactive/, `${where}: no badge for an unverified symbol`)
+          assert.match(article.textContent!, new RegExp(`${symbol} has not been verified in the market data catalog\\.`))
         }
         assert.equal(calls.some(url => url.includes(`/${symbol}/`)), false, `${where}: nothing is requested for the symbol`)
       } finally { await act(async () => root.unmount()); router.dispose(); element.remove() }

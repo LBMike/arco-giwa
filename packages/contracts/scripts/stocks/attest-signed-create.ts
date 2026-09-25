@@ -1,10 +1,10 @@
 import { utils } from "ethers"
 import type { Artifacts } from "hardhat/types"
 import {
-  assertPreparedStep,
-  verifyPreparedDeployment,
-  type UnsignedStocksDeployment,
-} from "./prepare-deployment"
+  assertPreparedLocalStep,
+  verifyPreparedLocalDeployment,
+  type LocalUnsignedDeployment,
+} from "./local-plan"
 
 type ArtifactReader = Pick<Artifacts, "readArtifact" | "getBuildInfo">
 
@@ -16,12 +16,12 @@ export type SignedCreateFeeLimits = Readonly<{
 }>
 
 export type SignedCreateAttestationInput = Readonly<{
-  plan: UnsignedStocksDeployment
+  plan: LocalUnsignedDeployment
   /** Retained separately from the plan being checked. */
   expectedPlanDigest: string
   stepIndex: number
-  /** Fresh trusted chain, pending-nonce and finalized completed-prefix observations. */
-  observed: Parameters<typeof assertPreparedStep>[2]
+  /** Fresh trusted chain, pending-nonce and caller-reviewed canonical completed-prefix observations. */
+  observed: Parameters<typeof assertPreparedLocalStep>[2]
   signedTransaction: string
   limits: SignedCreateFeeLimits
 }>
@@ -64,8 +64,9 @@ function createIntrinsicGas(initCodeHex: string): bigint {
 /**
  * Attest one externally signed, original EIP-1559 CREATE without an RPC or key.
  * The caller retains the approved digest independently and supplies fresh
- * chain/pending-nonce and finalized prior-code observations from a trusted
- * source. This pure function cannot establish that those observations are real,
+ * chain/pending-nonce and canonical prior-code observations from a trusted
+ * source. The caller owns the inclusion/finality policy. This pure function
+ * cannot establish that those observations are real,
  * or that they remain current before send. It checks only CREATE intrinsic gas;
  * the executor must separately check base fee, estimate actual execution gas,
  * refresh chain state immediately before sending, and verify final receipts.
@@ -83,7 +84,7 @@ export async function attestSignedStocksCreate(
     )
     // Rebuild the complete plan from pinned build artifacts; its self-declared
     // digest alone is never authority for signed bytes.
-    const plan = await verifyPreparedDeployment(input.plan, artifacts)
+    const plan = await verifyPreparedLocalDeployment(input.plan, artifacts)
     requireValue(plan.planDigest === input.expectedPlanDigest)
     requireValue(
       Number.isInteger(input.stepIndex) &&
@@ -91,7 +92,7 @@ export async function attestSignedStocksCreate(
         input.stepIndex < plan.steps.length,
     )
     const step = plan.steps[input.stepIndex]
-    assertPreparedStep(plan, input.stepIndex, input.observed)
+    assertPreparedLocalStep(plan, input.stepIndex, input.observed)
     const raw = input.signedTransaction
     requireValue(
       typeof raw === "string" &&

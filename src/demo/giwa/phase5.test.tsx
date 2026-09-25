@@ -205,6 +205,18 @@ test("vault-list row is config-first: registered vault shows configured image/ca
   assert.doesNotMatch(builtin, /Acme/) // no config leakage
 })
 
+test("captured Funds managers use local logos while other configured logos remain untouched", () => {
+  const snapshot = JSON.parse(readFileSync("src/demo/giwa/investor-shell/verification/deployed-giwa.snapshot.json", "utf8"))
+  const core = normalizeCatalog(snapshot.catalog).filter(({ productId }) => ["beqty", "umint", "ibenji", "acapix"].includes(productId))
+  const html = renderToStaticMarkup(
+    <GiwaCatalogTable rows={core} selectedProductId="" sortKey="aum" sortDir="desc" onSelect={() => undefined} />,
+  )
+  for (const logo of ["bny-investments.jpg", "umint.svg", "franklin.png", "aksia.svg"]) {
+    assert.match(html, new RegExp(`src="/logos/${logo.replace(".", "\\.")}"`))
+  }
+  assert.doesNotMatch(html, /src="https:\/\/(?:pbs\.twimg\.com|img\.rwa\.xyz|encrypted-tbn0\.gstatic\.com)[^"]*" alt="(?:BNY Investments|UBS Asset Management|Franklin Templeton|Aksia)"/)
+})
+
 test("catalog normalization reads addresses from registry-shaped payloads", () => {
   const [normalized] = normalizeCatalog([
     {

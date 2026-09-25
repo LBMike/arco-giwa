@@ -46,6 +46,8 @@ export type GiwaStocksFeatureProps = {
    */
   detailOpen?: boolean
   onDetailChange?: (open: boolean) => void
+  /** The live NVDA price the page's market chart shows; the customer trade panel previews amounts at it. */
+  marketPrice?: string | null
 }
 
 const TABS: { id: GiwaStocksTab; label: string }[] = [
@@ -55,6 +57,8 @@ const TABS: { id: GiwaStocksTab; label: string }[] = [
 ]
 
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect
+/** How often the customer presentation re-reads a one-click trade's order while it settles. */
+export const INSTANT_POLL_MS = 2_000
 
 export type GiwaStocksFeatureViewProps = {
   state: StocksInvestorState
@@ -70,6 +74,8 @@ export type GiwaStocksFeatureViewProps = {
   access?: GiwaStocksAccess | null
   /** The detail's own "All stocks" control. False when the host page owns list/detail and renders its own way back. */
   showAllStocks?: boolean
+  /** The live NVDA price the page's market chart shows (customer presentation previews). */
+  marketPrice?: string | null
 }
 
 export function GiwaStocksFeatureView({
@@ -83,6 +89,7 @@ export function GiwaStocksFeatureView({
   renderOrderExecution = null,
   access = null,
   showAllStocks = true,
+  marketPrice = null,
 }: GiwaStocksFeatureViewProps) {
   const demo = useDemoPresentation()
   const interacted = useRef(false)
@@ -110,7 +117,7 @@ export function GiwaStocksFeatureView({
     <OrderExecutionSlotContext.Provider value={renderOrderExecution}>
       <UserInteractionContext.Provider value={interacted}>
         <StockInvestSurface symbol="NVDA" tab={tab === "orders" ? "ORDERS" : state.side} onTab={value => { if (value === "ORDERS") onTabChange("orders"); else { actions.setSide(value); onTabChange("stocks") } }}>
-          {switching ? <Notice tone="info">Updating session…</Notice> : tab === "orders" ? <OrdersView state={state} actions={actions} /> : <TradePanel state={state} actions={actions} />}
+          {switching ? <Notice tone="info">Updating session…</Notice> : tab === "orders" ? <OrdersView state={state} actions={actions} /> : <TradePanel state={state} actions={actions} marketPrice={marketPrice} />}
         </StockInvestSurface>
       </UserInteractionContext.Provider>
     </OrderExecutionSlotContext.Provider>
@@ -208,6 +215,7 @@ export function GiwaStocksFeature(props: GiwaStocksFeatureProps) {
   const { client, session, hostWallet, onSessionRejected, statusPollMs = 10_000, initialTab = "stocks", now, newIdempotencyKey, renderOrderExecution = null, access = null } = props
   const [controller] = useState(() => createStocksInvestorController({ now, newIdempotencyKey }))
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState)
+  const demo = useDemoPresentation()
   const actions = useMemo(() => actionsFor(controller), [controller])
   const [tab, setTab] = useState<GiwaStocksTab>(initialTab)
   // Controlled by the host page when it passes detailOpen (it owns list/detail and the way back); otherwise local.
@@ -282,6 +290,14 @@ export function GiwaStocksFeature(props: GiwaStocksFeatureProps) {
     if (!previous.shown || previous.generation !== state.generation || (refusedKey !== null && refusedKey !== previous.refusedKey)) actions.loadPortfolio()
   }, [actions, switching, verified, catalogReady, sellForm, refusedKey, state.generation])
 
+  // The demo presentation also shows the wallet's NVDA on the Buy side: read the portfolio once per session generation
+  // while the Buy form is on screen (the Sell form above re-reads on each appearance). A failed read is not retried here.
+  const buyForm = state.side === "BUY" && (state.attempt === null || state.attempt.status === "REJECTED")
+  useEffect(() => {
+    if (!demo || switching || !verified || !catalogReady || !buyForm || state.portfolio.status !== "idle") return
+    actions.loadPortfolio()
+  }, [actions, demo, switching, verified, catalogReady, buyForm, state.portfolio.status, state.generation])
+
   // A SELL order that has just been accepted reserves units: refresh the available quantity once. An attempt restored as
   // already accepted (a remount, or a new session generation after signing in again) is not a new acceptance.
   const generation = state.generation
@@ -297,20 +313,27 @@ export function GiwaStocksFeature(props: GiwaStocksFeatureProps) {
     if (previous.key !== attemptKey || previous.status !== "ACCEPTED") actions.loadPortfolio()
   }, [actions, switching, generation, attemptKey, attemptStatus, attemptSide])
 
-  // Re-read a displayed order that can still change, while the page is visible.
+  // Re-read a displayed order that can still change, while the page is visible. The customer presentation shows a one-click
+  // trade's result in the panel itself and settles on GIWA confirmation, so it follows the order every 2 s.
+  const pollMs = demo && statusPollMs > 0 ? Math.min(statusPollMs, INSTANT_POLL_MS) : statusPollMs
   const pollOrder = useCallback(
     (refresh: () => void) => {
-      if (statusPollMs <= 0) return () => undefined
+      if (pollMs <= 0) return () => undefined
       const timer = window.setInterval(() => {
         if (typeof document === "undefined" || document.visibilityState === "visible") refresh()
-      }, statusPollMs)
+      }, pollMs)
       return () => window.clearInterval(timer)
     },
-    [statusPollMs],
+    [pollMs],
   )
   const attemptOrder = state.attempt?.status === "ACCEPTED" ? state.attempt.order : null
   const attemptPolling = attemptOrder !== null && !orderIsTerminal(attemptOrder)
   useEffect(() => (attemptPolling ? pollOrder(actions.refreshAttemptOrder) : undefined), [attemptPolling, pollOrder, actions, state.generation])
+  // A completed one-click trade changed the wallet's NVDA: read the portfolio once more (Buy balance, Sell availability).
+  const completedOrder = demo && attemptOrder !== null && attemptOrder.state === "COMPLETED" ? attemptOrder.id : null
+  useEffect(() => {
+    if (completedOrder !== null && verified && !switching) actions.loadPortfolio()
+  }, [completedOrder, verified, switching, actions])
   const selectedPolling = tab === "orders" && state.selectedOrder !== null && !orderIsTerminal(state.selectedOrder.order)
   useEffect(() => (selectedPolling ? pollOrder(actions.refreshSelectedOrder) : undefined), [selectedPolling, pollOrder, actions, state.generation])
 
@@ -326,6 +349,7 @@ export function GiwaStocksFeature(props: GiwaStocksFeatureProps) {
       renderOrderExecution={renderOrderExecution}
       access={access}
       showAllStocks={!controlledDetail}
+      marketPrice={props.marketPrice ?? null}
     />
   )
 }

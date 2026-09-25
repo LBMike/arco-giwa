@@ -1,10 +1,12 @@
 import { utils } from "ethers"
 import type { Artifacts } from "hardhat/types"
 import {
-  assertPreparedStep,
-  verifyPreparedDeployment,
-  type UnsignedStocksDeployment,
-} from "./prepare-deployment"
+  assertPreparedLocalStep,
+  verifyPreparedLocalDeployment,
+  isExternalCashPlan,
+  type LocalUnsignedDeployment,
+} from "./local-plan"
+import { verifyExternalCashIdentity } from "./verify-external-cash"
 import { attestSignedStocksCreate, type SignedCreateFeeLimits } from "./attest-signed-create"
 import {
   readLocalCreateIntents,
@@ -109,18 +111,76 @@ async function network(context: LocalDeploymentContext) {
   )
 }
 
-/** Validates every recorded original against a single canonical finalized cutoff. */
-async function finalizedPrefix(
-  plan: UnsignedStocksDeployment,
+function externalCashFailure(error: unknown): never {
+  if (error instanceof Error) {
+    // Preserve only exact sanitized transport/cancellation codes, never provider details.
+    if (
+      [
+        "DEPLOYMENT_RPC_UNAVAILABLE",
+        "LOCAL_DEPLOYMENT_RPC_UNAVAILABLE",
+        "DEPLOYMENT_RPC_RESPONSE_INVALID",
+        "TUSDC_DEPLOYMENT_STOPPED",
+      ].includes(error.message)
+    )
+      throw Error(error.message)
+    if (error.name === "AbortError") throw Error("TUSDC_DEPLOYMENT_STOPPED")
+  }
+  throw Error("LOCAL_DEPLOYMENT_EXTERNAL_CASH_CHANGED")
+}
+
+async function externalCashPreflight(
+  context: LocalDeploymentContext,
+  plan: LocalUnsignedDeployment,
+) {
+  if (!isExternalCashPlan(plan)) return
+  try {
+    const expected = plan.input.network
+    const anchor = row(
+      await context.rpc("eth_getBlockByNumber", [hex(BigInt(expected.checkpointNumber)), false]),
+    )
+    check(
+      qty(anchor.number).toString() === expected.checkpointNumber &&
+        hash(anchor.hash) === expected.checkpointHash,
+      "LOCAL_DEPLOYMENT_EXTERNAL_CASH_CHANGED",
+    )
+    for (const head of ["finalized", "latest"]) {
+      const current = row(await context.rpc("eth_getBlockByNumber", [head, false]))
+      const tag = hex(qty(current.number))
+      check(
+        qty(current.number) >= BigInt(expected.checkpointNumber),
+        "LOCAL_DEPLOYMENT_EXTERNAL_CASH_CHANGED",
+      )
+      await verifyExternalCashIdentity(plan, context.rpc, tag)
+      const again = row(await context.rpc("eth_getBlockByNumber", [tag, false]))
+      check(
+        hash(again.hash) === hash(current.hash) && qty(again.number) === qty(current.number),
+        "LOCAL_DEPLOYMENT_EXTERNAL_CASH_CHANGED",
+      )
+    }
+  } catch (error) {
+    externalCashFailure(error)
+  }
+}
+
+/** Validates every recorded original against one pinned canonical cutoff. */
+async function canonicalPrefix(
+  plan: LocalUnsignedDeployment,
   entries: LocalCreateIntent[],
   context: LocalDeploymentContext,
+  head: "finalized" | "latest",
 ) {
-  const cutoff = row(await context.rpc("eth_getBlockByNumber", ["finalized", false]))
+  const cutoff = row(await context.rpc("eth_getBlockByNumber", [head, false]))
   const cutoffNumber = qty(cutoff.number),
     cutoffHash = hash(cutoff.hash),
     tag = hex(cutoffNumber)
-  const completed: Parameters<typeof assertPreparedStep>[2]["completed"] = []
+  const completed: Parameters<typeof assertPreparedLocalStep>[2]["completed"] = []
   const blocks: { number: bigint; hash: string }[] = []
+  const originals: {
+    transactionHash: string
+    blockNumber: string
+    blockHash: string
+    transactionIndex: string
+  }[] = []
   let previous: { number: bigint; index: bigint } | undefined
   for (const [index, entry] of entries.entries()) {
     const step = plan.steps[index]
@@ -142,7 +202,12 @@ async function finalizedPrefix(
     )
     const number = qty(receipt.blockNumber),
       transactionIndex = qty(receipt.transactionIndex)
-    check(number <= cutoffNumber, "LOCAL_DEPLOYMENT_ORIGINAL_NOT_FINALIZED")
+    check(
+      number <= cutoffNumber,
+      head === "finalized"
+        ? "LOCAL_DEPLOYMENT_ORIGINAL_NOT_FINALIZED"
+        : "LOCAL_DEPLOYMENT_ORIGINAL_NOT_INCLUDED",
+    )
     check(
       hash(receipt.transactionHash) === entry.transactionHash &&
         hash(tx.hash) === entry.transactionHash &&
@@ -189,6 +254,12 @@ async function finalizedPrefix(
       "LOCAL_DEPLOYMENT_RUNTIME_CHANGED",
     )
     blocks.push({ number, hash: hash(block.hash) })
+    originals.push({
+      transactionHash: entry.transactionHash,
+      blockNumber: number.toString(),
+      blockHash: hash(block.hash),
+      transactionIndex: transactionIndex.toString(),
+    })
     completed.push({
       index,
       address: step.predictedAddress,
@@ -203,37 +274,130 @@ async function finalizedPrefix(
     )
   }
   check(
-    qty(row(await context.rpc("eth_getBlockByNumber", ["finalized", false])).number) >=
-      cutoffNumber,
-    "LOCAL_DEPLOYMENT_FINALITY_REGRESSED",
+    qty(row(await context.rpc("eth_getBlockByNumber", [head, false])).number) >= cutoffNumber,
+    head === "finalized"
+      ? "LOCAL_DEPLOYMENT_FINALITY_REGRESSED"
+      : "LOCAL_DEPLOYMENT_INCLUSION_REGRESSED",
   )
-  return completed
+  return {
+    completed,
+    inclusionCutoff: { number: cutoffNumber.toString(), hash: cutoffHash },
+    originals,
+  }
 }
 
 export async function inspectLocalDeployment(context: LocalDeploymentContext) {
   const fees = limits(context.approval)
-  const plan = await verifyPreparedDeployment(context.plan, context.artifacts)
+  const plan = await verifyPreparedLocalDeployment(context.plan, context.artifacts)
   check(
     plan.planDigest === context.approval.expectedPlanDigest &&
       plan.input.deployer === address(context.expectedDeployer),
     "LOCAL_DEPLOYMENT_APPROVAL_MISMATCH",
   )
   const entries = await readLocalCreateIntents(context.journal)
+  check(entries.length <= plan.steps.length, "LOCAL_DEPLOYMENT_JOURNAL_BINDING_MISMATCH")
   await network(context)
-  const completed = await finalizedPrefix(plan, entries, context)
+  await externalCashPreflight(context, plan)
+  const { completed } = await canonicalPrefix(plan, entries, context, "finalized")
   await network(context)
-  if (entries.length === 5) return { plan, fees, entries, completed, next: null }
+  if (entries.length === plan.steps.length) return { plan, fees, entries, completed, next: null }
   const pendingNonce = qty(
     await context.rpc("eth_getTransactionCount", [plan.input.deployer, "pending"]),
   ).toString()
   const observed = { chainId: 91342, deployer: plan.input.deployer, pendingNonce, completed }
-  assertPreparedStep(plan, entries.length, observed)
+  assertPreparedLocalStep(plan, entries.length, observed)
   return { plan, fees, entries, completed, next: { index: entries.length, observed } }
+}
+
+/** External-cash CREATE sequencing only. These observations never authorize activation. */
+export async function inspectIncludedExternalCashDeployment(context: LocalDeploymentContext) {
+  const fees = limits(context.approval)
+  const plan = await verifyPreparedLocalDeployment(context.plan, context.artifacts)
+  check(isExternalCashPlan(plan), "LOCAL_DEPLOYMENT_INCLUDED_REQUIRES_EXTERNAL_CASH")
+  check(
+    plan.planDigest === context.approval.expectedPlanDigest &&
+      plan.input.deployer === address(context.expectedDeployer),
+    "LOCAL_DEPLOYMENT_APPROVAL_MISMATCH",
+  )
+  const entries = await readLocalCreateIntents(context.journal)
+  check(entries.length <= plan.steps.length, "LOCAL_DEPLOYMENT_JOURNAL_BINDING_MISMATCH")
+  const prefix = await includedPrefix(context, plan, entries)
+  const observed = {
+    chainId: 91342,
+    deployer: plan.input.deployer,
+    pendingNonce: (BigInt(plan.input.startingNonce) + BigInt(entries.length)).toString(),
+    completed: prefix.completed,
+  }
+  if (entries.length === plan.steps.length) return { plan, fees, entries, ...prefix, next: null }
+  assertPreparedLocalStep(plan, entries.length, observed)
+  return { plan, fees, entries, ...prefix, next: { index: entries.length, observed } }
+}
+
+async function includedPrefix(
+  context: LocalDeploymentContext,
+  plan: LocalUnsignedDeployment,
+  entries: LocalCreateIntent[],
+) {
+  check(isExternalCashPlan(plan), "LOCAL_DEPLOYMENT_INCLUDED_REQUIRES_EXTERNAL_CASH")
+  await network(context)
+  await externalCashPreflight(context, plan)
+  const prefix = await canonicalPrefix(plan, entries, context, "latest")
+  const tag = hex(BigInt(prefix.inclusionCutoff.number))
+  // Bind the account nonce and the existing proxy identity to the same cutoff as prior code.
+  const expectedNonce = BigInt(plan.input.startingNonce) + BigInt(entries.length)
+  check(
+    qty(await context.rpc("eth_getTransactionCount", [plan.input.deployer, tag])) ===
+      expectedNonce &&
+      qty(await context.rpc("eth_getTransactionCount", [plan.input.deployer, "pending"])) ===
+        expectedNonce,
+    "LOCAL_DEPLOYMENT_NONCE_CHANGED",
+  )
+  try {
+    await verifyExternalCashIdentity(plan, context.rpc, tag)
+  } catch (error) {
+    externalCashFailure(error)
+  }
+  await recheckIncludedBlocks(context, prefix)
+  await network(context)
+  return prefix
+}
+
+type IncludedPrefix = Awaited<ReturnType<typeof canonicalPrefix>>
+async function recheckIncludedBlocks(context: LocalDeploymentContext, prefix: IncludedPrefix) {
+  for (const block of [
+    prefix.inclusionCutoff,
+    ...prefix.originals.map((original) => ({
+      number: original.blockNumber,
+      hash: original.blockHash,
+    })),
+  ]) {
+    const again = row(await context.rpc("eth_getBlockByNumber", [hex(BigInt(block.number)), false]))
+    check(
+      qty(again.number).toString() === block.number && hash(again.hash) === block.hash,
+      "LOCAL_DEPLOYMENT_CANONICAL_HISTORY_CHANGED",
+    )
+  }
+}
+
+function unchangedIncludedOriginals(before: IncludedPrefix, after: IncludedPrefix) {
+  check(
+    JSON.stringify(before.originals) === JSON.stringify(after.originals),
+    "LOCAL_DEPLOYMENT_CANONICAL_HISTORY_CHANGED",
+  )
+  check(
+    BigInt(after.inclusionCutoff.number) >= BigInt(before.inclusionCutoff.number),
+    "LOCAL_DEPLOYMENT_INCLUSION_REGRESSED",
+  )
+  check(
+    before.inclusionCutoff.number !== after.inclusionCutoff.number ||
+      before.inclusionCutoff.hash === after.inclusionCutoff.hash,
+    "LOCAL_DEPLOYMENT_CANONICAL_HISTORY_CHANGED",
+  )
 }
 
 async function price(
   context: LocalDeploymentContext,
-  plan: UnsignedStocksDeployment,
+  plan: LocalUnsignedDeployment,
   index: number,
   fees: SignedCreateFeeLimits,
 ) {
@@ -318,6 +482,7 @@ export async function sendNextLocalDeployment(
   )
   // The final network/nonce read happens after gas and signature verification.
   await network(context)
+  await externalCashPreflight(context, plan)
   check(
     qty(await context.rpc("eth_getTransactionCount", [plan.input.deployer, "pending"])) ===
       BigInt(plan.steps[index].transaction.nonce),
@@ -338,6 +503,109 @@ export async function sendNextLocalDeployment(
     transactionHash,
   }
   await persistLocalCreateIntent(context.journal, entry)
+  try {
+    check(
+      hash(await context.rpc("eth_sendRawTransaction", [signed])) === transactionHash,
+      "LOCAL_DEPLOYMENT_BROADCAST_UNCERTAIN",
+    )
+  } catch {
+    throw Error("LOCAL_DEPLOYMENT_BROADCAST_UNCERTAIN_USE_RECOVER")
+  }
+  return entry
+}
+
+/**
+ * Sequence only the four reviewed external-cash CREATEs on successful L2 inclusion.
+ * The original finalized executor and activation verifier retain their policy.
+ */
+export async function sendNextIncludedExternalCashDeployment(
+  context: LocalDeploymentContext,
+  sign: (transaction: Record<string, unknown>) => Promise<string>,
+) {
+  const initial = await inspectIncludedExternalCashDeployment(context)
+  check(initial.next !== null, "LOCAL_DEPLOYMENT_ALREADY_COMPLETE")
+  const { plan, fees } = initial,
+    index = initial.next.index
+  const pricing = await price(context, plan, index, fees)
+  // Pricing can take time too: refresh every original immediately before asking for a signature.
+  const beforeSign = await inspectIncludedExternalCashDeployment(context)
+  check(beforeSign.next?.index === index, "LOCAL_DEPLOYMENT_STEP_ALREADY_CLAIMED")
+  unchangedIncludedOriginals(initial, beforeSign)
+  await recheckIncludedBlocks(context, initial)
+  const signed = await sign({
+    type: 2,
+    chainId: 91342,
+    nonce: plan.steps[index].transaction.nonce,
+    value: "0",
+    data: plan.steps[index].transaction.data,
+    gasLimit: pricing.gas.toString(),
+    maxPriorityFeePerGas: fees.maxPriorityFeePerGas.toString(),
+    maxFeePerGas: fees.maxFeePerGas.toString(),
+    accessList: [],
+  })
+  const fresh = await inspectIncludedExternalCashDeployment(context)
+  check(fresh.next?.index === index, "LOCAL_DEPLOYMENT_STEP_ALREADY_CLAIMED")
+  unchangedIncludedOriginals(beforeSign, fresh)
+  await recheckIncludedBlocks(context, beforeSign)
+  const refreshed = await price(context, plan, index, fees)
+  check(refreshed.gas <= pricing.gas, "LOCAL_DEPLOYMENT_GAS_ESTIMATE_CHANGED")
+  check(pricing.gas <= refreshed.blockGasLimit, "LOCAL_DEPLOYMENT_GAS_LIMIT")
+  const transactionHash = await attestSignedStocksCreate(
+    {
+      plan,
+      expectedPlanDigest: context.approval.expectedPlanDigest,
+      stepIndex: index,
+      observed: fresh.next.observed,
+      signedTransaction: signed,
+      limits: fees,
+    },
+    context.artifacts,
+  )
+  const envelope = utils.RLP.decode(`0x${signed.slice(4)}`) as string[]
+  const integer = (v: string) => BigInt(v === "0x" ? "0x0" : v)
+  check(
+    integer(envelope[4]) === pricing.gas &&
+      integer(envelope[2]) === fees.maxPriorityFeePerGas &&
+      integer(envelope[3]) === fees.maxFeePerGas,
+    "LOCAL_DEPLOYMENT_SIGNED_PRICING_CHANGED",
+  )
+  check(
+    qty(await context.rpc("eth_getBalance", [plan.input.deployer, "pending"])) >=
+      pricing.gas * fees.maxFeePerGas,
+    "LOCAL_DEPLOYMENT_GAS_BALANCE",
+  )
+  // Attestation, fees and balance reads can race a reorg. Rebuild the entire prefix afterward.
+  const beforeIntent = await inspectIncludedExternalCashDeployment(context)
+  check(beforeIntent.next?.index === index, "LOCAL_DEPLOYMENT_STEP_ALREADY_CLAIMED")
+  unchangedIncludedOriginals(fresh, beforeIntent)
+  await recheckIncludedBlocks(context, fresh)
+  const entry: LocalCreateIntent = {
+    version: 1,
+    planDigest: plan.planDigest,
+    genesisHash: context.approval.genesisHash,
+    deployer: plan.input.deployer,
+    index,
+    nonce: BigInt(plan.steps[index].transaction.nonce).toString(),
+    transactionHash,
+  }
+  await persistLocalCreateIntent(context.journal, entry)
+  // The journal intentionally contains the next original already. Revalidate the known prior
+  // prefix without reading that unresolved new entry. Any failure leaves a durable recovery
+  // barrier; it never permits another signature or a replacement transaction.
+  const beforeBroadcast = await includedPrefix(context, plan, beforeIntent.entries)
+  unchangedIncludedOriginals(beforeIntent, beforeBroadcast)
+  await recheckIncludedBlocks(context, beforeIntent)
+  check(
+    bytes(await context.rpc("eth_getCode", [plan.steps[index].predictedAddress, "pending"])) ===
+      "0x",
+    "LOCAL_DEPLOYMENT_ADDRESS_OCCUPIED",
+  )
+  check(
+    qty(await context.rpc("eth_getTransactionCount", [plan.input.deployer, "pending"])) ===
+      BigInt(plan.steps[index].transaction.nonce),
+    "LOCAL_DEPLOYMENT_NONCE_CHANGED",
+  )
+  await recheckIncludedBlocks(context, beforeBroadcast)
   try {
     check(
       hash(await context.rpc("eth_sendRawTransaction", [signed])) === transactionHash,

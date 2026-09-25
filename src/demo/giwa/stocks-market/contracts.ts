@@ -25,6 +25,8 @@ export type NvdaLiveSnapshot = {
   testnetExecution: { mode: "FIXED_MOCK_PRICE"; status: "CATALOG_ONLY" | "UNAVAILABLE"; unitPrice: string | null; quoteRequired: true }
 }
 export type Profile = { symbol: string; name: string; currency: "USD"; description: string | null; exchange: string | null; securityType: string | null; marketCap: string | null; sharesOutstanding?: string | null; aum?: string | null; aumAsOf?: string | null; issuerFundamentals?: { source: string; sourceUrl: string; asOf: string } | null; website: string | null; industry: string | null; logoUrl: string | null; sourceDate: string | null }
+/** Latest verified recurring cash payment; every money amount stays an exact decimal string. */
+export type Dividend = { symbol: string; currency: "USD"; cashAmount: string; splitAdjustedCashAmount: string | null; frequency: number; exDividendDate: string; payDate: string | null }
 export type Bar = { timestamp: string; open: string; high: string; low: string; close: string; volume: string }
-export type Chart = { symbol: string; currency: "USD"; range: Range; interval: "5m" | "1h" | "1d"; adjustedForSplits: true; from: string; to: string; bars: Bar[]; history: "RETURNED_WINDOW" | "TRUNCATED" | "EMPTY"; complete: boolean }
+export type Chart = { symbol: string; currency: "USD"; range: Range; interval: "5m" | "1h" | "1d"; adjustedForSplits: true; from: string; to: string; bars: Bar[]; seed: Bar | null; fallback: "PREVIOUS_SESSION" | null; fallbackBars: Bar[]; history: "RETURNED_WINDOW" | "TRUNCATED" | "EMPTY"; complete: boolean }
 export type MarketFetch = (url: string, init: RequestInit) => Promise<Response>

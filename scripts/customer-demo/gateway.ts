@@ -20,6 +20,10 @@ function publicRead(raw: string, method: string): boolean {
     || /^\/api\/v1\/(portfolio|activity|redemptions)\/0x[a-fA-F0-9]{40}$/.test(raw)
     || /^\/api\/v1\/faucet\/0x[a-fA-F0-9]{40}\/status$/.test(raw)
     || raw === "/api/v1/stocks/catalog"
+    // A direct order's progress, by the random key the wallet's own deposit or escrow carries (no session).
+    || /^\/api\/v1\/stocks\/direct\/0x4152434f44524354[0-9a-f]{48}$/.test(raw)
+    // A wallet's Stocks trades for its Portfolio activity (public chain facts, like /api/v1/activity/:wallet).
+    || /^\/api\/v1\/stocks\/activity\/0x[a-fA-F0-9]{40}$/.test(raw)
 }
 
 function privateRead(raw: string, method: string): boolean {
@@ -76,7 +80,8 @@ function validateRpc(text: string) {
   if (!calls.length || calls.length > 100 || calls.some(value => {
     if (!value || typeof value !== "object") return true
     const call = value as Record<string, unknown>
-    return call.jsonrpc !== "2.0" || typeof call.method !== "string" || !RPC_READS.has(call.method) || !Array.isArray(call.params)
+    // JSON-RPC 2.0 lets a call omit params, and viem does for eth_chainId and eth_blockNumber. Present params must be an array.
+    return call.jsonrpc !== "2.0" || typeof call.method !== "string" || !RPC_READS.has(call.method) || (call.params !== undefined && !Array.isArray(call.params))
   })) throw new GatewayError(403, "CUSTOMER_RPC_READ_ONLY")
 }
 

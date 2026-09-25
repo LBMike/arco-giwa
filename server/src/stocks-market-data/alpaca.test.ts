@@ -86,11 +86,15 @@ test('Alpaca chart supplies split adjustment/feed and marks pagination truncated
   const chart = await service.chart('NVDA', '1D'); assert.equal(chart.marketFeed, 'SIP'); assert.equal(chart.data!.history, 'TRUNCATED'); assert.equal(chart.data!.complete, false); assert.equal(chart.data!.bars[0].volume, '9007199254740993');
   await service.chart('NVDA', '1D'); assert.equal(calls, 1);
 });
-test('Alpaca 1D chart retains only the latest session when the market is closed', () => {
+test('Alpaca 1D chart separates rolling bars, pre-window seed and previous-session fallback', () => {
   const sunday = Date.parse('2026-09-20T18:00:00.000Z');
   const bar = (t: string, close: number) => ({ t, o: close, h: close + 1, l: close - 1, c: close, v: 100 });
   const result = alpacaChart(parseExactJson(JSON.stringify({ symbol: 'NVDA', bars: [bar('2026-09-17T18:00:00Z', 100), bar('2026-09-18T18:00:00Z', 110), bar('2026-09-18T18:05:00Z', 111)] })), 'NVDA', '1D', sunday);
-  assert.deepEqual(result.bars.map(item => item.close), ['110', '111']);
+  assert.deepEqual(result.bars, []);
+  assert.equal(result.seed?.close, '111');
+  assert.deepEqual(result.fallbackBars.map(item => item.close), ['110', '111']);
+  assert.equal(result.fallback, 'PREVIOUS_SESSION');
+  assert.equal(result.to, new Date(sunday).toISOString());
   assert.equal(Date.parse(result.to) - Date.parse(result.from), 86400000);
 });
 

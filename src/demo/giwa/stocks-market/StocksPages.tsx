@@ -66,12 +66,12 @@ export function StocksPage() {
   const aside = ({ selection, unverified, quote }: StocksAsideView) => {
     const symbol = selection.symbol
     // Detail mode: only the heading above the order panel (it starts near the top of the column); the full explanation follows it.
-    const explain = <><p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">테스트넷 모의 체결가: 서버 발급 견적 기준. 현재 고정 모의 가격 120이며 위 USD 시장시세와 별개입니다. 시장정보 종목 선택은 이 NVDA 주문에 적용되지 않습니다.</p><ExecutionCapabilityNote /></>
+    const explain = <><p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">테스트넷 모의 체결가: 서버 발급 견적 기준. 견적 시점의 NVDA 실시간 시세(위 차트와 같은 출처)로 가격을 정하고, 로컬 서버가 고정 가격 설정이면 120입니다. 시장정보 종목 선택은 이 NVDA 주문에 적용되지 않습니다.</p><ExecutionCapabilityNote /></>
     const trade = <section key="trade" hidden={demo && symbol !== "NVDA"} aria-label={demo ? "Trade NVDA" : "NVDA testnet mock trading"} className={demo ? "w-full min-w-0" : "w-full min-w-0 rounded-3xl border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] [&>:last-child]:rounded-b-3xl"}>
       {/* Detail mode: a compact label only — the panel below carries its own "Trade NVDA" heading, and the next-step button
           has to fit in the first screen. The list keeps the full header, where the explanation belongs above the panel. */}
       <DemoDetails><div className={`border-b border-[var(--color-arco-border)] ${symbol === null ? "p-4 sm:p-6" : "px-4 py-3 sm:px-6"}`}><h2 className={symbol === null ? "text-lg font-medium" : "text-sm font-medium"}>NVDA · 테스트넷 모의 거래</h2>{symbol === null ? explain : null}</div></DemoDetails>
-      <InvestorWithExecution client={clients.investor} session={host.investor} hostWallet={session ? { address: session.walletAddress, chainId: session.chainId } : null} onSessionRejected={rejected} access={access} detailOpen={symbol === "NVDA"} onDetailChange={open => { if (open) selection.openDetail("NVDA", "investor"); else selection.closeDetail() }} />
+      <InvestorWithExecution client={clients.investor} session={host.investor} hostWallet={session ? { address: session.walletAddress, chainId: session.chainId } : null} onSessionRejected={rejected} access={access} marketPrice={quote?.symbol === "NVDA" ? quote.price : null} detailOpen={symbol === "NVDA"} onDetailChange={open => { if (open) selection.openDetail("NVDA", "investor"); else selection.closeDetail() }} />
       {!demo && symbol !== null ? <div className="border-t border-[var(--color-arco-border)] p-4 sm:p-6">{explain}</div> : null}
     </section>
     const signInRegion = <div hidden={demo} key="sign-in" className="min-w-0 empty:hidden"><StocksSignIn /></div>

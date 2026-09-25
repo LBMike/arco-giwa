@@ -76,7 +76,11 @@ test("RPC forwards bounded read batches to the fixed GIWA endpoint and rejects a
   assert.equal((await f.request("/__giwa/read-rpc", { method: "POST", headers: { "content-type": "application/json" }, body: "{" })).status, 400)
   assert.equal((await f.request("/__giwa/read-rpc", { ...json(rpc()), body: " ".repeat(65537) })).status, 413)
   assert.equal((await fetch(f.origin + "/__giwa/read-rpc", json(rpc()))).status, 403)
-  assert.equal(calls.length, 1); assert.equal(f.fallthrough, 0)
+  // viem sends parameterless reads without params (JSON-RPC 2.0 allows it); a write stays refused, and params must be an array.
+  assert.equal((await f.request("/__giwa/read-rpc", json({ jsonrpc: "2.0", id: 2, method: "eth_chainId" }))).status, 200)
+  assert.equal((await f.request("/__giwa/read-rpc", json({ jsonrpc: "2.0", id: 3, method: "eth_sendRawTransaction" }))).status, 403)
+  assert.equal((await f.request("/__giwa/read-rpc", json({ jsonrpc: "2.0", id: 4, method: "eth_blockNumber", params: null }))).status, 403)
+  assert.equal(calls.length, 2); assert.equal(f.fallthrough, 0)
 })
 
 test("unavailable, redirect, invalid JSON and oversized upstream replies never become fake success", async t => {

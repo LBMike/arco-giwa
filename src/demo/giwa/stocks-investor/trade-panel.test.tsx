@@ -7,9 +7,10 @@ import type { GiwaStocksAccess } from "./access"
 import { actionsFor } from "./actions"
 import { createHarness, WALLET_A } from "./fixtures/controller-harness"
 import { GiwaStocksFeatureView } from "./GiwaStocksFeature"
-import type { StocksInvestorController } from "./controller"
+import type { StocksInvestorController, StocksInvestorState } from "./controller"
 import { INVEST_TAB_ACTIVE } from "../invest-panel-ui"
-import { statusAnnouncement, tradeStep } from "./TradePanel"
+import { availableToSell, OrderDetailFields, statusAnnouncement, tradeStep, walletHolding } from "./TradePanel"
+import { DemoPresentationContext } from "../demo-presentation"
 
 // The GIWA-style trade panel, rendered statically (server snapshot = desktop, so the one inline panel). The dock and the
 // bottom sheet are covered by trade-sheet.dom.test.tsx.
@@ -70,6 +71,10 @@ test("CTA precedence: wallet → network → wallet support → signing in → s
     [{ wallet: "ready", host: "signed-out", hostError: "SESSION_REJECTED", canSignIn: true, signIn: noop }, "Sign in to trade", true, /Your Stocks session is no longer valid\. Sign in again\./],
     [{ wallet: "ready", host: "signed-out", hostError: "WALLET_CHANGED", canSignIn: true, signIn: noop }, "Sign in to trade", true, /The connected wallet changed\. Sign in again with this wallet\./],
     [{ wallet: "ready", host: "error", hostError: "AUTH_UNAVAILABLE", canSignIn: false }, "Sign in to trade", false, /Stocks sign-in is not available on this page\./],
+    [{ wallet: "ready", host: "error", hostError: "SIGN_IN_WALLET_MISMATCH", canSignIn: true, signIn: noop }, "Sign in to trade", true, /The signing wallet or network changed/],
+    [{ wallet: "ready", host: "error", hostError: "WALLET_REQUEST_PENDING", canSignIn: true, signIn: noop }, "Sign in to trade", true, /A wallet request is already open/],
+    [{ wallet: "ready", host: "error", hostError: "NONCE_EXPIRED", canSignIn: true, signIn: noop }, "Sign in to trade", true, /The sign-in request expired/],
+    [{ wallet: "ready", host: "error", hostError: "AUTH_TIMEOUT", canSignIn: true, signIn: noop }, "Sign in to trade", true, /The sign-in server took too long/],
   ]
   for (const [over, label, active, hint] of cases) {
     const access = { ...READY_ACCESS, host: "signed-out", ...over } as GiwaStocksAccess
@@ -126,7 +131,23 @@ test("the panel's front shows the price; the order's small print is folded into 
   assert.match(text(html), /Order details/, "the disclosure")
   assert.doesNotMatch(text(html), /Order capability/, "no longer a row of its own above the action")
   const source = readFileSync(new URL("./TradePanel.tsx", import.meta.url), "utf8")
-  assert.match(source, /InfoRow label="Order details"(?:(?!<\/InfoRow>)[\s\S])*Field label="Order capability"/, "it moved into the disclosure, not away")
+  assert.match(source, /InfoRow label="Order details"(?:(?!<\/InfoRow>)[\s\S])*<OrderDetailFields/, "it moved into the disclosure, not away")
+  const preview = text(renderToStaticMarkup(<OrderDetailFields demo={false} side="SELL" quantity="500000000" quote={null} cash="ARCO_TEST_USDC" orderCapability="CHECK_PAUSE_AT_ORDER" cashSymbol="ARCO_TEST_USDC" deploymentId="fixture-stocks-deployment-a" />))
+  assert.match(preview, /Side Sell/); assert.match(preview, /Quantity 0\.5 NVDA/); assert.match(preview, /Order capability Open unless paused/)
+})
+
+test("customer presentation: Order details keeps only the fees (no side, quantity, amount or order capability)", () => {
+  for (const side of ["BUY", "SELL"] as const) {
+    const quote = { side, cashAmount: "60000000", expiresAt: "2026-09-25T00:01:00.000Z" }
+    for (const current of [null, quote]) {
+      const html = renderToStaticMarkup(
+        <DemoPresentationContext.Provider value>
+          <OrderDetailFields demo side={side} quantity="500000000" quote={current} cash="tUSDC" orderCapability="CHECK_PAUSE_AT_ORDER" cashSymbol="tUSDC" deploymentId="giwa-stocks-a" />
+        </DemoPresentationContext.Provider>,
+      )
+      assert.equal(text(html).trim(), "Mint fee 0% Burn fee 0%", `${side} ${current ? "quoted" : "typed"}`)
+    }
+  }
 })
 
 test("an ended session (expired, rejected, other wallet) replaces the generic sign-in notice, and the action points at it", async () => {
@@ -374,4 +395,55 @@ test("trade view code reads no wallet and parses no money with floats", () => {
     assert.doesNotMatch(source, /\bNumber\(|\.toFixed\(|\bparseFloat\b|\bparseInt\b|\bMath\.round\(/, file)
     assert.doesNotMatch(source, /from "(\.\.\/)+wallet|from "viem"|eth_call|eth_getBalance|allowance\(|balanceOf/, file)
   }
+})
+
+test("the Buy side's NVDA balance is the wallet's finalized holding once the portfolio is read; Sell keeps available units", () => {
+  const ready = (holdings: unknown[]) => ({ portfolio: { status: "ready", portfolio: { holdings }, observedAt: "2026-09-25T08:00:00.000Z" } }) as unknown as StocksInvestorState
+  const holding = { wallet: WALLET_A, symbol: "NVDA", walletQuantity: "1500000000", escrowedQuantity: "0", reservedQuantity: "500000000", availableQuantity: "1000000000", quantity: "1500000000" }
+  assert.equal(walletHolding({ portfolio: { status: "idle" } } as unknown as StocksInvestorState), null)
+  assert.equal(walletHolding({ portfolio: { status: "loading" } } as unknown as StocksInvestorState), null)
+  assert.equal(walletHolding(ready([holding])), "1500000000")
+  assert.equal(availableToSell(ready([holding])), "1000000000")
+  assert.equal(walletHolding(ready([])), "0")
+})
+
+test("customer presentation: the amount is typed first and 'Buy NVDA' signs in, then trades (no separate sign-in step)", async () => {
+  const h = await signedOut()
+  const access: GiwaStocksAccess = { wallet: "ready", host: "signed-out", hostError: null, canSignIn: true, signIn: noop }
+  const step = tradeStep(h.controller.getState(), access, true)
+  assert.deepEqual(step, { kind: "sign-in", label: "Buy NVDA", hint: null })
+  assert.equal(tradeStep(h.controller.getState(), { ...access, host: "error", hostError: "SIGN_IN_WALLET_DISCONNECTED" }, true).hint,
+    "Your wallet is not connected to this site. Approve the connection request in your wallet, then try again.")
+  assert.equal(tradeStep(h.controller.getState(), { ...access, host: "signing-in" }, true).label, "Signing in…")
+  // The technical preview keeps its explicit sign-in step.
+  assert.equal(tradeStep(h.controller.getState(), access).label, "Sign in to trade")
+
+  const customer = (current: GiwaStocksAccess = access) => renderToStaticMarkup(
+    <DemoPresentationContext.Provider value>
+      <GiwaStocksFeatureView state={h.controller.getState()} actions={actionsFor(h.controller)} tab="stocks" onTabChange={noop} detailOpen onDetailChange={noop} access={current} />
+    </DemoPresentationContext.Provider>,
+  )
+  const before = customer()
+  assert.doesNotMatch(panel(before).match(/<fieldset[^>]*>/)?.[0] ?? "", /disabled/, "the amount can be typed before signing in")
+  assert.equal(cta(before).label, "Buy NVDA")
+  assert.equal(enabled(cta(before).tag), false, "no amount yet")
+  assert.doesNotMatch(text(panel(before)), /sign in once|sends no transaction/, "no sign-in explanation under the button")
+  // Both amounts start at 0, and You pay is an input: the typed tUSDC converts to the NVDA quantity at the fixed price.
+  assert.equal((panel(before).match(/<input\b[^>]*placeholder="0"/g) ?? []).length, 2, "You pay and You receive both show 0")
+  assert.match(panel(before), /<input\b[^>]*id="[^"]*-pay"[^>]*placeholder="0"|<input\b[^>]*placeholder="0"[^>]*id="[^"]*-pay"/, "You pay takes a typed amount")
+  h.controller.setPayAmount("60")
+  const typed = customer()
+  assert.equal(enabled(cta(typed).tag), true)
+  assert.match(panel(typed), /value="60"/)
+  assert.match(panel(typed), /value="0\.5"/)
+  h.controller.setSide("SELL")
+  assert.equal(tradeStep(h.controller.getState(), access, true).label, "Sell NVDA")
+
+  // Signed in: one Buy press (no Get quote, no Place order, no Discard quote, no quote countdown).
+  await h.enter(WALLET_A)
+  h.controller.setPayAmount("60")
+  const signedIn = customer(READY_ACCESS)
+  assert.equal(cta(signedIn).label, "Buy NVDA")
+  assert.equal(enabled(cta(signedIn).tag), true)
+  assert.doesNotMatch(text(panel(signedIn)), /Get quote|Place buy order|Discard quote|Valid for/)
 })

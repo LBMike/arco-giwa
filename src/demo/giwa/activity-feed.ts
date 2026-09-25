@@ -1,5 +1,9 @@
 import { formatUnits } from "viem"
 import { vaultConfigOf, vaultDisplayName, vaultImageFor } from "./catalog"
+import { formatCash, formatQuantity } from "./stocks-investor/display"
+import { orderStatusMeaning } from "./stocks-investor/status"
+import type { StocksActivityEntry } from "./stocks-investor/types"
+import { curatedStock, stockLogoPath } from "./stocks-market/curated"
 import type { GiwaActivity, GiwaCatalogItem, GiwaRedemption } from "./types"
 
 // Builds the personal-portfolio Activity feed. Two streams merge into ONE time-ordered list,
@@ -12,7 +16,7 @@ import type { GiwaActivity, GiwaCatalogItem, GiwaRedemption } from "./types"
 
 const SHARE_DECIMALS = 18
 
-export type ActivityKind = "deposit" | "request" | "pending" | "complete"
+export type ActivityKind = "deposit" | "request" | "pending" | "complete" | "stock"
 
 // Figma-verbatim labels + token tone classes (mirror redemptionBadge in components.tsx).
 const TYPE_LABEL: Record<ActivityKind, string> = {
@@ -20,12 +24,14 @@ const TYPE_LABEL: Record<ActivityKind, string> = {
   request: "Redemption request",
   pending: "Pending",
   complete: "Redemption complete",
+  stock: "Stocks",
 }
 const TYPE_TONE: Record<ActivityKind, string> = {
   deposit: "text-[var(--color-arco-text-soft)]",
   request: "text-[var(--color-arco-text-soft)]",
   pending: "text-[var(--color-arco-text-soft)]",
   complete: "text-[var(--color-arco-up)]",
+  stock: "text-[var(--color-arco-text-soft)]",
 }
 
 // A redemption request whose status is one of these has paid out → "Redemption complete".
@@ -164,13 +170,64 @@ function rowFromRedemption(redemption: GiwaRedemption, products: GiwaCatalogItem
   })
 }
 
+// Stocks trades (GET /api/v1/stocks/activity/:wallet): one row per trade, dated when the wallet's own transaction was
+// observed, linked to that transaction. The type says the server's state: Buy / Sell once settled, "processing" while
+// it settles, "Held for review", or the returned outcome.
+const STOCK_PRODUCT: ActivityProduct = {
+  productId: null,
+  symbol: "NVDA",
+  name: curatedStock("NVDA")?.name ?? "NVDA",
+  imageUrl: stockLogoPath("NVDA") ?? undefined,
+  category: "Stocks",
+}
+
+export function stockTypeLabel(entry: StocksActivityEntry): { label: string; tone: string } {
+  const sell = entry.side === "SELL"
+  const category = orderStatusMeaning({ side: entry.side, state: entry.state }).category
+  switch (category) {
+    case "COMPLETED":
+      return { label: sell ? "Sell" : "Buy", tone: TYPE_TONE.complete }
+    case "RETURNED":
+      return { label: sell ? "Sell returned" : "Buy refunded", tone: TYPE_TONE.stock }
+    case "EXPIRED":
+      return { label: "Sell expired", tone: TYPE_TONE.stock }
+    case "REVIEW_REQUIRED":
+    case "DEADLINE_PASSED":
+      return { label: "Held for review", tone: TYPE_TONE.stock }
+    default:
+      return { label: sell ? "Sell processing" : "Buy processing", tone: TYPE_TONE.stock }
+  }
+}
+
+export function stockActivityRow(entry: StocksActivityEntry): ActivityRow {
+  const { label, tone } = stockTypeLabel(entry)
+  const date = formatDate(entry.createdAt)
+  const parts = [
+    entry.quantity !== "0" ? `${formatQuantity(entry.quantity)} NVDA` : null,
+    entry.cashAmount !== "0" ? `${formatCash(entry.cashAmount)} tUSDC` : null,
+  ].filter((part): part is string => part !== null)
+  return {
+    key: `stock:${entry.side}:${entry.paymentTx}`,
+    kind: "stock",
+    typeLabel: label,
+    typeTone: tone,
+    date: date.text,
+    sortTs: date.ts,
+    product: STOCK_PRODUCT,
+    amount: parts.join(" · ") || "—",
+    txHash: entry.paymentTx,
+  }
+}
+
 export function buildActivityFeed(
   events: GiwaActivity[],
   redemptions: GiwaRedemption[],
   products: GiwaCatalogItem[],
+  stocks: StocksActivityEntry[] = [],
 ): ActivityRow[] {
   const fromEvents = events.map((event, index) => rowFromEvent(event, index, products)).filter((r): r is ActivityRow => r !== null)
   const fromRedemptions = redemptions.map((redemption) => rowFromRedemption(redemption, products))
+  const fromStocks = stocks.map(stockActivityRow)
   // Newest first. Rows with an unknown date (sortTs 0 — un-backfilled events) sink to the bottom.
-  return [...fromEvents, ...fromRedemptions].sort((a, b) => b.sortTs - a.sortTs)
+  return [...fromEvents, ...fromRedemptions, ...fromStocks].sort((a, b) => b.sortTs - a.sortTs)
 }

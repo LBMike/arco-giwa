@@ -116,7 +116,7 @@ A blocked `localhost:8080` read that the pages make without a wallet would be a 
 
 - **Menu:**
   - At 375 and 768 px, the menu button in the top bar opens a left drawer. Try Tab, Shift+Tab and Escape.
-  - At 1440 and 1920 px, a persistent sidebar is shown. It appears from 1280 px.
+  - At 1440 and 1920 px, the desktop sidebar appears from 1280 px. Its top control switches between the full menu and a compact icon rail, and remembers the choice.
   - Send is shown as "Coming soon".
 - **Home:**
   - The Savings card reads "3 savings accounts · 1 coming soon".
@@ -284,7 +284,8 @@ Savings/Funds keep their deployed catalog snapshot. The helper forces IEX, ignor
 and never imports credentials into Vite env. A separate optional `.secrets/massive.env`
 containing MASSIVE_API_KEY enables Basic ticker profiles and stock market capitalization.
 Massive has an independent rolling budget of four requests/minute and a shared 24h
-in-memory profile cache. The preview explicitly disables ETF Global requests, including
+profile cache persisted as validated public facts in `.cache/stocks-market-profiles-v1.json`.
+The preview explicitly disables ETF Global requests, including
 when the account happens to have a paid entitlement. Missing credentials keep profiles
 unconfigured; no fabricated valuation is substituted.
 The host binds loopback, blocks `.secrets` and `.env` paths, and denies cross-origin market
@@ -301,6 +302,7 @@ IEX volume is single-exchange volume; USD turnover is an estimate (shares × pri
 The list exposes the latest observed trade timestamp, not a fabricated current time.
 Stock market caps load progressively with the optional Massive key; ETF AUM remains
 unconfigured in this free-plan preview. The first cold load of all 40 ticker profiles
-can take about ten minutes, and reopening a page shares the existing server cache.
-Restarting the server clears this in-memory cache. A rolling 1D
+can take about ten minutes; reopening a page or restarting the server reuses the
+local profile cache while it remains valid. This cache is not synced to Supabase.
+A rolling 1D
 chart can legitimately be empty over a weekend; 1W/longer ranges retain actual observations.

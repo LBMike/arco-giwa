@@ -13,7 +13,7 @@ export function endpoint(value: string, localHarness = false): URL {
 }
 export function httpStocksRpc(url: string, localHarness = false, request: HttpFetch = fetch): JsonRpcTransport {
   const target = endpoint(url, localHarness);
-  const readMethods = new Set(['eth_chainId', 'eth_getBlockByNumber', 'eth_getTransactionByHash', 'eth_getTransactionReceipt', 'eth_getCode', 'eth_call', 'eth_getLogs']);
+  const readMethods = new Set(['eth_chainId', 'eth_getBlockByNumber', 'eth_getTransactionByHash', 'eth_getTransactionReceipt', 'eth_getCode', 'eth_getStorageAt', 'eth_call', 'eth_getLogs']);
   return async (method, params) => {
     ensure(readMethods.has(method), 'READ_ONLY_RPC_METHOD');
     const id = randomUUID();

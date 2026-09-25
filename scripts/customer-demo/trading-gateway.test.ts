@@ -13,7 +13,8 @@ const claim = { side: "BUY", orderId: id, intentKey: digest, stage: "TRANSFER", 
   deploymentDigest: digest, transaction: { chainId: 91342, from: `0x${"1".repeat(40)}`, to: `0x${"2".repeat(40)}`, value: "0", data: "0x12345678" } }
 const order = { quoteId: id, idempotencyKey: "customer-order-original" }
 const writes: [string, unknown][] = [
-  ["quotes", { symbol: "NVDA", quantity: "2.000000001" }], ["sell-quotes", { symbol: "NVDA", quantity: "0.5" }],
+  ["quotes", { symbol: "NVDA", quantity: "2.000000001" }], ["quotes", { symbol: "NVDA", cashAmount: "60" }], ["quotes", { symbol: "NVDA", cashAmount: "0.000001" }],
+  ["sell-quotes", { symbol: "NVDA", quantity: "0.5" }],
   ...["orders", "sell-orders", "orders/recover", "sell-orders/recover"].map(path => [path, order] as [string, unknown]),
   ["wallet-submissions/claims", claim], ["wallet-submissions/outcomes", { ...record, status: "SUBMITTED", txHash }],
   ["wallet-submissions/reconcile", { ...record, txHash }],
@@ -76,6 +77,9 @@ test("foreign origin, malformed auth, routes, methods and unexpected fields fail
   for (const route of ["/api/v1/admin/stocks/orders", "/api/v1/stocks/mint", "/api/v1/faucet/request", "/__fixture/wallet", path + "?target=elsewhere", path + "/", "/api/v1/stocks/%6frders"]) assert.equal((await f.request(route, order)).status, 503)
   for (const body of [{ ...order, wallet: claim.transaction.from }, { ...order, secret: "must-not-leave" }, { ...order, idempotencyKey: "short" }, [], null]) assert.equal((await f.request(path, body)).status, 400)
   for (const quantity of [1, "1e3", "0.1234567891", "-1", "01"]) assert.equal((await f.request("/api/v1/stocks/quotes", { symbol: "NVDA", quantity })).status, 400)
+  for (const cashAmount of [60, "1e3", "60.1234567", "-1", "01", ""]) assert.equal((await f.request("/api/v1/stocks/quotes", { symbol: "NVDA", cashAmount })).status, 400)
+  for (const body of [{ symbol: "NVDA", quantity: "1", cashAmount: "60" }, { symbol: "AAPL", cashAmount: "60" }, { symbol: "NVDA", cashAmount: "60", wallet: claim.transaction.from }]) assert.equal((await f.request("/api/v1/stocks/quotes", body)).status, 400)
+  assert.equal((await f.request("/api/v1/stocks/sell-quotes", { symbol: "NVDA", cashAmount: "60" })).status, 400, "a Sell names its NVDA quantity")
   for (const transaction of [{ ...claim.transaction, chainId: 1 }, { ...claim.transaction, value: "1" }, { ...claim.transaction, privateKey: "must-not-leave" }]) assert.equal((await f.request("/api/v1/stocks/wallet-submissions/claims", { ...claim, transaction })).status, 400)
   for (const body of [{ ...record, status: "CONFIRMED", txHash }, { ...record, status: "SUBMITTED" }, { ...record, status: "REVERTED" }]) assert.equal((await f.request("/api/v1/stocks/wallet-submissions/outcomes", body)).status, 400)
   assert.equal(calls, 0)

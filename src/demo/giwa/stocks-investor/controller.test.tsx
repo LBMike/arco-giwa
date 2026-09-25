@@ -502,3 +502,108 @@ test("authenticated reads wait for the catalog's deployment; no false deployment
   if (orders.status === "ready") assert.equal(orders.buy.status, "ready")
   assert.equal(h.requests("GET", "/api/v1/stocks/catalog").length, 1, "no catalog reload loop")
 })
+
+test("one-click trade: an amount typed before the panel's own sign-in is kept for the panel; one press quotes and places once", async () => {
+  const h = createHarness()
+  await h.enter(null)
+  h.controller.setSide("BUY")
+  // "You pay" converts at the catalog's fixed price, rounded down to 9 decimals.
+  h.controller.setPayAmount("60")
+  assert.equal(h.controller.getState().quantityInput, "0.5")
+  h.controller.noteSignInIntent("0.5", "60")
+  await h.enter(WALLET_A)
+  const carried = h.controller.getState()
+  assert.equal(carried.quantityInput, "0.5")
+  assert.equal(carried.payInput, "60")
+  assert.equal(carried.tradeWhenReady, true)
+  // The panel first checks what comes before the trade (approval, balance); nothing is requested until it goes ahead.
+  assert.equal(carried.quote.status, "idle")
+  assert.equal(h.requests("POST", "/quotes").length, 0)
+  h.controller.tradeNow()
+  await flush()
+  const traded = h.controller.getState()
+  assert.equal(traded.tradeWhenReady, false)
+  assert.equal(h.requests("POST", "/quotes").length, 1)
+  assert.equal(h.requests("POST", "/orders").length, 1)
+  assert.equal(traded.attempt?.status, "ACCEPTED")
+  assert.ok(traded.attempt?.order)
+  assert.equal(traded.instantOrderId, traded.attempt?.order?.id, "only the order the one-click press placed starts its wallet request")
+  assert.equal(traded.payInput, "")
+  h.controller.startNewOrder()
+  assert.equal(h.controller.getState().instantOrderId, null)
+
+  // Clearing it (the panel shows the approval or the balance first) requests nothing.
+  const c = createHarness()
+  await c.enter(null)
+  c.controller.setQuantity("0.5")
+  c.controller.noteSignInIntent("0.5")
+  await c.enter(WALLET_A)
+  assert.equal(c.controller.getState().tradeWhenReady, true)
+  c.controller.clearTradeWhenReady()
+  await flush()
+  assert.equal(c.controller.getState().tradeWhenReady, false)
+  assert.equal(c.requests("POST", "/quotes").length, 0)
+
+  // A panel sign-in without a quantity, or with an invalid one, carries nothing and quotes nothing.
+  for (const quantity of [undefined, "0.5.5", ""]) {
+    const g = createHarness()
+    await g.enter(null)
+    g.controller.setQuantity("0.5")
+    g.controller.noteSignInIntent(quantity)
+    await g.enter(WALLET_A)
+    assert.equal(g.controller.getState().quantityInput, "")
+    assert.equal(g.controller.getState().tradeWhenReady, false)
+    assert.equal(g.controller.getState().quote.status, "idle")
+    assert.equal(g.requests("POST", "/quotes").length, 0)
+  }
+
+  // A later wallet switch is not the noted sign-in: nothing is carried to wallet B.
+  const k = createHarness()
+  await k.enter(WALLET_A)
+  k.controller.noteSignInIntent("0.5")
+  await k.enter(WALLET_B)
+  assert.equal(k.controller.getState().quantityInput, "")
+  assert.equal(k.controller.getState().tradeWhenReady, false)
+  assert.equal(k.requests("POST", "/quotes").length, 0)
+})
+
+test("You pay: a typed tUSDC amount buys the NVDA quantity it covers at the fixed price, rounded down; typing NVDA clears it", async () => {
+  const h = createHarness()
+  await h.enter(WALLET_A)
+  const cases: [string, string][] = [["60", "0.5"], ["100", "0.833333333"], ["0.00000012", ""], ["0.000001", "0.000000008"], ["abc", ""], ["", ""]]
+  for (const [pay, quantity] of cases) {
+    h.controller.setPayAmount(pay)
+    const state = h.controller.getState()
+    assert.equal(state.payInput, pay)
+    assert.equal(state.quantityInput, quantity, pay)
+    assert.equal(state.quantityCheck.ok, quantity !== "", pay)
+  }
+  h.controller.setPayAmount("60")
+  h.controller.setQuantity("0.25")
+  assert.equal(h.controller.getState().payInput, "")
+  assert.equal(h.controller.getState().quantityInput, "0.25")
+  h.controller.setPayAmount("60")
+  h.controller.setSide("SELL")
+  assert.equal(h.controller.getState().payInput, "")
+  // The one-click press quotes the exact typed amount: the server decides the NVDA it buys, and its quote is what is paid.
+  h.controller.setSide("BUY")
+  h.controller.setPayAmount("100")
+  h.controller.tradeNow()
+  await flush()
+  const quotes = h.requests("POST", "/quotes")
+  assert.equal(quotes.length, 1)
+  assert.deepEqual(quotes[0].body, { symbol: "NVDA", cashAmount: "100" })
+  const bought = h.controller.getState().attempt
+  assert.equal(bought?.status, "ACCEPTED")
+  assert.equal(bought?.quote.cashAmount, "100000000")
+  assert.equal(bought?.quote.quantity, "833333333")
+  // A price on screen (the chart's) previews the quantity; it never becomes the request.
+  const g = createHarness()
+  await g.enter(WALLET_A)
+  g.controller.setPayAmount("60", "223.71")
+  assert.equal(g.controller.getState().quantityInput, "0.268204371")
+  g.controller.setQuantity("0.5")
+  g.controller.tradeNow()
+  await flush()
+  assert.deepEqual(g.requests("POST", "/quotes")[0].body, { symbol: "NVDA", quantity: "0.5" })
+})

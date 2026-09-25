@@ -126,7 +126,11 @@ test("display catalog grants no trading capability or authority and does not rep
   const app = buildApp(env, {
     ...legacy(), stocksMarketData: configuredStocksMarketData({}, { catalog }),
     stocks: {
-      service: { catalog: () => { tradingReads++; return { instruments: [{ symbol: "NVDA", price: "120.000000", orderCapability: "NOT_ACTIVATED" }] } } } as unknown as StocksService,
+      service: {
+        catalog: () => { tradingReads++; return { instruments: [{ symbol: "NVDA", price: "120.000000", orderCapability: "NOT_ACTIVATED" }] } },
+        // The trading catalog route reads the current price first, then answers with the same catalog.
+        currentCatalog: async () => { tradingReads++; return { instruments: [{ symbol: "NVDA", price: "120.000000", orderCapability: "NOT_ACTIVATED" }] } },
+      } as unknown as StocksService,
     },
   })
   try {

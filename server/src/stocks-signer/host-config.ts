@@ -23,7 +23,10 @@ export function parseSignerHostConfig(value: unknown): SignerHostConfig {
   try {
     const row = record(value, 'schemaVersion,profile,manifest,reviewedManifestDigest,reviewedInitialNonce,rpcUrl,listen,custody,transaction,limits');
     if (row.schemaVersion !== 1 || row.profile !== 'DEMO_TESTNET') throw fail();
-    record(row.manifest, 'schemaVersion,redemptionEscrow,deploymentId,profile,chainId,networkInstance,checkpointNumber,checkpointHash,abiDigest,finalityPolicy,cashToken,cashSymbol,cashScale,stockToken,quantityScale,fundingVault,mintController,signerAddress,codeHashes,restrictedTransfers,nonUpgradeable');
+    const externalCash = row.manifest && typeof row.manifest === 'object'
+      && (row.manifest as Record<string, unknown>).schemaVersion === 3;
+    record(row.manifest, 'schemaVersion,redemptionEscrow,deploymentId,profile,chainId,networkInstance,checkpointNumber,checkpointHash,abiDigest,finalityPolicy,cashToken,cashSymbol,cashScale,stockToken,quantityScale,fundingVault,mintController,signerAddress,codeHashes,restrictedTransfers,nonUpgradeable'
+      + (externalCash ? ',stockContractsNonUpgradeable,cashIdentity' : ''));
     const manifest = freezeManifest(row.manifest as Manifest);
     if (row.reviewedManifestDigest !== manifestDigest(manifest)
       || decimal(row.reviewedInitialNonce) > BigInt(Number.MAX_SAFE_INTEGER)) throw fail();

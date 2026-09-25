@@ -77,3 +77,18 @@ test("GiwaSidebarNav renders links with aria-current and a non-interactive Send 
   assert.doesNotMatch(html, /href="\/send"|href="\/admin"/)
   assert.doesNotMatch(html, /<(a|button)[^>]*>(?:(?!<\/\1>).)*Send/)
 })
+
+test("compact desktop nav keeps named icon links and the disabled Send row", () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter initialEntries={["/product/abc"]}>
+      <GiwaSidebarNav isAdmin={false} compact />
+    </MemoryRouter>,
+  )
+  for (const name of ["Home", "Savings", "Funds", "Stocks", "Portfolio"]) {
+    assert.ok(html.includes(`aria-label="${name}"`), `${name} needs an icon-link name`)
+  }
+  assert.match(html, /aria-current="page"[^>]*aria-label="Funds"/)
+  assert.match(html, /<span aria-disabled="true"[^>]*>.*?Send.*?Coming soon/)
+  assert.doesNotMatch(html, /aria-label="Savings categories"/)
+  assert.doesNotMatch(html, /href="\/send"/)
+})

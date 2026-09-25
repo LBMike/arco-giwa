@@ -21,11 +21,10 @@ export function StockInvestSurface({ symbol, tab, onTab, children }: { symbol: s
     return () => { if (previous) root.style.setProperty("--giwa-dock-space", previous); else root.style.removeProperty("--giwa-dock-space") }
   }, [desktop])
   const card = <section aria-label={`${symbol} invest panel`} className={`w-full ${INVEST_PANEL_CARD}`}>
-    <div className="flex items-center justify-between">
+    <div className="flex items-center">
       <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-2.5 py-1 text-xs text-[var(--color-arco-text-soft)]">
         <img src="/logos/giwa.png" alt="" width={14} height={14} className="rounded-full object-contain" />GIWA
       </span>
-      <span className="text-xs font-medium text-[var(--color-arco-text-soft)]">{symbol}</span>
     </div>
     <div role="tablist" aria-label={`${symbol} trading`} className={`mt-3 grid grid-cols-3 ${INVEST_TAB_TRACK}`}>
       {TABS.map((value, index) => <button key={value} type="button" role="tab" id={`${id}-${value}`} aria-selected={tab === value} aria-controls={`${id}-body`} tabIndex={tab === value ? 0 : -1} onClick={() => onTab(value)} onKeyDown={event => {

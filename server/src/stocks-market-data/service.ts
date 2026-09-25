@@ -1,8 +1,11 @@
-import { MARKET_CONTEXT, PILOT_CATALOG, MarketDataError, type Chart, type ChartRange, type CompanyProfile, type DataReason, type DataStatus, type DisplayCatalog, type FeedDelay, type Logo, type MarketResponse, type Quote } from './contracts.js';
-import { chart, chartPath, etfAssets, profile, quotes, RANGE_RULES, type InternalProfile } from './normalize.js';
+import { createHash } from 'node:crypto';
+import { MARKET_CONTEXT, PILOT_CATALOG, MarketDataError, type Chart, type ChartRange, type CompanyProfile, type DataReason, type DataStatus, type DisplayCatalog, type Dividend, type FeedDelay, type Logo, type MarketResponse, type Quote } from './contracts.js';
+import { chart, chartPath, dividend as normalizeDividend, etfAssets, profile, quotes, RANGE_RULES, type InternalProfile } from './normalize.js';
 import { alpacaChart, alpacaChartPath, alpacaQuotes } from './alpaca.js';
 import { issuerFundamentals } from './issuer.js';
 import { AlpacaTransport, MassiveTransport, IssuerTransport } from './transport.js';
+import { loadProfileDiskCache, profileCachePath, saveProfileDiskCache, type ProfileCacheEntry } from './profile-disk-cache.js';
+import { snapshotSourceTimestamp, validatedSnapshotData, type MarketSnapshotStore } from './snapshot-store.js';
 
 export interface StocksMarketDataOptions {
   apiKey?: string;
@@ -19,17 +22,22 @@ export interface StocksMarketDataOptions {
   massiveRequestsPerMinute?: number;
   etfGlobalEnabled?: boolean;
   issuerFundamentalsEnabled?: boolean;
+  /** Explicit, local-only path for validated public company facts. Omit to keep an in-memory cache. */
+  profileCachePath?: string;
+  /** Optional durable store for validated public market facts. */
+  snapshotStore?: MarketSnapshotStore;
 }
 export interface StocksMarketDataService {
   catalog(): MarketResponse<DisplayCatalog>;
   quotes(): Promise<MarketResponse<Quote[]>>;
   profile(symbol: string): Promise<MarketResponse<CompanyProfile>>;
+  dividend(symbol: string): Promise<MarketResponse<Dividend>>;
   chart(symbol: string, range: ChartRange): Promise<MarketResponse<Chart>>;
   logo(symbol: string): Promise<MarketResponse<Logo>>;
   hasSymbol(symbol: string): boolean;
 }
 interface Entry { data?: unknown; fetched?: number; retryAt: number; reason: DataReason }
-const POLICY = { quotes: { ttl: 15000, maxAge: 300000 }, profile: { ttl: 86400000, maxAge: 604800000 }, chart: { ttl: 60000, maxAge: 900000 }, logo: { ttl: 86400000, maxAge: 604800000 } } as const;
+const POLICY = { quotes: { ttl: 15000, maxAge: 300000 }, profile: { ttl: 86400000, maxAge: 604800000 }, dividend: { ttl: 86400000, maxAge: 86400000 }, chart: { ttl: 60000, maxAge: 900000 }, logo: { ttl: 86400000, maxAge: 604800000 } } as const;
 const BAD_CONFIG = () => { throw new Error('INVALID_MARKET_DATA_CONFIG'); };
 function validDate(value: unknown): boolean { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value; }
 function validateCatalog(input: DisplayCatalog): DisplayCatalog {
@@ -64,29 +72,91 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
   const alpaca = provider === 'ALPACA' && options.alpacaKeyId && options.alpacaSecretKey ? new AlpacaTransport({ keyId: options.alpacaKeyId, secretKey: options.alpacaSecretKey, fetch: options.fetch, now, timeoutMs: options.timeoutMs, requestsPerMinute: options.requestsPerMinute }) : null;
   const priceTransport = provider === 'ALPACA' ? alpaca : transport;
   const cache = new Map<string, Entry>(); const flights = new Map<string, Promise<void>>();
+  const snapshotStore = options.snapshotStore;
+  const snapshotScope = createHash('sha256').update(JSON.stringify({ provider, feed: provider === 'ALPACA' ? alpacaFeed : null, delay, symbols: [...symbols].sort() })).digest('hex');
+  const hydrated = new Set<string>();
+  const diskPath = options.profileCachePath === undefined ? null : profileCachePath(options.profileCachePath);
+  const allowed = new Set(symbols);
+  if (diskPath) for (const [key, entry] of loadProfileDiskCache(diskPath, allowed, now())) cache.set(key, { ...entry, retryAt: 0, reason: null });
+  const saveProfiles = () => {
+    if (!diskPath) return;
+    const entries = new Map<string, ProfileCacheEntry>();
+    for (const [key, entry] of cache) if ((key.startsWith('profile:') || key.startsWith('aum:') || key.startsWith('issuer:')) && entry.data !== undefined && entry.fetched !== undefined) entries.set(key, { data: entry.data as ProfileCacheEntry['data'], fetched: entry.fetched });
+    saveProfileDiskCache(diskPath, allowed, entries, now());
+  };
   // Retain the accepted source high-water independently of reset/missing snapshots.
   // Only validated catalog symbols can enter this map, so it holds at most 40 keys.
   const latestAcceptedTimestamp = new Map<string, string>();
   const envelope = <T>(status: DataStatus, reason: DataReason, data: T | null, fetched?: number): MarketResponse<T> => ({ ...MARKET_CONTEXT, provider, ...(provider === 'ALPACA' ? { marketFeed: alpacaFeed === 'iex' ? 'IEX' as const : 'SIP' as const } : {}), status, reason, data: data === null ? null : structuredClone(data), fetchedAt: fetched === undefined ? null : new Date(fetched).toISOString(), cacheAgeMs: fetched === undefined ? null : Math.max(0, now() - fetched), feedDelay: delay });
   const checkSymbol = (symbol: string) => { if (!symbols.includes(symbol)) throw new MarketDataError('NOT_FOUND'); };
   async function get<T>(key: string, policy: { ttl: number; maxAge: number }, load: () => Promise<T>): Promise<MarketResponse<T>> {
-    if (!(key === 'quotes' || key.startsWith('chart:') ? priceTransport : transport)) return envelope('UNCONFIGURED', 'NOT_CONFIGURED', null);
+    const maxAge = snapshotStore && (key === 'quotes' || key.startsWith('chart:')) ? 7 * 86400000 : policy.maxAge;
+    const hasTransport = Boolean(key === 'quotes' || key.startsWith('chart:') ? priceTransport : transport);
+    if (!hasTransport && !snapshotStore) return envelope('UNCONFIGURED', 'NOT_CONFIGURED', null);
     let entry = cache.get(key); let time = now();
-    if (entry?.data !== undefined && entry.fetched !== undefined && time - entry.fetched < policy.ttl) return envelope('AVAILABLE', null, entry.data as T, entry.fetched);
+    if (hasTransport && entry?.data !== undefined && entry.fetched !== undefined && !entry.reason && time - entry.fetched < policy.ttl) return envelope('AVAILABLE', null, entry.data as T, entry.fetched);
     if (!entry || entry.retryAt <= time) {
       let flight = flights.get(key);
       if (!flight) {
         // Keys are exclusively catalog symbols × fixed resource/range keys: <= 321.
         flight = (async () => {
+          // A restored row is always provisional until the provider has refreshed it.
+          // The source fetch time is retained, so a failed refresh cannot make it fresh.
+          if (snapshotStore && !hydrated.has(key)) {
+            if (cache.get(key)?.data === undefined) {
+              try {
+                const stored = await snapshotStore.read(snapshotScope, key);
+                hydrated.add(key);
+                const at = now();
+                if (stored && Number.isSafeInteger(stored.fetchedAt) && stored.fetchedAt <= at && at - stored.fetchedAt <= maxAge) {
+                  const data = validatedSnapshotData(key, stored.data, symbols, at);
+                  if (data !== null) {
+                    const fresh = hasTransport && at - stored.fetchedAt < policy.ttl;
+                    cache.set(key, { data, fetched: stored.fetchedAt, retryAt: 0, reason: fresh ? null : hasTransport ? 'PROVIDER_UNAVAILABLE' : 'NOT_CONFIGURED' });
+                    if (key === 'quotes') for (const q of data as Quote[]) if (q.sourceTimestamp) latestAcceptedTimestamp.set(q.symbol, q.sourceTimestamp);
+                  }
+                }
+              } catch { /* Retry persistence on the next provider attempt. */ }
+            } else hydrated.add(key);
+          }
+          const restored = cache.get(key);
+          if (hasTransport && restored?.data !== undefined && restored.fetched !== undefined && !restored.reason && now() - restored.fetched < policy.ttl) return;
+          if (!hasTransport) {
+            const prior = cache.get(key);
+            cache.set(key, { ...prior, retryAt: now() + 30000, reason: 'NOT_CONFIGURED' });
+            return;
+          }
           try {
             const data = await load();
             if (key === 'quotes') {
               const batch = data as Quote[];
               for (const q of batch) if (q.sourceTimestamp && latestAcceptedTimestamp.get(q.symbol) && q.sourceTimestamp < latestAcceptedTimestamp.get(q.symbol)!) throw new MarketDataError('INVALID_RESPONSE');
+              const prior = cache.get(key), previous = prior?.data as Quote[] | undefined;
+              if (snapshotStore && Array.isArray(previous) && prior?.fetched !== undefined && now() - prior.fetched <= maxAge && batch.some((q, i) => q.price === null && previous[i]?.price !== null && previous[i]?.price !== undefined)) {
+                // The database rejects this partial batch to preserve per-symbol source
+                // high-water. Keep the same complete, explicitly stale view in memory.
+                cache.set(key, { ...prior, retryAt: now() + 30000, reason: 'MISSING_OBSERVATION' });
+                return;
+              }
               // Publish high-water updates only after the entire batch validates.
               for (const q of batch) if (q.sourceTimestamp) latestAcceptedTimestamp.set(q.symbol, q.sourceTimestamp);
             }
+            if (snapshotStore && (key === 'quotes' ? (data as Quote[]).every(q => q.price === null) : key.startsWith('chart:') && (data as Chart).bars.length === 0 && !(data as Chart).seed && (data as Chart).fallbackBars.length === 0)) {
+              const prior = cache.get(key);
+              if (prior?.data !== undefined && prior.fetched !== undefined && now() - prior.fetched <= maxAge) {
+                cache.set(key, { ...prior, retryAt: now() + 30000, reason: key === 'quotes' ? 'MISSING_OBSERVATION' : 'EMPTY_HISTORY' });
+                return;
+              }
+            }
             cache.set(key, { data, fetched: now(), retryAt: 0, reason: null });
+            if (key.startsWith('profile:') || key.startsWith('aum:') || key.startsWith('issuer:')) saveProfiles();
+            if (snapshotStore) {
+              const fetchedAt = cache.get(key)!.fetched!;
+              const publicData = validatedSnapshotData(key, data, symbols, now());
+              if (publicData !== null) try {
+                await snapshotStore.write(snapshotScope, key, { data: publicData, fetchedAt, sourceTimestamp: snapshotSourceTimestamp(key, publicData) });
+              } catch { /* A database error cannot hide a valid provider response. */ }
+            }
           } catch (error) {
             const reason = error instanceof MarketDataError ? error.reason : 'PROVIDER_UNAVAILABLE';
             const prior = cache.get(key); cache.set(key, { ...prior, retryAt: now() + 30000, reason });
@@ -97,8 +167,8 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
       await flight; if (flights.get(key) === flight) flights.delete(key);
     }
     entry = cache.get(key); time = now();
-    if (entry?.data !== undefined && entry.fetched !== undefined && time - entry.fetched <= policy.maxAge) return envelope(entry.reason ? 'STALE' : 'AVAILABLE', entry.reason, entry.data as T, entry.fetched);
-    return envelope('UNAVAILABLE', entry?.reason ?? 'PROVIDER_UNAVAILABLE', null, entry?.fetched);
+    if (entry?.data !== undefined && entry.fetched !== undefined && time - entry.fetched <= maxAge) return envelope(entry.reason ? 'STALE' : 'AVAILABLE', entry.reason, entry.data as T, entry.fetched);
+    return envelope(hasTransport ? 'UNAVAILABLE' : 'UNCONFIGURED', entry?.reason ?? (hasTransport ? 'PROVIDER_UNAVAILABLE' : 'NOT_CONFIGURED'), null, entry?.fetched);
   }
   const massiveEnvelope = <T>(result: MarketResponse<T>): MarketResponse<T> => { const { marketFeed: _feed, ...rest } = result; return { ...rest, provider: 'MASSIVE' }; };
   async function enrichIssuer(result: MarketResponse<CompanyProfile>): Promise<MarketResponse<CompanyProfile>> {
@@ -135,7 +205,16 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
       // The optional ETF Global entitlement shares the existing transport budget and cache.
       // A denied/missing AUM read must not discard a valid ticker profile or substitute market cap.
       const assets = await get(`aum:${symbol}`, POLICY.profile, async () => etfAssets(await transport!.json(`/etf-global/v1/profiles?composite_ticker=${symbol}&sort=effective_date.desc&limit=1`), symbol));
-      return enrichIssuer({ ...result, reason: assets.reason ?? result.reason, data: { ...data, aum: assets.status === 'AVAILABLE' ? assets.data?.aum ?? null : null, aumAsOf: assets.status === 'AVAILABLE' ? assets.data?.aumAsOf ?? null : null } });
+      return enrichIssuer({ ...result, ...(assets.status === 'STALE' && assets.data?.aum ? { status: 'STALE' as const, fetchedAt: assets.fetchedAt, cacheAgeMs: assets.cacheAgeMs } : {}), reason: assets.reason ?? result.reason, data: { ...data, aum: assets.data?.aum ?? null, aumAsOf: assets.data?.aumAsOf ?? null } });
+    },
+    async dividend(symbol) {
+      checkSymbol(symbol);
+      const requested = now();
+      const today = new Date(requested).toISOString().slice(0, 10);
+      // Cache even the expected empty result, without sharing profile availability.
+      const result = massiveEnvelope(await get<{ value: Dividend | null }>(`dividend:${symbol}`, POLICY.dividend, async () => ({ value: normalizeDividend(await transport!.json(`/stocks/v1/dividends?ticker=${symbol}&distribution_type=recurring&ex_dividend_date.lte=${today}&sort=ex_dividend_date.desc&limit=1`), symbol, requested) })));
+      if (result.data?.value) return { ...result, data: result.data.value };
+      return { ...result, status: result.status === 'AVAILABLE' ? 'UNAVAILABLE' : result.status, reason: result.status === 'AVAILABLE' ? 'NOT_FOUND' : result.reason, data: null };
     },
     async chart(symbol, range) {
       checkSymbol(symbol); if (!Object.prototype.hasOwnProperty.call(RANGE_RULES, range)) throw new MarketDataError('NOT_FOUND');

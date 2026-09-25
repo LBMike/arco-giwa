@@ -11,6 +11,12 @@ export type OrderExecutionInput = Readonly<{
   observedAt: string | null
   refreshing: boolean
   onRefresh: () => void
+  /**
+   * The customer presentation's one-click trade: a compact wallet step instead of the full panel. `autoStart` is true only
+   * for the order the user's own Buy or Sell press has just placed; the host then starts that order's one wallet request
+   * (deposit or escrow) once, after its own fresh checks. Absent: the full step-by-step panel.
+   */
+  instant?: Readonly<{ autoStart: boolean }>
 }>
 
 /** Returns null for orders it has nothing to offer for. */

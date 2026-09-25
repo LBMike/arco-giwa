@@ -7,7 +7,7 @@ import {StocksService} from '../stocks/service.js';
 import {ReceiptVerifier} from '../stocks/chain.js';
 import {deriveOrder} from '../stocks-submissions/contracts.js';
 import {orderBinding} from '../stocks-submissions/enrollment.js';
-import {StocksExecutionService} from './service.js';
+import {EXECUTION_DB_BUDGET_MS,StocksExecutionService} from './service.js';
 import type {ReviewedDeployment} from './contracts.js';
 function setup(){
  const m=testManifest(),digest=manifestDigest(m),queries:string[]=[];let now=1000000,mono=0,remaining=60000,paused=false,proofCalls=0,queryHook:(sql:string)=>Promise<void>=async()=>{};
@@ -53,14 +53,14 @@ for(const point of ['first SELECT','COMMIT'] as const)test(`DB phase rejects a d
  const f=setup();let stalled=false,after:string[]=[];
  f.setQueryHook(async sql=>{
   if(stalled)after.push(sql);
-  if(!stalled&&((point==='first SELECT'&&sql.startsWith('SELECT'))||sql===point)){stalled=true;f.advance(2500)}
+  if(!stalled&&((point==='first SELECT'&&sql.startsWith('SELECT'))||sql===point)){stalled=true;f.advance(EXECUTION_DB_BUDGET_MS)}
  });
  await assert.rejects(f.service.policy(ACTOR,'BUY','test-order'),/EXECUTION_DATABASE_TIMEOUT/);
  assert.equal(f.proofCalls(),0);assert.deepEqual(after,['ROLLBACK']);
 });
 test('DB phase releases a late acquired client before any SQL and rejects a backward clock',async()=>{
  const f=setup(),connect=f.stocks.repo.pool.connect.bind(f.stocks.repo.pool);let released=0;
- f.stocks.repo.pool.connect=async()=>{const client=await connect();f.advance(2500);return {...client,release:()=>{released++;client.release()}}};
+ f.stocks.repo.pool.connect=async()=>{const client=await connect();f.advance(EXECUTION_DB_BUDGET_MS);return {...client,release:()=>{released++;client.release()}}};
  await assert.rejects(f.service.policy(ACTOR,'BUY','test-order'),/EXECUTION_DATABASE_TIMEOUT/);assert.equal(released,1);assert.deepEqual(f.queries,[]);assert.equal(f.proofCalls(),0);
  const g=setup();g.setQueryHook(async sql=>{if(sql.startsWith('SELECT'))g.setMono(-1)});
  await assert.rejects(g.service.policy(ACTOR,'BUY','test-order'),/EXECUTION_DATABASE_TIMEOUT/);assert.equal(g.proofCalls(),0);

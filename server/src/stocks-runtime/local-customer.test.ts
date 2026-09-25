@@ -22,6 +22,22 @@ test('only dedicated local composition accepts the exact deployed manifest and l
     { operators: [{ ...row.operators[0], permissions: ['stocks:control'] }] },
   ]) assert.throws(() => parseStocksRuntimeConfig({ ...row, ...patch }, true));
 });
+test('local tUSDC activation accepts the finalized deployment and rejects changed cash or contract identity', () => {
+  const row = { ...config(), manifest: JSON.parse(readFileSync(
+    'docs/evidence/giwa-tusdc-activation-027/verified-manifest.json', 'utf8')) };
+  const accepted = parseStocksRuntimeConfig(row, true);
+  assert.equal(accepted.manifest.schemaVersion, 3);
+  assert.equal(accepted.manifest.cashToken, '0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633');
+  assert.equal(accepted.manifest.cashSymbol, 'tUSDC');
+  assert.throws(() => parseStocksRuntimeConfig(row));
+  for (const patch of [
+    { cashToken: config().manifest.cashToken },
+    { stockToken: config().manifest.stockToken },
+    { fundingVault: config().manifest.fundingVault },
+    { deploymentId: 'unreviewed-deployment' },
+    { cashIdentity: { ...row.manifest.cashIdentity, implementation: row.manifest.cashToken } },
+  ]) assert.throws(() => parseStocksRuntimeConfig({ ...row, manifest: { ...row.manifest, ...patch } }, true));
+});
 test('local server rejects split databases, wrong origins and hidden key overrides before any connection', () => {
   const env = {
     DATABASE_URL: 'postgresql://postgres.munsybkrsxrmajmbssli:TEST@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres',

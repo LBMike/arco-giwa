@@ -2,6 +2,7 @@ import { decodeEventLog, decodeFunctionData, erc20Abi, toEventSelector, type Hex
 import { ABI, address, ensure, freezeManifest, hash, immutable, manifestDigest, StocksError, type Manifest } from '../stocks/contracts.js';
 import { ReceiptVerifier, type ChainPort, type VerifiedEnvelope } from '../stocks/chain.js';
 import { digest, type Side, type Stage, type Transaction } from './contracts.js';
+import { verifyCashIdentity } from '../stocks/cash-identity.js';
 
 export type SubmissionReceiptRequest = { claimId: string; intentKey: string; transactionDigest: string; txHash: Hex; stage: Stage; side: Side; transaction: Transaction };
 export type SubmissionReceiptProof = { version: 1; deploymentDigest: string; claimId: string; intentKey: string; transactionDigest: string; txHash: Hex; status: 'CONFIRMED' | 'REVERTED'; blockNumber: string; blockHash: Hex; evidence: Record<string, unknown> };
@@ -42,6 +43,7 @@ export function createSubmissionReceiptVerifier(input: Manifest, rpc: ChainPort,
         code[address(target)] = await read(() => rpc.codeHash(target,block.number));
         ensure(code[address(target)] === m.codeHashes[address(target)], 'RECEIPT_CODE');
       }
+      await read(() => verifyCashIdentity(m, rpc, block.number));
       ensure(Array.isArray(receipt.logs) && receipt.logs.length <= 256, 'RECEIPT_LOGS');
       const indices = new Set<number>(), events: VerifiedEnvelope['events'] = [];
       const approvals: { address: string; args: Record<string,unknown> }[] = [];

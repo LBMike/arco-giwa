@@ -1,21 +1,28 @@
 import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 // Quote → order for NVDA, in the GIWA invest-panel look. The quote is the server's; this panel never computes an amount,
-// never replaces an expired quote on its own, and never turns an unconfirmed request into a new one. It reads no wallet,
-// balance or allowance: the only balance it shows is the server portfolio's available NVDA on the Sell side.
+// never replaces an expired quote on its own, and never turns an unconfirmed request into a new one. Cash reads are
+// informational, scoped to the verified host wallet and v3 deployment; execution still performs its own fresh checks.
 
-import { useId, useRef, type ReactNode, type RefObject } from "react"
+import { useEffect, useId, useRef, type ReactNode, type RefObject } from "react"
 import { Loader2 } from "lucide-react"
 
-import { AmountBlock, AmountField, INVEST_CTA, INVEST_CTA_READY, INVEST_PANEL_CARD, INVEST_TAB, INVEST_TAB_ACTIVE, INVEST_TAB_TRACK, InfoRow } from "../invest-panel-ui"
-import { StockLogo } from "../stocks-market/StockLogo"
+import { AmountBlock, AmountField, INVEST_PANEL_CARD, INVEST_TAB, INVEST_TAB_ACTIVE, INVEST_TAB_TRACK, InfoRow } from "../invest-panel-ui"
+import { directContracts } from "../stocks-direct"
+import { DirectTradePanel } from "./DirectTrade"
+import { CTA_BUSY, CTA_READY, FIELD_FOCUS, NvdaMark, TestNote } from "./trade-parts"
+import { signInFailureMessage } from "../stocks-host/sign-in-errors"
 import { useStocksAccess, type GiwaStocksAccess } from "./access"
 import type { StocksInvestorActions } from "./actions"
 import { isUnresolved, tradeBlock, type OrderAttempt, type StocksInvestorState, type TradeBlock } from "./controller"
-import { formatBaseUnits, isDecimalKeystroke } from "./decimal"
+import { formatBaseUnits, isDecimalKeystroke, parseHumanDecimal } from "./decimal"
 import { attemptErrorMessage, cashLabel, errorMessage, formatCash, formatPrice, formatQuantity, formatSignedQuantity, formatUtc, signedOutMessage, tradeBlockMessage } from "./display"
 import { OrderStatusCard } from "./OrderStatusCard"
+import { StocksFundingStatus, useStocksFundingStatus, useStocksWalletCash } from "./funding-status"
+import { approvalMessage, useStocksTokenApproval } from "./cash-approval"
+import { BURN_FEE_BPS, buyCost, buyQuantity, formatFee, MINT_FEE_BPS, priceUnits, sellPayout } from "./pricing"
+import { InstantTradeView } from "./InstantTrade"
 import { orderStatusMeaning } from "./status"
-import { STOCKS_QUANTITY_SCALE, type StocksCashSymbol } from "./types"
+import { STOCKS_CASH_SCALE, STOCKS_QUANTITY_SCALE, type StocksCashSymbol } from "./types"
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, FOCUS_RING, Field, Heading, Notice, useRescueFocus } from "./ui"
 
 const QUANTITY_REASON: Record<string, string> = {
@@ -25,15 +32,17 @@ const QUANTITY_REASON: Record<string, string> = {
   TOO_LARGE: "This quantity is above the accepted maximum.",
 }
 
+/** Customer presentation, Buy: why the typed tUSDC amount cannot be used. */
+const PAY_REASON: Record<string, string> = {
+  FORMAT: "Enter a plain decimal number, for example 60.",
+  PRECISION: "Use at most 6 decimal places.",
+  ZERO: "Enter an amount greater than zero.",
+  TOO_LARGE: "This amount is above the accepted maximum.",
+}
+
 /** Native `disabled` drops keyboard focus: while a read is in flight the button stays focusable, aria-disabled, and has no click handler. */
 const BUSY = "aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
 
-const CTA = `${INVEST_CTA} min-h-11 ${FOCUS_RING}`
-const CTA_READY = `${CTA} ${INVEST_CTA_READY} disabled:cursor-not-allowed`
-/** In progress: readable text on the muted surface (the muted text token is for placeholders only). */
-const CTA_BUSY = `${CTA} cursor-progress bg-[var(--color-arco-surface-muted)] text-[var(--color-arco-text-soft)]`
-const CHIP_NOTE = "rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-arco-text-soft)]"
-const FIELD_FOCUS = "focus-within:outline focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-[var(--color-arco-ink)]"
 /** The selected Buy / Sell segment: GIWA's active pill plus an inset ink ring, a non-colour cue of at least 3:1 (Stocks only). */
 const SIDE_ACTIVE = `${INVEST_TAB_ACTIVE} ring-1 ring-inset ring-[var(--color-arco-ink)]`
 
@@ -101,7 +110,8 @@ export function attemptTitle(attempt: OrderAttempt, state: StocksInvestorState):
 
 function AttemptView({ attempt, state, cashSymbol, actions }: { attempt: OrderAttempt; state: StocksInvestorState; cashSymbol: StocksCashSymbol | null; actions: StocksInvestorActions }) {
   const demo = useDemoPresentation()
-  const cash = demo ? "USDC" : cashSymbol ?? "test cash"
+  const tusdc = state.catalog.status === "ready" && state.catalog.catalog.cashSymbol === "tUSDC"
+  const cash = tusdc ? cashSymbol ?? "test cash" : demo ? "USDC" : cashSymbol ?? "test cash"
   const headingRef = useRef<HTMLHeadingElement>(null)
   useRescueFocus(headingRef, `${attempt.body.idempotencyKey}:${attempt.status}`)
   const request = (
@@ -228,15 +238,16 @@ export function sessionEndedMessage(access: GiwaStocksAccess | null): string | n
 function hostErrorMessage(access: GiwaStocksAccess): string | null {
   if (access.host !== "error" || sessionEndedMessage(access) !== null) return null
   if (!access.canSignIn) return "Stocks sign-in is not available on this page. Reload the page; if this continues, contact operations."
-  return "Stocks sign-in could not be completed. Try again."
+  return signInFailureMessage(access.hostError)
 }
 
 /**
  * The single next step the panel offers, in order: wallet → network → sign-in → catalog → quantity → quote → order.
  * Without host access (standalone feature) the wallet and sign-in steps belong to the host: the form stays disabled with
- * the reason shown, as before.
+ * the reason shown, as before. With `quoteSignsIn` (the customer presentation) the sign-in step is the form's own
+ * "Get quote": the quantity is typed first, and that press signs in and then quotes it.
  */
-export function tradeStep(state: StocksInvestorState, access: GiwaStocksAccess | null): TradeStep {
+export function tradeStep(state: StocksInvestorState, access: GiwaStocksAccess | null, quoteSignsIn = false): TradeStep {
   const block: TradeBlock = tradeBlock(state)
   if (isUnresolved(state.attempt) || state.attempt?.status === "ACCEPTED") return { kind: "attempt", label: state.attempt ? attemptTitle(state.attempt, state) : "", hint: null }
   const signedIn = state.session.status === "verified" && !state.authRejected
@@ -249,6 +260,8 @@ export function tradeStep(state: StocksInvestorState, access: GiwaStocksAccess |
     }
     if (access.wallet === "unavailable") return { kind: "wallet-unavailable", label: "Wallet cannot sign here", hint: "Your wallet is not ready to sign a message, so it cannot sign in to Stocks on this page." }
     if (access.host === "signing-in") return { kind: "signing-in", label: "Signing in…", hint: "Complete the sign-in message in your wallet." }
+    // The customer presentation's first Buy or Sell press signs in; only a sign-in failure is explained under it.
+    if (quoteSignsIn) return { kind: "sign-in", label: state.side === "SELL" ? "Sell NVDA" : "Buy NVDA", hint: hostErrorMessage(access) }
     return { kind: "sign-in", label: "Sign in to trade", hint: hostErrorMessage(access) }
   }
   if (block === "NO_CLIENT" || block === "CATALOG_NOT_READY" || block === "NOT_ACTIVATED" || block === "SIGNED_OUT" || block === "AUTH_REJECTED") {
@@ -262,23 +275,65 @@ export function tradeStep(state: StocksInvestorState, access: GiwaStocksAccess |
 }
 
 /** The server portfolio's available NVDA once it has been read (never an assumed zero before that). Signed base units. */
+/**
+ * The order's small print inside "Order details". The customer presentation shows only the fees: side, amounts and
+ * order capability are already on the panel's face. The technical preview keeps every order fact.
+ */
+export function OrderDetailFields({ demo, side, quantity, quote, cash, orderCapability, cashSymbol, deploymentId }: {
+  demo: boolean
+  side: "BUY" | "SELL"
+  /** NVDA base units, or null while none is entered. */
+  quantity: string | null
+  quote: { side: "BUY" | "SELL"; cashAmount: string; expiresAt: string } | null
+  cash: string
+  orderCapability: "CHECK_PAUSE_AT_ORDER" | "NOT_ACTIVATED" | null
+  cashSymbol: StocksCashSymbol | null
+  deploymentId: string | null
+}) {
+  if (demo) return (
+    <>
+      <Field label="Mint fee">{formatFee(MINT_FEE_BPS)}</Field>
+      <Field label="Burn fee">{formatFee(BURN_FEE_BPS)}</Field>
+    </>
+  )
+  return (
+    <>
+      <Field label="Side">{side === "SELL" ? "Sell" : "Buy"}</Field>
+      <Field label="Quantity">{quantity !== null ? `${formatQuantity(quantity)} NVDA` : "—"}</Field>
+      {quote ? (
+        <>
+          <Field label={quote.side === "SELL" ? "You receive (test cash)" : "You pay (test cash)"}>
+            {formatCash(quote.cashAmount)} {cash}
+          </Field>
+          <DemoDetails><Field label="Exact amount" mono>
+            {quote.cashAmount} base units (6 decimals)
+          </Field>
+          <Field label="Server deadline">{formatUtc(quote.expiresAt)}</Field></DemoDetails>
+        </>
+      ) : null}
+      {/* Off the front of the panel (the block notice says when trading is not activated), with the rest of the order's small print. */}
+      {orderCapability ? <Field label="Order capability">{orderCapability === "CHECK_PAUSE_AT_ORDER" ? "Open unless paused" : "Not activated"}</Field> : null}
+      <DemoDetails>{cashSymbol ? <Field label="Test cash">{cashLabel(cashSymbol)}</Field> : null}
+      {deploymentId ? (
+        <Field label="Deployment" mono>
+          {deploymentId}
+        </Field>
+      ) : null}</DemoDetails>
+    </>
+  )
+}
+
 export function availableToSell(state: StocksInvestorState): string | null {
   if (state.portfolio.status !== "ready") return null
   return state.portfolio.portfolio.holdings.find((holding) => holding.symbol === "NVDA")?.availableQuantity ?? "0"
 }
 
-/** The NVDA logo at chip size (StockLogo's smallest box, scaled into 20px). Decorative: "NVDA" follows. */
-function NvdaMark() {
-  return (
-    <span className="inline-flex size-5 shrink-0 [&>span]:size-5 [&>span]:text-[10px]">
-      <StockLogo symbol="NVDA" size={32} />
-    </span>
-  )
+/** The NVDA the wallet holds (server portfolio, finalized, including reserved units) once read; null before that. Signed. */
+export function walletHolding(state: StocksInvestorState): string | null {
+  if (state.portfolio.status !== "ready") return null
+  return state.portfolio.portfolio.holdings.find((holding) => holding.symbol === "NVDA")?.walletQuantity ?? "0"
 }
 
-function TestNote({ children }: { children: ReactNode }) {
-  return <DemoDetails><span className={CHIP_NOTE}>{children}</span></DemoDetails>
-}
 
 export type TradePanelProps = {
   state: StocksInvestorState
@@ -287,9 +342,26 @@ export type TradePanelProps = {
   titleId?: string
   /** Makes the heading focusable (the detail view focuses it after "View"). */
   headingRef?: RefObject<HTMLHeadingElement>
+  /**
+   * The live NVDA price the market chart shows. The customer presentation previews amounts at it (the server quotes at its
+   * own read of the same live price). Absent: the catalog price.
+   */
+  marketPrice?: string | null
 }
 
-export function TradePanel({ state, actions, titleId, headingRef }: TradePanelProps) {
+/**
+ * The customer presentation trades directly when the server publishes its contracts (the wallet's own deposit or escrow
+ * is the order: no sign-in). An order this tab placed through a session is finished on the session panel first. The
+ * technical preview, and an older server, keep the quote → order panel.
+ */
+export function TradePanel(props: TradePanelProps) {
+  const demo = useDemoPresentation()
+  const catalog = props.state.catalog.status === "ready" ? props.state.catalog.catalog : null
+  const contracts = demo && props.state.attempt === null ? directContracts(catalog) : null
+  return contracts !== null ? <DirectTradePanel state={props.state} actions={props.actions} contracts={contracts} marketPrice={props.marketPrice ?? null} /> : <SessionTradePanel {...props} />
+}
+
+function SessionTradePanel({ state, actions, titleId, headingRef, marketPrice = null }: TradePanelProps) {
   const demo = useDemoPresentation()
   const access = useStocksAccess()
   const inputId = useId()
@@ -303,19 +375,38 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
   const quoteRef = useRef<HTMLDivElement>(null)
   const catalog = state.catalog.status === "ready" ? state.catalog.catalog : null
   const instrument = catalog?.instruments.find((item) => item.symbol === "NVDA") ?? null
-  const cashSymbol = catalog?.cashSymbol ?? null
-  const cash = demo ? "USDC" : cashSymbol ?? "test cash"
+  const tusdcCatalog = catalog?.cashSymbol === "tUSDC"
+  const funding = useStocksFundingStatus(tusdcCatalog ? catalog.deploymentId : null)
+  // The wallet's tUSDC is public: shown as soon as the wallet is on GIWA, before and after Stocks sign-in (as on Funds).
+  // In the customer presentation the verified deployment (known after sign-in) adds what this wallet has approved to its
+  // funding vault (Buy) and its redemption escrow (Sell), and the wallet's NVDA at the same head block.
+  const walletCash = useStocksWalletCash(
+    tusdcCatalog,
+    demo ? funding.data?.fundingVault ?? null : null,
+    undefined,
+    undefined,
+    demo && funding.data ? { token: funding.data.stockToken, spender: funding.data.redemptionEscrow } : null,
+  )
+  // The one-time approval of the one-click trade (Savings and Funds approve their vaults the same way).
+  const approval = useStocksTokenApproval(walletCash.refresh)
+  const cashBalance = walletCash.data?.balance ?? funding.data?.balance ?? null
+  const cashSymbol = tusdcCatalog ? walletCash.data?.cashSymbol ?? funding.data?.cashSymbol ?? null : catalog?.cashSymbol ?? null
+  const cash = tusdcCatalog ? cashSymbol ?? "test cash" : demo ? "USDC" : cashSymbol ?? "test cash"
   const block = tradeBlock(state)
   const attempt = state.attempt
   const showForm = attempt === null || attempt.status === "REJECTED"
   const quote = state.quote.status === "ready" || state.quote.status === "expired" ? state.quote.quote : null
   // Back to the form after "Start a new order" or "Discard quote": the quantity field. A new quote replaces the button
   // that asked for it: the quote summary (never the order button, so a held or repeated key cannot place an order).
-  useRescueFocus(quote ? quoteRef : inputRef, `${showForm}:${state.quote.status}`)
+  useRescueFocus(quote && !demo ? quoteRef : inputRef, `${showForm}:${state.quote.status}`)
   const invalid = state.quantityInput !== "" && !state.quantityCheck.ok
-  const step = tradeStep(state, access)
+  const step = tradeStep(state, access, demo)
+  // Customer presentation: the quantity is typed before signing in, and "Get quote" signs in, then quotes it.
+  const quoteSignsIn = demo && step.kind === "sign-in"
   const sell = state.side === "SELL"
   const available = sell ? availableToSell(state) : null
+  // The NVDA field's balance: available to sell on Sell; on Buy (demo presentation) what the wallet holds.
+  const shownHolding = sell ? available : demo ? walletCash.data?.stockBalance ?? walletHolding(state) : null
   // MAX fills the exact available quantity as typed text (no grouping), only for a positive server value.
   const maxInput = available !== null && !available.startsWith("-") && available !== "0" ? formatBaseUnits(available, STOCKS_QUANTITY_SCALE) : null
   const overAvailable = sell && available !== null && state.quantityCheck.ok && BigInt(state.quantityCheck.baseUnits) > BigInt(available)
@@ -323,6 +414,62 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
   // An expired, rejected or other-wallet session says so instead of the generic "Sign-in required" text.
   const sessionEnded = state.session.status === "verified" && !state.authRejected ? null : sessionEndedMessage(access)
   const overAvailableShown = overAvailable && available !== null && state.portfolio.status === "ready"
+
+  // ── customer presentation: the one-click trade ──
+  const signedIn = state.session.status === "verified" && !state.authRejected
+  // Previews at the chart's live price (else the catalog's); the server's quote at its own read of that price is what counts.
+  const unitPrice = priceUnits(demo ? marketPrice : null) ?? priceUnits(instrument?.price)
+  const payCheck = demo && !sell && state.payInput !== "" ? parseHumanDecimal(state.payInput, STOCKS_CASH_SCALE) : null
+  const payInvalid = payCheck !== null && !payCheck.ok
+  // A typed tUSDC amount is paid exactly; the NVDA it buys follows the price on screen.
+  const payQuantity = payCheck !== null && payCheck.ok && unitPrice !== null ? buyQuantity(BigInt(payCheck.baseUnits), unitPrice) : null
+  const typedQuantity = payCheck !== null ? (payQuantity !== null && payQuantity > 0n ? payQuantity.toString() : null) : state.quantityCheck.ok ? state.quantityCheck.baseUnits : null
+  // The trade's cost (Buy) or payout (Sell) by the server's own rounding. The server's quote is still what is paid.
+  const tradeCash =
+    payCheck !== null && payCheck.ok ? payCheck.baseUnits
+      : typedQuantity !== null && unitPrice !== null ? (sell ? sellPayout(BigInt(typedQuantity), unitPrice) : buyCost(BigInt(typedQuantity), unitPrice)).toString()
+        : null
+  const payValue = state.payInput !== "" ? state.payInput : !sell && tradeCash !== null ? formatBaseUnits(tradeCash, STOCKS_CASH_SCALE) : ""
+  const receiveValue = payCheck !== null ? (typedQuantity !== null ? formatBaseUnits(typedQuantity, STOCKS_QUANTITY_SCALE) : "") : state.quantityInput
+  const tooSmall = demo && ((payCheck !== null && payCheck.ok && typedQuantity === null) || (sell && tradeCash === "0"))
+  // What the trade takes from the wallet: tUSDC base units for Buy, NVDA base units for Sell.
+  const required = sell ? typedQuantity : tradeCash
+  const target = demo && funding.data ? (sell ? { token: funding.data.stockToken, spender: funding.data.redemptionEscrow } : { token: funding.data.cashToken, spender: funding.data.fundingVault }) : null
+  const walletRead = walletCash.data
+  const allowed = target === null || walletRead === null ? null : sell ? (walletRead.stockSpender === target.spender ? walletRead.stockAllowance : null) : walletRead.spender === target.spender ? walletRead.allowance : null
+  const approvalNeeded = required === null || allowed === null ? null : BigInt(allowed) < BigInt(required)
+  const spendable = sell ? available ?? walletRead?.stockBalance ?? null : cashBalance
+  const short = demo && !tooSmall && required !== null && spendable !== null && BigInt(spendable) < BigInt(required)
+  const approving = approval.state.status === "wallet" || approval.state.status === "pending" || (approval.state.status === "confirmed" && approvalNeeded === true)
+  const approveSymbol = sell ? "NVDA" : cashSymbol ?? "tUSDC"
+  const tradeLabel = sell ? "Sell NVDA" : "Buy NVDA"
+  const sessionWallet = state.session.status === "verified" ? state.session.wallet : null
+
+  // GIWA's RPC can briefly serve the old allowance after a confirmed approval: read again until it shows (as Funds does).
+  const approvalConfirmed = approval.state.status === "confirmed"
+  const refreshWallet = walletCash.refresh
+  useEffect(() => {
+    if (!approvalConfirmed || approvalNeeded !== true) return
+    let reads = 0
+    const timer = setInterval(() => {
+      reads += 1
+      if (reads > 10) clearInterval(timer)
+      else refreshWallet()
+    }, 1_500)
+    return () => clearInterval(timer)
+  }, [approvalConfirmed, approvalNeeded, refreshWallet])
+  // A one-click trade carried through sign-in continues once nothing comes first (approval, balance), else it stops there.
+  const carried = demo && state.tradeWhenReady && signedIn && block === null
+  useEffect(() => {
+    if (!carried) return
+    if (short || tooSmall || approvalNeeded === true) actions.clearTradeWhenReady()
+    else if (approvalNeeded === false || funding.status === "error" || walletCash.status === "error") actions.tradeNow()
+  }, [carried, short, tooSmall, approvalNeeded, funding.status, walletCash.status, actions])
+  // A finished trade changed both balances.
+  const settled = demo && attempt?.status === "ACCEPTED" && attempt.order?.state === "COMPLETED"
+  useEffect(() => {
+    if (settled) refreshWallet()
+  }, [settled, refreshWallet])
 
   const nvdaField = (
     <AmountField
@@ -339,32 +486,52 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
       symbol="NVDA"
       icon={<NvdaMark />}
       symbolNote={<TestNote>Test units</TestNote>}
-      value={state.quantityInput}
+      value={demo && !sell ? receiveValue : state.quantityInput}
       // Exact base units of the typed quantity, like the cash side's (also keeps both fields the same height).
       subValue={demo ? undefined : state.quantityCheck.ok ? `${state.quantityCheck.baseUnits} base units (9 decimals)` : "9 decimals max"}
       onChange={actions.setQuantity}
       filter={(next) => isDecimalKeystroke(next, STOCKS_QUANTITY_SCALE)}
       balanceLabel={demo ? "Balance" : "Available to sell"}
-      balance={available === null ? (demo ? "--" : undefined) : `${formatSignedQuantity(available)} NVDA`}
+      balance={shownHolding === null ? (demo ? "--" : undefined) : `${formatSignedQuantity(shownHolding)} NVDA`}
       onMax={maxInput === null ? undefined : () => actions.setQuantity(maxInput)}
       maxClassName={FOCUS_RING}
       className={FIELD_FOCUS}
       inputRef={inputRef}
-      inputProps={{ autoComplete: "off", spellCheck: false, placeholder: "0.5", "aria-describedby": overAvailableShown ? `${hintId} ${availableId}` : hintId, "aria-invalid": invalid }}
+      inputProps={{ autoComplete: "off", spellCheck: false, placeholder: demo ? "0" : "0.5", "aria-describedby": overAvailableShown ? `${hintId} ${availableId}` : hintId, "aria-invalid": invalid }}
     />
   )
-  const cashField = (
+  const payId = `${inputId}-pay`
+  const cashField = demo && !sell ? (
+    <AmountField
+      key="cash"
+      id={payId}
+      tone="soft"
+      copyButton={false}
+      caption="You pay"
+      symbol={tusdcCatalog ? cashSymbol ?? "Test cash" : "USDC"}
+      icon={<img src="/logos/usdc.svg" alt="" width={18} height={18} />}
+      balance={tusdcCatalog && cashBalance !== null ? `${formatCash(cashBalance)} tUSDC` : "--"}
+      symbolNote={<TestNote>TEST</TestNote>}
+      value={payValue}
+      onChange={(next) => actions.setPayAmount(next, marketPrice)}
+      filter={(next) => isDecimalKeystroke(next, STOCKS_CASH_SCALE)}
+      onMax={cashBalance !== null && cashBalance !== "0" ? () => actions.setPayAmount(formatBaseUnits(cashBalance, STOCKS_CASH_SCALE), marketPrice) : undefined}
+      maxClassName={FOCUS_RING}
+      className={FIELD_FOCUS}
+      inputProps={{ autoComplete: "off", spellCheck: false, placeholder: "0", "aria-describedby": hintId, "aria-invalid": payInvalid }}
+    />
+  ) : (
     <AmountField
       key="cash"
       display
       tone="soft"
       copyButton={false}
       caption={sell ? "You receive" : "You pay"}
-      symbol={demo ? "USDC" : cashSymbol ?? "Test cash"}
+      symbol={tusdcCatalog ? cashSymbol ?? "Test cash" : demo ? "USDC" : cashSymbol ?? "Test cash"}
       icon={demo ? <img src="/logos/usdc.svg" alt="" width={18} height={18} /> : undefined}
-      balance={demo ? "--" : undefined}
+      balance={tusdcCatalog ? cashBalance !== null ? `${formatCash(cashBalance)} tUSDC` : "--" : demo ? "--" : undefined}
       symbolNote={<TestNote>TEST</TestNote>}
-      value={quote ? formatCash(quote.cashAmount) : "—"}
+      value={quote ? formatCash(quote.cashAmount) : demo ? (tradeCash !== null && tradeCash !== "0" ? formatCash(tradeCash) : "0") : "—"}
       subValue={demo ? undefined : quote ? `${quote.cashAmount} base units (6 decimals)` : "서버 견적 후 표시"}
     />
   )
@@ -376,9 +543,10 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
       : step.kind === "switch"
         ? access?.switchNetwork
         : signIn
-          ? // The user states Buy or Sell before signing in; the controller keeps that one choice through this sign-in.
+          ? // The user states Buy or Sell before signing in; the controller keeps that one choice through this sign-in,
+            // and in the customer presentation also the typed quantity, which it quotes once the session lands.
             () => {
-              actions.noteSignInIntent()
+              actions.noteSignInIntent(quoteSignsIn && state.quantityCheck.ok ? state.quantityInput : null, quoteSignsIn && state.payInput !== "" ? state.payInput : null)
               signIn()
             }
           : undefined
@@ -400,7 +568,7 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
     case "sign-in":
     case "wallet-unavailable":
       cta = (
-        <button key="access" type="button" className={CTA_READY} onClick={accessAction} disabled={!accessAction} aria-describedby={describedBy}>
+        <button key="access" type="button" className={CTA_READY} onClick={accessAction} disabled={!accessAction || (quoteSignsIn && (!state.quantityCheck.ok || short || tooSmall))} aria-describedby={describedBy}>
           {step.label}
         </button>
       )
@@ -432,18 +600,54 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
       // blocked · quantity · quote · requote: the form's submit button (Enter in the quantity field asks for a quote).
       cta = (
         <button key="submit" type="submit" className={CTA_READY} disabled={step.kind === "blocked" || step.kind === "quantity"} aria-describedby={describedBy}>
-          {step.label}
+          {demo ? tradeLabel : step.label}
         </button>
       )
   }
-
+  // Customer presentation, signed in with an amount: approve once, then Buy or Sell in one press (quote → order → the one
+  // wallet request). Every busy step stays a focusable, aria-disabled button with its reason.
+  const demoTrade = demo && (step.kind === "quote" || step.kind === "requote" || step.kind === "place" || step.kind === "quoting")
+  let tradeReady = false
+  const busy = (label: string) => (
+    <button key="busy" type="button" className={CTA_BUSY} aria-disabled="true" aria-busy="true">
+      <Loader2 aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />
+      {label}
+    </button>
+  )
+  if (demoTrade) {
+    if (step.kind === "quoting") cta = busy("Getting price…")
+    else if (tooSmall) {
+      cta = <button key="submit" type="submit" className={CTA_READY} disabled>{tradeLabel}</button>
+    } else if (short) {
+      cta = <button key="short" type="button" className={CTA_READY} disabled>{`Not enough ${approveSymbol}`}</button>
+    } else if (approval.state.status === "wallet") cta = busy("Approve in your wallet…")
+    else if (approving) cta = busy("Confirming approval on GIWA…")
+    else if (approvalNeeded === true && target !== null && sessionWallet !== null) {
+      const approveTarget = target
+      const owner = sessionWallet
+      cta = (
+        <button key="approve" type="button" className={CTA_READY} onClick={() => void approval.approve({ owner, token: approveTarget.token, spender: approveTarget.spender })}>
+          {`Approve ${approveSymbol}`}
+        </button>
+      )
+    } else if (approvalNeeded === null && (funding.status === "loading" || walletCash.status === "loading")) cta = busy("Checking your wallet…")
+    else {
+      tradeReady = true
+      cta = (
+        <button key="submit" type="submit" className={CTA_READY}>
+          {tradeLabel}
+        </button>
+      )
+    }
+  }
   return (
     <section className={demo ? "flex w-full flex-col" : `flex w-full flex-col gap-4 ${INVEST_PANEL_CARD}`} aria-labelledby={demo ? undefined : headingId} aria-label={demo ? "Trade NVDA" : undefined} data-testid="stocks-trade-panel">
       <DemoDetails><Heading id={headingId} headingRef={headingRef}>
         Trade NVDA
       </Heading></DemoDetails>
       <p className="sr-only" aria-live="polite" data-testid="stocks-trade-status">
-        {statusAnnouncement(state)}
+        {/* The one-click trade's own result view announces its outcome; there is no "order accepted" step to say. */}
+        {demo && attempt?.status === "ACCEPTED" ? "" : statusAnnouncement(state)}
       </p>
 
       {blockNotice || (accessStep && !demo) ? (
@@ -472,7 +676,13 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
         </div>
       ) : null}
 
-      {attempt !== null ? <AttemptView attempt={attempt} state={state} cashSymbol={cashSymbol} actions={actions} /> : null}
+      {attempt === null ? null : demo && (attempt.status === "SUBMITTING" || attempt.status === "ACCEPTED") ? (
+        <InstantTradeView attempt={attempt} state={state} actions={actions} cashSymbol={cash} />
+      ) : demo && attempt.status === "REJECTED" ? (
+        <Notice tone="error">{attempt.error ? attemptErrorMessage(attempt.error, attempt.outcomeUnknown) : "The server refused the order."}</Notice>
+      ) : (
+        <AttemptView attempt={attempt} state={state} cashSymbol={cashSymbol} actions={actions} />
+      )}
 
       {showForm ? (
         <form
@@ -480,10 +690,13 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
           noValidate
           onSubmit={(event) => {
             event.preventDefault()
-            if (step.kind === "quote" || step.kind === "requote" || step.kind === "place") actions.requestQuote()
+            if (demoTrade) {
+              if (tradeReady) actions.tradeNow()
+            } else if (step.kind === "quote" || step.kind === "requote" || step.kind === "place") actions.requestQuote()
+            else if (quoteSignsIn && state.quantityCheck.ok) accessAction?.()
           }}
         >
-          <fieldset className="flex w-full min-w-0 flex-col" disabled={block !== null}>
+          <fieldset className="flex w-full min-w-0 flex-col" disabled={block !== null && !quoteSignsIn}>
             <legend className="sr-only">Order side and quantity</legend>
             <DemoDetails><div role="radiogroup" aria-label="Order side" className={`grid w-full grid-cols-2 ${INVEST_TAB_TRACK}`}>
               {(["BUY", "SELL"] as const).map((side) => (
@@ -518,8 +731,19 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
                 {sell ? [nvdaField, cashField] : [cashField, nvdaField]}
               </AmountBlock>
             </div>
+            {tusdcCatalog ? <StocksFundingStatus funding={funding} wallet={walletCash} requiredCash={sell ? null : quote ? quote.cashAmount : demo ? tradeCash : null} /> : null}
             <p id={hintId} className={`mt-2 text-xs ${invalid ? "font-medium text-[var(--color-arco-ink)]" : "text-[var(--color-arco-text-soft)]"}`}>
-              {invalid ? QUANTITY_REASON[state.quantityCheck.ok ? "" : state.quantityCheck.reason] ?? "Enter a valid quantity." : demo ? "" : "Up to 9 decimal places. The server calculates the exact test cash amount."}
+              {payCheck !== null && !payCheck.ok
+                ? PAY_REASON[payCheck.reason] ?? "Enter a valid amount."
+                : tooSmall
+                  ? sell
+                    ? "This quantity pays out less than 0.000001 tUSDC. Enter a larger quantity."
+                    : "This amount buys less than 0.000000001 NVDA. Enter a larger amount."
+                  : invalid
+                    ? QUANTITY_REASON[state.quantityCheck.ok ? "" : state.quantityCheck.reason] ?? "Enter a valid quantity."
+                    : demo
+                      ? ""
+                      : "Up to 9 decimal places. The server calculates the exact test cash amount."}
             </p>
             {overAvailableShown && available !== null && state.portfolio.status === "ready" ? (
               <div className="mt-3" id={availableId}>
@@ -532,8 +756,9 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
           </fieldset>
 
           <div className="mt-3">
-            {instrument ? <InfoRow label={demo ? "Order price" : "Price"} value={`${formatPrice(instrument.price)} ${cash} / NVDA${demo ? "" : " (fixed, test)"}`} /> : null}
-            {quote ? (
+            {/* The customer presentation prices at the chart above; the technical preview shows the catalog price here. */}
+            {instrument && !demo ? <InfoRow label="Price" value={`${formatPrice(instrument.price)} ${cash} / NVDA (fixed, test)`} /> : null}
+            {quote && !demo ? (
               <div ref={quoteRef} tabIndex={-1} role="group" aria-label="Quote" data-testid="stocks-quote" className={FOCUS_RING}>
                 <InfoRow
                   label="Quote"
@@ -543,29 +768,16 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
             ) : null}
             <InfoRow label="Order details" expandable tone="soft" bodyId={detailsId} buttonClassName={FOCUS_RING}>
               <dl className="w-full">
-                <Field label="Side">{(quote?.side ?? state.side) === "SELL" ? "Sell" : "Buy"}</Field>
-                <Field label="Quantity">
-                  {quote ? `${formatQuantity(quote.quantity)} NVDA` : state.quantityCheck.ok ? `${formatQuantity(state.quantityCheck.baseUnits)} NVDA` : "—"}
-                </Field>
-                {quote ? (
-                  <>
-                    <Field label={quote.side === "SELL" ? (demo ? "You receive" : "You receive (test cash)") : (demo ? "You pay" : "You pay (test cash)")}>
-                      {formatCash(quote.cashAmount)} {cash}
-                    </Field>
-                    <DemoDetails><Field label="Exact amount" mono>
-                      {quote.cashAmount} base units (6 decimals)
-                    </Field>
-                    <Field label="Server deadline">{formatUtc(quote.expiresAt)}</Field></DemoDetails>
-                  </>
-                ) : null}
-                {/* Off the front of the panel (the block notice says when trading is not activated), with the rest of the order's small print. */}
-                {instrument ? <Field label="Order capability">{instrument.orderCapability === "CHECK_PAUSE_AT_ORDER" ? "Open unless paused" : "Not activated"}</Field> : null}
-                <DemoDetails>{cashSymbol ? <Field label="Test cash">{cashLabel(cashSymbol)}</Field> : null}
-                {catalog ? (
-                  <Field label="Deployment" mono>
-                    {catalog.deploymentId}
-                  </Field>
-                ) : null}</DemoDetails>
+                <OrderDetailFields
+                  demo={demo}
+                  side={quote?.side ?? state.side}
+                  quantity={quote ? quote.quantity : state.quantityCheck.ok ? state.quantityCheck.baseUnits : null}
+                  quote={quote}
+                  cash={cash}
+                  orderCapability={instrument?.orderCapability ?? null}
+                  cashSymbol={cashSymbol}
+                  deploymentId={catalog?.deploymentId ?? null}
+                />
               </dl>
             </InfoRow>
           </div>
@@ -584,7 +796,12 @@ export function TradePanel({ state, actions, titleId, headingRef }: TradePanelPr
           ) : null}
 
           {accessStep && !demo ? null : cta}
-          {step.kind === "place" ? (
+          {demoTrade && approval.state.status === "error" ? (
+            <div className="mt-3">
+              <Notice tone="error">{approvalMessage(approval.state.code, approveSymbol)}</Notice>
+            </div>
+          ) : null}
+          {step.kind === "place" && !demo ? (
             <button type="button" className={`${BUTTON_SECONDARY} mt-2 w-full`} onClick={actions.discardQuote}>
               Discard quote
             </button>

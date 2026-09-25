@@ -70,6 +70,8 @@ export function PortfolioCard({
   aum = null,
   percentLabel = '% of NAV',
   stacked = false,
+  exposureHeading = 'Exposure by Protocol',
+  exposureColumnLabel = 'Portfolio',
 }: {
   // `snapshot` is optional so legacy callers (no snapshot data) are unaffected; `total`
   // is widened to allow null (GIWA config → donut total falls back to the AUM).
@@ -86,6 +88,9 @@ export function PortfolioCard({
   // the viewport-based md:2-col (byte-identical for the product page). Set by narrow-container
   // callers (Savings 505px column) where md: (768px viewport) would wrongly go side-by-side.
   stacked?: boolean
+  // Read-only underlying funds use allocation segments instead of DeFi protocols.
+  exposureHeading?: string
+  exposureColumnLabel?: string
 }) {
   const tabs: Tab[] = [
     ...(enabledViews?.snapshot === true ? (['snapshot'] as Tab[]) : []),
@@ -149,7 +154,7 @@ export function PortfolioCard({
           <EmptyBreakdown />
         )
       ) : portfolio.exposure.length > 0 ? (
-        <ExposureView rows={portfolio.exposure} aum={aum} percentLabel={percentLabel} />
+        <ExposureView rows={portfolio.exposure} aum={aum} percentLabel={percentLabel} heading={exposureHeading} columnLabel={exposureColumnLabel} />
       ) : (
         <EmptyBreakdown />
       )}
@@ -323,10 +328,14 @@ function ExposureView({
   rows,
   aum,
   percentLabel,
+  heading,
+  columnLabel,
 }: {
   rows: BreakdownRow[]
   aum: number | null
   percentLabel: string
+  heading: string
+  columnLabel: string
 }) {
   const [active, setActive] = useState<number | null>(null)
   const [showTip, setShowTip] = useState(false)
@@ -341,7 +350,7 @@ function ExposureView({
     <>
       <div className="mt-4 flex items-center gap-1.5">
         <span className="text-[10px] uppercase tracking-wide text-[var(--color-arco-muted)]">
-          Exposure by Protocol
+          {heading}
         </span>
         <span className="inline-flex size-4 items-center justify-center rounded-[6px] bg-[var(--color-arco-chip)] text-[10px] leading-none text-[var(--color-arco-text-soft)]">
           i
@@ -383,7 +392,7 @@ function ExposureView({
       {/* table — row hover highlights the segment; shares the pie views' aligned layout */}
       <div className="mt-4">
         <BreakdownTable
-          columnLabel="Portfolio"
+          columnLabel={columnLabel}
           percentLabel={percentLabel}
           rows={rows}
           aum={aum}

@@ -4,6 +4,7 @@ import { awsKmsSigningPort, createKmsCustody } from '../../server/dist/stocks-si
 import { parseSignerHostConfig } from '../../server/dist/stocks-signer/host-config.js';
 import { startStocksSignerHost } from '../../server/dist/stocks-signer/host.js';
 import { httpStocksSignerRpc } from '../../server/dist/stocks-signer/http-rpc.js';
+import { giwaConfirmedTransport } from '../../server/dist/stocks/giwa-confirmation.js';
 
 // Explicit public config only. No dotenv, private key, migrations or nonce seed.
 const args = process.argv.slice(2);
@@ -36,7 +37,7 @@ try {
   pool.on('error', () => process.stderr.write('SIGNER_DATABASE_CONNECTION_ERROR\n'));
   ownershipTransferred = true;
   host = await startStocksSignerHost({ config, pool, custody, bearerToken, signal: abort.signal,
-    rpc: httpStocksSignerRpc(config.rpcUrl), mode: args[2] === '--check' ? 'check' : 'serve' });
+    rpc: giwaConfirmedTransport(httpStocksSignerRpc(config.rpcUrl)), mode: args[2] === '--check' ? 'check' : 'serve' });
   if (abort.signal.aborted) { stop(); await shutdown; }
   else process.stdout.write(host.address === null ? 'SIGNER_HOST_CHECK_PASSED\n' : 'SIGNER_HOST_LISTENING\n');
 } catch {

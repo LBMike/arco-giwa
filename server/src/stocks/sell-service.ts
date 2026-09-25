@@ -5,6 +5,8 @@ import type { Hex } from 'viem';
 import { address, callDigest, ensure, hash, immutable, liquidityScope, operationKey, units, validateActor, type Actor, type BrokerPort, type SqlClient, type SignerPort } from './contracts.js';
 import { redemptionCall } from './chain.js';
 import type { StocksService } from './service.js';
+import { formatPriceUnits, sellPayout } from './pricing.js';
+import { directActorId, directIdempotencyKey, directPrice, isDirectOrderKey, type DirectHold } from './direct.js';
 import type { Row } from './repository.js';
 export type EscrowReturnPolicy = (fact: {
     custodyId: string;
@@ -20,7 +22,7 @@ export class StocksSellService {
         await this.parent.ready();
         ensure(symbol === 'NVDA', 'UNSUPPORTED_SYMBOL');
         const value = units(quantity, 9);
-        const cash = value * 120000000n / 1000000000n;
+        const cash = sellPayout(value, await this.parent.currentPrice(), this.parent.pricing.burnFeeBps);
         ensure(cash > 0n, 'ZERO_SELL_PAYOUT');
         return this.parent.repo.tx(async (db) => {
             const row = (await db.query(`INSERT INTO arco_evm."StocksSellQuote" (id,"actorId",wallet,symbol,quantity,"cashAmount","deploymentDigest","expiresAt") VALUES ($1,$2,$3,'NVDA',$4,$5,$6,clock_timestamp()+interval '60 seconds') RETURNING *`, [randomUUID(), actor.actorId, address(actor.wallet), value.toString(), cash.toString(), this.parent.digest])).rows[0];
@@ -68,6 +70,13 @@ export class StocksSellService {
     recoverOrder(actor: Actor, quoteId: string, key: string) { return recoverOrder(this.parent.repo, actor, 'SELL', quoteId, key); }
     async expireReservations(): Promise<number> {
         const s = this.parent;
+        // A catch-up cursor may precede token deployment. With no due orders,
+        // historical token state is unnecessary and must not block observation.
+        // A candidate arriving after this read is handled by the next tick;
+        // the locked query below still decides every actual release.
+        const due = (await s.repo.pool.query(`SELECT id FROM arco_evm."StocksSellOrder" WHERE "deploymentDigest"=$1 AND state='AWAITING_ESCROW' AND "quoteExpiresAt"<clock_timestamp() LIMIT 1`, [s.digest])).rows[0];
+        if (!due)
+            return 0;
         const cursor = (await s.repo.pool.query('SELECT * FROM arco_evm."StocksObserverCursor" WHERE "deploymentDigest"=$1', [s.digest])).rows[0];
         if (!cursor || cursor.version === 0)
             return 0;
@@ -91,6 +100,8 @@ export class StocksSellService {
             return { status: 'FINALITY_PENDING' };
         const fact = s.verifier.escrow(proof);
         const digest = operationKey(JSON.stringify({ receipt: proof.receipt, tx: proof.tx }));
+        // A direct Sell: the escrow is the order. It is priced here, before the transaction, at the live price.
+        const direct = await this.directSell(fact);
         const row = await s.repo.tx(async (db) => {
             await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [fact.eventId]);
             const prior = (await db.query('SELECT * FROM arco_evm."StocksCustody" WHERE id=$1 OR ("deploymentDigest"=$2 AND "escrowId"=$3) FOR UPDATE', [fact.eventId, s.digest, fact.escrowId])).rows[0];
@@ -99,7 +110,11 @@ export class StocksSellService {
                 return prior;
             }
             await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`stock-wallet:${s.digest}:${fact.payer}`]);
-            const order = (await db.query('SELECT * FROM arco_evm."StocksSellOrder" WHERE "orderKey"=$1 FOR UPDATE', [fact.orderKey])).rows[0];
+            let order = (await db.query('SELECT * FROM arco_evm."StocksSellOrder" WHERE "orderKey"=$1 FOR UPDATE', [fact.orderKey])).rows[0];
+            if (!order && direct && 'cash' in direct)
+                order = await this.insertDirectSell(db, fact, direct.cash, direct.price);
+            else if (!order && isDirectOrderKey(fact.orderKey))
+                await s.repo.audit(db, fact.orderKey, 'DIRECT_ORDER_NOT_CREATED', { side: 'SELL', custodyId: fact.eventId, txHash, quantity: fact.quantity, hold: direct && 'hold' in direct ? direct.hold : null });
             let reason = 'UNIDENTIFIED_ORDER';
             if (order) {
                 if (order.deploymentDigest !== s.digest)
@@ -128,6 +143,36 @@ export class StocksSellService {
         if (row.reason === 'EXACT_ESCROW' && row.orderId && !(await s.paused()))
             await this.reserveLiquidity(row.orderId);
         return row;
+    }
+    /**
+     * A direct Sell's tUSDC at the live price; a hold when it cannot be taken as an order (trading paused, no price for
+     * DIRECT_PRICE_WAIT_SECONDS, a zero payout); null when it is not a direct key or was already recorded.
+     * A failed price read on a recent escrow throws, so the observer reads the escrow again.
+     */
+    private async directSell(fact: { orderKey: string; eventId: string; escrowId: string; quantity: string; blockTimestamp: string }): Promise<{ cash: bigint; price: bigint } | { hold: DirectHold } | null> {
+        const s = this.parent;
+        if (!isDirectOrderKey(fact.orderKey))
+            return null;
+        const known = await s.repo.pool.query('SELECT 1 FROM arco_evm."StocksSellOrder" WHERE "orderKey"=$1 UNION ALL SELECT 1 FROM arco_evm."StocksCustody" WHERE id=$2 OR ("deploymentDigest"=$3 AND "escrowId"=$4)', [fact.orderKey, fact.eventId, s.digest, fact.escrowId]);
+        if (known.rows.length)
+            return null;
+        if (await s.directHalted())
+            return { hold: 'TRADING_PAUSED' };
+        const price = await directPrice(() => s.currentPrice(), fact.blockTimestamp);
+        if (price === null)
+            return { hold: 'PRICE_UNAVAILABLE' };
+        const cash = sellPayout(BigInt(fact.quantity), price, s.pricing.burnFeeBps);
+        return cash > 0n ? { cash, price } : { hold: 'BELOW_ONE_UNIT' };
+    }
+    /** The quote and order a direct Sell stands for, created with its escrow, in its transaction. The NVDA is already held. */
+    private async insertDirectSell(db: SqlClient, fact: { orderKey: string; payer: string; quantity: string }, cash: bigint, price: bigint): Promise<Row> {
+        const s = this.parent;
+        const actorId = directActorId(fact.payer);
+        const quote = (await db.query(`INSERT INTO arco_evm."StocksSellQuote" (id,"actorId",wallet,symbol,quantity,"cashAmount","deploymentDigest","expiresAt") VALUES ($1,$2,$3,'NVDA',$4,$5,$6,clock_timestamp()+interval '60 seconds') RETURNING *`, [randomUUID(), actorId, address(fact.payer), fact.quantity, cash.toString(), s.digest])).rows[0];
+        const id = randomUUID();
+        const order = (await db.query(`INSERT INTO arco_evm."StocksSellOrder" (id,"orderKey","quoteId","actorId",wallet,symbol,quantity,"cashAmount","idempotencyKey","deploymentId","deploymentDigest","quoteExpiresAt") VALUES($1,$2,$3,$4,$5,'NVDA',$6,$7,$8,$9,$10,$11) RETURNING *`, [id, fact.orderKey, quote.id, actorId, quote.wallet, quote.quantity, quote.cashAmount, directIdempotencyKey(fact.orderKey), s.manifest.deploymentId, s.digest, quote.expiresAt])).rows[0];
+        await s.repo.audit(db, id, 'DIRECT_ORDER_CREATED', { side: 'SELL', orderKey: fact.orderKey, price: formatPriceUnits(price) });
+        return order;
     }
     private async movement(db: SqlClient, id: string, custody: Row, wallet: string, escrow: string, supply: string, blockNumber: string, blockHash: string, txHash: string) {
         await db.query('INSERT INTO arco_evm."StocksQuantityMovement" (id,"deploymentDigest",wallet,"custodyId","walletDelta","escrowDelta","supplyDelta","blockNumber","blockHash","txHash") VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [id, this.parent.digest, custody.payer, custody.id, wallet, escrow, supply, blockNumber, blockHash, txHash]);

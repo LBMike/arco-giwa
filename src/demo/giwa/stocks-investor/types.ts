@@ -34,16 +34,47 @@ export type StocksInstrument = {
   price: string
   priceSource: "FIXED_MOCK_PRICE"
   orderCapability: StocksOrderCapability
+  /** The verified deployment's NVDA token, lower-case. Public, for read-only balance display. Older servers omit it. */
+  tokenAddress?: HexAddress
 }
 
-export type StocksCashSymbol = "ARCO_TEST_USDC" | "ARCO_TEST_RLUSD"
+export type StocksCashSymbol = "ARCO_TEST_USDC" | "ARCO_TEST_RLUSD" | "tUSDC"
+
+/**
+ * The verified deployment's contracts, lower-case: a direct Buy deposits tUSDC to `fundingVault`, a direct Sell escrows
+ * NVDA (`stockToken`) to `redemptionEscrow`. Public, like the catalog. Older servers omit it.
+ */
+export type StocksContracts = {
+  cashToken: HexAddress
+  fundingVault: HexAddress
+  stockToken: HexAddress
+  redemptionEscrow: HexAddress
+}
 
 export type StocksCatalog = StocksProfile & {
   instruments: StocksInstrument[]
   cashSymbol: StocksCashSymbol
   deploymentId: string
   observedAt: string
+  contracts?: StocksContracts
 }
+
+/** Why a direct payment or escrow was held for review instead of becoming an order (server/src/stocks/direct.ts). */
+export type StocksDirectHold = "TRADING_PAUSED" | "PRICE_UNAVAILABLE" | "BELOW_ONE_UNIT"
+
+/**
+ * GET /api/v1/stocks/activity/:wallet — one Stocks trade in a wallet's public activity: an order it paid for (Buy) or
+ * escrowed NVDA into (Sell), or a payment or escrow held for review without an order. `paymentTx` is the wallet's own
+ * GIWA transaction; `settlementTx` the platform's mint, payout, refund or return once done.
+ */
+export type StocksActivityEntry =
+  | { side: "BUY"; state: BuyOrderState; quantity: BaseUnits; cashAmount: BaseUnits; paymentTx: `0x${string}`; settlementTx: `0x${string}` | null; createdAt: string }
+  | { side: "SELL"; state: SellOrderState; quantity: BaseUnits; cashAmount: BaseUnits; paymentTx: `0x${string}`; settlementTx: `0x${string}` | null; createdAt: string }
+
+/** GET /api/v1/stocks/direct/:orderKey — a direct order's progress. Amounts are integer base-unit strings. */
+export type StocksDirectStatus =
+  | { side: "BUY"; state: BuyOrderState; quantity: BaseUnits; cashAmount: BaseUnits; hold: StocksDirectHold | null }
+  | { side: "SELL"; state: SellOrderState; quantity: BaseUnits; cashAmount: BaseUnits; hold: StocksDirectHold | null }
 
 export type StocksSide = "BUY" | "SELL"
 
@@ -146,7 +177,8 @@ export type StocksPortfolio = {
 
 export type StocksEnvelope<T> = { observedAt: string; data: T }
 
-export type StocksQuoteRequest = { symbol: "NVDA"; quantity: string }
+/** A quote for an NVDA quantity, or (Buy only) for an exact tUSDC amount: the NVDA it buys at the server's current price. */
+export type StocksQuoteRequest = { symbol: "NVDA"; quantity: string } | { symbol: "NVDA"; cashAmount: string }
 export type StocksOrderRequest = { quoteId: string; idempotencyKey: string }
 
 // ── host contract ──────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
+import { DemoPresentationContext } from "../demo-presentation"
 import { StocksHighlights } from "./StocksHighlights"
 import { stockHighlights } from "./highlights"
 import { fixtureCatalog, fixtureQuote, fixtureTop40Catalog, fixtureTop40Quotes } from "./fixtures"
@@ -51,6 +52,10 @@ test("last observed quotes populate all three cards when the market has no curre
   assert.doesNotMatch(html, /No current market data|Price —/)
   assert.match(html, /Last observed/)
   assert.match(html, /Sep 23/)
+  const customer = renderToStaticMarkup(<DemoPresentationContext.Provider value><MemoryRouter><StocksHighlights groups={groups} /></MemoryRouter></DemoPresentationContext.Provider>)
+  assert.doesNotMatch(customer, /Last observed|Sep 23|>24H<\/span>/)
+  assert.equal((customer.match(/<h2 /g) ?? []).length, 3)
+  assert.equal((customer.match(/<li /g) ?? []).length, 8)
 })
 
 test("cards render titles, badges, actual detail links and at most three rows even if oversized input is supplied", () => {

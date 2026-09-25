@@ -18,6 +18,7 @@ import {
 import { giwaProductPath } from "./routes"
 import { nextSort } from "./sort"
 import { ProductsSkeleton } from "./GiwaSkeleton"
+import { referenceAssetsForList } from "./digift-reference-assets"
 
 export default function GiwaInvestorPage() {
   const navigate = useNavigate()
@@ -43,6 +44,16 @@ export default function GiwaInvestorPage() {
     [catalogQuery.data],
   )
   const filteredProducts = useMemo(() => applyGiwaFilters(products, filters), [filters, products])
+  const referenceRows = useMemo(() => {
+    const assets = referenceAssetsForList(products.map((product) => product.symbol), filters.search)
+    // GIWA-only denomination, issuer and network filters cannot be asserted for reference profiles.
+    // The only shared category is Equity Exposure.
+    return assets.filter((asset) => {
+      if (filters.category.length && !filters.category.includes(asset.category as GiwaCategory)) return false
+      if (filters.denomination.length || filters.issuer.length || filters.network.length) return false
+      return true
+    })
+  }, [products, filters])
   // Real market APY per product (e.g. aCAPIX 11.58%); null for products without a published rate,
   // in which case the table falls back to the legacy apyLabel.
   const apyByProductId = useMemo(
@@ -87,11 +98,12 @@ export default function GiwaInvestorPage() {
       {catalogQuery.isError && <ErrorBox title="Registry unavailable" message={catalogQuery.error.message} />}
 
       <section className="space-y-4">
-        <h2 className="pl-1 text-lg font-medium text-[var(--color-arco-ink)]">All products</h2>
+        <h2 className="pl-1 text-lg font-medium text-[var(--color-arco-ink)]">All Funds</h2>
         <GiwaFilterBar products={products} filters={filters} onChange={patchFilters} />
         <div className="pt-2">
           <GiwaCatalogTable
             rows={filteredProducts}
+            referenceRows={referenceRows}
             selectedProductId=""
             sortKey={sort.key}
             sortDir={sort.dir}

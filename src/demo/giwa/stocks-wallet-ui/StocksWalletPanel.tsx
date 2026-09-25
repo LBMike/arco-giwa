@@ -112,7 +112,7 @@ function OrderSummary({ order, plan, network }: { order: PanelOrder; plan: Plan 
         </Field>
       ) : null}
       {plan ? (
-        <Field label={sell ? "Token (NVDA test units)" : "Token (ARCO_TEST_USDC)"} mono>
+        <Field label={sell ? "Token (NVDA test units)" : `Token (${order.cashSymbol})`} mono>
           {plan.token}
         </Field>
       ) : null}
@@ -321,7 +321,7 @@ export function StocksWalletPanel(props: StocksWalletPanelProps) {
       </div>
 
       <Notice tone="info" title="Test assets only">
-        <p>ARCO_TEST_USDC is test cash and NVDA units are test units on the GIWA Sepolia testnet. They have no real-world value; prices are fixed mock prices.</p>
+        <p>{model.order?.cashSymbol ?? "Cash in this demo"} is test cash and NVDA units are test units on the GIWA Sepolia testnet. They have no real-world value; prices are fixed mock prices.</p>
       </Notice>
 
       {model.order ? <OrderSummary order={model.order} plan={model.plan} network={network} /> : null}

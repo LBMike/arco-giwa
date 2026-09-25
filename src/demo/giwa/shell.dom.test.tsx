@@ -220,4 +220,36 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
     assert.equal(fetchCalls.length, 0)
     await m.unmount()
   })
+
+  await t.test("desktop sidebar collapses to named icons, remembers its choice and leaves the drawer expanded", async () => {
+    const storageKey = "giwa-investor-sidebar-collapsed"
+    window.localStorage.removeItem(storageKey)
+    const m = await mount("/savings")
+    const shell = () => m.element.querySelector<HTMLElement>("[data-sidebar-state]")!
+    assert.equal(shell().dataset.sidebarState, "expanded")
+    assert.match(shell().className, /xl:grid-cols-\[224px_minmax\(0,1fr\)\]/)
+
+    await act(async () => { m.element.querySelector<HTMLButtonElement>('button[aria-label="Collapse sidebar"]')!.click(); await flush() })
+    assert.equal(shell().dataset.sidebarState, "collapsed")
+    assert.match(shell().className, /xl:grid-cols-\[56px_minmax\(0,1fr\)\]/)
+    assert.equal(window.localStorage.getItem(storageKey), "1")
+    assert.equal(m.sidebar().querySelector<HTMLAnchorElement>('a[href="/savings"]')?.getAttribute("aria-label"), "Savings")
+    assert.deepEqual(currentLabels(m.sidebar()), ["Savings"])
+    assert.equal(m.sidebar().querySelector('[aria-label="Savings categories"]'), null)
+    assert.equal(m.sidebar().querySelector('[aria-disabled="true"]')?.closest('a, button'), null)
+
+    await m.open()
+    assert.ok(m.dialog()?.querySelector('a[href="/savings"]')?.textContent?.includes("Savings"), "mobile drawer keeps full labels")
+    key(m.dialog()!, "Escape")
+    await m.settle()
+    await m.unmount()
+
+    const restored = await mount("/funds")
+    assert.equal(restored.element.querySelector<HTMLElement>("[data-sidebar-state]")?.dataset.sidebarState, "collapsed")
+    await act(async () => { restored.element.querySelector<HTMLButtonElement>('button[aria-label="Expand sidebar"]')!.click(); await flush() })
+    assert.equal(restored.element.querySelector<HTMLElement>("[data-sidebar-state]")?.dataset.sidebarState, "expanded")
+    assert.equal(window.localStorage.getItem(storageKey), "0")
+    await restored.unmount()
+    window.localStorage.removeItem(storageKey)
+  })
 })

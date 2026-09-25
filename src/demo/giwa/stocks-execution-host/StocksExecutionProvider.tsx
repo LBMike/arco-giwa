@@ -20,6 +20,7 @@ import { BUTTON_SECONDARY, Notice } from "../stocks-investor/ui"
 import { KNOWN_HASH_CHAIN_ID, KnownHashRecoveryCard, recoverKnownHash, sameOwner, tabKnownHashStore, type KnownHashEntry, type KnownHashScope, type KnownHashStore, type RecoveryResult } from "../stocks-known-hash-recovery"
 import { currentActiveWalletSource, type ActiveWalletSource } from "../stocks-wallet-source"
 import { StocksWalletExecutionPanel } from "../stocks-wallet-ui"
+import { InstantOrderExecution } from "./InstantOrderExecution"
 import { createExecutionRegistry, executionIdentityKey, type ExecutionCapability, type ExecutionHostView, type ExecutionOwner, type ExecutionRegistry } from "./registry"
 
 export type ExecutionClockSeam = Readonly<{ now: () => number; monotonicNow: () => number }>
@@ -63,6 +64,12 @@ type ExecutionHostValue = Readonly<{
 
 const UPDATING: ExecutionCapability = Object.freeze({ status: "UNAVAILABLE", code: "CONTEXT_CHANGED" })
 const ExecutionHostContext = createContext<ExecutionHostValue | null>(null)
+
+/** Read-only funding display scope. No registry, action or wallet request is exposed. */
+export function useStocksFundingReadContext() {
+  const host = useContext(ExecutionHostContext)
+  return host ? { view: host.liveView(), currentView: host.liveView, fetch: host.fetch, clock: host.clock } : null
+}
 
 function pageOrigin(): string | null {
   try {
@@ -174,7 +181,7 @@ export function useStocksExecutionCapability(): ExecutionCapability | null {
  */
 export function useStocksOrderExecutionSlot(): OrderExecutionSlot | null {
   const ready = useContext(ExecutionHostContext)?.capability.status === "READY"
-  return useMemo(() => (ready ? (input) => <StocksOrderExecution order={input.order} observedAt={input.observedAt} refreshing={input.refreshing} onRefresh={input.onRefresh} /> : null), [ready])
+  return useMemo(() => (ready ? (input) => <StocksOrderExecution order={input.order} observedAt={input.observedAt} refreshing={input.refreshing} onRefresh={input.onRefresh} instant={input.instant} /> : null), [ready])
 }
 
 /**
@@ -222,6 +229,8 @@ export type StocksOrderExecutionProps = {
   observedAt: string | null
   refreshing: boolean
   onRefresh: () => void
+  /** The customer presentation's compact one-click step (see OrderExecutionInput.instant). */
+  instant?: Readonly<{ autoStart: boolean }>
 }
 
 function useOwnerVersion(owner: ExecutionOwner | null) {
@@ -272,7 +281,7 @@ function KnownHashRecoveryAction({ entry }: { entry: KnownHashEntry }) {
 }
 
 /** The wallet execution panel for one accepted order of the signed-in wallet. Null outside the provider. */
-export function StocksOrderExecution({ order, observedAt, refreshing, onRefresh }: StocksOrderExecutionProps) {
+export function StocksOrderExecution({ order, observedAt, refreshing, onRefresh, instant }: StocksOrderExecutionProps) {
   const host = useContext(ExecutionHostContext)
   const registry = host?.registry ?? null
   useKnownHashVersion(host?.knownHashes ?? tabKnownHashStore)
@@ -291,6 +300,11 @@ export function StocksOrderExecution({ order, observedAt, refreshing, onRefresh 
   const showPanel = owner !== null || payable
   const unavailableCode = owner ? null : lookup ? lookup.code : host.capability.status === "UNAVAILABLE" ? host.capability.code : "CONTEXT_CHANGED"
   const healthy = owner ? owner.healthy() : true
+  // One-click trade: the order's one wallet request as a compact step. A kept hash or a clock failure still shows the full
+  // recovery above it, and never starts anything on its own.
+  if (instant && kept.length === 0 && healthy) {
+    return <InstantOrderExecution owner={owner} order={order} observedAt={observedAt} unavailableCode={unavailableCode} autoStart={instant.autoStart} />
+  }
   return (
     <div className="flex w-full flex-col gap-3" data-testid="stocks-order-execution">
       {kept.map((entry) => (

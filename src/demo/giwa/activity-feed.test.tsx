@@ -144,3 +144,44 @@ test("GiwaActivityTable renders the built feed — no raw event names, wei amoun
   assert.doesNotMatch(html, /999111/)
   assert.doesNotMatch(html, /GIWA Event/) // generic fallback product label
 })
+
+// ── Stocks trades (GET /api/v1/stocks/activity/:wallet) ──
+const TX = (n: number) => `0x${n.toString(16).padStart(64, "0")}` as `0x${string}`
+const trade = (over: Record<string, unknown> = {}) =>
+  ({ side: "BUY", state: "COMPLETED", quantity: "498000000", cashAmount: "60000000", paymentTx: TX(1), settlementTx: TX(2), createdAt: "2026-09-26T01:02:03.000Z", ...over }) as never
+
+test("a Stocks trade is one row: NVDA, Buy or Sell by the server's state, both amounts, dated and linked to the wallet's own transaction", () => {
+  const [row] = buildActivityFeed([], [], [], [trade()])
+  assert.equal(row!.product.name, "NVIDIA Corporation")
+  assert.equal(row!.product.symbol, "NVDA")
+  assert.equal(row!.product.category, "Stocks")
+  assert.equal(row!.typeLabel, "Buy")
+  assert.equal(row!.amount, "0.498 NVDA · 60 tUSDC")
+  assert.equal(row!.date, "2026-09-26 01:02:03")
+  assert.equal(row!.txHash, TX(1), "the payment the wallet sent, not the platform's mint")
+  const label = (over: Record<string, unknown>) => buildActivityFeed([], [], [], [trade(over)])[0]!.typeLabel
+  assert.equal(label({ side: "SELL" }), "Sell")
+  assert.equal(label({ state: "MINT_SUBMITTED" }), "Buy processing")
+  assert.equal(label({ side: "SELL", state: "LIQUIDITY_PENDING" }), "Sell processing")
+  assert.equal(label({ state: "FUNDING_REVIEW_REQUIRED" }), "Held for review")
+  assert.equal(label({ state: "REFUNDED" }), "Buy refunded")
+  assert.equal(label({ side: "SELL", state: "RETURNED" }), "Sell returned")
+  // A payment held without an order has no NVDA amount; an escrow held without one has no cash amount.
+  assert.equal(buildActivityFeed([], [], [], [trade({ state: "FUNDING_REVIEW_REQUIRED", quantity: "0", cashAmount: "5000000" })])[0]!.amount, "5 tUSDC")
+  assert.equal(buildActivityFeed([], [], [], [trade({ side: "SELL", state: "ESCROW_REVIEW_REQUIRED", quantity: "100000000", cashAmount: "0" })])[0]!.amount, "0.1 NVDA")
+})
+
+test("Stocks trades merge into the one feed by time, and render in the Activity table with their explorer link", () => {
+  const rows = buildActivityFeed(
+    [ev({ eventName: "ProductDeposit", txHash: "0xdeposit", contractAddress: "0xdep", blockTimestamp: "2026-09-26T00:00:00.000Z", args: { sharesOut: "1000000000000000000" } })],
+    [],
+    [product()],
+    [trade(), trade({ side: "SELL", paymentTx: TX(3), createdAt: "2026-09-25T00:00:00.000Z" })],
+  )
+  assert.deepEqual(rows.map((row) => row.typeLabel), ["Buy", "Deposit", "Sell"])
+  const html = renderToStaticMarkup(<GiwaActivityTable rows={rows} />)
+  assert.match(html, /NVIDIA Corporation/)
+  assert.match(html, /0\.498 NVDA · 60 tUSDC/)
+  assert.ok(html.includes(`/tx/${TX(1)}`), "linked to the payment transaction on the explorer")
+  assert.doesNotMatch(html, /No indexed activity yet/)
+})

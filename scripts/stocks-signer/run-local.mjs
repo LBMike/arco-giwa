@@ -7,6 +7,7 @@ import { createLocalKeystoreCustody } from '../../server/dist/stocks-signer/cust
 import { parseSignerHostConfig } from '../../server/dist/stocks-signer/host-config.js';
 import { startStocksSignerHost } from '../../server/dist/stocks-signer/host.js';
 import { httpStocksSignerRpc } from '../../server/dist/stocks-signer/http-rpc.js';
+import { giwaConfirmedTransport } from '../../server/dist/stocks/giwa-confirmation.js';
 
 // Operator-local CLI. Never load dotenv, export a key, migrate/seed a DB or log input.
 const args = process.argv.slice(2);
@@ -62,7 +63,7 @@ try {
   pool.on('error', () => process.stderr.write('SIGNER_DATABASE_CONNECTION_ERROR\n'));
   ownershipTransferred = true;
   host = await startStocksSignerHost({ config, pool, custody, bearerToken, signal: abort.signal,
-    rpc: httpStocksSignerRpc(config.rpcUrl), mode: args[4] === '--check' ? 'check' : 'serve' });
+    rpc: giwaConfirmedTransport(httpStocksSignerRpc(config.rpcUrl)), mode: args[4] === '--check' ? 'check' : 'serve' });
   if (abort.signal.aborted) { stop(); await shutdown; }
   else process.stdout.write(host.address === null ? 'SIGNER_LOCAL_HOST_CHECK_PASSED\n' : 'SIGNER_LOCAL_HOST_LISTENING\n');
 } catch {

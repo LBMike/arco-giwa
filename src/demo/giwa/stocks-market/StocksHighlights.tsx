@@ -1,5 +1,6 @@
 import { useId } from "react"
 import { Link } from "react-router-dom"
+import { useDemoPresentation } from "../demo-presentation"
 import { GIWA_STOCKS_ROUTE } from "../routes"
 import { changeParts, compactDollars, priceLabel, volumeDollars } from "./display"
 import type { HighlightGroups, HighlightRow } from "./highlights"
@@ -25,6 +26,7 @@ function HighlightCard({ title, rows, metric, period = false, status }: {
   status?: string
 }) {
   const headingId = useId()
+  const demo = useDemoPresentation()
   const stale = rows.length > 0 && rows.every(row => row.quote?.status === "STALE")
   const observedTimes = stale ? rows.map(row => row.quote?.sourceTimestamp).filter((value): value is string => Boolean(value)).sort() : []
   const lastObserved = observedTimes[observedTimes.length - 1] ?? null
@@ -32,7 +34,7 @@ function HighlightCard({ title, rows, metric, period = false, status }: {
   return <section aria-labelledby={headingId} className="w-full min-w-0 rounded-3xl border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-3">
     <div className="flex min-h-10 items-center gap-2 px-3 py-2">
       <h2 id={headingId} title={title === "Newly Added" ? "Recently added to our catalog; products added together retain catalog order." : undefined} className="text-lg font-medium leading-6 text-[var(--color-arco-ink)]">{title}</h2>
-      {(period || stale) && <span className="rounded-full bg-[var(--color-arco-chip)] px-1.5 py-0.5 text-xs leading-4 text-[var(--color-arco-chip-ink)]">{stale ? `Last observed${observedDate ? ` · ${observedDate}` : ""}` : "24H"}</span>}
+      {(stale ? !demo : period) && <span className="rounded-full bg-[var(--color-arco-chip)] px-1.5 py-0.5 text-xs leading-4 text-[var(--color-arco-chip-ink)]">{stale ? `Last observed${observedDate ? ` · ${observedDate}` : ""}` : "24H"}</span>}
     </div>
     <p className="sr-only">{metric === "change" ? "Price change compared with the previous close." : "Estimated session volume in USD, calculated as the latest price multiplied by traded shares."}</p>
     {rows.length > 0 ? <ul className="divide-y divide-[var(--color-arco-border)]">

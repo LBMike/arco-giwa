@@ -1,12 +1,14 @@
 // Transport validation only. The existing backend owns eligibility, order state,
 // idempotency and receipt verification; this module never grants permission to sign.
-type WriteKind = "quote" | "order" | "claim" | "outcome" | "reconcile"
+type WriteKind = "quote" | "sell-quote" | "order" | "claim" | "outcome" | "reconcile"
 const prefix = "/api/v1/stocks/"
 const label = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9:_-]{1,128}$/.test(value)
 const digest = (value: unknown) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)
 const address = (value: unknown) => typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value)
 const hash = (value: unknown) => typeof value === "string" && /^0x[a-f0-9]{64}$/.test(value) && !/^0x0{64}$/.test(value)
 const stage = (value: unknown) => value === "APPROVAL" || value === "TRANSFER"
+const quantity = (value: unknown) => typeof value === "string" && /^(0|[1-9][0-9]{0,29})(\.[0-9]{1,9})?$/.test(value)
+const cash = (value: unknown) => typeof value === "string" && /^(0|[1-9][0-9]{0,29})(\.[0-9]{1,6})?$/.test(value)
 
 export function tradingRead(path: string, method: string): boolean {
   return method === "GET" && (path === `${prefix}execution/deployment`
@@ -15,7 +17,8 @@ export function tradingRead(path: string, method: string): boolean {
 
 export function tradingWrite(path: string, method: string): WriteKind | null {
   if (method !== "POST") return null
-  if (path === `${prefix}quotes` || path === `${prefix}sell-quotes`) return "quote"
+  if (path === `${prefix}quotes`) return "quote"
+  if (path === `${prefix}sell-quotes`) return "sell-quote"
   if (["orders", "sell-orders", "orders/recover", "sell-orders/recover"].some(route => path === prefix + route)) return "order"
   if (path === `${prefix}wallet-submissions/claims`) return "claim"
   if (path === `${prefix}wallet-submissions/outcomes`) return "outcome"
@@ -36,8 +39,9 @@ export function tradingBody(text: string, kind: WriteKind): string {
   if (Buffer.byteLength(text) > (kind === "claim" ? 8192 : 4096)) throw new Error("INVALID_CUSTOMER_TRADE")
   const row = object(JSON.parse(text))
   let valid = false
-  if (kind === "quote") valid = exact(row, ["symbol", "quantity"]) && row.symbol === "NVDA"
-    && typeof row.quantity === "string" && /^(0|[1-9][0-9]{0,29})(\.[0-9]{1,9})?$/.test(row.quantity)
+  // A Buy may name the tUSDC it pays instead of a quantity; the backend then decides the NVDA it buys.
+  if (kind === "quote" || kind === "sell-quote") valid = row.symbol === "NVDA"
+    && (exact(row, ["symbol", "quantity"]) && quantity(row.quantity) || kind === "quote" && exact(row, ["symbol", "cashAmount"]) && cash(row.cashAmount))
   else if (kind === "order") valid = exact(row, ["quoteId", "idempotencyKey"]) && label(row.quoteId)
     && typeof row.idempotencyKey === "string" && /^[A-Za-z0-9:_-]{8,128}$/.test(row.idempotencyKey)
   else if (kind === "claim") {

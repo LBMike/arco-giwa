@@ -1,11 +1,14 @@
-import { address, ensure, freezeManifest, immutable, liquidityScope, manifestDigest, StocksError, validateActor, type Actor } from '../stocks/contracts.js';
+import { address, ensure, freezeManifest, publicManifest, immutable, liquidityScope, manifestDigest, StocksError, validateActor, type Actor } from '../stocks/contracts.js';
 import type { StocksService } from '../stocks/service.js';
 import { deriveOrder, label, side } from '../stocks-submissions/contracts.js';
 import { orderBinding } from '../stocks-submissions/enrollment.js';
 import type { DeploymentEvidencePort, ExecutionPolicy, ReviewedDeployment } from './contracts.js';
 export type ExecutionServiceClock = { wallNow(): number; monotonicNow(): number };
 const systemClock: ExecutionServiceClock = {wallNow:()=>Date.now(),monotonicNow:()=>performance.now()};
-const MAX_LEASE=15000, DB_BUDGET=2500;
+// The product database can be a region away from the API: a cold pooled connection plus the phase's
+// round trips took 2.5-3 s on the local demo, which read as "execution not allowed" in the wallet.
+export const EXECUTION_DB_BUDGET_MS=6000;
+const MAX_LEASE=15000, DB_BUDGET=EXECUTION_DB_BUDGET_MS;
 
 export class StocksExecutionService {
   constructor(private readonly stocks: StocksService, private readonly deployments: DeploymentEvidencePort, private readonly clock: ExecutionServiceClock=systemClock) {}
@@ -27,7 +30,7 @@ export class StocksExecutionService {
     ensure(Number.isSafeInteger(e.verifiedAt)&&Number.isSafeInteger(e.validUntil)&&e.verifiedAt<=this.clock.wallNow()&&e.validUntil>e.verifiedAt&&e.validUntil-e.verifiedAt<=MAX_LEASE,'EXECUTION_DEPLOYMENT_MISMATCH',503);
     this.check(start,e.validUntil);
     // Whitelist public manifest properties even if a trusted port adds internal metadata.
-    const manifest={schemaVersion:m.schemaVersion,deploymentId:m.deploymentId,profile:m.profile,chainId:m.chainId,networkInstance:m.networkInstance,checkpointNumber:m.checkpointNumber,checkpointHash:m.checkpointHash,abiDigest:m.abiDigest,finalityPolicy:m.finalityPolicy,cashToken:m.cashToken,cashSymbol:m.cashSymbol,cashScale:m.cashScale,stockToken:m.stockToken,quantityScale:m.quantityScale,fundingVault:m.fundingVault,mintController:m.mintController,redemptionEscrow:m.redemptionEscrow,signerAddress:m.signerAddress,codeHashes:Object.fromEntries([m.cashToken,m.stockToken,m.fundingVault,m.mintController,m.redemptionEscrow].map(target=>[address(target),m.codeHashes[address(target)]])),restrictedTransfers:m.restrictedTransfers,nonUpgradeable:m.nonUpgradeable};
+    const manifest=publicManifest(m);
     ensure(manifestDigest(manifest)===this.stocks.digest,'EXECUTION_DEPLOYMENT_MISMATCH',503);
     return immutable({status:'VERIFIED',evidenceId:e.evidenceId,manifestDigest:e.manifestDigest,manifest,verifiedAt:e.verifiedAt,validUntil:e.validUntil});
   }
@@ -59,7 +62,8 @@ export class StocksExecutionService {
       };
       try {
         await query('BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY');
-        await query("SET LOCAL statement_timeout='2000ms'");await query("SET LOCAL lock_timeout='2000ms'");await query("SET LOCAL idle_in_transaction_session_timeout='3000ms'");
+        // One round trip for all three limits.
+        await query("SET LOCAL statement_timeout='2000ms';SET LOCAL lock_timeout='2000ms';SET LOCAL idle_in_transaction_session_timeout='3000ms'");
         const table=orderSide==='BUY'?'StocksOrder':'StocksSellOrder';
         const order=(await query(`SELECT * FROM arco_evm."${table}" WHERE id=$1 AND "actorId"=$2 AND wallet=$3 AND "deploymentDigest"=$4`,[id,actor.actorId,address(actor.wallet),this.stocks.digest])).rows[0];
         ensure(order,'ORDER_NOT_FOUND',404);ensure(order.deploymentId===this.stocks.manifest.deploymentId,'ORDER_DEPLOYMENT_MISMATCH',409);

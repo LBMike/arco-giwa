@@ -1,16 +1,23 @@
 import type { Address, Hex } from "viem"
 import type { HostSession } from "../stocks-host/session"
 
-export type ManifestV2 = {
-  schemaVersion: 2; redemptionEscrow: Address; deploymentId: string; profile: "DEMO_TESTNET"; chainId: 91342
+export const PLATFORM_TUSDC = "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633" as const
+type ManifestCommon = {
+  redemptionEscrow: Address; deploymentId: string; profile: "DEMO_TESTNET"; chainId: 91342
   networkInstance: string; checkpointNumber: string; checkpointHash: Hex; abiDigest: string; finalityPolicy: "FINALIZED"
-  cashToken: Address; cashSymbol: "ARCO_TEST_USDC"; cashScale: 6; stockToken: Address; quantityScale: 9
+  cashToken: Address; cashScale: 6; stockToken: Address; quantityScale: 9
   fundingVault: Address; mintController: Address; signerAddress: Address; codeHashes: Record<string, Hex>
-  restrictedTransfers: true; nonUpgradeable: true
+  restrictedTransfers: true
 }
+export type ManifestV2 = ManifestCommon & { schemaVersion: 2; cashSymbol: "ARCO_TEST_USDC"; nonUpgradeable: true; cashIdentity?: never; stockContractsNonUpgradeable?: never }
+export type ManifestV3 = ManifestCommon & {
+  schemaVersion: 3; cashSymbol: "tUSDC"; nonUpgradeable: false; stockContractsNonUpgradeable: true
+  cashIdentity: { kind: "ERC1967"; implementation: Address; implementationCodeHash: Hex; proxyAdmin: Address; proxyAdminCodeHash: Hex }
+}
+export type StocksManifest = ManifestV2 | ManifestV3
 /** Trusted host attestation, NOT a catalog response or a browser self-verification flag. */
 export type ReviewedDeployment = {
-  status: "VERIFIED"; evidenceId: string; manifestDigest: string; manifest: ManifestV2
+  status: "VERIFIED"; evidenceId: string; manifestDigest: string; manifest: StocksManifest
   verifiedAt: number; validUntil: number
 }
 export type ExecutionContext = {
@@ -29,6 +36,7 @@ export type Order = Readonly<{
 export type Transaction = Readonly<{ chainId: 91342; from: Address; to: Address; data: Hex; value: "0" }>
 export type Plan = Readonly<{
   side: Side; order: Order; manifestDigest: string; intentKey: string; token: Address; spender: Address
+  cashSymbol: StocksManifest["cashSymbol"]
   amount: string; deadline: number; approval: Transaction; transfer: Transaction
 }>
 export type WalletIdentity = {

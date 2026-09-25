@@ -201,6 +201,7 @@ test("preview installs the fetch guard before rendering and loads product pages 
     "../../stocks-market/environment",
     "../../stocks-market/fixtures",
     "../../stocks-market/routes",
+    "./customer-wallet",
     "./deployed",
     "./fixtures",
     "react",
@@ -211,11 +212,13 @@ test("preview installs the fetch guard before rendering and loads product pages 
   assert.deepEqual([...fixtures.matchAll(/^import (?!type )/gm)], [], "fixtures.ts has type-only imports")
 })
 
-test("customer mode forwards real reads before captured or empty wallet fixtures and never enables auth forwarding", () => {
+test("customer mode forwards real reads and its explicitly configured wallet before fixture responses", () => {
   const preview = read("./main.tsx")
   const forwarded = preview.indexOf('CUSTOMER_READS && url.origin === ORIGIN && url.pathname.startsWith("/api/")')
   assert.ok(forwarded > 0 && forwarded < preview.indexOf("const captured = deployedLegacyReply"))
   assert.match(preview, /CUSTOMER_READS && url.origin === RPC_ORIGIN/)
+  const wallet = preview.indexOf("CUSTOMER_READS && customerWalletRequestAllowed(url, method, DYNAMIC_ENVIRONMENT_ID)")
+  assert.ok(wallet > 0 && wallet < preview.indexOf("const captured = deployedLegacyReply"))
   const serve = read("../../stocks-execution-host/verification/serve.ts")
   assert.ok(serve.indexOf("return customer(request, response, next)") < serve.indexOf("return api(request, response, url)"))
   assert.match(serve, /--customer-reads/)

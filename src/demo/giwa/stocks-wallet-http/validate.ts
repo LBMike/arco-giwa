@@ -31,7 +31,11 @@ const MANIFEST_KEYS = [
 const CONTRACT_KEYS = ["cashToken", "stockToken", "fundingVault", "mintController", "redemptionEscrow"] as const
 const POLICY_KEYS = ["allowed", "deploymentDigest", "orderId", "side", "observedAt", "validUntil"]
 const CATALOG_KEYS = [...PROFILE_KEYS, "observedAt", "instruments", "cashSymbol", "deploymentId"]
+/** The deployment's contracts the server publishes for direct trades; parseCatalog checks their shape. */
+const CATALOG_OPTIONAL_KEYS = ["contracts"]
 const INSTRUMENT_KEYS = ["symbol", "quantityScale", "price", "priceSource", "orderCapability"]
+/** The NVDA token address the server publishes for read-only balance display; parseCatalog checks its format. */
+const INSTRUMENT_OPTIONAL_KEYS = ["tokenAddress"]
 const DEPLOYMENT_CODES = new Set<string>(["DEPLOYMENT_NOT_REVIEWED", "DEPLOYMENT_EVIDENCE_EXPIRED", "INVALID_DEPLOYMENT", "UNSUPPORTED_DEPLOYMENT", "INVALID_DEPLOYMENT_ID", "OVERLAPPING_CONTRACTS", "MANIFEST_DIGEST_MISMATCH"])
 
 export type PolicyScope = Readonly<{ side: Side; orderId: string; deploymentDigest: string }>
@@ -41,9 +45,9 @@ function object(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-function keys(value: Record<string, unknown>, required: readonly string[]) {
+function keys(value: Record<string, unknown>, required: readonly string[], optional: readonly string[] = []) {
   try {
-    exact(value, [...required])
+    exact(value, [...required], [...optional])
   } catch {
     fail("INVALID_RESPONSE", "SHAPE")
   }
@@ -98,7 +102,8 @@ export function acceptDeployment(json: unknown, clock: ReadClock, expectedDigest
   keys(data, DEPLOYMENT_KEYS)
   if (data.status !== "VERIFIED") fail("DEPLOYMENT_NOT_REVIEWED", "EVIDENCE")
   const manifest = object(data.manifest)
-  keys(manifest, MANIFEST_KEYS)
+  keys(manifest, manifest.schemaVersion === 3 ? [...MANIFEST_KEYS, "cashIdentity", "stockContractsNonUpgradeable"] : MANIFEST_KEYS)
+  if (manifest.schemaVersion === 3) keys(object(manifest.cashIdentity), ["kind", "implementation", "implementationCodeHash", "proxyAdmin", "proxyAdminCodeHash"])
   // The server publishes exactly one code hash per contract, keyed by its lower-case address.
   const contracts = CONTRACT_KEYS.map((name) => manifest[name])
   if (!contracts.every((value): value is string => typeof value === "string")) fail("INVALID_DEPLOYMENT", "SHAPE")
@@ -154,9 +159,9 @@ export function acceptOrder(json: unknown, clock: ReadClock, scope: PolicyScope)
 /** GET /api/v1/stocks/catalog → the public top-level catalog (no data envelope), deep-frozen. Not execution evidence. */
 export function acceptCatalog(json: unknown, clock: ReadClock): unknown {
   const root = object(json)
-  keys(root, CATALOG_KEYS)
+  keys(root, CATALOG_KEYS, CATALOG_OPTIONAL_KEYS)
   if (!Array.isArray(root.instruments)) fail("INVALID_RESPONSE", "SHAPE")
-  root.instruments.forEach((row) => keys(object(row), INSTRUMENT_KEYS))
+  root.instruments.forEach((row) => keys(object(row), INSTRUMENT_KEYS, INSTRUMENT_OPTIONAL_KEYS))
   try {
     parseCatalog(root)
   } catch {

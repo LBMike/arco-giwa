@@ -264,6 +264,8 @@ function createHandlers(): Map<string, Handler> {
   on("SET LOCAL statement_timeout='2000ms'", false, () => command(null))
   on("SET LOCAL lock_timeout='2000ms'", false, () => command(null))
   on("SET LOCAL idle_in_transaction_session_timeout='3000ms'", false, () => command(null))
+  // The execution policy sets all three limits in one round trip.
+  on("SET LOCAL statement_timeout='2000ms';SET LOCAL lock_timeout='2000ms';SET LOCAL idle_in_transaction_session_timeout='3000ms'", false, () => command(null))
   for (const table of ["StocksOrder", "StocksSellOrder"] as const) {
     on(`SELECT * FROM arco_evm."${table}" WHERE id=$1 AND "actorId"=$2 AND wallet=$3 AND "deploymentDigest"=$4`, false, (db, [id, actorId, wallet, digest]) =>
       result(db.tables[table].filter((row) => row.id === id && row.actorId === actorId && row.wallet === wallet && row.deploymentDigest === digest)))

@@ -33,24 +33,16 @@ const SOCIALS = [
 export type FooterLink = { label: string; href: string }
 
 export function Footer({ links }: { links?: readonly FooterLink[] }) {
-  /* brand wordmark (public/arco-wordmark.png) — recoloured to ink via a CSS
-     mask so the cream brand asset reads on the light footer */
+  /* Reuse the shipped brand icon; no missing wordmark asset request. */
   const brand = (
     <span
       role="img"
       aria-label="Arco"
-      className="block h-6 w-[72px] shrink-0 bg-[var(--color-arco-ink)]"
-      style={{
-        WebkitMaskImage: 'url(/arco-wordmark.png)',
-        maskImage: 'url(/arco-wordmark.png)',
-        WebkitMaskRepeat: 'no-repeat',
-        maskRepeat: 'no-repeat',
-        WebkitMaskPosition: 'left center',
-        maskPosition: 'left center',
-        WebkitMaskSize: 'contain',
-        maskSize: 'contain',
-      }}
-    />
+      className="flex h-6 w-[72px] shrink-0 items-center gap-1 text-[var(--color-arco-ink)]"
+    >
+      <img src="/arco-icon.svg" alt="" aria-hidden className="size-5" />
+      <span aria-hidden className="text-lg font-semibold tracking-tight">Arco</span>
+    </span>
   )
 
   /* social links */

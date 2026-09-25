@@ -1,9 +1,9 @@
 import { normalizeApiBase as normalizeCommonApiBase } from "../api-base"
-import type { Catalog, Chart, Envelope, MarketFetch, NvdaLiveSnapshot, Profile, Quote, Range } from "./contracts"
-import { envelope, parseCatalog, parseChart, parseNvdaLiveSnapshot, parseProfile, parseQuotes, symbol } from "./validate"
+import type { Catalog, Chart, Dividend, Envelope, MarketFetch, NvdaLiveSnapshot, Profile, Quote, Range } from "./contracts"
+import { envelope, parseCatalog, parseChart, parseDividend, parseNvdaLiveSnapshot, parseProfile, parseQuotes, symbol } from "./validate"
 export type MarketEventSource = { addEventListener: EventTarget["addEventListener"]; close(): void }
 export type MarketEventSourceFactory = (url: string, init: { withCredentials: false }) => MarketEventSource
-export type MarketClient = { baseUrl: string; catalog(signal: AbortSignal): Promise<Envelope<Catalog>>; quotes(symbols: readonly string[], signal: AbortSignal): Promise<Envelope<Quote[]>>; profile(name: string, signal: AbortSignal): Promise<Envelope<Profile>>; chart(name: string, range: Range, signal: AbortSignal): Promise<Envelope<Chart>>; liveNvda(signal: AbortSignal): Promise<NvdaLiveSnapshot>; subscribeNvda(onSnapshot: (snapshot: NvdaLiveSnapshot) => void, onError: () => void): (() => void) | null }
+export type MarketClient = { baseUrl: string; catalog(signal: AbortSignal): Promise<Envelope<Catalog>>; quotes(symbols: readonly string[], signal: AbortSignal): Promise<Envelope<Quote[]>>; profile(name: string, signal: AbortSignal): Promise<Envelope<Profile>>; dividend(name: string, signal: AbortSignal): Promise<Envelope<Dividend>>; chart(name: string, range: Range, signal: AbortSignal): Promise<Envelope<Chart>>; liveNvda(signal: AbortSignal): Promise<NvdaLiveSnapshot>; subscribeNvda(onSnapshot: (snapshot: NvdaLiveSnapshot) => void, onError: () => void): (() => void) | null }
 export function normalizeApiBase(value: string): string {
   const base = normalizeCommonApiBase(value)
   if (base === null) throw new Error("INVALID_API_BASE")
@@ -63,5 +63,5 @@ export function createMarketClient(base: string, fetcher: MarketFetch = (url, in
     } catch { close(); onError(); return null }
     return close
   }
-  return { baseUrl, catalog: signal => get("catalog", signal, parseCatalog), quotes: (symbols, signal) => get("quotes", signal, value => parseQuotes(value, symbols)), profile: (name, signal) => get(`${symbol(name)}/profile`, signal, value => parseProfile(value, name, baseUrl)), chart: (name, range, signal) => get(`${symbol(name)}/chart?range=${range}`, signal, value => parseChart(value, name, range)), liveNvda: signal => read("NVDA/live", signal, parseNvdaLiveSnapshot, 65_536), subscribeNvda }
+  return { baseUrl, catalog: signal => get("catalog", signal, parseCatalog), quotes: (symbols, signal) => get("quotes", signal, value => parseQuotes(value, symbols)), profile: (name, signal) => get(`${symbol(name)}/profile`, signal, value => parseProfile(value, name, baseUrl)), dividend: (name, signal) => get(`${symbol(name)}/dividend`, signal, value => parseDividend(value, name)), chart: (name, range, signal) => get(`${symbol(name)}/chart?range=${range}`, signal, value => parseChart(value, name, range)), liveNvda: signal => read("NVDA/live", signal, parseNvdaLiveSnapshot, 65_536), subscribeNvda }
 }

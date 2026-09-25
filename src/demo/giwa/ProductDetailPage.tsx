@@ -15,9 +15,17 @@ import { BrandMark } from "../components/BrandMark"
 import { SectionNav } from "../components/SectionNav"
 import { MetricCard } from "../components/MetricCard"
 import { AboutCard } from "../components/AboutCard"
+import { digiftReferenceAssetById } from "./digift-reference-assets"
+import { DigiFTReferenceDetail } from "./DigiFTReferenceDetail"
 
 export default function GiwaProductDetailPage() {
   const { id } = useParams()
+  const referenceAsset = id ? digiftReferenceAssetById(id) : undefined
+  if (referenceAsset) return <DigiFTReferenceDetail asset={referenceAsset} />
+  return <DeployedProductDetailPage id={id} />
+}
+
+function DeployedProductDetailPage({ id }: { id: string | undefined }) {
   const catalogQuery = useQuery({ queryKey: ["giwa", "catalog"], queryFn: giwaApi.catalog })
   const products = catalogQuery.data ?? []
   const product = products.find((candidate) => candidate.productId === id)

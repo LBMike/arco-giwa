@@ -17,6 +17,8 @@ export type ChartMetric = {
   headline: string
   valueFormat: (n: number) => string
   delta: (points: RawPoint[]) => number | null
+  /** Optional headline change (e.g. "+$12.34 (+0.52%)") shown instead of the arrow and percent from `delta`. */
+  change?: (points: RawPoint[]) => { text: string; dir: "up" | "down" | "flat" } | null
   emptyLabel: string
   // Optional "projected at X%" chip (vault-detail built-in price curve).
   projected?: boolean
@@ -26,28 +28,40 @@ export type ChartMetric = {
 // Generic legacy-style toggle chart card: a two-metric segmented toggle (left) + a
 // 7D/30D/90D/1Y/All range selector (right), a headline (current value + delta over the
 // range) and one plot. Reused by the vault-detail (Price/APY) and the personal portfolio
-// (Net Worth/Net Rate) surfaces — the caller supplies the two metrics.
+// (Net Worth/Net Rate) surfaces — the caller supplies the two metrics. A caller that shows the
+// same range elsewhere (the portfolio's Net Worth change) passes `range` and `onRangeChange`.
 export function GiwaTwoMetricChartCard({
   metrics,
   initialIndex = 0,
   now: nowProp,
+  range: rangeProp,
+  onRangeChange,
 }: {
   metrics: readonly [ChartMetric, ChartMetric]
   initialIndex?: 0 | 1
   now?: number
+  range?: ChartRange
+  onRangeChange?: (range: ChartRange) => void
 }) {
   const [now] = useState(() => nowProp ?? Math.floor(Date.now() / 1000))
   const [index, setIndex] = useState<0 | 1>(initialIndex)
-  const [range, setRange] = useState<ChartRange>(() => defaultRange(metrics[0].series))
+  const [ownRange, setOwnRange] = useState<ChartRange>(() => defaultRange(metrics[0].series))
+  const range = rangeProp ?? ownRange
+  const setRange = (next: ChartRange) => {
+    setOwnRange(next)
+    onRangeChange?.(next)
+  }
 
   const active = metrics[index]
   const visible = filterByRange(active.series, range, now)
   const chartPoints = toChartPoints(visible)
 
-  const deltaValue = active.delta(visible)
-  const deltaDir = deltaValue == null ? null : deltaValue > 0.005 ? "up" : deltaValue < -0.005 ? "down" : "flat"
+  // `change` (when the metric has one) replaces the arrow + percent; null means nothing to show.
+  const change = active.change ? active.change(visible) : undefined
+  const deltaValue = change === undefined ? active.delta(visible) : null
+  const deltaDir = change ? change.dir : deltaValue == null ? null : deltaValue > 0.005 ? "up" : deltaValue < -0.005 ? "down" : "flat"
   const arrow = deltaDir === "up" ? "▲ " : deltaDir === "down" ? "▼ " : ""
-  const deltaText = deltaValue == null ? null : `${arrow}${pctLabel(Math.abs(deltaValue))} · ${range}`
+  const deltaText = change ? `${change.text} · ${range}` : deltaValue == null ? null : `${arrow}${pctLabel(Math.abs(deltaValue))} · ${range}`
   const deltaClass =
     deltaDir === "up"
       ? "text-[var(--color-arco-up)]"

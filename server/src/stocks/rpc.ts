@@ -63,5 +63,10 @@ export function createStocksRpcPort(transport: JsonRpcTransport, manifest: Manif
             return BigInt(result).toString();
         },
         async codeHash(contract, blockNumber) { return keccak256(hexData(await transport('eth_getCode', [contract, `0x${BigInt(blockNumber).toString(16)}`]))); },
+        async storageAt(contract, slot, blockNumber) {
+            const result = hexData(await transport('eth_getStorageAt', [contract, slot, `0x${BigInt(blockNumber).toString(16)}`]));
+            ensure(result.length === 66, 'INVALID_STORAGE_RESULT');
+            return result;
+        },
     };
 }

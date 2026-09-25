@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { encodeFunctionData, parseAbi } from 'viem';
 import { createDeploymentEvidence } from './deployment.js';
-import { h, testManifest } from '../stocks/test-fixtures.js';
+import { a, h, testManifest, testTusdcManifest } from '../stocks/test-fixtures.js';
+import { CASH_ADMIN_SLOT, CASH_IMPLEMENTATION_SLOT } from '../stocks/cash-identity.js';
 import { manifestDigest, type Manifest } from '../stocks/contracts.js';
 import type { JsonRpcTransport } from '../stocks/rpc.js';
 
 const word = (v: bigint | string) => `0x${(typeof v === 'bigint' ? v.toString(16) : v.slice(2)).padStart(64, '0')}`;
-function fixture() {
-  const m = testManifest(), answers = new Map<string, string>();
+function fixture(m = testManifest()) {
+  const answers = new Map<string, string>();
   const bindings = [
     [m.stockToken, 'mintController', m.mintController], [m.stockToken, 'redemptionEscrow', m.redemptionEscrow],
     [m.fundingVault, 'cashToken', m.cashToken], [m.fundingVault, 'redemptionEscrow', m.redemptionEscrow], [m.fundingVault, 'operator', m.signerAddress],
@@ -21,10 +22,15 @@ function fixture() {
   const base: JsonRpcTransport = async (method, args) => {
     if (method === 'eth_chainId') return '0x164ce';
     if (method === 'eth_getBlockByNumber') {
-      const number = args[0] === 'finalized' ? '0x64' : args[0] as string;
+      const number = args[0] === 'finalized' ? '0x64' : args[0] === 'latest' ? '0xc8' : args[0] as string;
       return { number, hash: h(Number(BigInt(number))), timestamp: '0x3e8' };
     }
     if (method === 'eth_getCode') return '0x6000';
+    if (method === 'eth_getStorageAt' && m.schemaVersion === 3) {
+      assert.equal(args[0], m.cashToken);
+      assert.ok(args[1] === CASH_IMPLEMENTATION_SLOT || args[1] === CASH_ADMIN_SLOT);
+      return word(args[1] === CASH_IMPLEMENTATION_SLOT ? m.cashIdentity.implementation : m.cashIdentity.proxyAdmin);
+    }
     if (method === 'eth_call') { const tx = args[0] as { to: string; data: string }; const v = answers.get(`${tx.to}:${tx.data}`); assert.ok(v); return v; }
     assert.fail(`Unexpected RPC ${method}`);
   };
@@ -100,8 +106,22 @@ test('runtime stop denies cached and pending evidence with no subsequent RPC', a
 });
 test('manifest extension/config secrets are rejected before RPC; whitelist output is unchanged and snapshotted', async () => {
   const f = fixture();
-  assert.throws(() => createDeploymentEvidence({ ...f.m, signerToken: 'NOT_PUBLIC' } as Manifest, f.rpc), /EXECUTION_MANIFEST_NOT_PUBLIC/);
+  assert.throws(() => createDeploymentEvidence({ ...f.m, signerToken: 'NOT_PUBLIC' } as unknown as Manifest, f.rpc), /EXECUTION_MANIFEST_NOT_PUBLIC/);
   assert.throws(() => createDeploymentEvidence({ ...f.m, codeHashes: { ...f.m.codeHashes, privateConfig: 'NOT_PUBLIC' } } as unknown as Manifest, f.rpc), /EXECUTION_MANIFEST_NOT_PUBLIC/);
   assert.equal(f.calls.length, 0); const port = createDeploymentEvidence(f.m, f.rpc, f.opts); const digest = manifestDigest(f.m); f.m.deploymentId = 'MUTATED_TEST_CONFIG';
   assert.equal((await port.get()).manifestDigest, digest);
+});
+
+test('v3 public execution evidence preserves cash identity and denies a latest upgrade inside the finalized lease', async () => {
+  const f = fixture(testTusdcManifest());
+  const port = createDeploymentEvidence(f.m, f.rpc, f.opts);
+  const first = await port.get();
+  assert.deepEqual(first.manifest, f.m);
+  assert.equal(first.manifestDigest, manifestDigest(f.m));
+  f.setHandler(async (method, args) => {
+    if (method === 'eth_getStorageAt' && args[1] === CASH_IMPLEMENTATION_SLOT && args[2] === '0xc8') return word(a(444));
+    return f.base(method, args);
+  });
+  // Finalized code and proxy slots have not changed; no clock advance needed.
+  await assert.rejects(port.get(), /EXECUTION_DEPLOYMENT_UNVERIFIED/);
 });

@@ -258,6 +258,8 @@ test("order envelope: PROFILE, other order or deployment, investor and planner v
   }
 })
 
+const CONTRACTS = { cashToken: `0x${"11".repeat(20)}`, fundingVault: `0x${"22".repeat(20)}`, stockToken: `0x${"33".repeat(20)}`, redemptionEscrow: `0x${"44".repeat(20)}` }
+
 test("catalog: exact public shape; it is never deployment evidence or permission", async () => {
   const cases: [string, unknown][] = [
     ["data envelope", envelope(catalog())],
@@ -265,11 +267,23 @@ test("catalog: exact public shape; it is never deployment evidence or permission
     ["extra instrument field", { ...catalog(), instruments: [{ ...catalog().instruments[0], allowed: true }] }],
     ["profile", { ...catalog(), chainId: 1 }],
     ["price as number", { ...catalog(), instruments: [{ ...catalog().instruments[0], price: 120 }] }],
+    ["token address not lower-case", { ...catalog(), instruments: [{ ...catalog().instruments[0], tokenAddress: `0x${"AB".repeat(20)}` }] }],
+    ["token address malformed", { ...catalog(), instruments: [{ ...catalog().instruments[0], tokenAddress: "0x1234" }] }],
+    ["contracts with an extra key", { ...catalog(), contracts: { ...CONTRACTS, mintController: `0x${"55".repeat(20)}` } }],
+    ["contracts not lower-case", { ...catalog(), contracts: { ...CONTRACTS, fundingVault: `0x${"AA".repeat(20)}` } }],
+    ["contracts overlapping", { ...catalog(), contracts: { ...CONTRACTS, redemptionEscrow: CONTRACTS.fundingVault } }],
+    ["contracts' stock token not the published NVDA token", { ...catalog(), instruments: [{ ...catalog().instruments[0], tokenAddress: `0x${"ab".repeat(20)}` }], contracts: CONTRACTS }],
   ]
   for (const [label, body] of cases) {
     const { reads } = setup(server({ catalog: body }))
     await rejectsWith(reads.readCatalog(read()), "INVALID_RESPONSE").catch((error) => assert.fail(`${label}: ${error}`))
   }
+  // The server publishes the verified NVDA token for read-only balance display, and the deployment's contracts for
+  // direct trades; they are the only optional keys.
+  const published = { ...catalog(), instruments: [{ ...catalog().instruments[0], tokenAddress: `0x${"ab".repeat(20)}` }] }
+  assert.deepEqual(await setup(server({ catalog: published })).reads.readCatalog(read()), published)
+  const direct = { ...catalog(), instruments: [{ ...catalog().instruments[0], tokenAddress: CONTRACTS.stockToken }], contracts: CONTRACTS }
+  assert.deepEqual(await setup(server({ catalog: direct })).reads.readCatalog(read()), direct)
   const reads = setup(server()).reads
   const value = (await reads.readCatalog(read())) as Record<string, unknown>
   assert.equal("status" in value || "allowed" in value || "manifestDigest" in value, false)

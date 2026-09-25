@@ -2,19 +2,23 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { zeroAddress } from 'viem';
+import { zeroAddress, encodeFunctionData, parseAbi } from 'viem';
+import { createStocksRuntime } from '../stocks-runtime/runtime.js';
+import { CASH_ADMIN_SLOT } from './cash-identity.js';
+import type { JsonRpcTransport } from './rpc.js';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import Fastify from 'fastify';
 import { manifestDigest, operationKey, type Actor, type SqlPool } from './contracts.js';
-import { ReceiptVerifier } from './chain.js';
+import { ReceiptVerifier, type ChainPort } from './chain.js';
+import { StocksFinalizedObserver } from '../stocks-runtime/observer.js';
 import { StocksRepository } from './repository.js';
 import { StocksService } from './service.js';
 import { StocksWorker } from './worker.js';
 import { createDurableMockBroker } from './mock-broker.js';
 import { stocksPlugin } from './plugin.js';
 import { reconcileStocks } from './reconciliation.js';
-import { a, h, ACTOR, TestChain, TestSigner, testManifest, eventLog } from './test-fixtures.js';
+import { a, h, ACTOR, TestChain, TestSigner, testManifest, testTusdcManifest, eventLog } from './test-fixtures.js';
 const require = createRequire(import.meta.url);
 const enabled = process.env.STOCKS_TEST_HARNESS_ONLY === '1' && !!process.env.STOCKS_TEST_DATABASE_URL;
 const pg = require('pg') as {
@@ -26,11 +30,11 @@ let nextPhysicalAddress = 10000;
 async function fixture() {
     assert.equal(enabled, true);
     const pool = new pg.Pool({ connectionString: process.env.STOCKS_TEST_DATABASE_URL, max: 8 });
-    const m = testManifest();
+    const m = process.env.STOCKS_TEST_EXTERNAL_CASH_ONLY === '1' ? testTusdcManifest() : testManifest();
     m.deploymentId = `TEST_HARNESS_ONLY_${randomUUID()}`;
     m.networkInstance = `TEST_NETWORK_${randomUUID()}`;
     // Scenarios represent separate physical cash pools, not renamed aliases of one pool.
-    for (const field of ['cashToken', 'fundingVault'] as const) {
+    for (const field of (m.schemaVersion === 3 ? ['fundingVault'] : ['cashToken', 'fundingVault']) as ('cashToken' | 'fundingVault')[]) {
         const previous = m[field];
         m[field] = a(nextPhysicalAddress++);
         m.codeHashes[m[field]] = m.codeHashes[previous];
@@ -73,6 +77,81 @@ async function scenario(work: (f: Awaited<ReturnType<typeof fixture>>) => Promis
     }
 }
 const options = { skip: !enabled };
+test('PG v3 cash upgrade pauses new orders but preserves finalized observation progress', { skip: !enabled || process.env.STOCKS_TEST_EXTERNAL_CASH_ONLY !== '1' }, async () => scenario(async f => {
+    const m = f.m; assert.equal(m.schemaVersion, 3); if (m.schemaVersion !== 3) return;
+    const word = (value: string | bigint) => `0x${(typeof value === 'bigint' ? value.toString(16) : value.slice(2)).padStart(64, '0')}`;
+    const answers = new Map<string, string>();
+    for (const [target, getter, value] of [
+        [m.stockToken, 'mintController', m.mintController], [m.stockToken, 'redemptionEscrow', m.redemptionEscrow],
+        [m.fundingVault, 'cashToken', m.cashToken], [m.fundingVault, 'redemptionEscrow', m.redemptionEscrow], [m.fundingVault, 'operator', m.signerAddress],
+        [m.mintController, 'stockToken', m.stockToken], [m.mintController, 'operator', m.signerAddress],
+        [m.redemptionEscrow, 'stockToken', m.stockToken], [m.redemptionEscrow, 'cashToken', m.cashToken], [m.redemptionEscrow, 'fundingVault', m.fundingVault], [m.redemptionEscrow, 'operator', m.signerAddress],
+    ]) answers.set(`${target}:${encodeFunctionData({ abi: parseAbi([`function ${getter}() view returns (address)`]), functionName: getter })}`, word(value));
+    let changed = false, logsRead = 0;
+    const transport: JsonRpcTransport = async (method, args) => {
+        if (method === 'eth_chainId') return '0x164ce';
+        if (method === 'eth_getBlockByNumber') {
+            const number = args[0] === 'finalized' ? '0x64' : args[0] === 'latest' ? '0xc8' : String(args[0]);
+            return { number, hash: h(Number(BigInt(number))), timestamp: `0x${Math.floor(Date.now() / 1000).toString(16)}` };
+        }
+        if (method === 'eth_getCode') return '0x6000';
+        if (method === 'eth_getStorageAt') return word(args[1] === CASH_ADMIN_SLOT ? m.cashIdentity.proxyAdmin : changed && args[2] === '0xc8' ? a(555) : m.cashIdentity.implementation);
+        if (method === 'eth_call') {
+            const { to, data } = args[0] as { to: string; data: string };
+            if (data === '0x313ce567') return word(to === m.cashToken ? 6n : 9n);
+            const answer = answers.get(`${to}:${data}`); assert.ok(answer); return answer;
+        }
+        if (method === 'eth_getLogs') { logsRead++; return []; }
+        assert.fail(method);
+    };
+    const runtime = await createStocksRuntime({ manifest: m, pool: { query: f.pool.query.bind(f.pool), connect: f.pool.connect.bind(f.pool), end: async () => {} }, transport, signer: { submit: f.signer.submit.bind(f.signer), lookup: f.signer.lookup.bind(f.signer), probe: async () => {} }, autodispatch: true, paused: false, operators: [] });
+    try {
+        await runtime.tick(); assert.equal(await runtime.service.paused(), false);
+        const before = (await f.pool.query('SELECT version FROM arco_evm."StocksObserverCursor" WHERE "deploymentDigest"=$1', [f.service.digest])).rows[0].version;
+        changed = true;
+        await runtime.tick(); assert.equal(await runtime.service.paused(), true);
+        assert.equal((await f.pool.query('SELECT version FROM arco_evm."StocksObserverCursor" WHERE "deploymentDigest"=$1', [f.service.digest])).rows[0].version, before + 1);
+        await assert.rejects(runtime.service.quote(f.actor, 'NVDA', '1'), /STOCKS_PAUSED/);
+        assert.ok(logsRead > 0); assert.equal(f.signer.calls.length, 0);
+    } finally { await runtime.close(); }
+}));
+test('PG empty expiry allows catch-up through pre-token-deployment blocks and observer restart without economic writes', options, async () => scenario(async (f) => {
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const rpc: ChainPort = Object.create(f.rpc);
+    rpc.block = async value => {
+        const number = value === 'finalized' ? '500' : value;
+        return { number, hash: h(Number(number)), timestamp: (now - 500n + BigInt(number)).toString() };
+    };
+    rpc.codeHash = async (token, block) => {
+        if (f.m.schemaVersion === 3 && token === f.m.cashIdentity.implementation) return f.m.cashIdentity.implementationCodeHash;
+        if (f.m.schemaVersion === 3 && token === f.m.cashIdentity.proxyAdmin) return f.m.cashIdentity.proxyAdminCodeHash;
+        return token === f.m.stockToken && BigInt(block) < 300n ? h(0) : f.m.codeHashes[token.toLowerCase()];
+    };
+    const makeService = () => new StocksService(new StocksRepository(f.pool, f.service.digest), f.m, new ReceiptVerifier(f.m, rpc),
+        { manifestDigest: f.service.digest, contractPolicyVerified: true }, async () => true);
+    const makeObserver = () => new StocksFinalizedObserver(f.pool, f.m as typeof f.m & { redemptionEscrow: string }, f.service.digest, rpc,
+        async () => [], { observeFunding: async () => assert.fail('no funding'), observeEscrow: async () => assert.fail('no escrow'), isTransactionProjected: async () => assert.fail('no settlement') });
+    let service = makeService(), observer = makeObserver();
+    for (let batch = 1; batch <= 5; batch++) {
+        assert.equal(await service.sell.expireReservations(), 0);
+        const worker = new StocksWorker(service, f.broker, f.signer);
+        assert.equal(await worker.runOne(), false);
+        assert.equal(await observer.runOnce(), batch === 5 ? 'CURRENT' : 'CATCHING_UP');
+        const coverage = await observer.coverage();
+        assert.equal(coverage?.throughBlock, String(batch * 100));
+        if (batch === 1) {
+            // The normal snapshot must still reject a block before token creation.
+            await assert.rejects(service.verifier.snapshot('100', h(100), []), /CODE_IDENTITY_MISMATCH/);
+            service = makeService(); observer = makeObserver();
+        }
+    }
+    assert.equal((await reconcileStocks(service, () => observer.coverage())).status, 'MATCHED_AT_CUTOFF');
+    assert.equal(f.signer.calls.length, 0);
+    for (const table of ['StocksJournal', 'StocksOutbox', 'StocksQuantityReservation', 'StocksHolding']) {
+        assert.equal((await f.pool.query(`SELECT COUNT(*)::text AS count FROM arco_evm."${table}" WHERE "deploymentDigest"=$1`, [service.digest])).rows[0].count, '0');
+    }
+}));
+
 test('PG concurrent duplicate commands create one immutable quote/order and reject key/body reuse', options, async () => scenario(async (f) => {
     const q = await f.service.quote(f.actor, 'NVDA', '0.000000001');
     assert.equal(q.quantity, '1');
@@ -618,7 +697,16 @@ test('SELL PG expired reservation release needs finalized observer coverage; lat
     await f.pool.query('INSERT INTO arco_evm."StocksObserverCursor" ("deploymentDigest","blockNumber","blockHash") VALUES($1,100,$2)', [f.service.digest, h(100)]);
     assert.equal(await f.service.sell.expireReservations(), 0);
     await f.pool.query('UPDATE arco_evm."StocksObserverCursor" SET version=1 WHERE "deploymentDigest"=$1',[f.service.digest]);
-    assert.equal(await f.service.sell.expireReservations(), 1);
+    f.rpc.wrongCode = true;
+    await assert.rejects(f.service.sell.expireReservations(), /CODE_IDENTITY_MISMATCH/);
+    assert.equal((await f.repo.portfolio(f.actor.actorId)).holdings[0].reservedQuantity, '1000000000');
+    f.rpc.wrongCode = false;
+    f.rpc.finalizedNumber = '1';
+    assert.equal(await f.service.sell.expireReservations(), 0);
+    assert.equal((await f.repo.portfolio(f.actor.actorId)).holdings[0].reservedQuantity, '1000000000');
+    f.rpc.finalizedNumber = '100';
+    const released = await Promise.all(Array.from({ length: 3 }, () => f.service.sell.expireReservations()));
+    assert.deepEqual(released.sort(), [0, 0, 1]);
     assert.equal((await f.repo.portfolio(f.actor.actorId)).holdings[0].availableQuantity, '2000000000');
     f.rpc.escrow(order.orderKey, order.quantity, f.actor.wallet, h(370));
     const receipt = f.rpc.receipts.get(h(370))!;

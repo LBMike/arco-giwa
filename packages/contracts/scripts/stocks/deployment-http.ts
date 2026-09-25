@@ -7,6 +7,8 @@ const reads = new Set([
   "eth_getTransactionByHash",
   "eth_getTransactionReceipt",
   "eth_getCode",
+  "eth_getStorageAt",
+  "eth_getLogs",
   "eth_call",
 ])
 export const DEPLOYMENT_RPC_MAX_BYTES = 4 * 1024 * 1024

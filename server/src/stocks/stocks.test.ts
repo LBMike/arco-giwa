@@ -125,7 +125,9 @@ test('HTTP fails closed without resolvers; forged role/wallet rejected and no mo
     const service = new StocksService(repo, m, new ReceiptVerifier(m, rpc));
     const app = Fastify();
     await app.register(stocksPlugin, { service });
-    assert.equal((await app.inject({ url: '/api/v1/stocks/catalog' })).statusCode, 200);
+    const catalog = await app.inject({ url: '/api/v1/stocks/catalog' });
+    assert.equal(catalog.statusCode, 200);
+    assert.equal(catalog.json().instruments[0].tokenAddress, m.stockToken.toLowerCase(), 'the public catalog names the verified NVDA token');
     for (const url of ['/api/v1/stocks/orders', '/api/v1/stocks/portfolio', '/api/v1/stocks/orders/id'])
         assert.equal((await app.inject({ url, headers: { 'x-actor-id': 'fake' } })).statusCode, 401);
     for (const path of ['overview', 'orders', 'orders/id', 'reconciliations', 'audit'])

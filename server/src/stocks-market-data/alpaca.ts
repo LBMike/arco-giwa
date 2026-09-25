@@ -88,5 +88,5 @@ export function alpacaChart(input: unknown, symbol: string, range: ChartRange, n
   });
   const truncated = row.next_page_token != null;
   const session = chartSession(bars, range, now);
-  return { symbol, currency: 'USD', range, interval: rule.interval, adjustedForSplits: true, from: session.from, to: session.to, bars: session.bars, history: truncated ? 'TRUNCATED' : session.bars.length ? 'RETURNED_WINDOW' : 'EMPTY', complete: !truncated };
+  return { symbol, currency: 'USD', range, interval: rule.interval, adjustedForSplits: true, from: session.from, to: session.to, bars: session.bars, seed: session.seed, fallback: session.fallback, fallbackBars: session.fallbackBars, history: truncated ? 'TRUNCATED' : session.bars.length ? 'RETURNED_WINDOW' : 'EMPTY', complete: !truncated };
 }

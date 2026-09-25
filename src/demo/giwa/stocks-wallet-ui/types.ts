@@ -7,7 +7,8 @@ import type { Plan, Side } from "../stocks-wallet/types"
 export type StocksWalletController = ReturnType<typeof createStocksWalletController>
 
 /** The controller surface the panel adapter uses. `cancel` and `dispose` stay with the owning host. */
-export type StocksWalletControllerApi = Pick<StocksWalletController, "select" | "refreshContext" | "getSnapshot" | "subscribe" | "prepare" | "approve" | "submit">
+export type StocksWalletControllerApi = Pick<StocksWalletController, "select" | "refreshContext" | "getSnapshot" | "subscribe" | "prepare" | "approve" | "submit"> &
+  Partial<Pick<StocksWalletController, "deposit">>
 
 /**
  * Explicit user actions. The panel calls each one only when the user activates its enabled button:
@@ -20,6 +21,11 @@ export type StocksWalletPanelActions = {
   approve(): Promise<void> | void
   /** Deposit (BUY) or escrow (SELL). Always its own click after the approval step. */
   submit(): Promise<void> | void
+  /**
+   * The one-click trade of the customer presentation: the check and the deposit (BUY) or escrow (SELL) request in one,
+   * started by the user's own Buy or Sell press in the trade panel. It never approves. Absent without controller support.
+   */
+  deposit?(): Promise<void> | void
 }
 
 /**

@@ -237,10 +237,10 @@ export function createStocksWalletController(ports: WalletPorts) {
     ensure(canonical(currentOrder) === canonical(a.plan.order), "ORDER_CHANGED")
     planOrder({ side: a.plan.side, order: currentOrder }, a.context, now())
     const catalog = record(await read(a, () => ports.readCatalog(req)))
-    ensure(catalog.profile === "DEMO_TESTNET" && catalog.valuePolicy === "TEST_VALUE_ONLY" && catalog.brokerMode === "MOCK_BROKER" && catalog.chainId === 91342 && catalog.priceSource === "FIXED_MOCK_PRICE" && catalog.deploymentId === a.plan.order.deploymentId && catalog.cashSymbol === "ARCO_TEST_USDC" && Array.isArray(catalog.instruments), "CATALOG_MISMATCH")
+    ensure(catalog.profile === "DEMO_TESTNET" && catalog.valuePolicy === "TEST_VALUE_ONLY" && catalog.brokerMode === "MOCK_BROKER" && catalog.chainId === 91342 && catalog.priceSource === "FIXED_MOCK_PRICE" && catalog.deploymentId === a.plan.order.deploymentId && catalog.cashSymbol === a.plan.cashSymbol && Array.isArray(catalog.instruments), "CATALOG_MISMATCH")
     freshResponse(catalog)
     const instruments = catalog.instruments.map(record)
-    ensure(instruments.length === 1 && instruments[0]!.symbol === "NVDA" && instruments[0]!.quantityScale === 9 && instruments[0]!.price === "120.000000" && instruments[0]!.priceSource === "FIXED_MOCK_PRICE" && instruments[0]!.orderCapability === "CHECK_PAUSE_AT_ORDER", "CAPABILITY_UNAVAILABLE")
+    ensure(instruments.length === 1 && instruments[0]!.symbol === "NVDA" && instruments[0]!.quantityScale === 9 && typeof instruments[0]!.price === "string" && /^(0|[1-9]\d{0,9})\.\d{6}$/.test(instruments[0]!.price) && /[1-9]/.test(instruments[0]!.price) && instruments[0]!.priceSource === "FIXED_MOCK_PRICE" && instruments[0]!.orderCapability === "CHECK_PAUSE_AT_ORDER", "CAPABILITY_UNAVAILABLE")
     ensure(typeof ports.readExecutionPolicy === "function", "CURRENT_POLICY_REQUIRED")
     // The policy's lifetime is counted from before its request was sent, so neither request delay nor a stalled or
     // stepped-back wall clock re-grants the server's TTL at receipt.
@@ -336,7 +336,7 @@ export function createStocksWalletController(ports: WalletPorts) {
     ensure(fresh.allowance >= BigInt(a.plan.amount), "ALLOWANCE_NOT_CONFIRMED")
     state(a, "READY_TRANSFER") // Requires a separate explicit submit() click.
   }
-  async function run(a: Attempt, action: "prepare" | "approve" | "submit") {
+  async function run(a: Attempt, action: "prepare" | "approve" | "submit" | "deposit") {
     try {
       if (!snapshot.txHash && !["SUBMITTED", "APPROVAL_SUBMITTED", "UNKNOWN"].includes(snapshot.status)) state(a, "CHECKING")
       const fresh = await preflight(a, action === "prepare")
@@ -345,7 +345,8 @@ export function createStocksWalletController(ports: WalletPorts) {
         if (fresh.allowance >= BigInt(a.plan.amount)) { state(a, "READY_TRANSFER"); return }
         await send(a, "APPROVAL", fresh.policy)
       } else {
-        ensure(fresh.allowance >= BigInt(a.plan.amount), "ALLOWANCE_CHANGED")
+        // A one-click deposit (or escrow) has no approval step of its own: without the allowance it stops before any claim.
+        ensure(fresh.allowance >= BigInt(a.plan.amount), action === "deposit" ? "ALLOWANCE_REQUIRED" : "ALLOWANCE_CHANGED")
         await send(a, "TRANSFER", fresh.policy)
       }
     } catch (error) {
@@ -359,7 +360,7 @@ export function createStocksWalletController(ports: WalletPorts) {
       }
     } finally { if (active === a) active = null }
   }
-  function start(action: "prepare" | "approve" | "submit"): Promise<void> {
+  function start(action: "prepare" | "approve" | "submit" | "deposit"): Promise<void> {
     synchronize()
     if (disposed) return Promise.resolve()
     if (active?.promise) return active.promise
@@ -384,6 +385,12 @@ export function createStocksWalletController(ports: WalletPorts) {
     getSnapshot: () => synchronize(),
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
     prepare: () => start("prepare"), approve: () => start("approve"), submit: () => start("submit"),
+    /**
+     * The one-click Buy (deposit) or Sell (escrow): the same full, fresh preflight as submit() and then the one wallet
+     * request, without a separate prepare() step first. It never approves: an allowance given beforehand (the trade
+     * panel's one-time approval) is required, and without it the attempt stops as ALLOWANCE_REQUIRED before any claim.
+     */
+    deposit: () => start("deposit"),
     cancel() {
       if (!active && (snapshot.txHash || ["SUBMITTED", "APPROVAL_SUBMITTED", "UNKNOWN"].includes(snapshot.status))) return
       const previous = active; generation++; active?.abort.abort(); active = null

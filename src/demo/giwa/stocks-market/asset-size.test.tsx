@@ -19,8 +19,8 @@ const quote = { ...fixtureTop40Quote("SOXL"), price: "123.67" }
 test("ETF proxy uses share-class units exactly and preserves reported AUM separately", () => {
   const size = assetSize(true, profile, quote)
   assert.equal(size.value, "21728826420.2")
-  assert.equal(size.label, "추정 AUM")
-  assert.match(size.title, /기준일 미제공/)
+  assert.equal(size.label, "Estimated AUM")
+  assert.match(size.title, /does not provide an as-of date/)
   assert.match(size.title, new RegExp(quote.sourceTimestamp!))
   assert.equal(assetSize(true, { ...profile, sharesOutstanding: "9007199254740993.5" }, { ...quote, price: "0.1" }).value, "900719925474099.35")
   assert.equal(assetSize(true, { ...profile, aum: "12" }, quote).value, "12")
@@ -33,7 +33,7 @@ test("missing, zero, mismatched or unavailable inputs never fabricate an AUM", (
   for (const q of [null, { ...quote, price: null }, { ...quote, price: "0" }, { ...quote, symbol: "MU" }, { ...quote, sourceTimestamp: null }, { ...quote, status: "UNAVAILABLE" as const }]) assert.equal(assetSize(true, profile, q).value, null)
   const stale = assetSize(true, profile, { ...quote, status: "STALE" })
   assert.equal(stale.value, "21728826420.2")
-  assert.match(stale.title, /마지막 확인 가격/)
+  assert.match(stale.title, /Last observed price/)
 })
 
 test("share-class outstanding units survive server and client validation without weighted substitution", () => {
@@ -51,11 +51,11 @@ test("list variants keep estimate details in the tooltip; detail labels the comp
   for (const variant of ["full", "home"] as const) {
     const html = renderToStaticMarkup(<StaticRouter location="/stocks"><StocksMarketTable catalog={fixtureTop40Catalog()} quotes={quotes} capabilities={{ phase: "loading" }} series={{}} profiles={{ SOXL: profile }} variant={variant} /></StaticRouter>)
     assert.match(html, /\$21\.73B/)
-    assert.doesNotMatch(html, />추정 AUM</)
-    assert.match(html, /title="추정 AUM:/)
+    assert.doesNotMatch(html, />Estimated AUM</)
+    assert.match(html, /title="Estimated AUM:/)
   }
   const html = renderToStaticMarkup(<StatisticsCard symbol="SOXL" quote={quote} quotes={quotes} profile={{ phase: "ready", value: fixtureEnvelope(profile) }} day={null} />)
-  assert.match(html, /추정 AUM/)
+  assert.match(html, /Estimated AUM/)
   assert.match(html, /\$21\.73B/)
   assert.doesNotMatch(html, /Total Market Cap/)
 })
@@ -66,7 +66,7 @@ test("issuer AUM takes precedence and retains its own source/date through client
   const size = assetSize(true, official, quote)
   assert.equal(size.estimated, false)
   assert.equal(size.value, "25855926611.57")
-  assert.match(size.title, /Roundhill 공식 자료/)
+  assert.match(size.title, /Official Roundhill data/)
   assert.match(size.title, /2026-09-18/)
   assert.throws(() => parseProfile({ ...official, issuerFundamentals: { ...official.issuerFundamentals, sourceUrl: "javascript:alert(1)" } }, "SOXL", "https://fixture.invalid"))
 })

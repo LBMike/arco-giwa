@@ -10,7 +10,11 @@ import {
   type BuyOrderState,
   type HexAddress,
   type SellOrderState,
+  type StocksActivityEntry,
   type StocksCatalog,
+  type StocksContracts,
+  type StocksDirectHold,
+  type StocksDirectStatus,
   type StocksEnvelope,
   type StocksHolding,
   type StocksInstrument,
@@ -107,6 +111,7 @@ export function parseCatalog(input: unknown): StocksCatalog {
       price: row.price,
       priceSource: "FIXED_MOCK_PRICE",
       orderCapability: member(row.orderCapability, ["CHECK_PAUSE_AT_ORDER", "NOT_ACTIVATED"], `${path}.orderCapability`),
+      ...(row.tokenAddress === undefined ? {} : { tokenAddress: lowerAddress(row.tokenAddress, `${path}.tokenAddress`) }),
     }
   })
   return {
@@ -116,10 +121,70 @@ export function parseCatalog(input: unknown): StocksCatalog {
     chainId: GIWA_STOCKS_CHAIN_ID,
     priceSource: "FIXED_MOCK_PRICE",
     instruments,
-    cashSymbol: member(root.cashSymbol, ["ARCO_TEST_USDC", "ARCO_TEST_RLUSD"], "catalog.cashSymbol"),
+    cashSymbol: member(root.cashSymbol, ["ARCO_TEST_USDC", "ARCO_TEST_RLUSD", "tUSDC"], "catalog.cashSymbol"),
     deploymentId: text(root.deploymentId, "catalog.deploymentId", 128),
     observedAt: instant(root.observedAt, "catalog.observedAt"),
+    ...(root.contracts === undefined ? {} : { contracts: contractsOf(root.contracts, instruments) }),
   }
+}
+
+const CONTRACT_KEYS = ["cashToken", "fundingVault", "stockToken", "redemptionEscrow"] as const
+
+/** The catalog's contracts: exactly four distinct lower-case addresses; NVDA's published token is the stock token. */
+function contractsOf(value: unknown, instruments: StocksInstrument[]): StocksContracts {
+  const row = record(value, "catalog.contracts")
+  if (Object.keys(row).length !== CONTRACT_KEYS.length || !CONTRACT_KEYS.every((key) => Object.prototype.hasOwnProperty.call(row, key))) fail("catalog.contracts")
+  const contracts: StocksContracts = {
+    cashToken: lowerAddress(row.cashToken, "catalog.contracts.cashToken"),
+    fundingVault: lowerAddress(row.fundingVault, "catalog.contracts.fundingVault"),
+    stockToken: lowerAddress(row.stockToken, "catalog.contracts.stockToken"),
+    redemptionEscrow: lowerAddress(row.redemptionEscrow, "catalog.contracts.redemptionEscrow"),
+  }
+  if (new Set(CONTRACT_KEYS.map((key) => contracts[key])).size !== CONTRACT_KEYS.length) fail("catalog.contracts")
+  if (instruments.some((item) => item.tokenAddress !== undefined && item.tokenAddress !== contracts.stockToken)) fail("catalog.contracts.stockToken")
+  return contracts
+}
+
+const TX_HASH = /^0x[0-9a-f]{64}$/
+
+function txHash(value: unknown, path: string): `0x${string}` {
+  if (typeof value !== "string" || !TX_HASH.test(value)) fail(path)
+  return value as `0x${string}`
+}
+
+/** GET /api/v1/stocks/activity/:wallet data: at most 200 trades, each on a known side and state. */
+export function parseStocksActivity(input: unknown): StocksActivityEntry[] {
+  if (!Array.isArray(input) || input.length > 200) fail("activity")
+  return input.map((raw, index) => {
+    const path = `activity[${index}]`
+    const row = record(raw, path)
+    const base = {
+      quantity: units(row.quantity, `${path}.quantity`),
+      cashAmount: units(row.cashAmount, `${path}.cashAmount`),
+      paymentTx: txHash(row.paymentTx, `${path}.paymentTx`),
+      settlementTx: row.settlementTx === null ? null : txHash(row.settlementTx, `${path}.settlementTx`),
+      createdAt: instant(row.createdAt, `${path}.createdAt`),
+    }
+    if (row.side === "SELL") return { side: "SELL" as const, state: member(row.state, SELL_ORDER_STATES, `${path}.state`), ...base }
+    if (row.side === "BUY") return { side: "BUY" as const, state: member(row.state, BUY_ORDER_STATES, `${path}.state`), ...base }
+    return fail(`${path}.side`)
+  })
+}
+
+const DIRECT_HOLDS: readonly StocksDirectHold[] = ["TRADING_PAUSED", "PRICE_UNAVAILABLE", "BELOW_ONE_UNIT"]
+
+/** GET /api/v1/stocks/direct/:orderKey data, for the side the key was sent with. */
+export function parseDirectStatus(input: unknown, side: StocksSide): StocksDirectStatus {
+  const row = record(input, "direct")
+  if (row.side !== side) fail("direct.side")
+  const quantity = units(row.quantity, "direct.quantity")
+  const cashAmount = units(row.cashAmount, "direct.cashAmount")
+  instant(row.createdAt, "direct.createdAt")
+  instant(row.updatedAt, "direct.updatedAt")
+  const hold = row.hold === undefined ? null : member(row.hold, DIRECT_HOLDS, "direct.hold")
+  return side === "SELL"
+    ? { side, state: member(row.state, SELL_ORDER_STATES, "direct.state"), quantity, cashAmount, hold }
+    : { side, state: member(row.state, BUY_ORDER_STATES, "direct.state"), quantity, cashAmount, hold }
 }
 
 /** Every authenticated route: { ...profile, observedAt, data }. */

@@ -55,7 +55,7 @@ describe("GIWA Stocks offline signed CREATE attestation", () => {
   }
 
   function observed(
-    source: UnsignedStocksDeployment,
+    source: Parameters<typeof attestSignedStocksCreate>[0]["plan"],
     requested: number,
   ): Parameters<typeof assertPreparedStep>[2] {
     const index = requested >= 0 && requested < source.steps.length ? requested : 0

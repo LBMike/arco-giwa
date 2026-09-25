@@ -1,6 +1,7 @@
 // TEST_HARNESS_ONLY. Explicit imports from tests only; never selected by runtime composition.
 import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256, zeroAddress, type Abi, type Address, type Hex } from 'viem';
-import { ABI, ABI_DIGEST, callDigest, operationKey, type Actor, type AuthorizedCall, type Manifest, type SignerPort, type Submission } from './contracts.js';
+import { ABI, ABI_DIGEST, PLATFORM_TUSDC, callDigest, operationKey, type Actor, type AuthorizedCall, type Manifest, type SignerPort, type Submission } from './contracts.js';
+import { CASH_IMPLEMENTATION_SLOT, CASH_ADMIN_SLOT } from './cash-identity.js';
 import { escrowIdentity } from './chain.js';
 import type { ChainBlock, ChainPort, ChainReceipt, ChainTransaction, RawLog } from './chain.js';
 export const a = (n: number) => `0x${n.toString(16).padStart(40, '0')}` as Address;
@@ -8,6 +9,14 @@ export const h = (n: number) => `0x${n.toString(16).padStart(64, '0')}` as Hex;
 export const ACTOR: Actor = { actorId: 'test-actor', wallet: a(10), chainId: 91342, scope: 'STOCKS_TESTNET', verified: true };
 export function testManifest(): Manifest {
     return { schemaVersion: 2, redemptionEscrow: a(105), deploymentId: 'TEST_HARNESS_ONLY_STOCKS_V1', profile: 'DEMO_TESTNET', chainId: 91342, networkInstance: 'TEST_HARNESS_ONLY_NETWORK_V1', checkpointNumber: '1', checkpointHash: h(1), abiDigest: ABI_DIGEST, finalityPolicy: 'FINALIZED', cashToken: a(100), cashSymbol: 'ARCO_TEST_USDC', cashScale: 6, stockToken: a(101), quantityScale: 9, fundingVault: a(102), mintController: a(103), signerAddress: a(104), codeHashes: Object.fromEntries([100, 101, 102, 103, 105].map(n => [a(n), keccak256('0x6000')])), restrictedTransfers: true, nonUpgradeable: true };
+}
+export function testTusdcManifest(): Extract<Manifest, { schemaVersion: 3 }> {
+    const legacy = testManifest(), codeHashes = { ...legacy.codeHashes };
+    delete codeHashes[legacy.cashToken];
+    codeHashes[PLATFORM_TUSDC] = keccak256('0x6000');
+    return { ...legacy, schemaVersion: 3, cashToken: PLATFORM_TUSDC, cashSymbol: 'tUSDC', codeHashes,
+        nonUpgradeable: false, stockContractsNonUpgradeable: true,
+        cashIdentity: { kind: 'ERC1967', implementation: a(201), implementationCodeHash: keccak256('0x6000'), proxyAdmin: a(202), proxyAdminCodeHash: keccak256('0x6000') } };
 }
 export function eventLog(contract: Address, name: string, args: Record<string, unknown>, index: number): RawLog {
     const event = ABI.find(entry => entry.type === 'event' && entry.name === name);
@@ -36,6 +45,12 @@ export class TestChain implements ChainPort {
     async receipt(id: Hex) { return this.receipts.get(id) ?? null; }
     async block(number: string | 'finalized') { return this.blocks.get(number === 'finalized' ? this.finalizedNumber : number) ?? null; }
     async codeHash() { return this.wrongCode ? h(77) : keccak256('0x6000'); }
+    async storageAt(_contract: Address, slot: Hex) {
+        if (this.m.schemaVersion !== 3) throw Error('TEST_PROXY_NOT_CONFIGURED');
+        const target = slot === CASH_IMPLEMENTATION_SLOT ? this.m.cashIdentity.implementation : slot === CASH_ADMIN_SLOT ? this.m.cashIdentity.proxyAdmin : undefined;
+        if (!target) throw Error('TEST_UNKNOWN_PROXY_SLOT');
+        return `0x${target.slice(2).padStart(64, '0')}` as Hex;
+    }
     async tokenBalance(token: Address, wallet: Address) { return token === this.m.cashToken ? this.cashBalance : this.walletBalances[wallet] ?? '0'; }
     async tokenSupply() { return this.stockSupply; }
     add(tx: ChainTransaction, logs: RawLog[], timestamp = Math.floor(Date.now() / 1000).toString(), blockNumber = '10') {

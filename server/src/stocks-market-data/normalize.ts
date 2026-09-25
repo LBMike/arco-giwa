@@ -1,4 +1,4 @@
-import { MarketDataError, type Bar, type Chart, type ChartRange, type CompanyProfile, type Quote } from './contracts.js';
+import { MarketDataError, type Bar, type Chart, type ChartRange, type CompanyProfile, type Dividend, type Quote } from './contracts.js';
 import { decimal, integer, object, optionalDecimal, scaled } from './exact-json.js';
 import { brandingPath } from './transport.js';
 
@@ -56,17 +56,63 @@ export function profile(input: unknown, symbol: string): InternalProfile {
   if (typeof row.homepage_url === 'string') { try { const url = new URL(row.homepage_url); if (url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash && url.href.length <= 2048) website = url.href; } catch { /* Omit unsafe optional links. */ } }
   return { iconPath, profile: { symbol, name, description: text(row.description, 12000), exchange: text(row.primary_exchange), securityType: text(row.type), currency: 'USD', marketCap: optionalDecimal(row.market_cap), sharesOutstanding: optionalDecimal(row.share_class_shares_outstanding), website, industry: text(row.sic_description, 500), logoUrl: iconPath ? `/api/v1/stocks/market/${symbol}/logo` : null, sourceDate: null } };
 }
+function calendarDate(input: unknown): string {
+  const value = text(input, 10);
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) return invalid();
+  return value;
+}
+/** Only a recent recurring distribution can establish a current payout schedule. */
+export function dividend(input: unknown, symbol: string, now: number): Dividend | null {
+  const rows = providerObject(input).results;
+  if (!Array.isArray(rows) || rows.length > 1) return invalid();
+  if (!rows.length) return null;
+  const row = object(rows[0]);
+  if (row.ticker !== symbol || row.currency !== 'USD' || row.distribution_type !== 'recurring') return invalid();
+  const exDividendDate = calendarDate(row.ex_dividend_date);
+  const payDate = row.pay_date == null ? null : calendarDate(row.pay_date);
+  const cashAmount = positive(row.cash_amount);
+  const splitAdjustedCashAmount = row.split_adjusted_cash_amount == null ? null : positive(row.split_adjusted_cash_amount);
+  const count = integer(row.frequency);
+  if (count < 1n || count > 365n) return invalid();
+  const frequency = Number(count);
+  const today = new Date(now).toISOString().slice(0, 10);
+  if (exDividendDate > today) return invalid();
+  const ageDays = (Date.parse(today) - Date.parse(exDividendDate)) / 86400000;
+  const maxAgeDays = Math.min(550, Math.max(21, Math.ceil(366 / frequency * 1.5) + 7));
+  if (ageDays > maxAgeDays) return null;
+  return { symbol, currency: 'USD', cashAmount, splitAdjustedCashAmount, frequency, exDividendDate, payDate };
+}
 export const RANGE_RULES = Object.freeze({ '1D': { days: 1, multiplier: 5, timespan: 'minute', interval: '5m', width: 300000 }, '1W': { days: 7, multiplier: 1, timespan: 'hour', interval: '1h', width: 3600000 }, '1M': { days: 31, multiplier: 1, timespan: 'day', interval: '1d', width: 86400000 }, '3M': { days: 93, multiplier: 1, timespan: 'day', interval: '1d', width: 86400000 }, '1Y': { days: 366, multiplier: 1, timespan: 'day', interval: '1d', width: 86400000 } } as const);
 export function chartWindow(range: ChartRange, now: number) { return { from: now - RANGE_RULES[range].days * 86400000, to: now }; }
-// A rolling 24-hour request is empty throughout weekends and market holidays. Ask for a bounded
-// calendar-week lookback, then publish only the latest New York trading date as the 1D series.
+// A rolling 24-hour request is empty throughout weekends and market holidays. Fetch a bounded
+// calendar-week lookback to find the last pre-window seed or a separate previous-session fallback.
 export function chartRequestWindow(range: ChartRange, now: number) { return { from: now - (range === '1D' ? 7 : RANGE_RULES[range].days) * 86400000, to: now }; }
-const tradingDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
-export function chartSession<T extends { timestamp: string }>(bars: T[], range: ChartRange, now: number): { bars: T[]; from: string; to: string } {
-  if (range !== '1D' || !bars.length) return { bars, from: new Date(chartWindow(range, now).from).toISOString(), to: new Date(now).toISOString() };
-  const latest = Date.parse(bars[bars.length - 1].timestamp);
-  const date = tradingDate.format(latest);
-  return { bars: bars.filter(bar => tradingDate.format(Date.parse(bar.timestamp)) === date), from: new Date(latest - 86400000).toISOString(), to: new Date(latest).toISOString() };
+const tradingDateFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+function tradingDate(time: number): string {
+  const parts = Object.fromEntries(tradingDateFormatter.formatToParts(time).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+export function chartSession<T extends { timestamp: string }>(bars: T[], range: ChartRange, now: number): { bars: T[]; seed: T | null; fallback: 'PREVIOUS_SESSION' | null; fallbackBars: T[]; from: string; to: string } {
+  const window = chartWindow(range, now);
+  const from = new Date(window.from).toISOString(); const to = new Date(window.to).toISOString();
+  if (range !== '1D') return { bars, seed: null, fallback: null, fallbackBars: [], from, to };
+  const rolling: T[] = []; let seed: T | null = null;
+  for (const bar of bars) {
+    if (Date.parse(bar.timestamp) < window.from) seed = bar;
+    else rolling.push(bar);
+  }
+  // Keep fallback observations distinct: a prior session can overlap the rolling window.
+  let fallbackBars: T[] = [];
+  if (rolling.length < 2) {
+    const today = tradingDate(now);
+    const prior = bars.filter(bar => tradingDate(Date.parse(bar.timestamp)) < today);
+    const latestPriorDate = prior.length ? tradingDate(Date.parse(prior[prior.length - 1].timestamp)) : null;
+    if (latestPriorDate) {
+      const candidate = prior.filter(bar => tradingDate(Date.parse(bar.timestamp)) === latestPriorDate);
+      if (candidate.length >= 2) fallbackBars = candidate;
+    }
+  }
+  return { bars: rolling, seed, fallback: fallbackBars.length ? 'PREVIOUS_SESSION' : null, fallbackBars, from, to };
 }
 export function chartPath(symbol: string, range: ChartRange, now: number): string {
   const rule = RANGE_RULES[range]; const window = chartRequestWindow(range, now);
@@ -93,7 +139,7 @@ export function chart(input: unknown, symbol: string, range: ChartRange, now: nu
   }
   const truncated = row.next_url != null || (row.queryCount != null && integer(row.queryCount) >= 50000n) || entries.length === 50000;
   const session = chartSession(bars, range, now);
-  return { symbol, currency: 'USD', range, interval: rule.interval, adjustedForSplits: true, from: session.from, to: session.to, bars: session.bars, history: truncated ? 'TRUNCATED' : session.bars.length ? 'RETURNED_WINDOW' : 'EMPTY', complete: !truncated };
+  return { symbol, currency: 'USD', range, interval: rule.interval, adjustedForSplits: true, from: session.from, to: session.to, bars: session.bars, seed: session.seed, fallback: session.fallback, fallbackBars: session.fallbackBars, history: truncated ? 'TRUNCATED' : session.bars.length ? 'RETURNED_WINDOW' : 'EMPTY', complete: !truncated };
 }
 
 /** ETF Global profiles: AUM is its own measure, never the ticker's market_cap. */

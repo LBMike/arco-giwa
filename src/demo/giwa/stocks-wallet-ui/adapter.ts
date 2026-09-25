@@ -77,6 +77,21 @@ export function stocksWalletPanelActions(controller: StocksWalletControllerApi, 
     },
     approve: () => (signable() && displayed("APPROVAL_REQUIRED") ? controller.approve() : undefined),
     submit: () => (signable() && displayed("READY_TRANSFER") ? controller.submit() : undefined),
+    // Evidence first, like prepare; then the controller runs its full fresh preflight before its one wallet request.
+    ...(typeof controller.deposit === "function"
+      ? {
+          deposit: () => {
+            const deposit = controller.deposit!
+            const run = () => (signable() ? deposit() : undefined)
+            if (!loadEvidence) return run()
+            if (!checkable() || !check(expected.signable, true)) return undefined
+            return Promise.resolve()
+              .then(loadEvidence)
+              .catch(() => undefined)
+              .then(run)
+          },
+        }
+      : {}),
   }
 }
 

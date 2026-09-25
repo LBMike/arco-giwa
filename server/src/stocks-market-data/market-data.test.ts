@@ -5,7 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { createStocksMarketDataService, stocksMarketDataPlugin, type DisplayCatalog } from './index.js';
 import { decimal, integer, parseExactJson } from './exact-json.js';
 import { brandingPath, MassiveTransport } from './transport.js';
-import { chart, chartPath, quotes } from './normalize.js';
+import { chart, chartPath, chartSession, quotes } from './normalize.js';
 
 // All observations below are synthetic; no provider credentials or live claims.
 const TIME = Date.parse('2026-09-17T18:00:00.000Z');
@@ -148,17 +148,64 @@ test('holiday/no-trade chart is empty rather than zero, and partial pagination i
   assert.equal(chart(parseExactJson(base + '}'), 'NVDA', '1D', TIME).history, 'EMPTY');
   for (const extra of [',"next_url":"https://evil.example/?apiKey=secret"', ',"queryCount":50000']) { const result = chart(parseExactJson(base + extra + '}'), 'NVDA', '1D', TIME); assert.equal(result.complete, false); assert.equal(result.history, 'TRUNCATED'); assert.ok(!JSON.stringify(result).includes('evil')); }
 });
-test('1D chart shows the latest observed New York trading session after a weekend', () => {
+test('1D chart keeps a rolling 24-hour window and a distinct previous-session fallback after a weekend', () => {
   const sunday = Date.parse('2026-09-20T18:00:00.000Z');
   const thursday = Date.parse('2026-09-17T18:00:00.000Z');
   const friday = Date.parse('2026-09-18T18:00:00.000Z');
   const bar = (t: number, close: number) => ({ t, o: close, h: close + 1, l: close - 1, c: close, v: 100 });
   const result = chart(parseExactJson(JSON.stringify({ status: 'OK', ticker: 'NVDA', adjusted: true, resultsCount: 3, results: [bar(thursday, 100), bar(friday, 110), bar(friday + 300000, 111)] })), 'NVDA', '1D', sunday);
-  assert.equal(result.bars.length, 2);
-  assert.equal(result.bars[0].close, '110');
-  assert.equal(result.to, new Date(friday + 300000).toISOString());
+  assert.deepEqual(result.bars, []);
+  assert.equal(result.seed?.close, '111');
+  assert.deepEqual(result.fallbackBars.map(item => item.close), ['110', '111']);
+  assert.equal(result.fallback, 'PREVIOUS_SESSION');
+  assert.equal(result.to, new Date(sunday).toISOString());
   assert.equal(Date.parse(result.to) - Date.parse(result.from), 86400000);
-  assert.equal(result.history, 'RETURNED_WINDOW');
+  assert.equal(result.history, 'EMPTY');
+});
+test('1D rolling selection covers 09:40 ET, midday, after close and weekend at fixed clocks', () => {
+  const bar = (time: string, close: string) => ({ timestamp: time, close });
+  const friday = [bar('2026-09-18T19:55:00.000Z', '103'), bar('2026-09-18T20:00:00.000Z', '104')];
+  const monday = [bar('2026-09-21T13:35:00.000Z', '110'), bar('2026-09-21T16:55:00.000Z', '120'), bar('2026-09-21T19:55:00.000Z', '125')];
+  for (const [name, nowText, input, expected, fallback] of [
+    ['09:40 ET', '2026-09-21T13:40:00.000Z', [...friday, monday[0]], ['110'], ['103', '104']],
+    ['midday', '2026-09-21T17:00:00.000Z', [...friday, ...monday.slice(0, 2)], ['110', '120'], []],
+    ['after close', '2026-09-22T03:00:00.000Z', [...friday, ...monday], ['110', '120', '125'], []],
+    ['weekend', '2026-09-20T18:00:00.000Z', friday, [], ['103', '104']],
+  ] as const) {
+    const now = Date.parse(nowText);
+    const selected = chartSession([...input], '1D', now);
+    assert.equal(selected.from, new Date(now - 86400000).toISOString(), name);
+    assert.equal(selected.to, nowText, name);
+    assert.deepEqual(selected.bars.map(item => item.close), expected, name);
+    assert.equal(selected.seed?.close, '104', name);
+    assert.deepEqual(selected.fallbackBars.map(item => item.close), fallback, name);
+    assert.equal(selected.fallback, fallback.length ? 'PREVIOUS_SESSION' : null, name);
+  }
+});
+test('1D rolling window can contain observations from two New York trading dates', () => {
+  const now = Date.parse('2026-09-22T13:40:00.000Z'); // Tuesday 09:40 ET.
+  const bars = [
+    { timestamp: '2026-09-21T13:35:00.000Z', close: '100' }, // Monday before the boundary.
+    { timestamp: '2026-09-21T14:00:00.000Z', close: '101' },
+    { timestamp: '2026-09-21T20:00:00.000Z', close: '102' },
+    { timestamp: '2026-09-22T13:35:00.000Z', close: '103' },
+  ];
+  const selected = chartSession(bars, '1D', now);
+  assert.equal(selected.from, '2026-09-21T13:40:00.000Z');
+  assert.equal(selected.to, '2026-09-22T13:40:00.000Z');
+  assert.equal(selected.seed?.close, '100');
+  assert.deepEqual(selected.bars.map(item => item.close), ['101', '102', '103']);
+  assert.equal(selected.fallback, null);
+});
+test('a one-bar prior session never fabricates a fallback line; longer ranges keep their full series', () => {
+  const sunday = Date.parse('2026-09-20T18:00:00.000Z');
+  const bars = [{ timestamp: '2026-09-18T20:00:00.000Z', close: '104' }];
+  const daily = chartSession(bars, '1D', sunday);
+  assert.equal(daily.fallback, null); assert.deepEqual(daily.fallbackBars, []); assert.equal(daily.seed?.close, '104');
+  for (const range of ['1W', '1M', '3M', '1Y'] as const) {
+    const longer = chartSession(bars, range, sunday);
+    assert.deepEqual(longer.bars, bars, range); assert.equal(longer.seed, null, range); assert.equal(longer.fallback, null, range); assert.deepEqual(longer.fallbackBars, [], range);
+  }
 });
 test('impossible OHLC, out-of-order/duplicate/future/out-of-window bars fail closed', () => {
   const bar = (t: number, o = '100') => `{"t":${t},"o":${o},"h":101,"l":99,"c":100,"v":2}`;

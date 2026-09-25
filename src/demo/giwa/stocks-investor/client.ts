@@ -172,7 +172,7 @@ export function createGiwaStocksHttpClient(options: GiwaStocksHttpClientOptions)
         (value) => parseEnvelope(value, (data) => parseQuote(data, side)),
         signal,
         { token },
-        { symbol: body.symbol, quantity: body.quantity },
+        "cashAmount" in body ? { symbol: body.symbol, cashAmount: body.cashAmount } : { symbol: body.symbol, quantity: body.quantity },
       ),
     createOrder: (side, body, token, signal) =>
       request(

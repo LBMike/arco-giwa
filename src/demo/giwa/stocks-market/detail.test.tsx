@@ -2,10 +2,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
-import type { Chart, Envelope, Profile, Quote, Security } from "./contracts"
-import { axisPrice, axisTicks, axisTime, barRange, chartPoints, compactDollars, dollars } from "./display"
+import { DemoPresentationContext } from "../demo-presentation"
+import type { Chart, Dividend, Envelope, Profile, Quote, Security } from "./contracts"
+import { axisPrice, axisTicks, axisTime, barRange, chartPoints, compactDollars, dollars, windowChange } from "./display"
 import { MarketChart } from "./MarketChart"
-import { AboutCard, DetailHeader, PeriodTabs, SecurityDetailView, StatisticsCard, UnavailableDetail } from "./MarketDetail"
+import { AboutCard, DetailHeader, DividendGroup, PeriodTabs, PriceCard, SecurityDetailView, StatisticsCard, UnavailableDetail } from "./MarketDetail"
 import { FIXTURE_TIME, fixtureTop40Chart, fixtureTop40Quote } from "./fixtures"
 import { MarketStatus, type Capabilities } from "./StocksMarketTable"
 import type { ReadState } from "./useOwnedRead"
@@ -17,6 +18,7 @@ const ORDERS: Capabilities = { phase: "ready", bySymbol: new Map([["NVDA", "CHEC
 const LONG = "Offline fixture company text for the clamp. ".repeat(8).trim()
 // Invented test values only.
 const PROFILE: Profile = { symbol: "NVDA", name: "NVIDIA Corporation", currency: "USD", description: LONG, exchange: "XNAS", securityType: "CS", marketCap: "4210987654321", website: "https://fixture.invalid/about", industry: "Fixture semiconductors", logoUrl: null, sourceDate: "2026-09-15" }
+const DIVIDEND: Dividend = { symbol: "NVDA", currency: "USD", cashAmount: "0.22", splitAdjustedCashAmount: "0.22", frequency: 4, exDividendDate: "2026-09-10", payDate: "2026-10-02" }
 const text = (html: string) => html.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&#x27;/g, "'")
 const count = (html: string, needle: string) => text(html).split(needle).length - 1
 const esc = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -28,64 +30,84 @@ function detail(overrides: Partial<Parameters<typeof SecurityDetailView>[0]> = {
     chart={<MarketChart response={envelope(chart)} />} {...overrides} />)
 }
 
+test("stock detail distinguishes the rolling chart from About and Statistics", () => {
+  const page = detail()
+  assert.match(page, /aria-label="최근 24시간 주가 차트/)
+  assert.match(text(page), /관측 구간 대비/)
+  assert.match(text(page), /About.*Statistics/)
+})
+
 test("header: the h1 names the security with the ticker muted after it, and the table's order-capability badge; no session pill", () => {
   const html = renderToStaticMarkup(<DetailHeader symbol="NVDA" name="NVIDIA Corporation" logoUrl={null} capabilities={ORDERS} headingId="h" />)
   assert.match(html, /<h1 id="h" tabindex="-1"[^>]*>NVIDIA Corporation <span class="text-\[var\(--color-arco-chip-ink\)\]">NVDA<\/span><\/h1>/)
   assert.match(html, /<img src="\/logos\/stocks\/nvidia\.png" alt="" width="40" height="40"/)
-  assert.match(text(html), /모의 주문$/)
-  for (const [capabilities, label] of [[{ phase: "loading" }, "확인 중"], [{ phase: "error" }, "상태 확인 불가"], [{ phase: "ready", bySymbol: new Map([["NVDA", "NOT_ACTIVATED"]]) }, "미활성"], [{ phase: "ready", bySymbol: new Map() }, "시장정보만"]] as const) {
+  assert.match(text(html), /Demo trading$/)
+  for (const [capabilities, label] of [[{ phase: "loading" }, "Checking"], [{ phase: "error" }, "Status unavailable"], [{ phase: "ready", bySymbol: new Map([["NVDA", "NOT_ACTIVATED"]]) }, "Inactive"], [{ phase: "ready", bySymbol: new Map() }, "Market data only"]] as const) {
     assert.match(text(renderToStaticMarkup(<DetailHeader symbol="NVDA" name="NVIDIA Corporation" logoUrl={null} capabilities={capabilities as Capabilities} headingId="h" />)), new RegExp(`${label}$`))
   }
   assert.match(renderToStaticMarkup(<DetailHeader symbol="ZZZZ" name="ZZZZ" logoUrl={null} capabilities={ORDERS} headingId="h" />), /<h1[^>]*>ZZZZ<\/h1>/, "no repeated ticker when there is no name")
 })
 
-test("price card: one caption, rounded price with the exact title, unsigned change with triangle and sr direction, feed and time", () => {
+test("price card: 1D change follows the chart; other periods retain previous-close change", () => {
   const html = detail()
   const quote = fixtureTop40Quote("NVDA")
-  assert.equal(count(html, "기초 주식 시세 · USD"), 1)
+  assert.equal(count(html, "Underlying stock price · USD"), 1)
   assert.match(html, new RegExp(`<p title="${esc(dollars(quote.price))}"[^>]*text-\\[40px\\][^>]*>\\$[0-9,]+(\\.\\d{1,2})?</p>`))
-  assert.match(html, /text-\[var\(--color-arco-down\)\]"><svg aria-hidden="true" width="12" height="10"[^>]*>.*?<\/svg><span class="sr-only">하락 <\/span>\$\d+\.\d+ \(\d+\.\d+%\)<\/span><span[^>]*>전일 종가 대비<\/span>/)
-  assert.match(text(html), /Sep 16, 2026, 08:00:00 AM EDT · 15분 지연/)
-  const up = renderToStaticMarkup(<SecurityDetailView security={NVDA} profile={ready(envelope(PROFILE))} quote={{ ...quote, change: "5.01", changePercent: "2.81" }} quotes={ready(envelope([quote]))} capabilities={ORDERS} day={null} range="1D" onRange={() => {}} selection={null} chart={null} />)
-  assert.match(up, /text-\[var\(--color-arco-up-text\)\]"><svg[^]*?상승 <\/span>\$5\.01 \(2\.81%\)/, "rising change text uses the AA text token")
-  const flat = renderToStaticMarkup(<SecurityDetailView security={NVDA} profile={ready(envelope(PROFILE))} quote={{ ...quote, change: "0.001", changePercent: "0" }} quotes={ready(envelope([quote]))} capabilities={ORDERS} day={null} range="1D" onRange={() => {}} selection={null} chart={null} />)
+  assert.match(text(html), new RegExp(`${esc(windowChange(fixtureTop40Chart("NVDA", "1D"), quote))}관측 구간 대비`))
+  assert.match(text(html), /Sep 16, 2026, 08:00:00 AM EDT · 15-minute delay/)
+  const up = renderToStaticMarkup(<SecurityDetailView security={NVDA} profile={ready(envelope(PROFILE))} quote={{ ...quote, change: "5.01", changePercent: "2.81" }} quotes={ready(envelope([quote]))} capabilities={ORDERS} day={null} range="1W" onRange={() => {}} selection={null} chart={null} />)
+  assert.match(up, /text-\[var\(--color-arco-up-text\)\]"><svg[^]*?Up <\/span>\$5\.01 \(2\.81%\)/, "rising change text uses the AA text token")
+  const flat = renderToStaticMarkup(<SecurityDetailView security={NVDA} profile={ready(envelope(PROFILE))} quote={{ ...quote, change: "0.001", changePercent: "0" }} quotes={ready(envelope([quote]))} capabilities={ORDERS} day={null} range="1W" onRange={() => {}} selection={null} chart={null} />)
   assert.match(flat, /<span class="text-\[var\(--color-arco-text-soft\)\]">\$0 \(0%\)<\/span>/, "flat stays neutral")
   const missing = renderToStaticMarkup(<SecurityDetailView security={NVDA} profile={{ phase: "loading" }} quote={null} quotes={{ phase: "loading" }} capabilities={ORDERS} day={null} range="1D" onRange={() => {}} selection={null} chart={null} />)
-  assert.equal(count(missing, "기초 주식 시세 · USD"), 1)
-  assert.match(text(missing), /기초 주식 시세 · USD—— ?전일 종가 대비/)
-  assert.match(text(missing), /시장정보 불러오는 중…/)
+  assert.equal(count(missing, "Underlying stock price · USD"), 1)
+  assert.match(text(missing), /Underlying stock price · USD—— ?관측 구간 대비/)
+  assert.match(text(missing), /Loading market data…/)
 })
 
 test("NVDA detail labels the exchange session separately from quote freshness and stream recovery", () => {
   const closed = text(detail({ marketSession: { state: "CLOSED", observedAt: FIXTURE_TIME, nextOpen: "2026-09-17T13:30:00.000Z", nextClose: null }, liveConnection: "streaming" }))
-  assert.match(closed, /미국 주식시장 · 장 마감/)
-  assert.doesNotMatch(closed, /시세 연결을 다시 시도하고 있습니다/)
+  assert.match(closed, /US stock market · Closed/)
+  assert.doesNotMatch(closed, /Reconnecting to market data…/)
 
   const reconnecting = text(detail({ marketSession: null, liveConnection: "reconnecting" }))
-  assert.match(reconnecting, /시세 연결을 다시 시도하고 있습니다/)
-  assert.doesNotMatch(reconnecting, /미국 주식시장 · 장 마감/)
+  assert.match(reconnecting, /Reconnecting to market data…/)
+  assert.doesNotMatch(reconnecting, /US stock market · Closed/)
 
   const unknown = text(detail({ marketSession: { state: "UNKNOWN", observedAt: null, nextOpen: null, nextClose: null }, liveConnection: "streaming" }))
-  assert.match(unknown, /미국 주식시장 · 장 상태 확인 중/)
-  assert.doesNotMatch(unknown, /미국 주식시장 · 장중|미국 주식시장 · 장 마감/)
+  assert.match(unknown, /US stock market · Session status unavailable/)
+  assert.doesNotMatch(unknown, /US stock market · Open|US stock market · Closed/)
+})
+
+test("demo price card omits routine session and stale notices but keeps unavailable and loading states", () => {
+  const quote = fixtureTop40Quote("SGOV")
+  const render = (current: Quote | null, quotes: ReadState<Envelope<Quote[]>>) => renderToStaticMarkup(<DemoPresentationContext.Provider value>
+    <PriceCard quote={current} quotes={quotes} selection={null} range="1D" onRange={() => {}} marketSession={{ state: "CLOSED", observedAt: FIXTURE_TIME, nextOpen: null, nextClose: null }}>{null}</PriceCard>
+  </DemoPresentationContext.Provider>)
+  const stale = render(quote, ready(envelope([quote], "STALE")))
+  assert.match(stale, /\$422\.82/)
+  assert.match(stale, /Sep 16, 2026/)
+  assert.doesNotMatch(stale, /US stock market|Last observed prices/)
+  assert.match(render(null, ready(envelope<Quote[]>(null, "UNAVAILABLE"))), /Market prices unavailable/)
+  assert.match(render(null, { phase: "loading" }), /Loading market data…/)
 })
 
 test("statistics source follows the quote provider instead of naming a different feed", () => {
   const quote = fixtureTop40Quote("NVDA")
   const html = detail({ quotes: ready({ ...envelope([quote]), provider: "ALPACA", marketFeed: "IEX", feedDelay: "REALTIME" }) })
-  assert.match(text(html), /Alpaca · IEX \(single exchange\) · 실시간/)
-  assert.doesNotMatch(text(html), /Massive · 실시간/)
+  assert.match(text(html), /Alpaca · IEX \(single exchange\) · Real-time feed configured/)
+  assert.doesNotMatch(text(html), /Massive · Real-time feed configured/)
 })
 
 test("a picked bar replaces the quote in the header (same caption slot) and hides the previous-close change", () => {
   const chart = fixtureTop40Chart("NVDA", "1D")
   const bar = chart.bars[3]
   const html = detail({ selection: { bar, interval: "5m", feedDelay: "UNKNOWN" } })
-  assert.equal(count(html, "기초 주식 시세 · USD"), 0)
-  assert.equal(count(html, "5m 구간 종가 · 시각은 봉 시작"), 1)
+  assert.equal(count(html, "Underlying stock price · USD"), 0)
+  assert.equal(count(html, "5m bar close · time marks bar start"), 1)
   assert.match(html, new RegExp(`title="${esc(dollars(bar.close))}"`))
   assert.match(html, /<p class="flex flex-wrap items-center gap-x-1\.5 text-sm invisible">/)
-  assert.match(text(html), /시세 지연 정보 미확인/, "the picked bar's own feed label")
+  assert.match(text(html), /Feed delay unknown/, "the picked bar's own feed label")
 })
 
 test("price card: this symbol's own non-AVAILABLE quote status whatever the chart shows; the envelope's only when there is no row", () => {
@@ -93,34 +115,34 @@ test("price card: this symbol's own non-AVAILABLE quote status whatever the char
   assert.equal(sgov.status, "STALE", "fixture: SGOV's quote is stale")
   const SGOV: Security = { symbol: "SGOV", name: "iShares 0-3 Month Treasury Bond ETF" }
   const view = (quote: Quote | null, quotes: ReadState<Envelope<Quote[]>>, chart: JSX.Element | null) => text(renderToStaticMarkup(<SecurityDetailView security={SGOV} profile={{ phase: "loading" }} quote={quote} quotes={quotes} capabilities={ORDERS} day={null} range="1D" onRange={() => {}} selection={null} chart={chart} />))
-  const stale = "마지막 확인 시세 · 오래된 데이터"
+  const stale = "Last observed prices · Stale data"
   // The chart read failed, or is loading (every period switch): the stale headline price still says it is stale.
   for (const chart of [<MarketStatus key="error" status="error" />, <MarketStatus key="loading" status="loading" />]) {
     const page = view(sgov, ready(envelope([sgov], "STALE")), chart)
-    assert.match(page, /기초 주식 시세 · USD\$422\.82하락/, "the stale price is the headline")
+    assert.match(page, /Underlying stock price · USD\$422\.82—관측 구간 대비/, "the stale price is the headline without an unavailable 24h change")
     assert.equal(page.split(stale).length - 1, 1, `one stale marker with a ${chart.props.status} chart`)
   }
   // Once an AVAILABLE chart loads, the marker is still there, once (the chart no longer repeats the quote's status).
   assert.equal(view(sgov, ready(envelope([sgov], "STALE")), <MarketChart response={envelope(fixtureTop40Chart("SGOV", "1D"))} />).split(stale).length - 1, 1)
   // Quote and chart both stale: two different statements, each scoped to its data, never the same line twice.
   const both = view(sgov, ready(envelope([sgov], "STALE")), <MarketChart response={envelope(fixtureTop40Chart("SGOV", "1D"), "STALE")} />)
-  assert.equal(both.split(`차트 · ${stale}`).length - 1, 1, "the chart's own status")
-  assert.equal(both.split(stale).length - 1, 2, "plus the quote's, once")
+  assert.equal(both.split("Chart · Last observed prices · stale data").length - 1, 1, "the chart's own status")
+  assert.equal(both.split("Last observed prices").length - 1, 2, "plus the quote's, once")
   // One stale symbol marks the whole envelope STALE: a symbol whose own row is AVAILABLE gets no marker.
   const nvda = fixtureTop40Quote("NVDA")
-  assert.doesNotMatch(view(nvda, ready(envelope([nvda, sgov], "STALE")), null), /오래된 데이터/)
-  for (const [status, copy] of [["UNAVAILABLE", "시세를 불러올 수 없습니다"], ["UNCONFIGURED", "시세 연결 준비 중"]] as const) {
-    assert.match(view(null, ready(envelope<Quote[]>(null, status)), null), new RegExp(`—— ?전일 종가 대비.*${copy}`), `no quote row: the envelope's ${status} explains the dashes`)
+  assert.doesNotMatch(view(nvda, ready(envelope([nvda, sgov], "STALE")), null), /Stale data/)
+  for (const [status, copy] of [["UNAVAILABLE", "Market prices unavailable"], ["UNCONFIGURED", "Price feed setup pending"]] as const) {
+    assert.match(view(null, ready(envelope<Quote[]>(null, status)), null), new RegExp(`—— ?관측 구간 대비.*${copy}`), `no quote row: the envelope's ${status} explains the dashes`)
     const row: Quote = { ...sgov, status, price: null, change: null, changePercent: null }
     assert.match(view(row, ready(envelope([row], status)), null), new RegExp(copy), `the row's own ${status}`)
   }
   const none = view(null, ready(envelope<Quote[]>([], "AVAILABLE")), null)
-  assert.doesNotMatch(none, /시세를 불러올 수 없습니다|시세 연결 준비 중|오래된 데이터|시장정보 불러오는 중/, "an AVAILABLE envelope adds no status line")
+  assert.doesNotMatch(none, /Market prices unavailable|Price feed setup pending|Stale data|Loading market data/, "an AVAILABLE envelope adds no status line")
 })
 
-test("period buttons: exactly 1D 1W 1M 3M 1Y as <button>s in the 차트 기간 group, pressed state on the active one, no ALL", () => {
+test("period buttons: exactly 1D 1W 1M 3M 1Y as <button>s in the Chart period group, pressed state on the active one, no ALL", () => {
   const html = renderToStaticMarkup(<PeriodTabs range="1W" onRange={() => {}} />)
-  assert.match(html, /^<div role="group" aria-label="차트 기간" class="[^"]*bg-\[var\(--color-arco-stock-chart-chip\)\][^"]*">/)
+  assert.match(html, /^<div role="group" aria-label="Chart period" class="[^"]*bg-\[var\(--color-arco-stock-chart-chip\)\][^"]*">/)
   assert.deepEqual([...html.matchAll(/<button type="button" aria-pressed="(true|false)"[^>]*>([^<]+)<\/button>/g)].map(match => [match[2], match[1]]), [["1D", "false"], ["1W", "true"], ["1M", "false"], ["3M", "false"], ["1Y", "false"]])
   assert.match(html, /aria-pressed="true" class="[^"]*bg-\[var\(--color-arco-surface\)\] text-\[var\(--color-arco-ink\)\]/)
   // A non-colour cue for the selected period (the white pill on the chip track and ink vs chip-ink are both below 3:1).
@@ -129,8 +151,8 @@ test("period buttons: exactly 1D 1W 1M 3M 1Y as <button>s in the 차트 기간 g
   assert.doesNotMatch(html, /ALL/)
   // The buttons sit outside the chart subtree (which is keyed by range) and appear once.
   const page = detail()
-  assert.equal([...page.matchAll(/aria-label="차트 기간"/g)].length, 1)
-  assert.ok(page.indexOf('aria-label="차트 기간"') < page.indexOf('aria-label="Underlying security chart"'))
+  assert.equal([...page.matchAll(/aria-label="Chart period"/g)].length, 1)
+  assert.ok(page.indexOf('aria-label="Chart period"') < page.indexOf('aria-label="Underlying security chart"'))
 })
 
 test("About: two-line clamp with a Show More control for long text, provider-less fallback, facts without values are left out", () => {
@@ -141,26 +163,27 @@ test("About: two-line clamp with a Show More control for long text, provider-les
   assert.ok(control, "long text gets the expand control")
   assert.match(html, new RegExp(`<p id="${control[1]}"`))
   const labels = [...html.matchAll(/<dt[^>]*>([^<]+)<\/dt>/g)].map(match => match[1])
-  assert.deepEqual(labels, ["Underlying Asset Name", "Underlying Asset Ticker", "Category", "Exchange", "Industry", "Website", "ISIN"])
+  assert.deepEqual(labels, ["Underlying Asset Name", "Underlying Asset Ticker", "Category", "Industry", "Website", "ISIN"])
+  assert.doesNotMatch(text(html), /Exchange|XNAS/, "exchange is omitted from About")
   assert.equal([...html.matchAll(/<dl /g)].length, 2, "two columns on md+")
-  assert.match(html, /<a href="https:\/\/fixture\.invalid\/about" target="_blank" rel="noopener noreferrer"[^>]*>fixture\.invalid<span class="sr-only"> \(새 창\)<\/span><\/a>/)
-  assert.match(text(html), /주식CS/, "curated kind and the provider security type as category pills")
+  assert.match(html, /<a href="https:\/\/fixture\.invalid\/about" target="_blank" rel="noopener noreferrer"[^>]*>fixture\.invalid<span class="sr-only"> \(opens in a new tab\)<\/span><\/a>/)
+  assert.deepEqual([...html.matchAll(/<span class="inline-flex h-5[^\"]*">([^<]+)<\/span>/g)].map(match => match[1]), ["Common Stock"], "the provider's CS code is expanded without a duplicate Stock pill")
   assert.match(text(html), /US67066G1040/)
   const etf = renderToStaticMarkup(<AboutCard security={{ symbol: "SOXL", name: "Direxion Daily Semiconductor Bull 3X Shares" }} profile={ready(envelope({ ...PROFILE, symbol: "SOXL", securityType: "ETF" }))} />)
-  assert.deepEqual([...etf.matchAll(/<span class="inline-flex h-5[^"]*">([^<]+)<\/span>/g)].map(match => match[1]), ["ETF", "레버리지·인버스"], "a provider type equal to the curated kind is shown once")
+  assert.deepEqual([...etf.matchAll(/<span class="inline-flex h-5[^"]*">([^<]+)<\/span>/g)].map(match => match[1]), ["ETF", "Leveraged / Inverse"], "a provider type equal to the curated kind is shown once")
   const short = renderToStaticMarkup(<AboutCard security={NVDA} profile={ready(envelope({ ...PROFILE, description: "Short fixture text." }))} />)
   assert.doesNotMatch(short, /Show More/, "short text has nothing to expand")
   const bare = renderToStaticMarkup(<AboutCard security={{ symbol: "ZZZZ", name: "Fixture Co" }} profile={ready(envelope({ ...PROFILE, symbol: "ZZZZ", name: "Fixture Co", description: null, exchange: null, securityType: null, website: null, industry: null }))} />)
-  assert.match(text(bare), /공급자 설명 없음/)
+  assert.match(text(bare), /No provider description/)
   assert.deepEqual([...bare.matchAll(/<dt[^>]*>([^<]+)<\/dt>/g)].map(match => match[1]), ["Underlying Asset Name", "Underlying Asset Ticker"], "rows without a value are hidden, never dashed")
   assert.doesNotMatch(text(bare), /—/)
-  const status = /<section aria-label="기업정보 상태"[^>]*>(.*?)<\/section>/.exec(html)![1]
-  assert.match(text(status), /^기업정보 · 공급자 참조 데이터기업정보 최근 수집: Sep 16, 2026, 08:00:00 AM EDT · 공급자 기준일: 2026-09-15\. 시세 관측 시각과 별개입니다\.$/)
-  assert.match(text(renderToStaticMarkup(<AboutCard security={NVDA} profile={{ phase: "error" }} />)), /기업정보를 불러올 수 없습니다/)
+  const status = /<section aria-label="Company profile status"[^>]*>(.*?)<\/section>/.exec(html)![1]
+  assert.match(text(status), /^Company profile · provider reference dataCompany profile fetched: Sep 16, 2026, 08:00:00 AM EDT · provider data date: 2026-09-15\. Separate from the quote observation time\.$/)
+  assert.match(text(renderToStaticMarkup(<AboutCard security={NVDA} profile={{ phase: "error" }} />)), /Company profile unavailable/)
   // "No provider description" states a fact about a loaded profile; a read that did not load one never claims it.
-  for (const [profile, status] of [[ready(envelope<Profile>(null, "UNAVAILABLE")), "기업정보를 불러올 수 없습니다"], [ready(envelope<Profile>(null, "UNCONFIGURED")), "기업정보 연결 준비 중"], [{ phase: "error" }, "기업정보를 불러올 수 없습니다"], [{ phase: "loading" }, "기업정보 불러오는 중…"]] as const) {
+  for (const [profile, status] of [[ready(envelope<Profile>(null, "UNAVAILABLE")), "Company profile unavailable"], [ready(envelope<Profile>(null, "UNCONFIGURED")), "Company profile connection pending"], [{ phase: "error" }, "Company profile unavailable"], [{ phase: "loading" }, "Loading company profile…"]] as const) {
     const about = text(renderToStaticMarkup(<AboutCard security={NVDA} profile={profile as ReadState<Envelope<Profile>>} />))
-    assert.doesNotMatch(about, /공급자 설명 없음/, status)
+    assert.doesNotMatch(about, /No provider description/, status)
     assert.match(about, new RegExp(status))
   }
 })
@@ -175,17 +198,47 @@ test("Statistics: 24H open/high/low from the loaded 1D bars only; quote and prof
   assert.deepEqual(rows.slice(0, 3).map(([name, , title]) => [name, title]), [["Open", dollars(expected.open)], ["High", dollars(expected.high)], ["Low", dollars(expected.low)]])
   for (const [, value] of rows.slice(0, 3)) assert.match(value, /^\$[0-9,]+(\.\d{1,2})?$/)
   assert.equal(rows[0][1], label(expected.open).replace(/\B(?=(\d{3})+(?!\d))/g, ","))
-  assert.deepEqual(rows.slice(3).map(([name, value, title]) => [name, value, title]), [["Total Market Cap", "$4.21T", "Market cap: $4,210,987,654,321"], ["세션 거래량", `${Number(quote.sessionVolume).toLocaleString("en-US")} 주`, null], ["전일 종가", `$${Number(quote.previousClose).toLocaleString("en-US", { maximumFractionDigits: 2 })}`, dollars(quote.previousClose)]])
+  assert.deepEqual(rows.slice(3).map(([name, value, title]) => [name, value, title]), [["Total Market Cap", "$4.21T", "Market cap: $4,210,987,654,321"], ["Session Volume", `${Number(quote.sessionVolume).toLocaleString("en-US")} shares`, null], ["Previous Close", `$${Number(quote.previousClose).toLocaleString("en-US", { maximumFractionDigits: 2 })}`, dollars(quote.previousClose)]])
   assert.match(html, /<h3[^>]*>Underlying Asset Price<span class="text-sm text-\[var\(--color-arco-chip-ink\)\]">1D<\/span><\/h3>/)
-  assert.match(text(html), /최근 관측 거래일 · 반환된 1D 5m 봉의 첫 시가·최고가·최저가/)
-  assert.match(text(html), /Massive · 15분 지연 · 시세 관측: Sep 16, 2026, 08:00:00 AM EDT\. 주식 시세·기업 시가총액은 ARCO 토큰 가격·유동성·보유량이 아닙니다\./)
-  assert.match(text(html), /NVDA 모의 주문은 주문 패널에서 진행합니다\. 표시 시세는 체결에 사용하지 않습니다\./)
+  assert.match(text(html), /Recent 24 hours · observed 5m bars/)
+  assert.match(text(html), /Massive · 15-minute delay · quote observed: Sep 16, 2026, 08:00:00 AM EDT\. Stock prices and company market cap are separate from ARCO token price, liquidity, and holdings\./)
+  assert.match(text(html), /Place simulated NVDA orders in the order panel\. Displayed market prices are not used for execution\./)
   const empty = renderToStaticMarkup(<StatisticsCard symbol="MU" quote={null} quotes={{ phase: "loading" }} profile={{ phase: "loading" }} day={null} />)
   assert.deepEqual([...empty.matchAll(/<dd[^>]*>([^<]*)<\/dd>/g)].map(match => match[1]), ["—", "—", "—", "—", "—", "—"])
   // True for every missing-series case (loading, STALE, UNAVAILABLE, one bar, failed): it never promises the values will come.
-  assert.match(text(empty), /현재 1D 차트 관측값\(봉 2개 이상\)이 있을 때만 표시합니다\./)
-  assert.doesNotMatch(text(empty), /불러오면/)
-  assert.doesNotMatch(text(empty), /NVDA 모의 주문/, "the order-panel pointer is NVDA's only")
+  assert.match(text(empty), /Shown when the 1D chart has a usable observed price line\./)
+  assert.doesNotMatch(text(empty), /will be available/)
+  assert.doesNotMatch(text(empty), /Place simulated NVDA orders/, "the order-panel pointer is NVDA's only")
+})
+
+test("dividend group shows recurring facts and an indicative yield only with a recent observed quote", () => {
+  const current: Quote = { ...fixtureTop40Quote("NVDA"), price: "223.71", status: "AVAILABLE" }
+  const card = renderToStaticMarkup(<DividendGroup dividend={DIVIDEND} quote={current} />)
+  const rows = [...card.matchAll(/<dt[^>]*>([^<]+)<\/dt><dd(?: title="([^"]*)")?[^>]*>([^<]*)<\/dd>/g)].map(match => [match[1], match[3]])
+  assert.match(card, /<h3[^>]*>Underlying Asset Dividend<\/h3>/)
+  assert.deepEqual(rows, [["Indicative Dividend Yield", "0.39%"], ["Payout Frequency", "Quarterly"], ["Latest Dividend Amount", "$0.22"]])
+  assert.doesNotMatch(text(card), /Indicative yield =|Price last observed|Future payments may differ/)
+  assert.match(card, /title="Ex-dividend date: 2026-09-10 · Payment date: 2026-10-02"/)
+
+  const recentStale = renderToStaticMarkup(<DividendGroup dividend={DIVIDEND} quote={{ ...current, status: "STALE", observationAgeMs: 3600000 }} />)
+  assert.match(text(recentStale), /Indicative Dividend Yield0\.39%/)
+  assert.doesNotMatch(text(recentStale), /Price last observed/)
+  for (const quote of [null, { ...current, status: "STALE" as const, observationAgeMs: 8 * 86400000 }, { ...current, symbol: "MU" }, { ...current, price: null }]) {
+    const withoutYield = text(renderToStaticMarkup(<DividendGroup dividend={DIVIDEND} quote={quote} />))
+    assert.doesNotMatch(withoutYield, /Yield|Indicative yield/)
+    assert.match(withoutYield, /Payout FrequencyQuarterlyLatest Dividend Amount\$0\.22/)
+  }
+
+  const withoutAdjustedAmount = text(renderToStaticMarkup(<DividendGroup dividend={{ ...DIVIDEND, splitAdjustedCashAmount: null }} quote={current} />))
+  assert.doesNotMatch(withoutAdjustedAmount, /Yield|Indicative yield/, "an unknown split-adjusted amount cannot support a yield")
+  assert.match(withoutAdjustedAmount, /Payout FrequencyQuarterlyLatest Dividend Amount\$0\.22/)
+
+  const detailWithDividend = detail({ dividendContent: <DividendGroup dividend={DIVIDEND} quote={current} /> })
+  const statisticsStart = detailWithDividend.indexOf(">Statistics</h2>")
+  const dividendStart = detailWithDividend.indexOf("Underlying Asset Dividend")
+  assert.ok(statisticsStart >= 0 && dividendStart > statisticsStart && dividendStart < detailWithDividend.indexOf("</section>", statisticsStart), "dividend is inside Statistics")
+  assert.equal((detailWithDividend.match(/<section\b/g) ?? []).length, (detail().match(/<section\b/g) ?? []).length, "dividend adds no separate section")
+  assert.doesNotMatch(detail(), /Underlying Asset Dividend/, "no dividend means no section at all")
 })
 
 test("display helpers: compact market cap with integer rounding, bar range by exact comparison, axis labels", () => {
@@ -218,14 +271,14 @@ test("without a ready market catalog only NVDA and the curated 40 are known: an 
   for (const capabilities of [noOrders, { phase: "error" }, { phase: "loading" }] as Capabilities[]) {
     const unknown = render("ZZZZ", capabilities)
     assert.match(unknown, /<h1[^>]*>ZZZZ<\/h1>/)
-    assert.doesNotMatch(text(unknown), /시장정보만|상태 확인 불가|확인 중|모의 주문|미활성/, `no order-capability badge (${capabilities.phase})`)
-    assert.match(text(unknown), /시세를 불러올 수 없습니다ZZZZ은 아직 시장정보 목록에서 확인되지 않은 종목입니다\.$/)
+    assert.doesNotMatch(text(unknown), /Market data only|Status unavailable|Checking|Demo trading|Inactive/, `no order-capability badge (${capabilities.phase})`)
+    assert.match(text(unknown), /Market prices unavailableZZZZ has not been verified in the market data catalog\.$/)
   }
   const curated = text(render("MU", noOrders))
-  assert.match(curated, /시장정보만/, "a curated symbol keeps its badge")
-  assert.doesNotMatch(curated, /확인되지 않은/)
-  assert.match(text(render("NVDA", ORDERS)), /모의 주문/)
-  assert.doesNotMatch(text(render("NVDA", ORDERS)), /확인되지 않은/)
+  assert.match(curated, /Market data only/, "a curated symbol keeps its badge")
+  assert.doesNotMatch(curated, /has not been verified/)
+  assert.match(text(render("NVDA", ORDERS)), /Demo trading/)
+  assert.doesNotMatch(text(render("NVDA", ORDERS)), /has not been verified/)
 })
 
 test("Y-axis ticks: whole-cent 1-2-5 steps spanning the closes, so every two-decimal label is exactly its gridline and labels never repeat", () => {

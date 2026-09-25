@@ -21,10 +21,12 @@
 // Nothing here stores to browser storage, computes money with numbers, or invents results.
 
 import { GiwaStocksRequestError, type GiwaStocksClient } from "./client"
-import { parseHumanDecimal, type HumanDecimalCheck } from "./decimal"
+import { formatBaseUnits, parseHumanDecimal, type HumanDecimalCheck } from "./decimal"
+import { buyQuantity, priceUnits } from "./pricing"
 import { attemptOwnerKey, normalizeSession, sessionIdentityKey, type NormalizedSession } from "./session"
 import { orderStatusMeaning } from "./status"
 import {
+  STOCKS_CASH_SCALE,
   STOCKS_QUANTITY_SCALE,
   type GiwaStocksHostWallet,
   type GiwaStocksSession,
@@ -106,6 +108,19 @@ export type StocksInvestorState = Readonly<{
   quantityInput: string
   quantityCheck: HumanDecimalCheck
   quote: QuoteState
+  /**
+   * Customer presentation, Buy: the tUSDC amount as typed in "You pay" ("" when the NVDA quantity was typed instead). The
+   * quantity is derived from it at the catalog price, rounded down, so the server's cost for it never exceeds the amount.
+   */
+  payInput: string
+  /**
+   * One-click trade: the amount was carried through the sign-in the panel started. The panel continues that trade once it
+   * has checked what comes first (the one-time approval, the balance), or clears this. Cleared by any quote request and by
+   * any change of side, amount or quantity.
+   */
+  tradeWhenReady: boolean
+  /** The order the one-click trade just placed in this tab: the host starts its one wallet request on its own, once. */
+  instantOrderId: string | null
   attempt: OrderAttempt | null
   selectedOrder: SelectedOrderState
   orders: OrdersState
@@ -196,6 +211,24 @@ export function tradeBlock(state: StocksInvestorState): TradeBlock {
   return null
 }
 
+/** The catalog's fixed NVDA price (a 6-decimal human decimal), or null before the catalog is read. */
+export function catalogPrice(state: Pick<StocksInvestorState, "catalog">): string | null {
+  if (state.catalog.status !== "ready") return null
+  return state.catalog.catalog.instruments.find((item) => item.symbol === "NVDA")?.price ?? null
+}
+
+/**
+ * The NVDA quantity (9 decimals, rounded down) that a typed tUSDC amount buys at a price, less the mint fee: "" when either
+ * is not a positive decimal, or when the amount buys less than one base unit. Exact BigInt arithmetic only.
+ */
+export function quantityForCash(cashInput: string, price: string | null): string {
+  const unit = priceUnits(price)
+  const cash = parseHumanDecimal(cashInput, STOCKS_CASH_SCALE)
+  if (unit === null || !cash.ok) return ""
+  const quantity = buyQuantity(BigInt(cash.baseUnits), unit)
+  return quantity > 0n ? formatBaseUnits(quantity.toString(), STOCKS_QUANTITY_SCALE) : ""
+}
+
 export class StocksInvestorController {
   private state: StocksInvestorState
   private readonly listeners = new Set<() => void>()
@@ -216,6 +249,10 @@ export class StocksInvestorController {
   private portfolioSeq = 0
   private selectedSeq = 0
   private submitting = false
+  /** The quote request a one-click press armed: its answer places the order. */
+  private autoPlaceSeq: number | null = null
+  /** The request key of the order a one-click press placed. */
+  private instantKey: string | null = null
   private rejectionReported = false
   private readonly attempts: Map<string, OrderAttempt>
   /** Owners whose in-flight work this controller started; only these are retired with a generation. */
@@ -237,6 +274,9 @@ export class StocksInvestorController {
       quantityInput: "",
       quantityCheck: parseHumanDecimal("", STOCKS_QUANTITY_SCALE),
       quote: { status: "idle" },
+      payInput: "",
+      tradeWhenReady: false,
+      instantOrderId: null,
       attempt: null,
       selectedOrder: null,
       orders: { status: "idle" },
@@ -340,17 +380,25 @@ export class StocksInvestorController {
 
   /**
    * That the user THEMSELF started a sign-in from the trade panel, and where. Signing in makes a new identity, and
-   * entering one clears the form — quantity, quote, order and holdings all belong to an actor, so none of them is carried
-   * over. The Buy / Sell segment is not that kind of data: it is the choice the user is stating on screen, so it alone
-   * survives that single step. Deliberately NOT a copy of the side: the side that is kept is the one chosen when the
-   * sign-in lands, so a Buy or Sell pressed after this note still wins. Consumed by the first identity change after it.
+   * entering one clears the form — quote, order and holdings all belong to an actor, so none of them is carried over.
+   * The Buy / Sell segment is not that kind of data: it is the choice the user is stating on screen, so it survives that
+   * single step, and so does a quantity the user typed and asked to quote with this very sign-in (one-click "Get quote").
+   * Deliberately NOT a copy of the side: the side that is kept is the one chosen when the sign-in lands, so a Buy or Sell
+   * pressed after this note still wins. Consumed by the first identity change after it.
    */
-  private signInIntent: { identityKey: string; clientId: number | null; deploymentId: string | null } | null = null
+  private signInIntent: { identityKey: string; clientId: number | null; deploymentId: string | null; quantity: string | null; pay: string | null } | null = null
 
-  /** The panel's own "Sign in to trade" press, before the host's sign-in starts. Noting it requests nothing. */
-  noteSignInIntent(): void {
+  /**
+   * The panel's own sign-in press, before the host's sign-in starts. Noting it requests nothing. With `quantity` (the
+   * one-click "Get quote" of the customer presentation) that exact typed quantity is kept through the sign-in and quoted
+   * once, when the session lands; it is the user's own request on screen, not data of a previous actor.
+   */
+  noteSignInIntent(quantity: string | null = null, pay: string | null = null): void {
     if (this.state.session.status === "verified") return
-    this.signInIntent = { identityKey: this.state.identityKey, clientId: this.clientId, deploymentId: this.deploymentId }
+    const kept = quantity !== null && parseHumanDecimal(quantity, STOCKS_QUANTITY_SCALE).ok ? quantity : null
+    // The typed tUSDC amount stays on screen with the quantity it was converted to.
+    const keptPay = kept !== null && pay !== null && parseHumanDecimal(pay, STOCKS_CASH_SCALE).ok ? pay : null
+    this.signInIntent = { identityKey: this.state.identityKey, clientId: this.clientId, deploymentId: this.deploymentId, quantity: kept, pay: keptPay }
   }
 
   /** Leaving the trade view, losing the connected wallet or a failed sign-in drops it: the next one starts on Buy. */
@@ -364,12 +412,12 @@ export class StocksInvestorController {
    * sign-in (a signed-out → verified step) that is still the same API, the same deployment and the same identity it was
    * made in. A recovered order keeps its own side and hides the form, so recovery wins over the note.
    */
-  private sideFor(session: NormalizedSession, restored: OrderAttempt | null): StocksSide {
+  private honouredIntent(session: NormalizedSession, restored: OrderAttempt | null) {
     const intent = this.signInIntent
     this.signInIntent = null
-    if (intent === null || session.status !== "verified" || this.state.session.status === "verified" || restored !== null) return "BUY"
+    if (intent === null || session.status !== "verified" || this.state.session.status === "verified" || restored !== null) return null
     const sameStep = intent.identityKey === this.state.identityKey && intent.clientId === this.clientId && intent.deploymentId === this.deploymentId
-    return sameStep ? this.state.side : "BUY"
+    return sameStep ? intent : null
   }
 
   private enterIdentity(session: NormalizedSession): void {
@@ -379,14 +427,20 @@ export class StocksInvestorController {
     this.rejectionReported = false
     const owner = attemptOwnerKey(this.client?.baseUrl ?? null, session, this.deploymentId)
     const restored = owner === null ? null : this.attempts.get(owner) ?? null
+    const intent = this.honouredIntent(session, restored)
+    const carried = intent?.quantity ?? ""
+    const carriedPay = carried === "" ? "" : intent?.pay ?? ""
     this.set({
       generation: this.state.generation + 1,
       identityKey: key,
       session,
       authRejected: false,
-      side: this.sideFor(session, restored),
-      quantityInput: "",
-      quantityCheck: parseHumanDecimal("", STOCKS_QUANTITY_SCALE),
+      side: intent ? this.state.side : "BUY",
+      quantityInput: carried,
+      quantityCheck: parseHumanDecimal(carried, STOCKS_QUANTITY_SCALE),
+      payInput: carriedPay,
+      tradeWhenReady: carried !== "",
+      instantOrderId: null,
       quote: { status: "idle" },
       attempt: restored,
       selectedOrder: null,
@@ -461,7 +515,7 @@ export class StocksInvestorController {
     this.ordersSeq += 1
     this.portfolioSeq += 1
     this.selectedSeq += 1
-    this.set({ authRejected: true, quote: { status: "idle" }, orders: { status: "idle" }, portfolio: { status: "idle" }, selectedOrder: null })
+    this.set({ authRejected: true, quote: { status: "idle" }, tradeWhenReady: false, orders: { status: "idle" }, portfolio: { status: "idle" }, selectedOrder: null })
     if (!this.isCurrent(generation)) return
     if (!this.rejectionReported && session.status === "verified") {
       this.rejectionReported = true
@@ -474,13 +528,44 @@ export class StocksInvestorController {
   setSide(side: StocksSide): void {
     if (isUnresolved(this.state.attempt) || this.state.attempt?.status === "ACCEPTED" || side === this.state.side) return
     this.quoteSeq += 1
-    this.set({ side, quote: { status: "idle" }, attempt: this.clearRejected() })
+    this.set({ side, quote: { status: "idle" }, payInput: "", tradeWhenReady: false, attempt: this.clearRejected() })
   }
 
   setQuantity(input: string): void {
     if (isUnresolved(this.state.attempt) || this.state.attempt?.status === "ACCEPTED") return
     this.quoteSeq += 1
-    this.set({ quantityInput: input, quantityCheck: parseHumanDecimal(input, STOCKS_QUANTITY_SCALE), quote: { status: "idle" }, attempt: this.clearRejected() })
+    this.set({ quantityInput: input, quantityCheck: parseHumanDecimal(input, STOCKS_QUANTITY_SCALE), quote: { status: "idle" }, payInput: "", tradeWhenReady: false, attempt: this.clearRejected() })
+  }
+
+  /**
+   * Customer presentation, Buy: the tUSDC amount typed in "You pay". The NVDA quantity is derived from it at the
+   * price on screen (`price`, the chart's; else the catalog's), rounded down, as a preview. A Buy with a typed amount is
+   * quoted for that exact amount: the server's quote decides the NVDA it buys, and stays the only amount that is paid.
+   */
+  setPayAmount(input: string, price: string | null = null): void {
+    if (isUnresolved(this.state.attempt) || this.state.attempt?.status === "ACCEPTED") return
+    const quantity = quantityForCash(input, price ?? catalogPrice(this.state))
+    this.quoteSeq += 1
+    this.set({ payInput: input, quantityInput: quantity, quantityCheck: parseHumanDecimal(quantity, STOCKS_QUANTITY_SCALE), quote: { status: "idle" }, tradeWhenReady: false, attempt: this.clearRejected() })
+  }
+
+  /** The panel checked what the one-click trade carried through sign-in needs first (approval, balance) and stops it there. */
+  clearTradeWhenReady(): void {
+    if (this.state.tradeWhenReady) this.set({ tradeWhenReady: false })
+  }
+
+  /**
+   * The one-click Buy or Sell press of the customer presentation: quote the amount on screen and place the order as soon
+   * as that quote arrives. Still one request of each kind, from this one press; a later quote is never requested for it.
+   */
+  tradeNow(): void {
+    this.clearTradeWhenReady()
+    const quote = this.state.quote
+    if (quote.status === "ready" && this.now() < quote.deadlineMs) {
+      void this.placeOrder(true)
+      return
+    }
+    void this.requestQuote(true)
   }
 
   private clearRejected(): OrderAttempt | null {
@@ -491,7 +576,7 @@ export class StocksInvestorController {
     return null
   }
 
-  async requestQuote(): Promise<void> {
+  async requestQuote(autoPlace = false): Promise<void> {
     const state = this.state
     // A REJECTED attempt does not block (it is cleared below); unresolved or open attempts do.
     if (tradeBlock(state) !== null || !state.quantityCheck.ok || state.quote.status === "loading" || state.session.status !== "verified") return
@@ -501,10 +586,16 @@ export class StocksInvestorController {
     const quantity = state.quantityCheck.input
     const baseUnits = state.quantityCheck.baseUnits
     const wallet = state.session.wallet
+    // A Buy with a typed tUSDC amount is quoted for exactly that amount: the server decides the NVDA it buys at its price.
+    const payCheck = side === "BUY" && state.payInput !== "" ? parseHumanDecimal(state.payInput, STOCKS_CASH_SCALE) : null
+    const byCash = payCheck !== null && payCheck.ok ? payCheck : null
     const seq = ++this.quoteSeq
-    this.set({ quote: { status: "loading", side, quantity }, attempt: this.clearRejected() })
+    this.autoPlaceSeq = autoPlace ? seq : null
+    this.set({ quote: { status: "loading", side, quantity }, tradeWhenReady: false, attempt: this.clearRejected() })
     if (!this.isCurrent(generation) || seq !== this.quoteSeq) return
-    const result = await this.authed((client, token, signal) => client.createQuote(side, { symbol: "NVDA", quantity }, token, signal))
+    const result = await this.authed((client, token, signal) =>
+      client.createQuote(side, byCash ? { symbol: "NVDA", cashAmount: byCash.input } : { symbol: "NVDA", quantity }, token, signal),
+    )
     if (result === null || !this.isCurrent(generation) || seq !== this.quoteSeq) return
     if (!result.ok) {
       this.set({ quote: { status: "error", side, error: result.error } })
@@ -513,7 +604,7 @@ export class StocksInvestorController {
     }
     const quote = result.value.data
     // A quote is only used for exactly the request that asked for it.
-    if (quote.side !== side || quote.symbol !== "NVDA" || quote.quantity !== baseUnits || quote.wallet !== wallet) {
+    if (quote.side !== side || quote.symbol !== "NVDA" || (byCash ? quote.cashAmount !== byCash.baseUnits : quote.quantity !== baseUnits) || quote.wallet !== wallet) {
       this.set({ quote: { status: "error", side, error: { kind: "MISMATCH", status: null, code: "QUOTE_DOES_NOT_MATCH_REQUEST" } } })
       return
     }
@@ -528,6 +619,11 @@ export class StocksInvestorController {
     // Server observation bounds old/cached responses without trusting the device wall clock.
     const deadlineMs = startedAt + Math.max(0, Math.min(ttl, observedRemaining, QUOTE_MAX_TTL_MS))
     this.set({ quote: { status: receivedAt >= deadlineMs ? "expired" : "ready", quote, deadlineMs, observedAt: result.value.observedAt }, nowMs: receivedAt })
+    // The one-click trade places the order its own press asked this quote for, and nothing else.
+    if (autoPlace && this.autoPlaceSeq === seq) {
+      this.autoPlaceSeq = null
+      if (this.state.quote.status === "ready") void this.placeOrder(true)
+    }
   }
 
   /** Clock tick from the view: moves a ready quote to expired. Never requests a replacement. */
@@ -546,7 +642,7 @@ export class StocksInvestorController {
 
   // ── orders ──────────────────────────────────────────────────────────────
 
-  async placeOrder(): Promise<void> {
+  async placeOrder(instant = false): Promise<void> {
     if (this.submitting) return
     const state = this.state
     if (tradeBlock(state) !== null) return
@@ -584,6 +680,7 @@ export class StocksInvestorController {
       return
     }
     this.submitting = true
+    this.instantKey = instant ? key : null
     this.touchedOwners.add(owner)
     this.attempts.set(owner, attempt)
     this.set({ attempt })
@@ -659,6 +756,9 @@ export class StocksInvestorController {
       patch.quote = { status: "idle" }
       patch.quantityInput = ""
       patch.quantityCheck = parseHumanDecimal("", STOCKS_QUANTITY_SCALE)
+      patch.payInput = ""
+      // Only the order this tab's one-click press placed starts its wallet request on its own.
+      if (next.order !== null && this.instantKey === next.body.idempotencyKey) patch.instantOrderId = next.order.id
     } else if (next.status === "REJECTED") {
       const code = next.error?.code
       const quote = this.state.quote
@@ -709,7 +809,7 @@ export class StocksInvestorController {
     const owner = this.ownerKey()
     if (owner !== null) this.attempts.delete(owner)
     this.quoteSeq += 1
-    this.set({ attempt: null, quote: { status: "idle" }, quantityInput: "", quantityCheck: parseHumanDecimal("", STOCKS_QUANTITY_SCALE) })
+    this.set({ attempt: null, quote: { status: "idle" }, quantityInput: "", quantityCheck: parseHumanDecimal("", STOCKS_QUANTITY_SCALE), payInput: "", instantOrderId: null })
   }
 
   /** Re-read the accepted attempt's order by id. Reading never creates or changes anything. */

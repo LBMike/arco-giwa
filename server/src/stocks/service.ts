@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { address, ensure, immutable, liquidityScope, manifestDigest, operationKey, PROFILE, units, validateActor, freezeManifest, type Activation, type Actor, type Manifest, type PausePolicy, type SqlClient } from './contracts.js';
 import { authorizedCall, ReceiptVerifier } from './chain.js';
 import { StocksRepository } from './repository.js';
+import { buyCost, buyQuantity, feeBps, FIXED_PRICE, FIXED_PRICING, formatPriceUnits, type StocksPricing } from './pricing.js';
+import { ACTIVITY_LIMIT, directActorId, directIdempotencyKey, directPrice, isDirectOrderKey, type DirectHold, type DirectOrderStatus, type StocksActivityEntry } from './direct.js';
 import type { Hex } from 'viem';
 export type RefundPolicy = (input: {
     fundingId: string;
@@ -16,7 +18,17 @@ export type RefundPolicy = (input: {
 export class StocksService {
     readonly digest: string;
     readonly sell: StocksSellService;
-    constructor(readonly repo: StocksRepository, readonly manifest: Manifest, readonly verifier: ReceiptVerifier, private readonly activation?: Activation, readonly paused: PausePolicy = async () => true, private readonly refundPolicy: RefundPolicy = async () => false, returnPolicy?: EscrowReturnPolicy) {
+    /** The last price a quote or the catalog read (the catalog shows it when a fresh read fails). */
+    private lastPrice: bigint | null = null;
+    /**
+     * `directHalted` decides whether a direct payment or escrow is held instead of becoming an order: an explicit halt
+     * (configured or operator pause, stopped runtime, changed cash identity). It defaults to `paused`. Transient states
+     * that only delay dispatch (the observer catching up after a restart) must not hold a wallet's own payment: its order
+     * is created and then waits for dispatch like any other.
+     */
+    constructor(readonly repo: StocksRepository, readonly manifest: Manifest, readonly verifier: ReceiptVerifier, private readonly activation?: Activation, readonly paused: PausePolicy = async () => true, private readonly refundPolicy: RefundPolicy = async () => false, returnPolicy?: EscrowReturnPolicy, readonly pricing: StocksPricing = FIXED_PRICING, readonly directHalted: PausePolicy = paused) {
+        feeBps(pricing.mintFeeBps);
+        feeBps(pricing.burnFeeBps);
         this.manifest = freezeManifest(manifest);
         this.digest = manifestDigest(this.manifest);
         if (activation)
@@ -34,14 +46,40 @@ export class StocksService {
         ensure(binding?.deploymentDigest === this.digest, 'VAULT_ALREADY_BOUND_TO_OTHER_DEPLOYMENT', 503);
     }
     async ready(): Promise<void> { await this.bindDeployment(); ensure(this.activation?.manifestDigest === this.digest && this.activation.contractPolicyVerified === true, 'STOCKS_NOT_ACTIVATED', 503); ensure(!(await this.paused()), 'STOCKS_PAUSED', 503); }
-    catalog() { return { ...PROFILE, instruments: [{ symbol: 'NVDA', quantityScale: 9, price: '120.000000', priceSource: 'FIXED_MOCK_PRICE', orderCapability: this.activation?.manifestDigest === this.digest ? 'CHECK_PAUSE_AT_ORDER' : 'NOT_ACTIVATED' }], cashSymbol: this.manifest.cashSymbol, deploymentId: this.manifest.deploymentId, observedAt: new Date().toISOString() }; }
+    /** The price a quote uses now. The profile's priceSource name stays FIXED_MOCK_PRICE: each quote fixes its price. */
+    async currentPrice(): Promise<bigint> { const price = await this.pricing.price(); this.lastPrice = price; return price; }
+    /** The catalog route: the current price when it can be read, otherwise the last one seen. Quotes always need a current one. */
+    async currentCatalog() {
+        try { await this.currentPrice(); }
+        catch (error) { if (this.lastPrice === null) throw error; }
+        return this.catalog();
+    }
+    /**
+     * Public. `tokenAddress` is the verified NVDA token, so a wallet's balance can be read on GIWA without signing in;
+     * `contracts` are the verified deployment's addresses a direct Buy or Sell is sent to (see direct.ts).
+     */
+    catalog() { return { ...PROFILE, instruments: [{ symbol: 'NVDA', quantityScale: 9, price: formatPriceUnits(this.lastPrice ?? FIXED_PRICE), priceSource: 'FIXED_MOCK_PRICE', orderCapability: this.activation?.manifestDigest === this.digest ? 'CHECK_PAUSE_AT_ORDER' : 'NOT_ACTIVATED', tokenAddress: this.manifest.stockToken.toLowerCase() }], contracts: { cashToken: this.manifest.cashToken.toLowerCase(), fundingVault: this.manifest.fundingVault.toLowerCase(), stockToken: this.manifest.stockToken.toLowerCase(), redemptionEscrow: this.manifest.redemptionEscrow.toLowerCase() }, cashSymbol: this.manifest.cashSymbol, deploymentId: this.manifest.deploymentId, observedAt: new Date().toISOString() }; }
     async quote(actor: Actor, symbol: string, quantity: unknown) {
         actor = immutable(actor);
         validateActor(actor);
         await this.ready();
         ensure(symbol === 'NVDA', 'UNSUPPORTED_SYMBOL');
         const value = units(quantity, 9);
-        const cash = (value * 120000000n + 999999999n) / 1000000000n;
+        const cash = buyCost(value, await this.currentPrice(), this.pricing.mintFeeBps);
+        return this.insertQuote(actor, symbol, value, cash);
+    }
+    /** A Buy for an exact tUSDC amount: the NVDA it buys at the current price, less the mint fee, rounded down. */
+    async quoteForCash(actor: Actor, symbol: string, cashAmount: unknown) {
+        actor = immutable(actor);
+        validateActor(actor);
+        await this.ready();
+        ensure(symbol === 'NVDA', 'UNSUPPORTED_SYMBOL');
+        const cash = units(cashAmount, 6);
+        const value = buyQuantity(cash, await this.currentPrice(), this.pricing.mintFeeBps);
+        ensure(value > 0n, 'QUOTE_TOO_SMALL');
+        return this.insertQuote(actor, symbol, value, cash);
+    }
+    private insertQuote(actor: Actor, symbol: string, value: bigint, cash: bigint) {
         const id = randomUUID();
         return this.repo.tx(async (db) => {
             const row = (await db.query('INSERT INTO arco_evm."StocksQuote" (id,"actorId",wallet,symbol,quantity,"cashAmount","deploymentDigest","expiresAt") VALUES ($1,$2,$3,$4,$5,$6,$7,clock_timestamp()+interval \'60 seconds\') RETURNING *', [id, actor.actorId, address(actor.wallet), symbol, value.toString(), cash.toString(), this.digest])).rows[0];
@@ -103,12 +141,18 @@ export class StocksService {
             });
         }
         const funding = this.verifier.funding(proof);
+        // A direct Buy: the deposit is the order. It is priced here, before the transaction, at the live price.
+        const direct = await this.directBuy(funding);
         return this.repo.tx(async (db) => {
             await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [funding.eventId]);
             const duplicate = (await db.query('SELECT * FROM arco_evm."StocksFunding" WHERE id=$1', [funding.eventId])).rows[0];
             if (duplicate)
                 return duplicate.proof.evidenceDigest === evidenceDigest ? duplicate : this.fundingConflict(db, duplicate, evidenceDigest);
-            const order = (await db.query('SELECT * FROM arco_evm."StocksOrder" WHERE "orderKey"=$1 FOR UPDATE', [funding.orderKey])).rows[0];
+            let order = (await db.query('SELECT * FROM arco_evm."StocksOrder" WHERE "orderKey"=$1 FOR UPDATE', [funding.orderKey])).rows[0];
+            if (!order && direct && 'quantity' in direct)
+                order = await this.insertDirectBuy(db, funding, direct.quantity, direct.price);
+            else if (!order && isDirectOrderKey(funding.orderKey))
+                await this.repo.audit(db, funding.orderKey, 'DIRECT_ORDER_NOT_CREATED', { side: 'BUY', fundingId: funding.eventId, txHash, amount: funding.amount, hold: direct && 'hold' in direct ? direct.hold : null });
             let reason = 'UNIDENTIFIED_ORDER';
             if (order) {
                 if (order.deploymentDigest !== this.digest)
@@ -135,6 +179,82 @@ export class StocksService {
             }
             return row;
         });
+    }
+    /**
+     * A direct Buy's NVDA at the live price; a hold when it cannot be taken as an order (trading paused, no price for
+     * DIRECT_PRICE_WAIT_SECONDS, less than one base unit); null when it is not a direct key or was already recorded.
+     * A failed price read on a recent deposit throws, so the observer reads the deposit again.
+     */
+    private async directBuy(funding: { orderKey: string; eventId: string; amount: string; blockTimestamp: string }): Promise<{ quantity: bigint; price: bigint } | { hold: DirectHold } | null> {
+        if (!isDirectOrderKey(funding.orderKey))
+            return null;
+        const known = await this.repo.pool.query('SELECT 1 FROM arco_evm."StocksOrder" WHERE "orderKey"=$1 UNION ALL SELECT 1 FROM arco_evm."StocksFunding" WHERE id=$2', [funding.orderKey, funding.eventId]);
+        if (known.rows.length)
+            return null;
+        if (await this.directHalted())
+            return { hold: 'TRADING_PAUSED' };
+        const price = await directPrice(() => this.currentPrice(), funding.blockTimestamp);
+        if (price === null)
+            return { hold: 'PRICE_UNAVAILABLE' };
+        const quantity = buyQuantity(BigInt(funding.amount), price, this.pricing.mintFeeBps);
+        return quantity > 0n ? { quantity, price } : { hold: 'BELOW_ONE_UNIT' };
+    }
+    /** The quote and order a direct Buy stands for, created with its funding, in its transaction. No wallet submission. */
+    private async insertDirectBuy(db: SqlClient, funding: { orderKey: string; payer: string; amount: string }, quantity: bigint, price: bigint) {
+        const actorId = directActorId(funding.payer);
+        const quote = (await db.query('INSERT INTO arco_evm."StocksQuote" (id,"actorId",wallet,symbol,quantity,"cashAmount","deploymentDigest","expiresAt") VALUES ($1,$2,$3,$4,$5,$6,$7,clock_timestamp()+interval \'60 seconds\') RETURNING *', [randomUUID(), actorId, address(funding.payer), 'NVDA', quantity.toString(), funding.amount, this.digest])).rows[0];
+        const id = randomUUID();
+        const order = (await db.query('INSERT INTO arco_evm."StocksOrder" (id,"orderKey","quoteId","actorId",wallet,symbol,quantity,"cashAmount","idempotencyKey","deploymentId","deploymentDigest","quoteExpiresAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *', [id, funding.orderKey, quote.id, actorId, quote.wallet, quote.symbol, quote.quantity, quote.cashAmount, directIdempotencyKey(funding.orderKey), this.manifest.deploymentId, this.digest, quote.expiresAt])).rows[0];
+        await this.repo.audit(db, id, 'DIRECT_ORDER_CREATED', { side: 'BUY', orderKey: funding.orderKey, price: formatPriceUnits(price) });
+        return order;
+    }
+    /** Public: a direct order's progress by its key (the key is the browser's own random value). */
+    async directOrder(orderKey: unknown): Promise<DirectOrderStatus> {
+        ensure(isDirectOrderKey(orderKey), 'INVALID_DIRECT_ORDER_KEY', 400);
+        const fields = 'state,quantity::text AS quantity,"cashAmount"::text AS "cashAmount","createdAt","updatedAt"';
+        const buy = (await this.repo.pool.query(`SELECT ${fields} FROM arco_evm."StocksOrder" WHERE "orderKey"=$1 AND "deploymentDigest"=$2`, [orderKey, this.digest])).rows[0];
+        const sell = buy ? undefined : (await this.repo.pool.query(`SELECT ${fields} FROM arco_evm."StocksSellOrder" WHERE "orderKey"=$1 AND "deploymentDigest"=$2`, [orderKey, this.digest])).rows[0];
+        const row = buy ?? sell;
+        const time = (value: unknown) => new Date(value as string).toISOString();
+        if (!row) {
+            // Observed but not taken as an order (see DirectHold): the payment or escrow waits for review.
+            const held = (await this.repo.pool.query('SELECT detail,"createdAt" FROM arco_evm."StocksAudit" WHERE subject=$1 AND action=\'DIRECT_ORDER_NOT_CREATED\' AND "deploymentDigest"=$2 ORDER BY "createdAt" LIMIT 1', [orderKey, this.digest])).rows[0];
+            ensure(held, 'DIRECT_ORDER_NOT_FOUND', 404);
+            const escrow = held.detail?.side === 'SELL';
+            const hold = ['TRADING_PAUSED', 'PRICE_UNAVAILABLE', 'BELOW_ONE_UNIT'].includes(held.detail?.hold) ? held.detail.hold as DirectHold : undefined;
+            return { side: escrow ? 'SELL' : 'BUY', state: escrow ? 'ESCROW_REVIEW_REQUIRED' : 'FUNDING_REVIEW_REQUIRED', quantity: escrow ? String(held.detail?.quantity ?? '0') : '0', cashAmount: escrow ? '0' : String(held.detail?.amount ?? '0'), createdAt: time(held.createdAt), updatedAt: time(held.createdAt), ...(hold ? { hold } : {}) };
+        }
+        return { side: buy ? 'BUY' : 'SELL', state: row.state, quantity: row.quantity, cashAmount: row.cashAmount, createdAt: time(row.createdAt), updatedAt: time(row.updatedAt) };
+    }
+    /**
+     * Public, like a wallet's product activity: the Stocks trades this wallet paid for or escrowed NVDA into, and its
+     * payments or escrows held without an order, newest first. Orders never funded or escrowed are not activity. Every
+     * fact here (amounts, transactions) is already public on GIWA.
+     */
+    async walletActivity(wallet: unknown): Promise<StocksActivityEntry[]> {
+        ensure(typeof wallet === 'string' && /^0x[0-9a-fA-F]{40}$/.test(wallet), 'INVALID_WALLET', 400);
+        const owner = wallet.toLowerCase();
+        const q = (text: string) => this.repo.pool.query(text, [owner, this.digest, ACTIVITY_LIMIT]);
+        const settled = (column: string, kinds: string) => `(SELECT x."txHash" FROM arco_evm."StocksOutbox" x WHERE x."${column}"=o.id AND x."deploymentDigest"=$2 AND x.kind IN (${kinds}) AND x.status='DONE' AND x."txHash" IS NOT NULL ORDER BY x."createdAt" DESC, x.id LIMIT 1) AS "settlementTx"`;
+        const [buys, sells, cash, stock] = await Promise.all([
+            q(`SELECT o.state, o.quantity::text AS quantity, o."cashAmount"::text AS "cashAmount", p."txHash" AS "paymentTx", p."createdAt", ${settled('orderId', "'MINT','REFUND'")}
+               FROM arco_evm."StocksOrder" o JOIN LATERAL (SELECT f."txHash", f."createdAt" FROM arco_evm."StocksFunding" f WHERE f."orderId"=o.id AND f."deploymentDigest"=$2 ORDER BY f."createdAt", f.id LIMIT 1) p ON true
+               WHERE o.wallet=$1 AND o."deploymentDigest"=$2 ORDER BY p."createdAt" DESC LIMIT $3`),
+            q(`SELECT o.state, o.quantity::text AS quantity, o."cashAmount"::text AS "cashAmount", p."txHash" AS "paymentTx", p."createdAt", ${settled('sellOrderId', "'REDEEM','RETURN'")}
+               FROM arco_evm."StocksSellOrder" o JOIN LATERAL (SELECT c."txHash", c."createdAt" FROM arco_evm."StocksCustody" c WHERE c."orderId"=o.id AND c."deploymentDigest"=$2 ORDER BY c."createdAt", c.id LIMIT 1) p ON true
+               WHERE o.wallet=$1 AND o."deploymentDigest"=$2 ORDER BY p."createdAt" DESC LIMIT $3`),
+            q(`SELECT amount::text AS "cashAmount", "txHash" AS "paymentTx", "createdAt" FROM arco_evm."StocksFunding" WHERE payer=$1 AND "deploymentDigest"=$2 AND "orderId" IS NULL ORDER BY "createdAt" DESC LIMIT $3`),
+            q(`SELECT quantity::text AS quantity, "txHash" AS "paymentTx", "createdAt" FROM arco_evm."StocksCustody" WHERE payer=$1 AND "deploymentDigest"=$2 AND "orderId" IS NULL ORDER BY "createdAt" DESC LIMIT $3`),
+        ]);
+        const time = (value: unknown) => new Date(value as string).toISOString();
+        const entries: StocksActivityEntry[] = [
+            ...buys.rows.map((r): StocksActivityEntry => ({ side: 'BUY', state: r.state, quantity: r.quantity, cashAmount: r.cashAmount, paymentTx: r.paymentTx, settlementTx: r.settlementTx ?? null, createdAt: time(r.createdAt) })),
+            ...sells.rows.map((r): StocksActivityEntry => ({ side: 'SELL', state: r.state, quantity: r.quantity, cashAmount: r.cashAmount, paymentTx: r.paymentTx, settlementTx: r.settlementTx ?? null, createdAt: time(r.createdAt) })),
+            // Held without an order (a direct payment taken for review, an unknown key, a plain transfer to the vault).
+            ...cash.rows.map((r): StocksActivityEntry => ({ side: 'BUY', state: 'FUNDING_REVIEW_REQUIRED', quantity: '0', cashAmount: r.cashAmount, paymentTx: r.paymentTx, settlementTx: null, createdAt: time(r.createdAt) })),
+            ...stock.rows.map((r): StocksActivityEntry => ({ side: 'SELL', state: 'ESCROW_REVIEW_REQUIRED', quantity: r.quantity, cashAmount: '0', paymentTx: r.paymentTx, settlementTx: null, createdAt: time(r.createdAt) })),
+        ];
+        return entries.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0)).slice(0, ACTIVITY_LIMIT);
     }
     private async fundingConflict(db: SqlClient, previous: Record<string, any>, evidenceDigest: string) {
         await this.repo.audit(db, previous.orderId ?? previous.id, 'FUNDING_EVIDENCE_CONFLICT', { fundingId: previous.id, originalEvidenceDigest: previous.proof.evidenceDigest, conflictingEvidenceDigest: evidenceDigest });

@@ -49,7 +49,7 @@ export function StocksMarketFeature({ client, ordersClient = null, aside }: Stoc
   // not on the Orders/Portfolio tabs, nor before the order catalog loads. At lg the same id is the inline panel's: no padding.
   const layout = detail ? `grid grid-cols-1 gap-6 ${demo ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "lg:grid-cols-[minmax(0,1fr)_minmax(0,488px)]"} lg:items-start${symbol === "NVDA" ? " max-lg:has-[#giwa-stocks-detail-title]:pb-28" : ""}` : "flex flex-col gap-6"
   return <>
-    {detail ? <button ref={back} type="button" onClick={selection.closeDetail} className={`inline-flex h-9 w-fit scroll-mt-[92px] items-center gap-2 rounded-lg text-sm font-medium text-[var(--color-arco-chip-ink)] hover:text-[var(--color-arco-ink)] ${FOCUS}`}><ArrowLeft aria-hidden="true" className="size-4 shrink-0" /><span>Stocks &amp; ETFs</span><span className="sr-only"> 목록으로</span></button> : null}
+    {detail ? <button ref={back} type="button" onClick={selection.closeDetail} className={`inline-flex h-9 w-fit scroll-mt-[92px] items-center gap-2 rounded-lg text-sm font-medium text-[var(--color-arco-chip-ink)] hover:text-[var(--color-arco-ink)] ${FOCUS}`}><ArrowLeft aria-hidden="true" className="size-4 shrink-0" /><span>Stocks &amp; ETFs</span><span className="sr-only"> list</span></button> : null}
     <div className={layout}>
       <div className="min-w-0">{client ? <MarketOwner key={client.baseUrl} client={client} ordersClient={ordersClient} selection={selection} anchor={back} onChecked={setChecked} /> : <NoClient selection={selection} anchor={back} />}</div>
       {aside ? <div className={`flex min-w-0 flex-col gap-6 ${demo && detail ? "lg:sticky lg:top-[104px]" : ""}`}>{aside({ selection, quote: checked?.symbol === symbol ? checked.quote : null, unverified: detail && !verified })}</div> : null}
@@ -60,8 +60,8 @@ export function StocksMarketFeature({ client, ordersClient = null, aside }: Stoc
 type Checked = { symbol: string; listed: boolean; quote: Quote | null }
 type ReportChecked = (update: (current: Checked | null) => Checked | null) => void
 function NoClient({ selection, anchor }: { selection: StocksSelection; anchor: RefObject<HTMLElement> }) {
-  if (selection.symbol === null) return <section aria-label="Stocks market" className="w-full rounded-2xl bg-[var(--color-arco-surface)] p-6"><h1 className="text-2xl">Stocks</h1><p role="status" className="mt-3">시장정보 API 연결 준비 중</p></section>
-  return <UnavailableDetail symbol={selection.symbol} status={<p role="status" className="text-sm text-[var(--color-arco-text-soft)]">시장정보 API 연결 준비 중</p>} capabilities={{ phase: "error" }} selection={selection} anchor={anchor} settled />
+  if (selection.symbol === null) return <section aria-label="Stocks market" className="w-full rounded-2xl bg-[var(--color-arco-surface)] p-6"><h1 className="text-2xl">Stocks</h1><p role="status" className="mt-3">Market data API setup pending</p></section>
+  return <UnavailableDetail symbol={selection.symbol} status={<p role="status" className="text-sm text-[var(--color-arco-text-soft)]">Market data API setup pending</p>} capabilities={{ phase: "error" }} selection={selection} anchor={anchor} settled />
 }
 
 function MarketOwner({ client, ordersClient, selection, anchor, onChecked }: { client: MarketClient; ordersClient: OrdersCatalogClient | null; selection: StocksSelection; anchor: RefObject<HTMLElement>; onChecked: ReportChecked }) {
@@ -91,7 +91,7 @@ function ListFrame({ selection, settled, table, children }: { selection: StocksS
     target?.focus({ preventScroll: true })
   }, [selection, settled, table])
   return <section aria-label="Stocks market" className="w-full min-w-0 rounded-2xl bg-[var(--color-arco-surface)] p-4 sm:p-6">
-    <header className="mb-6"><p className="text-xs text-[var(--color-arco-text-soft)]">{demo ? "MARKETS" : "MARKETS · DISPLAY ONLY"}</p><h1 ref={heading} tabIndex={-1} className={`mt-1 w-fit rounded-sm text-3xl font-medium ${FOCUS}`}>Stocks</h1><p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">{demo ? "Explore stocks & ETFs" : "기초 미국 주식·ETF 시장정보. 모의 주문의 체결가는 아래 주문 섹션에서 별도로 확인하세요."}</p></header>
+    <header className="mb-6"><p className="text-xs text-[var(--color-arco-text-soft)]">{demo ? "MARKETS" : "MARKETS · DISPLAY ONLY"}</p><h1 ref={heading} tabIndex={-1} className={`mt-1 w-fit rounded-sm text-3xl font-medium ${FOCUS}`}>Stocks</h1><p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">{demo ? "Explore stocks & ETFs" : "U.S. stock and ETF market data. Check the simulated execution price separately in the order panel below."}</p></header>
     {children}
   </section>
 }
@@ -103,16 +103,18 @@ function MarketCatalog({ client, response, capabilities, selection, anchor, onCh
   const { quotes, live, connection } = useMarketQuotes(client, names, liveNvda === true)
   const bySymbol = new Map(quotes.phase === "ready" ? (quotes.value.data ?? []).map(item => [item.symbol, item]) : [])
   const [detailSeries, setSeries] = useState<Readonly<Record<string, Chart | null>>>({})
-  const series = Object.fromEntries(Object.entries(detailSeries).filter((entry): entry is [string, Chart] => entry[1] !== null))
   // A finished 1D read either stores its series or clears the symbol's entry, so a later failed/stale read never leaves an old chart.
   const report = useCallback((symbol: string, chart: Chart | null) => setSeries(current => {
     if (chart) return current[symbol] === chart ? current : { ...current, [symbol]: chart }
     return { ...current, [symbol]: null }
   }), [])
-  const overview = useMarketRows(client, names, true, report)
-  const [view, setView] = useState<TableView>(DEFAULT_TABLE_VIEW)
   const table = useRef<HTMLDivElement>(null)
   const symbol = selection.symbol
+  const overview = useMarketRows(client, names, true, report, table, symbol === null)
+  // A budget-limited response can supply a useful cached chart without replacing a chart
+  // already published by detail or an earlier complete list response.
+  const series = Object.fromEntries(Object.entries({ ...overview.series, ...detailSeries }).filter((entry): entry is [string, Chart] => entry[1] !== null))
+  const [view, setView] = useState<TableView>(DEFAULT_TABLE_VIEW)
   const listed = symbol === null ? null : catalog.securities.find(item => item.symbol === symbol) ?? null
   // This ready catalog's answer for the open symbol, so the page can tell a listed security from an unknown one.
   const isListed = listed !== null
@@ -124,7 +126,7 @@ function MarketCatalog({ client, response, capabilities, selection, anchor, onCh
     return () => onChecked(current => current === answer ? null : current)
   }, [symbol, isListed, selectedQuote, onChecked])
   if (symbol === null) return <ListFrame selection={selection} settled table={table}>
-    <div className="mb-4">{quotes.phase === "ready" && <DemoDetails><p className="text-xs text-[var(--color-arco-text-soft)]">{marketSourceLabel(quotes.value)} · {FEED_LABELS[quotes.value.feedDelay]}</p></DemoDetails>}<MarketQuoteStatus quotes={quotes} marketSession={live?.marketSession} /></div>
+    <div className="mb-4 empty:hidden">{quotes.phase === "ready" && <DemoDetails><p className="text-xs text-[var(--color-arco-text-soft)]">{marketSourceLabel(quotes.value)} · {FEED_LABELS[quotes.value.feedDelay]}</p></DemoDetails>}<MarketQuoteStatus quotes={quotes} marketSession={live?.marketSession} /></div>
     <div ref={table} className="min-w-0 scroll-mt-24"><StocksMarketTable variant="full" catalog={catalog} quotes={quotes} capabilities={capabilities} series={series} profiles={overview.profiles} view={view} onViewChange={setView} onSelect={name => selection.openDetail(name, "row")} /></div>
   </ListFrame>
   // NVDA is the tradable symbol, so its detail opens even when the market catalog does not list it.

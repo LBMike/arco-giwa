@@ -6,8 +6,14 @@ export type StocksInvestorActions = {
   retryCatalog: () => void
   setSide: (side: StocksSide) => void
   /** The panel's own sign-in press: keep the side the user chose through that one sign-in. Requests nothing. */
-  noteSignInIntent: () => void
+  noteSignInIntent: (quantity?: string | null, pay?: string | null) => void
   setQuantity: (input: string) => void
+  /** Customer presentation, Buy: the typed tUSDC amount; the NVDA quantity previewed at `price` (the chart's live price). */
+  setPayAmount: (input: string, price?: string | null) => void
+  /** Customer presentation: the one-click Buy or Sell press (quote, then the order as soon as that quote arrives). */
+  tradeNow: () => void
+  /** Stops a trade carried through sign-in when the panel shows a step that comes first (approval, balance). */
+  clearTradeWhenReady: () => void
   requestQuote: () => void
   discardQuote: () => void
   placeOrder: () => void
@@ -25,8 +31,11 @@ export function actionsFor(controller: StocksInvestorController): StocksInvestor
   return {
     retryCatalog: () => void controller.loadCatalog(),
     setSide: (side) => controller.setSide(side),
-    noteSignInIntent: () => controller.noteSignInIntent(),
+    noteSignInIntent: (quantity, pay) => controller.noteSignInIntent(quantity ?? null, pay ?? null),
     setQuantity: (input) => controller.setQuantity(input),
+    setPayAmount: (input, price) => controller.setPayAmount(input, price ?? null),
+    tradeNow: () => controller.tradeNow(),
+    clearTradeWhenReady: () => controller.clearTradeWhenReady(),
     requestQuote: () => void controller.requestQuote(),
     discardQuote: () => controller.discardQuote(),
     placeOrder: () => void controller.placeOrder(),

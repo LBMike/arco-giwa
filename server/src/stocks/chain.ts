@@ -1,5 +1,6 @@
 import { decodeEventLog, encodeFunctionData, toEventSelector, encodeAbiParameters, keccak256, zeroAddress, type Address, type Hex } from 'viem';
 import { ABI, amount, address, ensure, hash, operationKey, freezeManifest, StocksError, type AuthorizedCall, type Manifest } from './contracts.js';
+import { verifyCashIdentity } from './cash-identity.js';
 export type RawLog = {
     address: Address;
     topics: [
@@ -39,6 +40,7 @@ export type ChainPort = {
     receipt(txHash: Hex): Promise<ChainReceipt | null>;
     block(number: string | 'finalized'): Promise<ChainBlock | null>;
     codeHash(contract: Address, blockNumber: string): Promise<Hex>;
+    storageAt?(contract: Address, slot: Hex, blockNumber: string): Promise<Hex>;
     tokenBalance(token: Address, wallet: Address, blockNumber: string): Promise<string>;
     tokenSupply(token: Address, blockNumber: string): Promise<string>;
 };
@@ -73,6 +75,7 @@ export class ReceiptVerifier {
         for (const contract of [m.cashToken, m.stockToken, m.fundingVault, m.mintController, m.redemptionEscrow]) {
             ensure(await this.rpc.codeHash(contract, block.number) === m.codeHashes[contract.toLowerCase()], 'CODE_IDENTITY_MISMATCH');
         }
+        await verifyCashIdentity(m, this.rpc, block.number);
         const indices = new Set<number>();
         for (const log of receipt.logs) {
             ensure(!log.removed && Number.isSafeInteger(log.logIndex) && log.logIndex >= 0 && !indices.has(log.logIndex), 'INVALID_LOG_IDENTITY');
@@ -107,6 +110,7 @@ export class ReceiptVerifier {
             return null;
         for (const token of [m.cashToken, m.stockToken])
             ensure(await this.rpc.codeHash(token, blockNumber) === m.codeHashes[token.toLowerCase()], 'CODE_IDENTITY_MISMATCH');
+        await verifyCashIdentity(m, this.rpc, blockNumber);
         const walletBalances: Record<string, string> = {};
         for (const wallet of wallets)
             walletBalances[wallet] = await this.rpc.tokenBalance(m.stockToken, address(wallet), blockNumber);

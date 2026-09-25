@@ -8,6 +8,7 @@ import { createOriginalSignerTransport } from './original-transport.js';
 import type { ExternalTransactionCustody } from './original-transport.js';
 import { PostgresSignerJournal } from './postgres-journal.js';
 import { createStocksSignerReadiness } from './readiness.js';
+import { guardCashSigning } from './cash-guard.js';
 
 /** Owns the supplied pool/custody from entry, including every startup failure. */
 export async function startStocksSignerHost(options: {
@@ -40,8 +41,9 @@ export async function startStocksSignerHost(options: {
   try {
     const config = immutable(options.config);
     const manifest = config.manifest;
+    const cashGuard = guardCashSigning(manifest, options.rpc, options.custody);
     const journal = new PostgresSignerJournal(options.pool, manifest, config.reviewedInitialNonce);
-    const transport = createOriginalSignerTransport({ manifest, rpc: options.rpc, custody: options.custody,
+    const transport = createOriginalSignerTransport({ manifest, rpc: cashGuard.rpc, custody: cashGuard.custody,
       intent: journal, lookup: createOriginalNonceLookup({ manifest, rpc: options.rpc }), limits: config.limits });
     const core = createStocksSignerCore({ manifest, journal, transport });
     const available = () => !closing && !options.signal?.aborted && config.custody.exclusiveAccountControlConfirmed === true;
@@ -62,10 +64,11 @@ export async function startStocksSignerHost(options: {
     const ready = async () => available() && await probe() && available();
     app = createStocksSignerHttpService({ manifest, core: {
       parsePut: core.parsePut,
-      submit: (id, body) => admit(() => core.submit(id, body)),
+      submit: (id, body) => admit(async () => { await cashGuard.check(); return core.submit(id, body); }),
       lookup: id => admit(() => core.lookup(id)),
     }, bearerToken: options.bearerToken, ready });
     if (!await ready()) throw new Error('NOT_READY');
+    await cashGuard.check();
     if (options.mode === 'check') { await close(); return { address: null, close }; }
     if (options.mode !== 'serve' || !available()) throw new Error('INVALID_START');
     const address = await app.listen({ ...config.listen });

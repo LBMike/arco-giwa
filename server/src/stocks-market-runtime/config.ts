@@ -8,7 +8,7 @@ import {
 import { createAlpacaMarketClock } from "../stocks-market-data/session.js"
 
 const delays: readonly string[] = ["UNKNOWN", "DELAYED_15_MIN", "END_OF_DAY", "REALTIME"]
-type RuntimePorts = Pick<StocksMarketDataOptions, "catalog" | "fetch" | "now" | "requestsPerMinute" | "massiveRequestsPerMinute" | "etfGlobalEnabled" | "issuerFundamentalsEnabled">
+type RuntimePorts = Pick<StocksMarketDataOptions, "catalog" | "fetch" | "now" | "requestsPerMinute" | "massiveRequestsPerMinute" | "etfGlobalEnabled" | "issuerFundamentalsEnabled" | "profileCachePath" | "snapshotStore">
 
 /** One service per server instance: the provider budget/cache is shared across routes. */
 export function configuredStocksMarketData(
@@ -30,6 +30,7 @@ export function configuredStocksMarketData(
     alpacaFeed: alpacaFeed as "iex" | "sip",
     alpacaKeyId: source.ALPACA_API_KEY_ID || undefined,
     alpacaSecretKey: source.ALPACA_API_SECRET_KEY || undefined,
+    profileCachePath: ports.profileCachePath ?? source.STOCKS_MARKET_PROFILE_CACHE_PATH ?? undefined,
   })
 }
 

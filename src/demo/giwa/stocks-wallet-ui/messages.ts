@@ -105,6 +105,12 @@ export function describeCode(code: string, side: Side | null): CodeDescription {
     case "EXECUTION_POLICY_EXPIRED":
       // No "nothing was sent" claim: the same code can follow an earlier, already recorded wallet request.
       return { reason: "A required check could not be completed in time.", next: "Check again.", step: "CHECK_AGAIN" }
+    case "ALLOWANCE_REQUIRED":
+      return {
+        reason: `This wallet has not approved ${s === "SELL" ? "NVDA" : "tUSDC"} for Stocks yet, so nothing was sent.`,
+        next: `Approve ${s === "SELL" ? "NVDA" : "tUSDC"} in the trade panel once, then try again.`,
+        step: "CHECK_AGAIN",
+      }
     case "ALLOWANCE_CHANGED":
     case "ALLOWANCE_NOT_CONFIRMED":
       return { reason: "The token allowance changed after it was checked.", next: "Check again.", step: "CHECK_AGAIN" }

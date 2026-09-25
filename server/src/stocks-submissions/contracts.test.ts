@@ -17,7 +17,9 @@ test('BUY/SELL planner derives bounded exact approval and target operation using
  assert.equal(plan.intentKey,digest([91342,(side==='BUY'?m.fundingVault:m.redemptionEscrow).toLowerCase(),(side==='BUY'?m.cashToken:m.stockToken).toLowerCase(),row.wallet.toLowerCase(),row.orderKey]));
  assert.equal(deriveOrder({...m,deploymentId:'DIFFERENT_ALIAS'},row,side).intentKey,plan.intentKey);
  assert.notEqual(manifestDigest({...m,deploymentId:'DIFFERENT_ALIAS'}),manifestDigest(m));
- assert.throws(()=>deriveOrder(m,{...row,cashAmount:'1'},side),/ORDER_PRICE_MISMATCH/);
+ // Each quote fixes its own price, so any positive bounded amount derives; an unbounded one does not.
+ assert.doesNotThrow(()=>deriveOrder(m,{...row,cashAmount:'1'},side));
+ assert.throws(()=>deriveOrder(m,{...row,cashAmount:`1${'0'.repeat(31)}`},side),/ORDER_PRICE_MISMATCH/);
  }
 });
 

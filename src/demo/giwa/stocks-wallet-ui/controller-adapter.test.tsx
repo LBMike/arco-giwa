@@ -407,6 +407,38 @@ test("a server status showing the order moved on makes approve and submit refuse
   }
 })
 
+test("one-click deposit: one wallet request with the allowance already given; nothing for a moved-on order or without it", async () => {
+  const h = harness()
+  const bound = h.f.selection(ORDER.BUY)
+  h.controller.select(bound)
+  const actions = () =>
+    stocksWalletPanelActions(h.controller, {
+      orderId: ORDER.BUY,
+      side: "BUY",
+      account: h.f.context().walletAddress,
+      ready: () => executionAvailability({ configured: true, ports: h.f.ports, context: h.f.context(), selection: bound, now: h.f.now() }).status === "READY",
+      signable: () => serverOrderAwaitsTransfer(h.f.serverOrder(ORDER.BUY), ORDER.BUY, "BUY"),
+    })
+  assert.equal(typeof actions().deposit, "function")
+  // Without the one-time approval: stopped before any claim or wallet request.
+  await actions().deposit!()
+  await flush()
+  assert.equal(h.f.requests.length, 0)
+  assert.equal(h.controller.getSnapshot().error, "ALLOWANCE_REQUIRED")
+  // A server status showing the order moved on refuses it before the controller runs.
+  h.f.controls.setAllowance(ORDER.BUY, "300000000")
+  h.f.controls.setServerState(ORDER.BUY, "BROKER_PENDING")
+  await actions().deposit!()
+  await flush()
+  assert.equal(h.f.requests.length, 0)
+  h.f.controls.setServerState(ORDER.BUY, "AWAITING_FUNDING")
+  await actions().deposit!()
+  await flush()
+  assert.equal(h.f.requests.length, 1, "exactly the deposit")
+  assert.equal(h.controller.getSnapshot().status, "SUBMITTED")
+  h.controller.dispose()
+})
+
 test("real controller: a confirmed approval followed by a paused policy reads 'approval sent', and recovers with a check", async () => {
   const h = harness()
   await h.actions().prepare()

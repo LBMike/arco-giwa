@@ -5,6 +5,9 @@ export const LOCAL_CUSTOMER_API = 'http://127.0.0.1:4493';
 export const LOCAL_CUSTOMER_SIGNER = 'http://127.0.0.1:4394';
 export const LOCAL_CUSTOMER_RPC = 'https://sepolia-rpc.giwa.io';
 export const LOCAL_CUSTOMER_MANIFEST = '4327e1459e77c9a15b4b2b3e6d156a30ddd73b16dd4b45836969c23128390247';
+// Set only during reviewed bundle assembly after all four CREATEs finalize.
+// A JSON file or environment variable cannot approve a different deployment.
+export const LOCAL_CUSTOMER_TUSDC_MANIFEST: string | null = 'db41e2bce0ee56d14aa98b04bb2c774f19bb83e6d3e9f8792f274e958ee3f204';
 export const LOCAL_CUSTOMER_ADMIN = '0xfdcf58e2954988e5bf0446aaf1284a1069136f29';
 const project = 'munsybkrsxrmajmbssli';
 const fail = () => Error('LOCAL_CUSTOMER_CONFIGURATION_INVALID');
@@ -15,7 +18,9 @@ export function validateLocalCustomerRuntime(row: {
   operators: ReadonlyArray<{ wallet: string; operatorId: string; permissions: readonly string[] }>;
 }) {
   ensure(row.rpcUrl === LOCAL_CUSTOMER_RPC && row.signerUrl === LOCAL_CUSTOMER_SIGNER
-    && manifestDigest(row.manifest) === LOCAL_CUSTOMER_MANIFEST
+    && (row.manifest.schemaVersion === 2 && manifestDigest(row.manifest) === LOCAL_CUSTOMER_MANIFEST
+      || row.manifest.schemaVersion === 3 && LOCAL_CUSTOMER_TUSDC_MANIFEST !== null
+        && manifestDigest(row.manifest) === LOCAL_CUSTOMER_TUSDC_MANIFEST)
     && row.manifest.signerAddress === LOCAL_CUSTOMER_ADMIN
     && row.operatorControls === true
     && row.operators.length === 1 && row.operators[0].wallet === LOCAL_CUSTOMER_ADMIN

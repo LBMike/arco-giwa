@@ -1,4 +1,4 @@
-import type { Bar, Catalog, Chart, Envelope, NvdaLiveSnapshot, Profile, Quote, Range, Status } from "./contracts"
+import type { Bar, Catalog, Chart, Dividend, Envelope, NvdaLiveSnapshot, Profile, Quote, Range, Status } from "./contracts"
 export class MarketResponseError extends Error { constructor() { super("MARKET_RESPONSE_INVALID") } }
 const bad = (): never => { throw new MarketResponseError() }
 function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) return bad(); return value as Record<string, unknown> }
@@ -120,6 +120,18 @@ export function parseProfile(value: unknown, name: string, apiBase: string): Pro
   const r = object(value); if (r.symbol !== name || r.currency !== "USD") return bad()
   return { symbol: name, currency: "USD", name: text(r.name), description: optional(r.description, v => text(v, 12000)), exchange: optional(r.exchange, text), securityType: optional(r.securityType, text), marketCap: optional(r.marketCap, decimal), sharesOutstanding: optional(r.sharesOutstanding ?? null, decimal), aum: optional(r.aum ?? null, decimal), aumAsOf: optional(r.aumAsOf ?? null, v => text(v, 30)), issuerFundamentals: optional(r.issuerFundamentals ?? null, value => { const f = object(value); return { source: text(f.source, 100), sourceUrl: url(f.sourceUrl), asOf: text(f.asOf, 10) } }), website: optional(r.website, url), industry: optional(r.industry, v => text(v, 500)), logoUrl: safeLogo(r.logoUrl, apiBase, name), sourceDate: optional(r.sourceDate, v => text(v, 30)) }
 }
+function date(value: unknown): string {
+  const result = text(value, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(result) || Number.isNaN(Date.parse(result)) || new Date(result).toISOString().slice(0, 10) !== result) return bad()
+  return result
+}
+export function parseDividend(value: unknown, name: string): Dividend {
+  const row = object(value)
+  if (row.symbol !== name || row.currency !== "USD") return bad()
+  const frequency = count(row.frequency)
+  if (frequency < 1 || frequency > 365) return bad()
+  return { symbol: name, currency: "USD", cashAmount: positive(row.cashAmount), splitAdjustedCashAmount: optional(row.splitAdjustedCashAmount, positive), frequency, exDividendDate: date(row.exDividendDate), payDate: optional(row.payDate, date) }
+}
 export function parseChart(value: unknown, name: string, range: Range): Chart {
   const r = object(value); const interval = range === "1D" ? "5m" : range === "1W" ? "1h" : "1d"
   if (r.symbol !== name || r.range !== range || r.currency !== "USD" || r.interval !== interval || r.adjustedForSplits !== true || typeof r.complete !== "boolean") return bad()
@@ -127,15 +139,35 @@ export function parseChart(value: unknown, name: string, range: Range): Chart {
   const width = interval === "5m" ? 300000 : interval === "1h" ? 3600000 : 86400000
   const days = { "1D": 1, "1W": 7, "1M": 31, "3M": 93, "1Y": 366 }[range]
   if (Date.parse(to) - Date.parse(from) !== days * 86400000 || !Array.isArray(r.bars) || r.bars.length > Math.ceil(days * 86400000 / width) + 2) return bad()
-  let previous = 0
-  const bars: Bar[] = r.bars.map(value => {
-    const b = object(value); const time = timestamp(b.timestamp); const ms = Date.parse(time)
-    if (ms <= previous || (previous && ms - previous < (interval === "1d" ? 23 * 3600000 : width)) || ms < Date.parse(from) - width || ms > Date.parse(to)) return bad(); previous = ms
+  const parseBar = (value: unknown): Bar => {
+    const b = object(value); const time = timestamp(b.timestamp)
     const open = positive(b.open), high = positive(b.high), low = positive(b.low), close = positive(b.close)
     if (scaled(low) > scaled(high) || scaled(open) < scaled(low) || scaled(open) > scaled(high) || scaled(close) < scaled(low) || scaled(close) > scaled(high)) return bad()
     return { timestamp: time, open, high, low, close, volume: decimal(b.volume) }
+  }
+  let previous = 0
+  const bars: Bar[] = r.bars.map(value => {
+    const bar = parseBar(value), ms = Date.parse(bar.timestamp)
+    if (ms <= previous || (previous && ms - previous < (interval === "1d" ? 23 * 3600000 : width)) || ms < Date.parse(from) - (range === "1D" ? 0 : width) || ms > Date.parse(to)) return bad(); previous = ms
+    return bar
   })
+  // A carry-forward baseline is a real pre-window observation, never an in-window bar.
+  if (r.seed === undefined || r.fallback === undefined || !Array.isArray(r.fallbackBars)) return bad()
+  const seed = r.seed === null ? null : parseBar(r.seed)
+  if (seed && (range !== "1D" || Date.parse(seed.timestamp) >= Date.parse(from) || Date.parse(seed.timestamp) < Date.parse(from) - 8 * 86400000)) return bad()
+  const fallback = r.fallback === null ? null : choice(r.fallback, ["PREVIOUS_SESSION"] as const)
+  if (r.fallbackBars.length > Math.ceil(86400000 / width) + 2) return bad()
+  let fallbackPrevious = 0
+  const fallbackBars: Bar[] = r.fallbackBars.map(value => {
+    const bar = parseBar(value), ms = Date.parse(bar.timestamp)
+    if (ms <= fallbackPrevious || (fallbackPrevious && ms - fallbackPrevious < width) || ms > Date.parse(to) || ms < Date.parse(from) - 8 * 86400000) return bad()
+    fallbackPrevious = ms
+    return bar
+  })
+  const nyDay = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" })
+  if (range !== "1D" && (seed !== null || fallback !== null || fallbackBars.length !== 0)) return bad()
+  if ((fallback === "PREVIOUS_SESSION") !== (fallbackBars.length >= 2) || (fallback !== null && (bars.length >= 2 || fallbackBars.some(bar => nyDay.format(new Date(bar.timestamp)) !== nyDay.format(new Date(fallbackBars[0].timestamp)))))) return bad()
   const history = choice(r.history, ["RETURNED_WINDOW", "TRUNCATED", "EMPTY"])
   if ((history === "EMPTY" && bars.length !== 0) || (history === "RETURNED_WINDOW" && bars.length === 0) || (history === "TRUNCATED") === r.complete) return bad()
-  return { symbol: name, currency: "USD", range, interval, adjustedForSplits: true, from, to, bars, history, complete: r.complete }
+  return { symbol: name, currency: "USD", range, interval, adjustedForSplits: true, from, to, bars, seed, fallback, fallbackBars, history, complete: r.complete }
 }

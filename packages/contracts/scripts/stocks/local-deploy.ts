@@ -11,6 +11,8 @@ import {
 import { unlockLocalDeploymentWallet } from "./local-keystore"
 import { localDeploymentRpc } from "./local-transport"
 import { verifyStocksDeploymentEvidence } from "./verify-deployment"
+import { verifyExternalCashDeploymentEvidence } from "./verify-external-cash"
+import { isExternalCashPlan } from "./local-plan"
 
 export async function runLocalDeploymentCli(args: string[]) {
   const command = args[0]
@@ -71,16 +73,28 @@ export async function runLocalDeploymentCli(args: string[]) {
   const transactionHashes = state.entries.map((entry) => entry.transactionHash)
   if (command === "verify") {
     if (state.next !== null) throw Error("LOCAL_DEPLOYMENT_INCOMPLETE")
-    const result = await verifyStocksDeploymentEvidence(
-      {
-        plan: state.plan,
-        expectedPlanDigest: context.approval.expectedPlanDigest,
-        abiDigest: options["--abi-digest"],
-        transactionHashes,
-      },
-      context.artifacts,
-      context.rpc,
-    )
+    if (isExternalCashPlan(state.plan) && options["--abi-digest"] !== state.plan.input.abiDigest)
+      throw Error("LOCAL_DEPLOYMENT_ABI_DIGEST_MISMATCH")
+    const result = isExternalCashPlan(state.plan)
+      ? await verifyExternalCashDeploymentEvidence(
+          {
+            plan: state.plan,
+            expectedPlanDigest: context.approval.expectedPlanDigest,
+            transactionHashes,
+          },
+          context.artifacts,
+          context.rpc,
+        )
+      : await verifyStocksDeploymentEvidence(
+          {
+            plan: state.plan,
+            expectedPlanDigest: context.approval.expectedPlanDigest,
+            abiDigest: options["--abi-digest"],
+            transactionHashes,
+          },
+          context.artifacts,
+          context.rpc,
+        )
     await writePublicDeploymentJson(options["--output"], result.manifest)
     return { status: "VERIFIED", deploymentId: result.manifest.deploymentId }
   }

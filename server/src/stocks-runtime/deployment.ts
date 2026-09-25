@@ -2,6 +2,7 @@ import { encodeFunctionData, parseAbi } from 'viem';
 import { ensure, freezeManifest, type Manifest } from '../stocks/contracts.js';
 import type { ChainPort } from '../stocks/chain.js';
 import type { JsonRpcTransport } from '../stocks/rpc.js';
+import { verifyCashIdentity, verifyCurrentCashIdentity } from '../stocks/cash-identity.js';
 
 export async function verifyStocksDeployment(manifest: Manifest, rpc: ChainPort, transport: JsonRpcTransport): Promise<void> {
   manifest = freezeManifest(manifest) as Manifest;
@@ -10,6 +11,8 @@ export async function verifyStocksDeployment(manifest: Manifest, rpc: ChainPort,
   const finalized = await rpc.block('finalized');
   ensure(finalized && BigInt(finalized.number) >= BigInt(manifest.checkpointNumber), 'STOCKS_FINALITY_UNAVAILABLE');
   for (const target of [manifest.cashToken, manifest.stockToken, manifest.fundingVault, manifest.mintController, manifest.redemptionEscrow]) ensure(await rpc.codeHash(target, finalized.number) === manifest.codeHashes[target.toLowerCase()], 'STOCKS_CODE_MISMATCH');
+  await verifyCashIdentity(manifest, rpc, finalized.number);
+  await verifyCurrentCashIdentity(manifest, transport);
   const bindings: [string, string, string][] = [
     [manifest.stockToken, 'mintController', manifest.mintController], [manifest.stockToken, 'redemptionEscrow', manifest.redemptionEscrow],
     [manifest.fundingVault, 'cashToken', manifest.cashToken], [manifest.fundingVault, 'redemptionEscrow', manifest.redemptionEscrow], [manifest.fundingVault, 'operator', manifest.signerAddress],

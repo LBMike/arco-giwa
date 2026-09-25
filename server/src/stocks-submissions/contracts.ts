@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { encodeFunctionData, getAddress, maxUint256, parseAbi, type Hex } from 'viem';
-import { ABI, canonicalJson, ensure, operationKey, type Manifest } from '../stocks/contracts.js';
+import { ABI, canonicalJson, ensure, operationKey, validateManifest, type Manifest } from '../stocks/contracts.js';
 import type { Row } from '../stocks/repository.js';
 export type Side = 'BUY' | 'SELL';
 export type Stage = 'APPROVAL' | 'TRANSFER';
@@ -24,11 +24,13 @@ function amount(value: unknown): bigint {
 const approvalAbi = parseAbi(['function approve(address spender,uint256 amount) returns (bool)']);
 // No expiry/state check here: inspect must derive identity after expiry or completion.
 export function deriveOrder(manifest: Manifest, order: Row, orderSide: Side) {
-  ensure(manifest.cashSymbol === 'ARCO_TEST_USDC' && order.symbol === 'NVDA', 'INVALID_SUBMISSION_ORDER');
+  validateManifest(manifest);
+  ensure((manifest.cashSymbol === 'ARCO_TEST_USDC' || manifest.cashSymbol === 'tUSDC') && order.symbol === 'NVDA', 'INVALID_SUBMISSION_ORDER');
   label(order.id);
   ensure(order.orderKey === operationKey(`${orderSide === 'SELL' ? 'sell:' : ''}${manifest.networkInstance}:${order.id}`), 'ORDER_KEY_MISMATCH');
   const quantity = amount(String(order.quantity)), cash = amount(String(order.cashAmount));
-  ensure(quantity <= 10n ** 30n && cash === (quantity * 120000000n + (orderSide === 'BUY' ? 999999999n : 0n)) / 1000000000n, 'ORDER_PRICE_MISMATCH');
+  // The order carries the amounts its own quote fixed at the price of that moment; there is no single price to re-derive them from.
+  ensure(quantity <= 10n ** 30n && cash <= 10n ** 30n, 'ORDER_PRICE_MISMATCH');
   const token = getAddress(orderSide === 'BUY' ? manifest.cashToken : manifest.stockToken);
   const spender = getAddress(orderSide === 'BUY' ? manifest.fundingVault : manifest.redemptionEscrow);
   const value = orderSide === 'BUY' ? cash : quantity;

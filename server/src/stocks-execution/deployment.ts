@@ -1,12 +1,11 @@
 import { createHash } from 'node:crypto';
-import { ensure, freezeManifest, hash, immutable, manifestDigest, StocksError, type Manifest } from '../stocks/contracts.js';
+import { ensure, publicManifest, hash, immutable, manifestDigest, StocksError, type Manifest } from '../stocks/contracts.js';
 import type { ChainBlock } from '../stocks/chain.js';
 import { createStocksRpcPort, type JsonRpcTransport } from '../stocks/rpc.js';
 import { verifyStocksDeployment } from '../stocks-runtime/deployment.js';
 import type { DeploymentEvidencePort, ReviewedDeployment } from './contracts.js';
 
 const LEASE_MS = 15_000;
-const fields = ['schemaVersion', 'redemptionEscrow', 'deploymentId', 'profile', 'chainId', 'networkInstance', 'checkpointNumber', 'checkpointHash', 'abiDigest', 'finalityPolicy', 'cashToken', 'cashSymbol', 'cashScale', 'stockToken', 'quantityScale', 'fundingVault', 'mintController', 'signerAddress', 'codeHashes', 'restrictedTransfers', 'nonUpgradeable'] as const;
 type Entry = { value: ReviewedDeployment; monoExpires: number };
 type Flight = { active: boolean; promise: Promise<Entry> };
 
@@ -15,10 +14,7 @@ export function createDeploymentEvidence(input: Manifest, transport: JsonRpcTran
   available?: () => boolean; now?: () => number; monotonicNow?: () => number; timeoutMs?: number;
 } = {}): DeploymentEvidencePort {
   // Do not echo unrecognized manifest/config properties into a public response.
-  const allowed = Object.fromEntries(fields.map(key => [key, input[key]])) as Manifest;
-  const targets = [input.cashToken, input.stockToken, input.fundingVault, input.mintController, input.redemptionEscrow];
-  allowed.codeHashes = Object.fromEntries(targets.map(target => [target.toLowerCase(), input.codeHashes[target.toLowerCase()]]));
-  const manifest = freezeManifest(allowed), digest = manifestDigest(manifest);
+  const manifest = publicManifest(input), digest = manifestDigest(manifest);
   ensure(digest === manifestDigest(input), 'EXECUTION_MANIFEST_NOT_PUBLIC', 503);
   const now = options.now ?? Date.now, mono = options.monotonicNow ?? (() => performance.now());
   const available = options.available ?? (() => true), timeout = options.timeoutMs ?? 8000;
@@ -41,7 +37,7 @@ export function createDeploymentEvidence(input: Manifest, transport: JsonRpcTran
     const check = () => { live(); const t = clock(); ensure(flight.active && t.tick - start.tick < timeout && t.wall - start.wall < timeout, 'EXECUTION_VERIFICATION_TIMEOUT', 503); };
     // Guard each physical transport call, including multi-call ChainPort methods.
     const guarded: JsonRpcTransport = async (method, params) => {
-      check(); ensure(['eth_chainId', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call'].includes(method), 'EXECUTION_READ_ONLY_RPC', 503);
+      check(); ensure(['eth_chainId', 'eth_getBlockByNumber', 'eth_getCode', 'eth_getStorageAt', 'eth_call'].includes(method), 'EXECUTION_READ_ONLY_RPC', 503);
       const result = await transport(method, params); check(); return immutable(result);
     };
     const work = async (): Promise<Entry> => {
@@ -75,7 +71,9 @@ export function createDeploymentEvidence(input: Manifest, transport: JsonRpcTran
   }
   return { async get() {
     live(); clock();
-    if (cached && valid(cached)) return cached.value;
+    // v3 must re-check current proxy identity on each execution request. A
+    // finalized lease alone may predate an upgrade visible at the chain head.
+    if (manifest.schemaVersion === 2 && cached && valid(cached)) return cached.value;
     cached = null;
     if (!pending) {
       const flight: Flight = { active: true, promise: undefined! };

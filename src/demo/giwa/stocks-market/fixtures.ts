@@ -10,7 +10,7 @@ export function fixtureChart(symbol = "NVDA", range: Range = "1D"): Chart {
   const days = { "1D": 1, "1W": 7, "1M": 31, "3M": 93, "1Y": 366 }[range]
   const width = range === "1D" ? 300000 : range === "1W" ? 3600000 : 86400000
   const end = Date.parse(FIXTURE_TIME); const from = end - days * 86400000
-  return { symbol, currency: "USD", range, interval: range === "1D" ? "5m" : range === "1W" ? "1h" : "1d", adjustedForSplits: true, from: new Date(from).toISOString(), to: FIXTURE_TIME, history: "RETURNED_WINDOW", complete: true, bars: Array.from({ length: 12 }, (_, index) => { const value = String(170 + index); return { timestamp: new Date(end - (14 - index) * width).toISOString(), open: value, close: value, high: String(171 + index), low: String(169 + index), volume: "1000" } }) }
+  return { symbol, currency: "USD", range, interval: range === "1D" ? "5m" : range === "1W" ? "1h" : "1d", adjustedForSplits: true, from: new Date(from).toISOString(), to: FIXTURE_TIME, history: "RETURNED_WINDOW", complete: true, seed: null, fallback: null, fallbackBars: [], bars: Array.from({ length: 12 }, (_, index) => { const value = String(170 + index); return { timestamp: new Date(end - (14 - index) * width).toISOString(), open: value, close: value, high: String(171 + index), low: String(169 + index), volume: "1000" } }) }
 }
 export function fixtureProfile(symbol = "NVDA"): Profile { return { symbol, name: symbol === "NVDA" ? "NVIDIA" : "Apple", currency: "USD", description: "명시적 오프라인 fixture 기업정보입니다. 실제 시세나 투자 정보가 아닙니다.", exchange: "XNAS", securityType: "CS", marketCap: "123456789012345678901234.56", website: null, industry: "Fixture industry", logoUrl: null, sourceDate: null } }
 export function fixtureMarketFetch(mode: "ready" | "keyless" | "stale" | "partial" | "empty" | "one" = "ready", symbols = ["NVDA", "AAPL"]): MarketFetch {
@@ -20,6 +20,7 @@ export function fixtureMarketFetch(mode: "ready" | "keyless" | "stale" | "partia
     if (path.endsWith("/quotes")) return Response.json(fixtureEnvelope([...symbols].reverse().map(symbol => mode === "keyless" ? { ...fixtureQuote(symbol), status: "UNCONFIGURED", reason: "NOT_CONFIGURED", price: null, change: null, changePercent: null, sessionVolume: null, previousClose: null, sourceTimestamp: null, observationAgeMs: null, priceSource: null } : { ...fixtureQuote(symbol), status: mode === "stale" ? "STALE" : "AVAILABLE", reason: mode === "stale" ? "OLD_OBSERVATION" : null }), mode === "keyless" ? "UNCONFIGURED" : mode === "stale" ? "STALE" : "AVAILABLE"))
     if (mode === "keyless") return Response.json(fixtureEnvelope(null, "UNCONFIGURED"))
     if (path.endsWith("/profile")) return Response.json(fixtureEnvelope(fixtureProfile(name)))
+    if (path.endsWith("/dividend")) return Response.json({ ...fixtureEnvelope(null, "UNAVAILABLE"), reason: "NOT_FOUND" })
     if (path.endsWith("/chart")) {
       const chart = fixtureChart(name, new URL(url).searchParams.get("range") as Range)
       if (mode === "partial") { chart.complete = false; chart.history = "TRUNCATED"; chart.bars.splice(4, 3) }
@@ -59,7 +60,7 @@ export function fixtureTop40Chart(symbol: string, range: Range = "1D"): Chart {
   const waves = 3 + (hash % 4); const amplitude = Number(price) / 100
   const closes = Array.from({ length: count }, (_, index) => { const value = start + divide((price - start) * BigInt(index), BigInt(count - 1)) + BigInt(Math.round(amplitude * Math.sin(Math.PI * index * waves / (count - 1)))); return index === count - 1 ? price : value < 1n ? 1n : value })
   const bars = closes.map((close, index) => { const open = index ? closes[index - 1] : close; const pad = BigInt(1 + (hash % 5)); const low = (open < close ? open : close) - pad; return { timestamp: new Date(end - (count - index) * width).toISOString(), open: fixed(open, 2), high: fixed((open > close ? open : close) + pad, 2), low: fixed(low < 1n ? 1n : low, 2), close: fixed(close, 2), volume: String(1000 + ((hash >>> (index % 16)) % 5000)) } })
-  return { symbol, currency: "USD", range, interval: range === "1D" ? "5m" : range === "1W" ? "1h" : "1d", adjustedForSplits: true, from: new Date(end - days * 86400000).toISOString(), to: FIXTURE_TIME, history: "RETURNED_WINDOW", complete: true, bars }
+  return { symbol, currency: "USD", range, interval: range === "1D" ? "5m" : range === "1W" ? "1h" : "1d", adjustedForSplits: true, from: new Date(end - days * 86400000).toISOString(), to: FIXTURE_TIME, history: "RETURNED_WINDOW", complete: true, seed: null, fallback: null, fallbackBars: [], bars }
 }
 export function fixtureTop40MarketFetch(options: Top40Options = {}): MarketFetch {
   return async (url) => {
@@ -68,6 +69,7 @@ export function fixtureTop40MarketFetch(options: Top40Options = {}): MarketFetch
     if (path.endsWith("/quotes")) return Response.json(fixtureEnvelope(fixtureTop40Quotes(options)))
     if (!curatedStock(name)) return Response.json({}, { status: 404 })
     if (path.endsWith("/profile")) return Response.json(fixtureEnvelope(fixtureTop40Profile(name)))
+    if (path.endsWith("/dividend")) return Response.json({ ...fixtureEnvelope(null, "UNAVAILABLE"), reason: "NOT_FOUND" })
     if (path.endsWith("/chart")) {
       if ((options.unavailable ?? TOP40_UNAVAILABLE).includes(name)) return Response.json({ ...fixtureEnvelope(null, "UNAVAILABLE"), reason: "MISSING_OBSERVATION" })
       return Response.json(fixtureEnvelope(fixtureTop40Chart(name, parsed.searchParams.get("range") as Range), (options.stale ?? TOP40_STALE).includes(name) ? "STALE" : "AVAILABLE"))

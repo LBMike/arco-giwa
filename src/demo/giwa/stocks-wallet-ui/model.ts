@@ -23,7 +23,8 @@ import { describeCode } from "./messages"
 import type { StocksServerOrderStatus, StocksWalletAvailability, StocksWalletPanelActions } from "./types"
 
 export type PanelKind = WalletSnapshot["status"] | "UNAVAILABLE"
-export type PanelAction = keyof StocksWalletPanelActions
+/** The panel's own buttons. The one-click `deposit` belongs to the customer presentation's compact step, not to this panel. */
+export type PanelAction = Exclude<keyof StocksWalletPanelActions, "deposit">
 export type PanelTone = "info" | "action" | "warning" | "error"
 export type PanelButton = Readonly<{ action: PanelAction; label: string; enabled: boolean; opensWallet: boolean }>
 export type StepStatus = "todo" | "current" | "done" | "problem"
@@ -31,6 +32,7 @@ export type PanelStep = Readonly<{ label: string; status: StepStatus; detail: st
 export type PanelAmount = Readonly<{ text: string; baseUnits: string; scale: 6 | 9 }>
 export type PanelOrder = Readonly<{
   side: Side
+  cashSymbol: string
   orderId: string
   quantity: PanelAmount
   /** Exact allowance requested from the wallet. Equal to the transfer amount. */
@@ -88,7 +90,6 @@ export const EVIDENCE_CODES: ReadonlySet<string> = new Set(["DEPLOYMENT_NOT_REVI
 
 export const IDLE_SNAPSHOT: WalletSnapshot = Object.freeze({ status: "IDLE", orderId: null, intentKey: null, stage: null, txHash: null, error: null, plan: null })
 
-const CASH = "ARCO_TEST_USDC"
 const STOCK = "NVDA"
 
 function same(a: string | null | undefined, b: string | null | undefined): boolean {
@@ -131,14 +132,15 @@ function remainingText(ms: number): string {
   return `${rest} s left`
 }
 
-function summarize(order: Order, side: Side, now: number): PanelOrder {
+function summarize(order: Order, side: Side, now: number, cashSymbol = "test cash"): PanelOrder {
   const deadline = Date.parse(order.quoteExpiresAt)
   // An unusable clock or deadline fails closed as expired.
   const expired = !Number.isFinite(now) || !Number.isFinite(deadline) || now >= deadline
-  const cash = amount(order.cashAmount, 6, CASH)
+  const cash = amount(order.cashAmount, 6, cashSymbol)
   const units = amount(order.quantity, 9, STOCK)
   return {
     side,
+    cashSymbol,
     orderId: order.id,
     quantity: units,
     approval: side === "SELL" ? units : cash,
@@ -341,6 +343,9 @@ export function derivePanelModel(input: PanelInput): PanelModel {
   let availability = input.availability
   if (availability.status === "READY" && !planMatches(availability.plan, order, side, account)) availability = { status: "UNAVAILABLE", code: "ORDER_SCOPE_MISMATCH" }
   const snapshot = bindSnapshot(input.snapshot, order, side, account)
+  // A matching reviewed plan carries the cash identity. Before review, do not relabel an order's cash.
+  const planCash = snapshot.plan?.cashSymbol ?? (availability.status === "READY" ? availability.plan.cashSymbol : undefined)
+  summary = summarize(order, side, now, planCash)
   const server = serverStatus(input.serverOrder, order, side)
   const expired = summary.expired || serverDeadlinePassed(input.serverOrder, order, side)
   const movedOn = !serverOrderAwaitsTransfer(input.serverOrder, order.id, side)

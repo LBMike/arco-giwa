@@ -106,6 +106,29 @@ for (const side of ["BUY", "SELL"] as const) {
     assert.equal(f.walletCalls.length, 1); assert.equal(f.controller.getSnapshot().status, "SUBMITTED")
     assert.equal(f.controller.getSnapshot().txHash, h("c")); f.controller.dispose()
   })
+  test(`${side}: one-click deposit runs every fresh check and sends only the transfer; without an allowance it sends nothing`, async () => {
+    const f = fixture(side); const plan = planOrder(f.selected, f.context(), START)
+    // No approval stage of its own: without the one-time allowance it stops before any claim or wallet request.
+    await f.controller.deposit()
+    assert.equal(f.controller.getSnapshot().status, "BLOCKED")
+    assert.equal(f.controller.getSnapshot().error, "ALLOWANCE_REQUIRED")
+    assert.equal(f.walletCalls.length, 0)
+    assert.equal(f.shared.data.size, 0, "no claim is reserved")
+    // With it: one press, one wallet request (the transfer), after the preflight and the final pre-sign order read.
+    f.setAllowance("1000000000000000000000000000000")
+    const reads = f.orderReads.length
+    const first = f.controller.deposit(), second = f.controller.deposit(); assert.equal(first, second)
+    await first
+    assert.deepEqual(f.walletCalls, [plan.transfer])
+    assert.equal(f.controller.getSnapshot().status, "SUBMITTED")
+    assert.equal(f.controller.getSnapshot().txHash, h("c"))
+    assert.ok(f.orderReads.length >= reads + 2, "preflight and final pre-sign order reads")
+    // A later press never sends again: it shows the recorded request.
+    await f.controller.deposit(); f.controller.cancel(); await f.controller.deposit()
+    assert.equal(f.walletCalls.length, 1)
+    assert.equal(f.controller.getSnapshot().status, "SUBMITTED")
+    f.controller.dispose()
+  })
 }
 
 test("browser ABI digest matches actual backend ABI definition; contracts require both allowances", () => {
@@ -145,7 +168,9 @@ test("large and smallest units retain exact bigint amount; malformed quantity/ca
     assert.deepEqual(decodeFunctionData({ abi: STOCKS_ABI, data: plan.transfer.data }).args, [f.order.orderKey, cash])
   }
   for (const value of [1, "1.0", "01", "-1", "0", (1n << 256n).toString()]) assert.throws(() => planOrder({ side: "BUY", order: { ...f.order, quantity: value } }, f.context(), START))
-  assert.throws(() => planOrder({ side: "BUY", order: { ...f.order, cashAmount: "120000001" } }, f.context(), START), /ORDER_PRICE_MISMATCH/)
+  // A quote fixes its own price, so any bounded amount plans; an unbounded one does not.
+  assert.doesNotThrow(() => planOrder({ side: "BUY", order: { ...f.order, cashAmount: "120000001" } }, f.context(), START))
+  assert.throws(() => planOrder({ side: "BUY", order: { ...f.order, cashAmount: `1${"0".repeat(31)}` } }, f.context(), START), /ORDER_PRICE_MISMATCH/)
   const p = planOrder(f.selected, f.context(), START)
   for (const change of [{ value: "1" }, { from: B }, { to: B }, { chainId: 1 }, { data: "0x" }, { arbitrary: true }]) assert.throws(() => assertTransaction({ ...p.transfer, ...change } as Transaction, p.transfer))
   f.controller.dispose()

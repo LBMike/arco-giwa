@@ -73,3 +73,39 @@ test("active injected wallet uses only eth_accounts, eth_chainId and personal_si
     setInjectedWalletSource()
   }
 })
+
+test("a site the wallet no longer exposes is reconnected through the wallet's own prompt before signing, never after", async () => {
+  const methods: string[] = []
+  let connected = false
+  const client: MessageWallet = {
+    getAddresses: async () => { methods.push("accounts"); return connected ? [A] : [] },
+    requestAddresses: async () => { methods.push("request"); connected = true; return [A] },
+    getChainId: async () => { methods.push("chain"); return 91342 },
+    signMessage: async () => { methods.push("message"); return SIG },
+  }
+  assert.equal(await createWalletMessageSigner(() => client)(request), SIG)
+  assert.deepEqual(methods, ["accounts", "chain", "request", "message", "accounts", "chain"])
+
+  let signed = 0
+  const sign = async () => { signed++; return SIG as `0x${string}` }
+  const cases: [MessageWallet, RegExp][] = [
+    [{ getAddresses: async () => [], getChainId: async () => 91342, signMessage: sign }, /SIGN_IN_WALLET_DISCONNECTED/],
+    [{ getAddresses: async () => [], requestAddresses: async () => { throw { code: 4001 } }, getChainId: async () => 91342, signMessage: sign }, /WALLET_REQUEST_REJECTED/],
+    [{ getAddresses: async () => [], requestAddresses: async () => { throw { code: -32002 } }, getChainId: async () => 91342, signMessage: sign }, /WALLET_REQUEST_PENDING/],
+    [{ getAddresses: async () => [], requestAddresses: async () => { throw new Error("private") }, getChainId: async () => 91342, signMessage: sign }, /SIGN_IN_WALLET_DISCONNECTED/],
+    [{ getAddresses: async () => [], requestAddresses: async () => [], getChainId: async () => 91342, signMessage: sign }, /SIGN_IN_WALLET_DISCONNECTED/],
+    [{ getAddresses: async () => [], requestAddresses: async () => [B], getChainId: async () => 91342, signMessage: sign }, /SIGN_IN_WALLET_MISMATCH/],
+    [{ getAddresses: async () => [], requestAddresses: async () => [A], getChainId: async () => 1, signMessage: sign }, /SIGN_IN_WALLET_MISMATCH/],
+  ]
+  for (const [wallet, code] of cases) await assert.rejects(createWalletMessageSigner(() => wallet)(request), code)
+  assert.equal(signed, 0)
+
+  // After the signature the site must still expose the same account; the wallet is not prompted again.
+  let after = false, prompts = 0
+  const lost: MessageWallet = {
+    getAddresses: async () => (after ? [] : [A]), requestAddresses: async () => { prompts++; return [A] },
+    getChainId: async () => 91342, signMessage: async () => { after = true; return SIG },
+  }
+  await assert.rejects(createWalletMessageSigner(() => lost)(request), /SIGN_IN_WALLET_DISCONNECTED/)
+  assert.equal(prompts, 0)
+})

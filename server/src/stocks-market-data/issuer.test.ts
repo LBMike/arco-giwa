@@ -47,5 +47,5 @@ test('service enriches missing DRAM/RAM AUM daily without discarding a profile o
   await service.profile('SOXL'); assert.equal(issuerCalls, 2);
   clock += 86400001; fail = true;
   const failed = await service.profile('DRAM');
-  assert.equal(failed.status, 'AVAILABLE'); assert.equal(failed.data?.aum, null); assert.equal(failed.data?.symbol, 'DRAM');
+  assert.equal(failed.status, 'AVAILABLE'); assert.equal(failed.data?.aum, '25855926611.57'); assert.equal(failed.data?.symbol, 'DRAM');
 });

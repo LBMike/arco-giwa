@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { loadMarketRows } from "./useMarketRows"
+import { applyMarketRow, loadMarketRows } from "./useMarketRows"
 import type { MarketClient } from "./client"
 import { fixtureChart, fixtureEnvelope, fixtureProfile } from "./fixtures"
 import { parseProfile } from "./validate"
@@ -48,6 +48,46 @@ test("a throttled fundamentals feed cannot block the independent chart feed", as
   assert.equal(completed, 3)
   controller.abort()
   await loading
+})
+test("a throttled profile does not delay a later server-cached profile", async () => {
+  const controller = new AbortController()
+  const calls: string[] = [], published: string[] = []
+  const client = { async profile(symbol: string) {
+    calls.push(symbol)
+    return symbol === "NVDA"
+      ? { ...fixtureEnvelope(null, "UNAVAILABLE"), reason: "REQUEST_BUDGET_EXHAUSTED" }
+      : fixtureEnvelope(fixtureProfile(symbol))
+  } } as unknown as MarketClient
+  await loadMarketRows(client, ["NVDA", "QLD"], controller.signal, false, (symbol, _kind, data) => {
+    published.push(`${symbol}:${data !== null}`)
+    if (symbol === "QLD") controller.abort()
+  })
+  assert.deepEqual(calls, ["NVDA", "QLD"])
+  assert.deepEqual(published, ["QLD:true"])
+})
+test("visible rows are requested first, including after the priority changes while loading", async () => {
+  const calls: string[] = []
+  let visible = ["TSLA"]
+  const client = { async profile(symbol: string) {
+    calls.push(symbol)
+    if (symbol === "TSLA") visible = ["MU"]
+    return fixtureEnvelope(fixtureProfile(symbol))
+  } } as unknown as MarketClient
+  await loadMarketRows(client, ["NVDA", "MU", "TSLA"], new AbortController().signal, false, () => {}, () => visible)
+  assert.deepEqual(calls, ["TSLA", "MU", "NVDA"])
+})
+test("a budget-limited partial profile keeps the last complete market cap and AUM", async () => {
+  const prior = { ...fixtureProfile("SOXL"), marketCap: "100", aum: "200" }
+  const partial = { ...prior, marketCap: "300", aum: null }
+  const before = { series: {}, profiles: { SOXL: prior } }
+  assert.equal(applyMarketRow(before, "SOXL", "profile", partial, true), before)
+  assert.equal(applyMarketRow({ series: {}, profiles: {} }, "SOXL", "profile", partial, true).profiles.SOXL?.marketCap, "300")
+  const controller = new AbortController()
+  const client = { async profile() { return { ...fixtureEnvelope(partial), reason: "REQUEST_BUDGET_EXHAUSTED" } } } as unknown as MarketClient
+  const observed: boolean[] = []
+  const loading = loadMarketRows(client, ["SOXL"], controller.signal, false, (_symbol, _kind, _data, preserve) => { observed.push(Boolean(preserve)); controller.abort() })
+  await loading
+  assert.deepEqual(observed, [true])
 })
 test("AUM is optional for old servers but malformed new values cannot pass validation", () => {
   const profile = fixtureProfile()

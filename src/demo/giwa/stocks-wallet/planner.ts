@@ -1,6 +1,7 @@
 import { encodeFunctionData, getAddress, isAddress, sha256, toHex, type Address, type Hex } from "viem"
 import { APPROVAL_ABI, STOCKS_ABI, STOCKS_ABI_DIGEST } from "./abi"
 import type { ExecutionContext, Order, Plan, ReviewedDeployment, Selection, Transaction } from "./types"
+import { PLATFORM_TUSDC } from "./types"
 
 export class StocksWalletError extends Error { constructor(readonly code: string) { super(code) } }
 export function ensure(condition: unknown, code: string): asserts condition { if (!condition) throw new StocksWalletError(code) }
@@ -32,8 +33,19 @@ export function validateDeployment(deployment: ReviewedDeployment | null, now: n
   label(deployment.evidenceId)
   ensure(Number.isFinite(now) && Number.isFinite(deployment.verifiedAt) && Number.isFinite(deployment.validUntil) && deployment.verifiedAt <= now && now < deployment.validUntil, "DEPLOYMENT_EVIDENCE_EXPIRED")
   const m = deployment.manifest
-  ensure(m?.schemaVersion === 2 && m.chainId === 91342 && m.profile === "DEMO_TESTNET" && m.cashSymbol === "ARCO_TEST_USDC" && m.cashScale === 6 && m.quantityScale === 9, "INVALID_DEPLOYMENT")
-  ensure(m.abiDigest === STOCKS_ABI_DIGEST && m.finalityPolicy === "FINALIZED" && m.restrictedTransfers === true && m.nonUpgradeable === true, "UNSUPPORTED_DEPLOYMENT")
+  ensure((m?.schemaVersion === 2 || m?.schemaVersion === 3) && m.chainId === 91342 && m.profile === "DEMO_TESTNET" && m.cashScale === 6 && m.quantityScale === 9, "INVALID_DEPLOYMENT")
+  ensure(m.abiDigest === STOCKS_ABI_DIGEST && m.finalityPolicy === "FINALIZED" && m.restrictedTransfers === true, "UNSUPPORTED_DEPLOYMENT")
+  if (m.schemaVersion === 2) {
+    ensure(m.cashSymbol === "ARCO_TEST_USDC" && m.nonUpgradeable === true && !Object.prototype.hasOwnProperty.call(m, "cashIdentity") && !Object.prototype.hasOwnProperty.call(m, "stockContractsNonUpgradeable"), "UNSUPPORTED_DEPLOYMENT")
+  } else {
+    ensure(m.cashSymbol === "tUSDC" && address(m.cashToken).toLowerCase() === PLATFORM_TUSDC, "INVALID_DEPLOYMENT")
+    ensure(m.nonUpgradeable === false && m.stockContractsNonUpgradeable === true, "UNSUPPORTED_DEPLOYMENT")
+    const identity = record(m.cashIdentity)
+    ensure(identity.kind === "ERC1967" && Object.keys(identity).sort().join(",") === "implementation,implementationCodeHash,kind,proxyAdmin,proxyAdminCodeHash", "INVALID_DEPLOYMENT")
+    const implementation = address(identity.implementation).toLowerCase(), admin = address(identity.proxyAdmin).toLowerCase()
+    hash(identity.implementationCodeHash); hash(identity.proxyAdminCodeHash)
+    ensure(new Set([PLATFORM_TUSDC, implementation, admin]).size === 3, "INVALID_DEPLOYMENT")
+  }
   ensure(/^[a-zA-Z0-9:_-]{8,128}$/.test(m.deploymentId) && /^[a-zA-Z0-9:_-]{8,128}$/.test(m.networkInstance), "INVALID_DEPLOYMENT_ID"); integer(m.checkpointNumber, true); hash(m.checkpointHash); address(m.signerAddress)
   const contracts = [m.cashToken, m.stockToken, m.fundingVault, m.mintController, m.redemptionEscrow].map(a => address(a).toLowerCase())
   ensure(new Set(contracts).size === 5, "OVERLAPPING_CONTRACTS")
@@ -72,7 +84,8 @@ export function planOrder(selection: Selection, context: ExecutionContext, now: 
   ensure(order.orderKey === sha256(toHex(`${selection.side === "SELL" ? "sell:" : ""}${m.networkInstance}:${order.id}`)), "ORDER_KEY_MISMATCH")
   const deadline = Date.parse(order.quoteExpiresAt); ensure(now < deadline, "ORDER_EXPIRED")
   const quantity = integer(order.quantity), cash = integer(order.cashAmount)
-  ensure(quantity <= 10n ** 30n && cash === (quantity * 120000000n + (selection.side === "BUY" ? 999999999n : 0n)) / 1000000000n, "ORDER_PRICE_MISMATCH")
+  // Each quote fixes its own price (the live NVDA price when it was made): the order's amounts are that quote's, bounded.
+  ensure(quantity <= 10n ** 30n && cash <= 10n ** 30n, "ORDER_PRICE_MISMATCH")
   const token = address(selection.side === "BUY" ? m.cashToken : m.stockToken)
   const spender = address(selection.side === "BUY" ? m.fundingVault : m.redemptionEscrow)
   const amount = selection.side === "BUY" ? order.cashAmount : order.quantity
@@ -81,7 +94,7 @@ export function planOrder(selection: Selection, context: ExecutionContext, now: 
   const transfer: Transaction = { ...base, to: spender, data: selection.side === "BUY" ? encodeFunctionData({ abi: STOCKS_ABI, functionName: "depositForOrder", args: [order.orderKey, BigInt(amount)] }) : encodeFunctionData({ abi: STOCKS_ABI, functionName: "escrowForOrder", args: [order.orderKey, token, BigInt(amount)] }) }
   // Physical target/token/wallet/order identity survives manifest aliases and controller recreation.
   const intentKey = digest([91342, spender.toLowerCase(), token.toLowerCase(), order.wallet.toLowerCase(), order.orderKey])
-  return freeze({ side: selection.side, order, manifestDigest: deployment.manifestDigest, intentKey, token, spender, amount, deadline, approval, transfer })
+  return freeze({ side: selection.side, order, manifestDigest: deployment.manifestDigest, intentKey, cashSymbol: m.cashSymbol, token, spender, amount, deadline, approval, transfer })
 }
 export function assertTransaction(actual: Transaction, expected: Transaction) {
   ensure(Object.keys(actual).sort().join() === "chainId,data,from,to,value" && actual.chainId === 91342 && actual.value === "0" && address(actual.from).toLowerCase() === expected.from.toLowerCase() && address(actual.to).toLowerCase() === expected.to.toLowerCase() && actual.data === expected.data, "TRANSACTION_MISMATCH")

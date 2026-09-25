@@ -48,6 +48,9 @@ test("shell layout keeps the provider split, the 76px sticky bar and matching gu
   const shell = read("./GiwaPreprodApp.tsx")
   assert.doesNotMatch(shell, /GiwaPreprodProviders/)
   assert.match(shell, /xl:grid-cols-\[224px_minmax\(0,1fr\)\]/)
+  assert.match(shell, /xl:grid-cols-\[56px_minmax\(0,1fr\)\]/)
+  assert.match(shell, /aria-label="Collapse sidebar"/)
+  assert.match(shell, /aria-label="Expand sidebar"/)
   assert.match(shell, /<main[\s\S]*?id="giwa-main"[\s\S]*?tabIndex=\{-1\}/)
   // scroll-mt matches the 76px sticky bar + 1px border, so "Skip to content" never parks main's first control under it.
   assert.match(shell, /max-w-\[1512px\] flex-1 scroll-mt-\[77px\] px-4 py-8 md:px-8/)

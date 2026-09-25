@@ -102,7 +102,7 @@ test("SIGNING, UNKNOWN, REVERTED and SUBMITTED screens", () => {
   assert.doesNotMatch(submittedText, /\bCompleted\b/)
   assert.equal(button(submitted, "submit"), null)
   const completed = text(s.html({ snapshot: s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), serverOrder: { orderId: s.plan.order.id, side: "BUY", state: "COMPLETED", observedAt: "2026-09-17T00:05:00.000Z" } }))
-  assert.match(completed, /Order result from the server Completed The test units are issued and finalized\. Status as of 2026-09-17 00:05:00 UTC/)
+  assert.match(completed, /Order result from the server Completed The test units are issued to the ordering wallet\. Status as of 2026-09-17 00:05:00 UTC/)
   const refreshing = s.html({ snapshot: s.snap("SUBMITTED", "TRANSFER", TRANSFER_HASH), onRefreshServerOrder: () => undefined, serverOrderRefreshing: true })
   const refreshTag = /<button[^>]*data-testid="stocks-wallet-refresh-order"[^>]*>/.exec(refreshing)?.[0] ?? ""
   assert.match(refreshTag, /aria-disabled="true"/)

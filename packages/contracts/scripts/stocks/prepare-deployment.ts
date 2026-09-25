@@ -91,7 +91,7 @@ function fullyQualified(name: (typeof names)[number]): string {
   return `contracts/stocks/${name}.sol:${name}`
 }
 
-function runtimeHash(
+export function runtimeHash(
   artifact: Artifact,
   build: BuildInfo,
   bindings: Record<string, string>,

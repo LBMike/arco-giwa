@@ -73,6 +73,7 @@ function stocksBoundaryFixture() {
     const list = (side: 'BUY' | 'SELL', actorId: string, id?: string) => orders.filter(row => row.side === side && row.actorId === actorId && (!id || row.id === id));
     const service = {
         catalog: () => ({ profile: 'DEMO_TESTNET', instruments: [{ symbol: 'NVDA' }] }),
+        currentCatalog: async () => ({ profile: 'DEMO_TESTNET', instruments: [{ symbol: 'NVDA' }] }),
         quote: (actor: Actor) => quote('BUY', actor),
         createOrder: (actor: Actor, quoteId: string) => create('BUY', actor, quoteId),
         sell: {

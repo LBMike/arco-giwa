@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { StocksError } from '../stocks/contracts.js';
 import { a, h } from '../stocks/test-fixtures.js';
 import { httpStocksSignerRpc } from './http-rpc.js';
+import { CASH_ADMIN_SLOT, CASH_IMPLEMENTATION_SLOT } from '../stocks/cash-identity.js';
 
 const isCode = (code: string) => (error: unknown) => error instanceof StocksError && error.code === code
   && error.status === 503 && !error.message.includes('PRIVATE_');
 const raw = '0x02aabb';
 
-test('allows only the four signer RPC methods and sends one exact JSON-RPC request each', async () => {
+test('allows bounded signing and proxy identity reads, sending one exact JSON-RPC request each', async () => {
   const methods: string[] = [];
   const rpc = httpStocksSignerRpc('https://rpc.example.test/stocks', false, async (url, init) => {
     assert.equal(String(url), 'https://rpc.example.test/stocks');
@@ -27,8 +28,11 @@ test('allows only the four signer RPC methods and sends one exact JSON-RPC reque
   assert.equal(await rpc('eth_getTransactionCount', [a(10), '0x1']), '0x1');
   assert.equal(await rpc('eth_getTransactionCount', [a(10), 'pending']), '0x1');
   assert.equal(await rpc('eth_sendRawTransaction', [raw]), h(22));
+  assert.equal(await rpc('eth_getBlockByNumber', ['latest', false]), '0x1');
+  assert.equal(await rpc('eth_getCode', [a(10), '0x1']), '0x1');
+  assert.equal(await rpc('eth_getStorageAt', [a(10), CASH_ADMIN_SLOT, '0x1']), '0x1');
   assert.deepEqual(methods, ['eth_chainId', 'eth_getBlockByNumber', 'eth_getTransactionCount',
-    'eth_getTransactionCount', 'eth_sendRawTransaction']);
+    'eth_getTransactionCount', 'eth_sendRawTransaction', 'eth_getBlockByNumber', 'eth_getCode', 'eth_getStorageAt']);
 });
 
 test('HTTPS is required except explicitly selected loopback HTTP; URL secrets and redirects are refused', async () => {
@@ -71,6 +75,11 @@ test('rejects forbidden methods and malformed parameters before any network call
     ['eth_getBlockByNumber', ['0x1', 'true']],
     ['eth_getTransactionCount', [a(0), '0x1']],
     ['eth_getTransactionCount', [a(10), 'latest']],
+    ['eth_getCode', [a(10), 'latest']],
+    ['eth_getCode', [a(0), '0x1']],
+    ['eth_getStorageAt', [a(10), h(123), '0x1']],
+    ['eth_getStorageAt', [a(10), CASH_IMPLEMENTATION_SLOT, 'pending']],
+    ['eth_getStorageAt', [a(10), CASH_IMPLEMENTATION_SLOT, '0x01']],
     ['eth_sendRawTransaction', []],
     ['eth_sendRawTransaction', ['0x']],
     ['eth_sendRawTransaction', ['0x0']],

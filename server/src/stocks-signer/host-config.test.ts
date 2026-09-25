@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { manifestDigest } from '../stocks/contracts.js';
-import { testManifest } from '../stocks/test-fixtures.js';
+import { manifestDigest, PLATFORM_TUSDC } from '../stocks/contracts.js';
+import { a, h, testManifest } from '../stocks/test-fixtures.js';
 import { parseSignerHostConfig } from './host-config.js';
 function config() {
   const manifest = testManifest();
@@ -24,6 +24,22 @@ test('strict public configuration freezes manifest and parses exact decimal amou
     { limits: { ...config().limits, maxTotalFeeWei: '1' } },
     { manifest: { ...config().manifest, privateKey: 'REJECT_INPUT' } }])
     assert.throws(() => parseSignerHostConfig({ ...config(), ...patch }), /^Error: SIGNER_HOST_CONFIGURATION_INVALID$/);
+});
+test('v3 host requires exact external cash identity and rejects mixed v2/v3 keys', () => {
+  const v2 = testManifest();
+  const manifest = { ...v2, schemaVersion: 3 as const, cashToken: PLATFORM_TUSDC, cashSymbol: 'tUSDC' as const,
+    nonUpgradeable: false as const, stockContractsNonUpgradeable: true as const,
+    codeHashes: { ...v2.codeHashes, [PLATFORM_TUSDC]: h(700) },
+    cashIdentity: { kind: 'ERC1967' as const, implementation: a(701), implementationCodeHash: h(701), proxyAdmin: a(702), proxyAdminCodeHash: h(702) } };
+  const input = { ...config(), manifest, reviewedManifestDigest: manifestDigest(manifest), custody: { type: 'LOCAL_KEYSTORE', exclusiveAccountControlConfirmed: true } };
+  const result = parseSignerHostConfig(input);
+  assert.equal(result.manifest.schemaVersion, 3);
+  assert.equal(Object.isFrozen(result.manifest.cashIdentity), true);
+  for (const patch of [{ cashIdentity: undefined }, { cashIdentity: { ...manifest.cashIdentity, secret: 'REJECT_INPUT' } },
+    { nonUpgradeable: true }, { stockContractsNonUpgradeable: undefined }, { cashToken: v2.cashToken },
+    { schemaVersion: 2 }, { unexpected: 'REJECT_INPUT' }]) {
+    assert.throws(() => parseSignerHostConfig({ ...input, manifest: { ...manifest, ...patch } }), /SIGNER_HOST_CONFIGURATION_INVALID/);
+  }
 });
 test('local keystore host configuration has no credential fields and only binds loopback', () => {
   const local = { ...config(), custody: { type: 'LOCAL_KEYSTORE', exclusiveAccountControlConfirmed: true } };

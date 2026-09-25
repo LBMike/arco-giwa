@@ -17,7 +17,8 @@ import { createHashRouter, Navigate, RouterProvider } from "react-router-dom"
 
 import "../../../../index.css"
 import "../../../theme.css"
-import { ARCO_API_BASE, GIWA_PUBLIC_RPC } from "../../config"
+import { ARCO_API_BASE, DYNAMIC_ENVIRONMENT_ID, GIWA_PUBLIC_RPC } from "../../config"
+import { customerWalletRequestAllowed } from "./customer-wallet"
 import { GIWA_PREPROD_ROUTE } from "../../routes"
 import type { MarketFetch } from "../../stocks-market/contracts"
 import { StocksPageEnvironment } from "../../stocks-market/environment"
@@ -124,6 +125,8 @@ function guardedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Res
   const url = new URL(hrefOf(input), window.location.href)
   const method = methodOf(input, init)
   if (aborted(init)) return Promise.reject(new DOMException("The operation was aborted.", "AbortError"))
+  // Dynamic owns its login flow. Pass the original request directly, without recording auth data.
+  if (CUSTOMER_READS && customerWalletRequestAllowed(url, method, DYNAMIC_ENVIRONMENT_ID)) return nativeFetch(input, init)
   if (CUSTOMER_READS && url.origin === RPC_ORIGIN && url.pathname === "/" && !url.search && method === "POST") {
     const target = `${ORIGIN}/__giwa/read-rpc`
     return nativeFetch(input instanceof Request ? new Request(target, input) : target, init)

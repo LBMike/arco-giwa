@@ -1,6 +1,7 @@
 import { createSiweMessage } from "viem/siwe"
 import { getAddress, isAddress, type Address } from "viem"
 import { resolveApiBase } from "../api-base"
+import { WalletSignInError } from "./sign-in-errors"
 
 export type HostContext = {
   walletAddress: string | null
@@ -172,7 +173,7 @@ export function createStocksHostSession(initial: HostContext, dependencies: Host
       // attempt is not. Only the former may publish a failure to this session.
       if (!disposed && active === attempt && generation === attempt.generation) {
         attempt.abort.abort()
-        publish({ status: "error", session: null, error: error instanceof AuthError ? error.message : "SIGN_IN_FAILED" })
+        publish({ status: "error", session: null, error: error instanceof AuthError ? error.message : error instanceof WalletSignInError ? error.code : "SIGN_IN_FAILED" })
       }
       return null
     } finally { if (active === attempt) active = null }

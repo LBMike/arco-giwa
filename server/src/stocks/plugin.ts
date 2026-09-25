@@ -25,7 +25,19 @@ export async function stocksPlugin(app: FastifyInstance, options: StocksPluginOp
         app.log.error({ code: 'STOCKS_INTERNAL_ERROR' });
         return reply.code(500).send({ error: 'INTERNAL_ERROR', ...PROFILE });
     });
-    app.get('/api/v1/stocks/catalog', async () => s.catalog());
+    app.get('/api/v1/stocks/catalog', async () => s.currentCatalog());
+    // Public: a direct order's progress. The key is the paying wallet's own random value; no session is involved.
+    app.get<{
+        Params: {
+            orderKey: string;
+        };
+    }>('/api/v1/stocks/direct/:orderKey', async (r) => envelope(await s.directOrder(r.params.orderKey)));
+    // Public, like a wallet's product activity: its Stocks trades and their GIWA transactions.
+    app.get<{
+        Params: {
+            wallet: string;
+        };
+    }>('/api/v1/stocks/activity/:wallet', async (r) => envelope(await s.walletActivity(r.params.wallet)));
     const recoveryActors = new WeakMap<FastifyRequest, Actor>();
     for (const [path, service] of [['orders', s], ['sell-orders', s.sell]] as const) {
         app.post(`/api/v1/stocks/${path}/recover`, {
@@ -50,7 +62,14 @@ export async function stocksPlugin(app: FastifyInstance, options: StocksPluginOp
             return envelope(await service.recoverOrder(a, b.quoteId, b.idempotencyKey));
         });
     }
-    app.post('/api/v1/stocks/quotes', async (r) => { const a = await actor(r); const b = body(r.body, ['symbol', 'quantity']); ensure(typeof b.symbol === 'string', 'INVALID_SYMBOL'); return envelope(await s.quote(a, b.symbol, b.quantity)); });
+    // A Buy is quoted for an NVDA quantity, or for an exact tUSDC amount (the NVDA it buys at the current price).
+    app.post('/api/v1/stocks/quotes', async (r) => {
+        const a = await actor(r);
+        const byCash = r.body !== null && typeof r.body === 'object' && Object.prototype.hasOwnProperty.call(r.body, 'cashAmount');
+        const b = body(r.body, ['symbol', byCash ? 'cashAmount' : 'quantity']);
+        ensure(typeof b.symbol === 'string', 'INVALID_SYMBOL');
+        return envelope(await (byCash ? s.quoteForCash(a, b.symbol, b.cashAmount) : s.quote(a, b.symbol, b.quantity)));
+    });
     app.post('/api/v1/stocks/orders', async (r) => { const a = await actor(r); const b = body(r.body, ['quoteId', 'idempotencyKey']); ensure(typeof b.quoteId === 'string' && typeof b.idempotencyKey === 'string', 'INVALID_ORDER_REQUEST'); return envelope(await s.createOrder(a, b.quoteId, b.idempotencyKey)); });
     app.post('/api/v1/stocks/sell-quotes', async (r) => { const a = await actor(r); const b = body(r.body, ['symbol', 'quantity']); ensure(typeof b.symbol === 'string', 'INVALID_SYMBOL'); return envelope(await s.sell.quote(a, b.symbol, b.quantity)); });
     app.post('/api/v1/stocks/sell-orders', async (r) => { const a = await actor(r); const b = body(r.body, ['quoteId', 'idempotencyKey']); ensure(typeof b.quoteId === 'string' && typeof b.idempotencyKey === 'string', 'INVALID_ORDER_REQUEST'); return envelope(await s.sell.createOrder(a, b.quoteId, b.idempotencyKey)); });

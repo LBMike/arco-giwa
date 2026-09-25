@@ -57,7 +57,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     const rowButton = (symbol: string) => element.querySelector(`button[data-symbol="${symbol}"]`) as HTMLButtonElement
     const heading = () => element.querySelector("article h1") as HTMLHeadingElement
     /** The page-level back control above the detail ("← Stocks & ETFs", accessible name with 목록으로). */
-    const back = () => [...element.querySelectorAll("button")].find(item => item.textContent === "Stocks & ETFs 목록으로") as HTMLButtonElement
+    const back = () => [...element.querySelectorAll("button")].find(item => item.textContent === "Stocks & ETFs list") as HTMLButtonElement
     const listed = () => Boolean(element.querySelector('[role="table"][aria-label="Stocks & ETFs"]'))
     const run = async (work: () => void) => { await act(async () => { work(); await flush() }) }
     /** Native <button> activation: browsers turn Enter/Space into a click; jsdom does not, so the click is issued the same way. */
@@ -87,11 +87,11 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     assert.deepEqual(m.visible(), [["NVDA", "10"]])
     await m.run(() => { inputValue.call(search, "DIREXION"); search.dispatchEvent(new w.Event("input", { bubbles: true })) })
     assert.deepEqual(m.visible(), [["SOXL", "1"], ["SOXS", "6"], ["KORU", "12"]])
-    assert.match(m.element.querySelector('p[role="status"].sr-only')!.textContent!, /^3개 표시 · 전체 40개$/)
+    assert.match(m.element.querySelector('p[role="status"].sr-only')!.textContent!, /^Showing 3 of 40 assets$/)
     await m.run(() => { inputValue.call(search, "zzzz"); search.dispatchEvent(new w.Event("input", { bubbles: true })) })
     assert.equal(m.rows().length, 0)
-    assert.match(m.element.textContent!, /검색 결과가 없습니다\./)
-    assert.doesNotMatch(m.table().textContent!, /검색 결과가 없습니다/, "the empty message is not a one-cell row inside the table")
+    assert.match(m.element.textContent!, /No matching assets\./)
+    assert.doesNotMatch(m.table().textContent!, /No matching assets/, "the empty message is not a one-cell row inside the table")
     await m.run(() => { inputValue.call(search, ""); search.dispatchEvent(new w.Event("input", { bubbles: true })) })
     const sort = m.element.querySelector("select") as HTMLSelectElement
     assert.equal(m.element.querySelector(`label[for="${sort.id}"]`)?.textContent, "Sort")
@@ -108,7 +108,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     await m.run(() => { selectValue.call(sort, "rank"); sort.dispatchEvent(new w.Event("change", { bubbles: true })) })
     assert.deepEqual(m.visible().map(([, rank]) => rank), CURATED_STOCKS.map((item: { rank: number }) => String(item.rank)))
     assert.equal(m.orderReads >= 1 && m.orderReads <= 2, true, "one capability read per mount (StrictMode may repeat the effect)")
-    assert.match(m.rows().find(row => row.querySelector('[data-symbol="NVDA"]'))!.textContent!, /모의 주문/)
+    assert.match(m.rows().find(row => row.querySelector('[data-symbol="NVDA"]'))!.textContent!, /Demo trading/)
   })
 
   await t.test("a row opens the detail in place of the list: ?symbol is pushed and the heading takes focus; Back returns focus to the row", async (st) => {
@@ -125,7 +125,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     assert.ok(document.activeElement === m.heading(), `focus on the detail heading, not ${document.activeElement?.tagName}`)
     assert.match(m.heading().textContent!, /MU/)
     assert.equal(m.heading().tabIndex, -1)
-    assert.deepEqual(scrolls.map(item => [item.element.textContent, item.options?.behavior, item.options?.block]), [["Stocks & ETFs 목록으로", "smooth", "start"]], "the top of the detail (its back control) scrolls into view")
+    assert.deepEqual(scrolls.map(item => [item.element.textContent, item.options?.behavior, item.options?.block]), [["Stocks & ETFs list", "smooth", "start"]], "the top of the detail (its back control) scrolls into view")
     scrolls.length = 0
     await m.close()
     assert.equal(m.router.state.location.search, "", "closing pushes the list URL")
@@ -179,7 +179,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     scrolls.length = 0
     await m.close()
     assert.equal(document.activeElement?.getAttribute("role"), "region", "the filtered-out row falls back to the table region")
-    assert.equal(document.activeElement?.getAttribute("aria-label"), "Stocks & ETFs 표 · 좌우로 스크롤")
+    assert.equal(document.activeElement?.getAttribute("aria-label"), "Stocks & ETFs table · Scroll horizontally")
     assert.deepEqual(scrolls.map(item => item.options?.block), ["start"])
   })
 
@@ -191,7 +191,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     const charts = m.calls.filter(url => url.includes("/chart"))
     assert.equal(new Set(charts.map(url => new URL(url).pathname.split("/")[5])).size, 40, "each listed symbol has its own chart request")
     await m.close()
-    assert.ok(m.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!.querySelector('svg[role="img"][aria-label^="최근 관측 거래일 종가 추이"]'))
+    assert.ok(m.rows().find(item => item.querySelector('[data-symbol="NVDA"]'))!.querySelector('svg[role="img"][aria-label^="Closing price trend for latest observed trading day"]'))
     assert.equal(m.table().querySelectorAll('svg[role="img"]').length, 37)
     const before = m.calls.length
     await m.run(() => {})
@@ -233,7 +233,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     assert.ok(m.calls.some(url => url.includes("/SGOV/chart?range=1D")), "the SGOV detail loaded its 1D chart")
     await m.close()
     assert.equal(spark("SGOV"), null, "a STALE series stays in the detail with its notice")
-    assert.match(m.rows().find(item => item.querySelector('[data-symbol="SGOV"]'))!.textContent!, /1D 차트 데이터 없음/)
+    assert.match(m.rows().find(item => item.querySelector('[data-symbol="SGOV"]'))!.textContent!, /1D chart data unavailable/)
   })
 
   await t.test("a finished 1D re-read that is not current clears the row sparkline; the next valid read restores it", async (st) => {
@@ -264,7 +264,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
         await reselect(outcome)
         assert.equal(replaced[replaced.length - 1], outcome, `${outcome}: the replacement answer was requested`)
         assert.equal(Boolean(spark()), false, `${outcome}: the old sparkline is gone`)
-        assert.match(row().textContent!, /1D 차트 데이터 없음/, `${outcome}: the row falls back to the not-loaded state`)
+        assert.match(row().textContent!, /1D chart data unavailable/, `${outcome}: the row falls back to the not-loaded state`)
         await reselect(null)
         assert.equal(spark()?.getAttribute("aria-label"), valid, `${outcome}: a following valid read restores it`)
       })
@@ -291,7 +291,7 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     assert.equal(m.listed(), false)
     assert.match(m.heading().textContent!, /TSLA/)
     assert.ok(document.activeElement === m.heading())
-    assert.deepEqual(scrolls.map(item => item.element.textContent), ["Stocks & ETFs 목록으로"])
+    assert.deepEqual(scrolls.map(item => item.element.textContent), ["Stocks & ETFs list"])
     await m.close()
     assert.ok(document.activeElement === m.rowButton("TSLA"))
     const reduce = w.matchMedia
@@ -304,11 +304,11 @@ test("Stocks & ETFs list and detail: filters, sorts, opens by keyboard, keeps li
     ;(document.activeElement as HTMLElement | null)?.blur()
     const unknown = await mount(st, "/stocks?symbol=ZZZZ")
     assert.equal(unknown.listed(), false)
-    assert.equal(unknown.heading().textContent, "종목을 찾을 수 없습니다")
+    assert.equal(unknown.heading().textContent, "Security not found")
     assert.ok(document.activeElement === unknown.heading(), "a deep link focuses the not-found heading")
-    assert.match(unknown.element.textContent!, /ZZZZ은 서버 시장정보 목록에 없는 종목입니다/)
+    assert.match(unknown.element.textContent!, /ZZZZ is not in the server market data catalog/)
     assert.equal(unknown.calls.some(url => url.includes("ZZZZ")), false, "no profile or chart request for a symbol the catalog does not list")
-    await unknown.run(() => unknown.button("목록으로").click())
+    await unknown.run(() => unknown.button("Back to list").click())
     assert.equal(unknown.listed(), true)
     assert.equal(unknown.router.state.location.search, "")
     const malformed = await mount(st, "/stocks?symbol=nvda%3Cx%3E")

@@ -63,8 +63,8 @@ export function OrderStatusCard({ order, observedAt, cashSymbol, refreshing, err
           </p>
           <p className="mt-2">
             {walletSteps
-              ? "The wallet steps below check this order and show any approval or deposit already requested for it; never send one again from another app or wallet. A plain token transfer is not matched to the order. The order moves on only after the server records a finalized deposit."
-              : "This screen does not sign or send anything. A plain token transfer is not matched to the order. The order moves on only after the server records a finalized deposit."}
+              ? "The wallet steps below check this order and show any approval or deposit already requested for it; never send one again from another app or wallet. A plain token transfer is not matched to the order. The order moves on once the server records the deposit GIWA confirmed."
+              : "This screen does not sign or send anything. A plain token transfer is not matched to the order. The order moves on once the server records the deposit GIWA confirmed."}
           </p>
         </Notice>
       ) : null}
@@ -78,8 +78,8 @@ export function OrderStatusCard({ order, observedAt, cashSymbol, refreshing, err
           </p>
           <p className="mt-2">
             {walletSteps
-              ? "The wallet steps below check this order and show any approval or escrow already requested for it; never send one again from another app or wallet. A plain token transfer is not matched to the order. The order moves on only after the server records a finalized escrow."
-              : "This screen does not sign or send anything. A plain token transfer is not matched to the order. The order moves on only after the server records a finalized escrow."}
+              ? "The wallet steps below check this order and show any approval or escrow already requested for it; never send one again from another app or wallet. A plain token transfer is not matched to the order. The order moves on once the server records the escrow GIWA confirmed."
+              : "This screen does not sign or send anything. A plain token transfer is not matched to the order. The order moves on once the server records the escrow GIWA confirmed."}
           </p>
         </Notice>
       ) : null}

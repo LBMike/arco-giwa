@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { address, hash, StocksError } from '../stocks/contracts.js';
 import type { JsonRpcTransport } from '../stocks/rpc.js';
 import { stocksHttpJson, STOCKS_RPC_MAX_BYTES } from '../stocks-runtime/http-json.js';
+import { CASH_ADMIN_SLOT, CASH_IMPLEMENTATION_SLOT } from '../stocks/cash-identity.js';
 
 const configurationInvalid = () => new StocksError('SIGNER_RPC_CONFIGURATION_INVALID', 503);
 const methodForbidden = () => new StocksError('SIGNER_RPC_METHOD_FORBIDDEN', 503);
@@ -28,7 +29,12 @@ function validateParams(method: string, params: unknown): void {
   if (method === 'eth_chainId') {
     if (params.length !== 0) throw requestInvalid();
   } else if (method === 'eth_getBlockByNumber') {
-    if (params.length !== 2 || !blockTag(params[0]) || typeof params[1] !== 'boolean') throw requestInvalid();
+    if (params.length !== 2 || !(params[0] === 'latest' || blockTag(params[0])) || typeof params[1] !== 'boolean') throw requestInvalid();
+  } else if (method === 'eth_getCode' || method === 'eth_getStorageAt') {
+    const storage = method === 'eth_getStorageAt';
+    if (params.length !== (storage ? 3 : 2) || typeof params[0] !== 'string' || !quantity(params[storage ? 2 : 1])) throw requestInvalid();
+    try { address(params[0]); } catch { throw requestInvalid(); }
+    if (storage && params[1] !== CASH_IMPLEMENTATION_SLOT && params[1] !== CASH_ADMIN_SLOT) throw requestInvalid();
   } else if (method === 'eth_getTransactionCount') {
     if (params.length !== 2 || typeof params[0] !== 'string' || !nonceTag(params[1])) throw requestInvalid();
     try { address(params[0]); } catch { throw requestInvalid(); }
