@@ -56,6 +56,7 @@ test("shell layout keeps the provider split, the 76px sticky bar and matching gu
   assert.match(shell, /max-w-\[1512px\] flex-1 scroll-mt-\[77px\] px-4 py-8 md:px-8/)
   const footer = readFileSync(new URL("../components/Footer.tsx", import.meta.url), "utf8")
   assert.equal([...footer.matchAll(/mx-auto (?:grid|flex) w-full max-w-\[1512px\][^"]*px-4 py-6 md:px-8/g)].length, 2, "footer follows the shell width and gutters")
+  assert.match(footer, /src="\/arco-wordmark\.png"\s+alt="Arco"/, "the footer's brand is the Arco wordmark")
   const components = read("./components.tsx")
   assert.match(components, /sticky top-0 z-40[^"]*backdrop-blur/)
   assert.match(components, /min-h-\[76px\] w-full max-w-\[1512px\][^"]*px-4 md:px-8/)

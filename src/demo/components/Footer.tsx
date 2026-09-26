@@ -1,4 +1,4 @@
-// Launch App footer — Arco brand mark + name on the left, social links on the
+// Launch App footer — the Arco wordmark on the left, social links on the
 // right, separated from the page by a top hairline. Layout mirrors the Ethena
 // footer reference; styling uses the light Arco tokens (no dark surface).
 // Brand glyphs are inline SVG (lucide dropped brand icons) using currentColor so
@@ -33,16 +33,16 @@ const SOCIALS = [
 export type FooterLink = { label: string; href: string }
 
 export function Footer({ links }: { links?: readonly FooterLink[] }) {
-  /* Reuse the shipped brand icon; no missing wordmark asset request. */
+  /* The Arco wordmark (black on transparent, 709×179): 20px high, about 79px wide. On a narrow screen the grid column
+     can get narrower than that; object-contain then scales it down instead of squeezing the letters. */
   const brand = (
-    <span
-      role="img"
-      aria-label="Arco"
-      className="flex h-6 w-[72px] shrink-0 items-center gap-1 text-[var(--color-arco-ink)]"
-    >
-      <img src="/arco-icon.svg" alt="" aria-hidden className="size-5" />
-      <span aria-hidden className="text-lg font-semibold tracking-tight">Arco</span>
-    </span>
+    <img
+      src="/arco-wordmark.png"
+      alt="Arco"
+      width={709}
+      height={179}
+      className="h-5 w-auto shrink-0 justify-self-start object-contain object-left"
+    />
   )
 
   /* social links */
