@@ -111,4 +111,13 @@ test("held and slow trades say what happened and never claim a result", () => {
   assert.equal(directFailureMessage("WALLET_REQUEST_REJECTED", "BUY"), "The payment was declined in your wallet. Nothing was sent.")
   assert.equal(directFailureMessage("REVERTED", "SELL"), "The escrow failed on GIWA, so nothing was escrowed. Check the wallet's test ETH for gas, then try again.")
   assert.match(directFailureMessage("NOT_ACCEPTED", "BUY"), /your wallet was not asked/)
+  // The trading limits: said before the wallet is asked, or when a payment arrived anyway.
+  assert.equal(directFailureMessage("SIDE_DISABLED", "BUY"), "Buying NVDA is paused for now, so your wallet was not asked. Nothing was sent.")
+  assert.equal(directFailureMessage("SIDE_DISABLED", "SELL"), "Selling NVDA is paused for now, so your wallet was not asked. Nothing was sent.")
+  assert.equal(directFailureMessage("DAILY_LIMIT_REACHED", "BUY"), "Today's NVDA buy limit has been reached. Try again after 00:00 KST. Nothing was sent.")
+  assert.equal(directFailureMessage("DAILY_LIMIT_REACHED", "SELL"), "Today's NVDA sell limit has been reached. Try again after 00:00 KST. Nothing was sent.")
+  assert.equal(directFailureMessage("TRADING_PAUSED", "SELL"), "Trading is paused right now, so your wallet was not asked. Nothing was sent.")
+  assert.equal(directHeldMessage(status({ state: "FUNDING_REVIEW_REQUIRED", quantity: "0", hold: "SIDE_DISABLED" })), "Buying NVDA was paused when GIWA confirmed your payment, so it is held for review. Nothing was bought.")
+  assert.equal(directHeldMessage(status({ side: "SELL", state: "ESCROW_REVIEW_REQUIRED", hold: "DAILY_LIMIT_REACHED" })), "Today's NVDA sell limit was reached when GIWA confirmed your escrow, so it is held for review. Nothing was sold.")
+  assert.match(view(trade({ phase: "HELD", hash: HASH, status: status({ state: "FUNDING_REVIEW_REQUIRED", quantity: "0", hold: "DAILY_LIMIT_REACHED" }) })), /^Purchase held for review You pay 60 USDC Today's NVDA buy limit was reached when GIWA confirmed your payment/)
 })

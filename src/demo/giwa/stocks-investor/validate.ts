@@ -171,7 +171,7 @@ export function parseStocksActivity(input: unknown): StocksActivityEntry[] {
   })
 }
 
-const DIRECT_HOLDS: readonly StocksDirectHold[] = ["TRADING_PAUSED", "PRICE_UNAVAILABLE", "BELOW_ONE_UNIT"]
+const DIRECT_HOLDS: readonly StocksDirectHold[] = ["TRADING_PAUSED", "PRICE_UNAVAILABLE", "BELOW_ONE_UNIT", "SIDE_DISABLED", "DAILY_LIMIT_REACHED"]
 
 /** GET /api/v1/stocks/direct/:orderKey data, for the side the key was sent with. */
 export function parseDirectStatus(input: unknown, side: StocksSide): StocksDirectStatus {

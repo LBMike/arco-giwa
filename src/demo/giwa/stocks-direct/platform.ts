@@ -3,6 +3,7 @@
 import { getAddress } from "viem"
 import { publicGiwaClient, walletClient } from "../contracts"
 import { STOCKS_ABI } from "../stocks-wallet/abi"
+import { directSendBlock } from "./availability"
 import { newDirectOrderKey, type DirectOrderKey } from "./key"
 import { readDirectStatus } from "./status"
 import { DirectTradeError, type DirectTradeInput, type DirectTradePorts, type TxHash } from "./trade"
@@ -21,6 +22,9 @@ export function directCall(input: DirectTradeInput, key: DirectOrderKey) {
 export function platformDirectPorts(options: { apiBase: string; fetch?: (input: string, init: RequestInit) => Promise<Response> }): DirectTradePorts {
   return {
     async send(input, key) {
+      // Paused, the side turned off or today's cap reached: the server would only hold it, so the wallet is not asked.
+      const block = await directSendBlock({ apiBase: options.apiBase, input, fetch: options.fetch })
+      if (block !== null) throw new DirectTradeError(block)
       const call = directCall(input, key)
       let simulation: { request: unknown }
       try {

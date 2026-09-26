@@ -5,7 +5,7 @@ import { getAddress } from "viem"
 import type { StocksCatalog, StocksDirectStatus } from "../stocks-investor/types"
 import { PLATFORM_TUSDC } from "../stocks-wallet/types"
 import {
-  clearDirectTrade, directCall, directContracts, directTradeOf, DirectTradeError, isDirectOrderKey, newDirectOrderKey, readDirectStatus,
+  clearDirectTrade, directCall, directContracts, directSendBlock, directTradeOf, DirectTradeError, isDirectOrderKey, newDirectOrderKey, readDirectStatus, readTradingAvailability,
   resetDirectTradesForTests, resumeDirectTrade, settledPhase, startDirectTrade, subscribeDirectTrades,
   type DirectPolling, type DirectTradeInput, type DirectTradePorts, type DirectTradeState, type TxHash,
 } from "."
@@ -190,4 +190,80 @@ test("trades are kept per wallet: another wallet's trade is not shown or replace
   release(HASH)
   assert.equal((await settle()).phase, "DONE")
   assert.equal((await settle(other)).phase, "DONE")
+})
+
+// ── asking the server before the wallet (trading limits) ──
+
+test("before the wallet is asked: the availability read is public, and only a server 'no' stops the send", async () => {
+  const calls: { url: string; init: RequestInit }[] = []
+  const reply = (code: number, body: unknown) => async (url: string, init: RequestInit) => { calls.push({ url, init }); return new Response(typeof body === "string" ? body : JSON.stringify(body), { status: code }) }
+  const answer = (side: string, block: string | null) => ({ ...PROFILE, observedAt: "2026-09-25T00:00:04.000Z", data: { symbol: "NVDA", side, accepts: block === null, block } })
+  const api = "http://127.0.0.1:4392/"
+  assert.deepEqual(await readTradingAvailability({ apiBase: api, side: "BUY", cashAmount: "60000000", fetch: reply(200, answer("BUY", null)) }), { side: "BUY", accepts: true, block: null })
+  assert.equal(calls[0]!.url, "http://127.0.0.1:4392/api/v1/stocks/availability?side=BUY&cashAmount=60000000")
+  assert.equal(calls[0]!.init.credentials, "omit")
+  assert.equal(calls[0]!.init.redirect, "error")
+  assert.deepEqual(calls[0]!.init.headers, { accept: "application/json" })
+  // A Buy is checked for what it pays, a Sell for the payout the page expects; without an estimate the smallest amount.
+  for (const block of ["SIDE_DISABLED", "DAILY_LIMIT_REACHED", "TRADING_PAUSED"]) {
+    assert.equal(await directSendBlock({ apiBase: api, input: input(), fetch: reply(200, answer("BUY", block)) }), block)
+  }
+  assert.equal(await directSendBlock({ apiBase: api, input: input({ side: "SELL", amount: "250000000", estimate: "29990000" }), fetch: reply(200, answer("SELL", "SIDE_DISABLED")) }), "SIDE_DISABLED")
+  assert.equal(calls[calls.length - 1]!.url, "http://127.0.0.1:4392/api/v1/stocks/availability?side=SELL&cashAmount=29990000")
+  await directSendBlock({ apiBase: api, input: input({ side: "SELL", amount: "250000000", estimate: null }), fetch: reply(200, answer("SELL", null)) })
+  assert.equal(calls[calls.length - 1]!.url, "http://127.0.0.1:4392/api/v1/stocks/availability?side=SELL")
+  // No usable answer never blocks: an older server without the route, a failure, an unreadable or mismatched answer.
+  for (const [name, fetch] of [
+    ["older server", reply(404, { statusCode: 404, error: "Not Found", message: "Route GET:/api/v1/stocks/availability not found" })],
+    ["server error", reply(500, { ...PROFILE, error: "INTERNAL_ERROR" })],
+    ["not json", reply(200, "<html>")],
+    ["another side", reply(200, answer("SELL", "SIDE_DISABLED"))],
+    ["unknown block", reply(200, answer("BUY", "SOMETHING_ELSE"))],
+    ["accepts with a block", reply(200, { ...answer("BUY", null), data: { symbol: "NVDA", side: "BUY", accepts: true, block: "SIDE_DISABLED" } })],
+    ["extra field", reply(200, { ...answer("BUY", "SIDE_DISABLED"), data: { ...answer("BUY", "SIDE_DISABLED").data, remaining: "5" } })],
+    ["wrong profile", reply(200, { ...answer("BUY", "SIDE_DISABLED"), chainId: 1 })],
+    ["offline", async () => { throw new TypeError("offline") }],
+  ] as const) assert.equal(await directSendBlock({ apiBase: api, input: input(), fetch }), null, name)
+  assert.equal(await directSendBlock({ apiBase: "not a url", input: input(), fetch: reply(200, answer("BUY", "SIDE_DISABLED")) }), null)
+})
+
+test("parity: the real availability route's answer is what the pre-check reads", async () => {
+  const { default: Fastify } = await import("fastify")
+  const { stocksPlugin } = await import("../../../../server/src/stocks/plugin")
+  const { StocksService } = await import("../../../../server/src/stocks/service")
+  const cases: Array<{ paused: boolean; limit: string | null; side: "BUY" | "SELL"; expected: string | null }> = [
+    { paused: false, limit: null, side: "BUY", expected: null },
+    { paused: false, limit: "SIDE_DISABLED", side: "SELL", expected: "SIDE_DISABLED" },
+    { paused: false, limit: "DAILY_LIMIT_REACHED", side: "BUY", expected: "DAILY_LIMIT_REACHED" },
+    { paused: true, limit: null, side: "BUY", expected: "TRADING_PAUSED" },
+  ]
+  for (const item of cases) {
+    const seen: unknown[] = []
+    const service = Object.assign(Object.create(StocksService.prototype), {
+      directHalted: async () => item.paused,
+      limits: { check: async (...args: unknown[]) => { seen.push(args); return item.limit }, admit: async () => null },
+    })
+    const app = Fastify({ logger: false })
+    await app.register(stocksPlugin, { service })
+    await app.ready()
+    const fetch = async (url: string) => {
+      const target = new URL(url)
+      const response = await app.inject({ method: "GET", url: `${target.pathname}${target.search}` })
+      return new Response(response.body, { status: response.statusCode })
+    }
+    const trade = item.side === "BUY" ? input() : input({ side: "SELL", amount: "250000000", estimate: "29990000" })
+    assert.equal(await directSendBlock({ apiBase: "http://127.0.0.1:4392", input: trade, fetch }), item.expected, JSON.stringify(item))
+    if (!item.paused) assert.deepEqual(seen, [["NVDA", item.side, item.side === "BUY" ? 60000000n : 29990000n]])
+    await app.close()
+  }
+})
+
+test("a status held by the trading limits is read as held", async () => {
+  const row = { side: "BUY", state: "FUNDING_REVIEW_REQUIRED", quantity: "0", cashAmount: "60000000", createdAt: "2026-09-25T00:00:00.000Z", updatedAt: "2026-09-25T00:00:00.000Z" }
+  for (const hold of ["SIDE_DISABLED", "DAILY_LIMIT_REACHED"] as const) {
+    const fetch = async () => new Response(JSON.stringify({ ...PROFILE, observedAt: "2026-09-25T00:00:04.000Z", data: { ...row, hold } }), { status: 200 })
+    const read = await readDirectStatus({ apiBase: "http://127.0.0.1:4392", key: KEY, side: "BUY", fetch })
+    assert.equal(read?.hold, hold)
+    assert.equal(settledPhase(read!), "HELD")
+  }
 })

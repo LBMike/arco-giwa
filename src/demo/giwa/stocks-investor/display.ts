@@ -4,7 +4,7 @@
 import { formatBaseUnits, formatHumanDecimal, formatSignedBaseUnits } from "./decimal"
 import type { FeatureError, TradeBlock } from "./controller"
 import type { SignedOutReason } from "./session"
-import { STOCKS_CASH_SCALE, STOCKS_QUANTITY_SCALE, type BaseUnits, type StocksCashSymbol } from "./types"
+import { STOCKS_CASH_SCALE, STOCKS_QUANTITY_SCALE, type BaseUnits, type StocksCashSymbol, type StocksSide } from "./types"
 
 export function formatQuantity(value: BaseUnits): string {
   return formatBaseUnits(value, STOCKS_QUANTITY_SCALE, { group: true })
@@ -105,13 +105,25 @@ const REFUSED: Record<string, string> = {
 }
 
 /**
+ * The trading limits refuse per side: SIDE_DISABLED (the side is turned off) and DAILY_LIMIT_REACHED (today's cap for the
+ * side, which resets at 00:00 KST). The text names the side when the caller knows it.
+ */
+function limitRefusal(code: string | null, side: StocksSide | undefined): string | null {
+  if (code === "SIDE_DISABLED") return side === undefined ? "Trading on this side is paused for now." : `${side === "SELL" ? "Selling" : "Buying"} NVDA is paused for now.`
+  if (code === "DAILY_LIMIT_REACHED") return `Today's NVDA ${side === "SELL" ? "sell " : side === "BUY" ? "buy " : ""}limit has been reached. Try again after 00:00 KST.`
+  return null
+}
+
+/**
  * Error text for an order attempt. A refusal of a retry may say nothing about an earlier send whose
  * outcome is unknown, so "no order was created" is only said when it is proven for this request key.
  */
-export function attemptErrorMessage(error: FeatureError, outcomeUnknown: boolean): string {
+export function attemptErrorMessage(error: FeatureError, outcomeUnknown: boolean, side?: StocksSide): string {
   if (error.kind === "NETWORK") return error.code === "TIMEOUT" ? "No answer was received from the Stocks API in time." : "No answer was received from the Stocks API."
   if (error.kind === "INVALID_RESPONSE") return "The server's answer could not be read as a Stocks response."
   // A refused order leaves its quote on screen, so only the order is said to be absent (not "no quote or order").
+  const limit = error.kind === "REFUSED" ? limitRefusal(error.code, side) : null
+  if (limit !== null) return outcomeUnknown ? `${limit} This retry was not processed. The earlier request may still have created the order.` : `${limit} No order was created.`
   if (!outcomeUnknown && error.kind === "REFUSED") {
     if (error.code === "STOCKS_PAUSED") return "Trading is paused. No order was created."
     if (error.code === "STOCKS_NOT_ACTIVATED" || error.code === "VAULT_ALREADY_BOUND_TO_OTHER_DEPLOYMENT") return "Stocks trading is unavailable. No order was created."
@@ -135,7 +147,7 @@ export function attemptErrorMessage(error: FeatureError, outcomeUnknown: boolean
   }
 }
 
-export function errorMessage(error: FeatureError): string {
+export function errorMessage(error: FeatureError, side?: StocksSide): string {
   switch (error.kind) {
     case "NETWORK":
       return error.code === "TIMEOUT" ? "The Stocks API did not answer in time." : "The Stocks API could not be reached."
@@ -151,7 +163,10 @@ export function errorMessage(error: FeatureError): string {
         : "The server's answer did not match this request or wallet, so it was not used."
     case "LOCAL":
       return "The order request could not be prepared safely. Nothing was sent."
-    case "REFUSED":
+    case "REFUSED": {
+      const limit = limitRefusal(error.code, side)
+      if (limit !== null) return `${limit} No quote or order was created.`
       return (error.code && REFUSED[error.code]) ?? `The server refused the request (${error.code ?? error.status ?? "unknown"}).`
+    }
   }
 }

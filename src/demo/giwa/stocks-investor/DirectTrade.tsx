@@ -123,6 +123,12 @@ export function directFailureMessage(code: DirectTradeCode, side: StocksSide): s
       return `GIWA would not accept this ${what}, so your wallet was not asked. Refresh the balance and try again.`
     case "REVERTED":
       return `The ${what} failed on GIWA, so nothing was ${side === "SELL" ? "escrowed" : "paid"}. Check the wallet's test ETH for gas, then try again.`
+    case "TRADING_PAUSED":
+      return "Trading is paused right now, so your wallet was not asked. Nothing was sent."
+    case "SIDE_DISABLED":
+      return `${side === "SELL" ? "Selling" : "Buying"} NVDA is paused for now, so your wallet was not asked. Nothing was sent.`
+    case "DAILY_LIMIT_REACHED":
+      return `Today's NVDA ${side === "SELL" ? "sell" : "buy"} limit has been reached. Try again after 00:00 KST. Nothing was sent.`
     default:
       return "The wallet could not send the transaction. Unlock your wallet and try again."
   }
@@ -140,6 +146,10 @@ export function directHeldMessage(status: StocksDirectStatus): string {
       return sell
         ? "This quantity pays out less than 0.000001 USDC, so it is held for review. Nothing was sold."
         : "This amount buys less than 0.000000001 NVDA, so it is held for review. Nothing was bought."
+    case "SIDE_DISABLED":
+      return `${sell ? "Selling" : "Buying"} NVDA was paused when GIWA confirmed your ${sell ? "escrow" : "payment"}, so it is held for review. Nothing was ${sell ? "sold" : "bought"}.`
+    case "DAILY_LIMIT_REACHED":
+      return `Today's NVDA ${sell ? "sell" : "buy"} limit was reached when GIWA confirmed your ${sell ? "escrow" : "payment"}, so it is held for review. Nothing was ${sell ? "sold" : "bought"}.`
     default:
       return orderStatusMeaning({ side: status.side, state: status.state }).detail
   }

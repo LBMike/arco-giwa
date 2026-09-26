@@ -21,8 +21,19 @@ export type DirectTradeInput = Readonly<{
   estimate: string | null
 }>
 
-/** Nothing moved: the wallet declined or could not send, or GIWA reverted the transaction. */
-export type DirectTradeCode = "WALLET_REQUEST_REJECTED" | "WALLET_REQUEST_PENDING" | "NOT_ACCEPTED" | "SEND_FAILED" | "REVERTED"
+/**
+ * Nothing moved: the wallet declined or could not send, GIWA reverted the transaction, or the server said before the wallet
+ * was asked that it would not take the order now (TRADING_PAUSED, SIDE_DISABLED, DAILY_LIMIT_REACHED).
+ */
+export type DirectTradeCode =
+  | "WALLET_REQUEST_REJECTED"
+  | "WALLET_REQUEST_PENDING"
+  | "NOT_ACCEPTED"
+  | "SEND_FAILED"
+  | "REVERTED"
+  | "TRADING_PAUSED"
+  | "SIDE_DISABLED"
+  | "DAILY_LIMIT_REACHED"
 
 export type DirectTradeState =
   | { phase: "WALLET" }

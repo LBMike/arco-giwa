@@ -60,7 +60,7 @@ export type StocksCatalog = StocksProfile & {
 }
 
 /** Why a direct payment or escrow was held for review instead of becoming an order (server/src/stocks/direct.ts). */
-export type StocksDirectHold = "TRADING_PAUSED" | "PRICE_UNAVAILABLE" | "BELOW_ONE_UNIT"
+export type StocksDirectHold = "TRADING_PAUSED" | "PRICE_UNAVAILABLE" | "BELOW_ONE_UNIT" | "SIDE_DISABLED" | "DAILY_LIMIT_REACHED"
 
 /**
  * GET /api/v1/stocks/activity/:wallet — one Stocks trade in a wallet's public activity: an order it paid for (Buy) or

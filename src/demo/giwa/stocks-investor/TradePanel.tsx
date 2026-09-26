@@ -67,7 +67,7 @@ export function statusAnnouncement(state: StocksInvestorState): string {
         if (!canResolveAttempt(state)) return "Sign in again to finish this order request."
         return attempt.outcomeUnknown ? unconfirmed : "Order request not processed. Retry it unchanged."
       case "REJECTED":
-        return `Order not placed. ${attempt.error ? attemptErrorMessage(attempt.error, attempt.outcomeUnknown) : ""}`
+        return `Order not placed. ${attempt.error ? attemptErrorMessage(attempt.error, attempt.outcomeUnknown, attempt.side) : ""}`
       case "ACCEPTED":
         return `Order accepted. ${attempt.order ? `Status: ${orderStatusMeaning(attempt.order, attempt.orderObservedAt).label}.` : ""}`
     }
@@ -80,7 +80,7 @@ export function statusAnnouncement(state: StocksInvestorState): string {
     case "expired":
       return "Quote expired. No order was placed."
     case "error":
-      return errorMessage(state.quote.error)
+      return errorMessage(state.quote.error, state.quote.side)
     default: {
       // Typing more than the server's available NVDA on the Sell side: said once while typing, never blocking.
       const available = state.side === "SELL" ? availableToSell(state) : null
@@ -149,7 +149,7 @@ function AttemptView({ attempt, state, cashSymbol, actions }: { attempt: OrderAt
                 ? "The server did not accept the sign-in session, so this request was not processed. After signing in again, retry it unchanged."
                 : "This request may already have created the order. Retrying sends the same request with the same request key, so it cannot create a second order."}
             </p>
-            {attempt.error && !staleSignIn ? <p className="mt-2">{attemptErrorMessage(attempt.error, attempt.outcomeUnknown)}</p> : null}
+            {attempt.error && !staleSignIn ? <p className="mt-2">{attemptErrorMessage(attempt.error, attempt.outcomeUnknown, attempt.side)}</p> : null}
             {attempt.lookup === "NOT_FOUND" ? <p className="mt-2">This request was not found in your latest orders. That does not prove it was not created.</p> : null}
           </Notice>
           {request}
@@ -165,7 +165,7 @@ function AttemptView({ attempt, state, cashSymbol, actions }: { attempt: OrderAt
       ) : null}
       {attempt.status === "REJECTED" ? (
         <>
-          <Notice tone="error">{attempt.error ? attemptErrorMessage(attempt.error, attempt.outcomeUnknown) : "The server refused the order."}</Notice>
+          <Notice tone="error">{attempt.error ? attemptErrorMessage(attempt.error, attempt.outcomeUnknown, attempt.side) : "The server refused the order."}</Notice>
           {request}
           <div>
             <button type="button" className={BUTTON_SECONDARY} onClick={actions.startNewOrder}>
@@ -680,7 +680,7 @@ function SessionTradePanel({ state, actions, titleId, headingRef, marketPrice = 
       {attempt === null ? null : demo && (attempt.status === "SUBMITTING" || attempt.status === "ACCEPTED") ? (
         <InstantTradeView attempt={attempt} state={state} actions={actions} cashSymbol={cash} />
       ) : demo && attempt.status === "REJECTED" ? (
-        <Notice tone="error">{attempt.error ? attemptErrorMessage(attempt.error, attempt.outcomeUnknown) : "The server refused the order."}</Notice>
+        <Notice tone="error">{attempt.error ? attemptErrorMessage(attempt.error, attempt.outcomeUnknown, attempt.side) : "The server refused the order."}</Notice>
       ) : (
         <AttemptView attempt={attempt} state={state} cashSymbol={cashSymbol} actions={actions} />
       )}
@@ -785,7 +785,7 @@ function SessionTradePanel({ state, actions, titleId, headingRef, marketPrice = 
 
           {state.quote.status === "error" ? (
             <div className="mt-4">
-              <Notice tone="error">{errorMessage(state.quote.error)}</Notice>
+              <Notice tone="error">{errorMessage(state.quote.error, state.quote.side)}</Notice>
             </div>
           ) : null}
           {state.quote.status === "expired" ? (
