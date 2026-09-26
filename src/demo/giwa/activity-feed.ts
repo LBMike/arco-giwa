@@ -34,6 +34,9 @@ const TYPE_TONE: Record<ActivityKind, string> = {
   stock: "text-[var(--color-arco-text-soft)]",
 }
 
+// A completed Stocks sell reads red, like a falling price; a completed buy keeps the "complete" green.
+const SELL_TONE = "text-[var(--color-arco-down)]"
+
 // A redemption request whose status is one of these has paid out → "Redemption complete".
 // Otherwise: REQUESTED → "Redemption request" (awaiting operator action), SETTLING (and any
 // unknown status) → "Pending" (payout in flight).
@@ -186,7 +189,7 @@ export function stockTypeLabel(entry: StocksActivityEntry): { label: string; ton
   const category = orderStatusMeaning({ side: entry.side, state: entry.state }).category
   switch (category) {
     case "COMPLETED":
-      return { label: sell ? "Sell" : "Buy", tone: TYPE_TONE.complete }
+      return { label: sell ? "Sell" : "Buy", tone: sell ? SELL_TONE : TYPE_TONE.complete }
     case "RETURNED":
       return { label: sell ? "Sell returned" : "Buy refunded", tone: TYPE_TONE.stock }
     case "EXPIRED":

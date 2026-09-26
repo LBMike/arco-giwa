@@ -25,22 +25,21 @@ test("nav sections and items keep their order, labels and routes", () => {
   assert.deepEqual(shape(false), [
     { label: null, items: [["Home", "/"]] },
     { label: "Invest", items: [["Savings", "/savings"], ["Funds", "/funds"], ["Stocks", "/stocks"]] },
-    { label: "Manage", items: [["Portfolio", "/portfolio"], ["Send", null]] },
+    { label: "Manage", items: [["Portfolio", "/portfolio"]] },
   ])
 })
 
 test("Admin item appears only for allowlisted wallets, at the end of Manage", () => {
   assert.ok(!shape(false).flatMap((section) => section.items).some(([label]) => label === "Admin"))
-  assert.deepEqual(shape(true)[2], { label: "Manage", items: [["Portfolio", "/portfolio"], ["Send", null], ["Admin", "/admin"]] })
+  assert.deepEqual(shape(true)[2], { label: "Manage", items: [["Portfolio", "/portfolio"], ["Admin", "/admin"]] })
   // The shared constant is never mutated by the admin variant.
-  assert.equal(INVESTOR_NAV_SECTIONS[2].items.length, 2)
+  assert.equal(INVESTOR_NAV_SECTIONS[2].items.length, 1)
 })
 
-test("Send has no route, is disabled and says Coming soon", () => {
-  const send = investorNavSections(true).flatMap((section) => section.items).find((item) => item.id === "send")!
-  assert.equal(send.to, null)
-  assert.equal(send.disabled, true)
-  assert.equal(send.note, "Coming soon")
+test("Send stays out of the menu until the feature exists", () => {
+  for (const admin of [false, true]) {
+    assert.ok(!investorNavSections(admin).flatMap((section) => section.items).some((item) => item.id === "send"), String(admin))
+  }
 })
 
 test("active matching per path", () => {
@@ -63,7 +62,7 @@ test("active matching per path", () => {
   }
 })
 
-test("GiwaSidebarNav renders links with aria-current and a non-interactive Send row", () => {
+test("GiwaSidebarNav renders links with aria-current and no Send row", () => {
   const html = renderToStaticMarkup(
     <MemoryRouter initialEntries={["/product/abc"]}>
       <GiwaSidebarNav isAdmin={false} />
@@ -73,12 +72,12 @@ test("GiwaSidebarNav renders links with aria-current and a non-interactive Send 
   for (const name of ["Home", "Invest", "Manage"]) assert.match(html, new RegExp(`<ul aria-label="${name}"`))
   assert.match(html, /<a aria-current="page"[^>]*href="\/funds"/)
   assert.equal(html.match(/aria-current="page"/g)?.length, 1)
-  assert.match(html, /<span aria-disabled="true"[^>]*>.*?Send.*?Coming soon/)
+  assert.doesNotMatch(html, />Send<\/span>|aria-label="Send"/)
   assert.doesNotMatch(html, /href="\/send"|href="\/admin"/)
   assert.doesNotMatch(html, /<(a|button)[^>]*>(?:(?!<\/\1>).)*Send/)
 })
 
-test("compact desktop nav keeps named icon links and the disabled Send row", () => {
+test("compact desktop nav keeps named icon links and has no Send row", () => {
   const html = renderToStaticMarkup(
     <MemoryRouter initialEntries={["/product/abc"]}>
       <GiwaSidebarNav isAdmin={false} compact />
@@ -88,7 +87,7 @@ test("compact desktop nav keeps named icon links and the disabled Send row", () 
     assert.ok(html.includes(`aria-label="${name}"`), `${name} needs an icon-link name`)
   }
   assert.match(html, /aria-current="page"[^>]*aria-label="Funds"/)
-  assert.match(html, /<span aria-disabled="true"[^>]*>.*?Send.*?Coming soon/)
+  assert.doesNotMatch(html, />Send<\/span>|aria-label="Send"/)
   assert.doesNotMatch(html, /aria-label="Savings categories"/)
   assert.doesNotMatch(html, /href="\/send"/)
 })

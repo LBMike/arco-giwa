@@ -45,8 +45,7 @@ export const INVESTOR_NAV_SECTIONS: readonly InvestorNavSection[] = [
     label: "Manage",
     items: [
       { id: "portfolio", label: "Portfolio", to: GIWA_PORTFOLIO_ROUTE },
-      // No Send feature or route exists yet.
-      { id: "send", label: "Send", to: null, disabled: true, note: "Coming soon" },
+      // Send stays out of the menu until the feature and its route exist.
     ],
   },
 ]

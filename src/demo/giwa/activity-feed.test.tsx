@@ -161,6 +161,9 @@ test("a Stocks trade is one row: NVDA, Buy or Sell by the server's state, both a
   assert.equal(row!.txHash, TX(1), "the payment the wallet sent, not the platform's mint")
   const label = (over: Record<string, unknown>) => buildActivityFeed([], [], [], [trade(over)])[0]!.typeLabel
   assert.equal(label({ side: "SELL" }), "Sell")
+  const tone = (over: Record<string, unknown>) => buildActivityFeed([], [], [], [trade(over)])[0]!.typeTone
+  assert.equal(tone({ side: "SELL" }), "text-[var(--color-arco-down)]", "a completed sell reads red")
+  assert.equal(tone({}), "text-[var(--color-arco-up)]", "a completed buy keeps the complete green")
   assert.equal(label({ state: "MINT_SUBMITTED" }), "Buy processing")
   assert.equal(label({ side: "SELL", state: "LIQUIDITY_PENDING" }), "Sell processing")
   assert.equal(label({ state: "FUNDING_REVIEW_REQUIRED" }), "Held for review")

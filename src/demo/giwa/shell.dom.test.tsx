@@ -80,7 +80,7 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
     return [...scope.querySelectorAll('[aria-current="page"]')].map(node => node.textContent?.trim())
   }
 
-  await t.test("sidebar links carry aria-current for the active route; Send is disabled and unfocusable", async () => {
+  await t.test("sidebar links carry aria-current for the active route; no Send row", async () => {
     const m = await mount("/funds")
     const cases: Array<[string, string]> = [["/funds", "Funds"], ["/product/abc", "Funds"], ["/stocks", "Stocks"], ["/admin/stocks", "Stocks"], ["/", "Home"], ["/savings", "Savings"], ["/portfolio", "Portfolio"]]
     for (const [path, label] of cases) {
@@ -90,15 +90,7 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
     }
     assert.equal(m.sidebar().querySelector('a[href="/admin"]'), null, "Admin only for allowlisted wallets")
 
-    const send = [...m.sidebar().querySelectorAll<HTMLElement>('[aria-disabled="true"]')].find(node => node.textContent?.includes("Send"))!
-    assert.ok(send)
-    assert.equal(send.tagName, "SPAN")
-    assert.equal(send.closest("a, button"), null)
-    assert.equal(send.querySelector("a, button"), null)
-    assert.equal(send.hasAttribute("tabindex"), false)
-    assert.ok(send.textContent?.includes("Coming soon"))
-    send.focus()
-    assert.notEqual(document.activeElement, send)
+    assert.equal([...m.sidebar().querySelectorAll("li")].some(node => node.textContent?.includes("Send")), false, "Send stays out of the menu until it exists")
 
     const first = m.element.querySelector<HTMLElement>(FOCUSABLE)!
     assert.equal(first.textContent, "Skip to content")
@@ -133,7 +125,7 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
 
     const drawerNav = dialog.querySelector('nav[aria-label="Main"]')!
     assert.deepEqual(currentLabels(drawerNav), ["Funds"])
-    assert.ok([...drawerNav.querySelectorAll('[aria-disabled="true"]')].some(node => node.tagName === "SPAN" && node.textContent?.includes("Send")))
+    assert.ok(![...drawerNav.querySelectorAll("li")].some(node => node.textContent?.includes("Send")), "the drawer has no Send row either")
 
     const focusable = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)]
     const firstEl = focusable[0], lastEl = focusable[focusable.length - 1]
