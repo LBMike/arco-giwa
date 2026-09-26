@@ -234,6 +234,27 @@ npm run stocks:integration:prepare -- \
 - 전환 후 첫 운영 배포는 `FYJTaN5s53hKvAqgsfAu9fVTYfPq`입니다. 문제가 생기면 Vercel Instant Rollback으로 `FS58rvjCVXzaZP3js3SGSBir2YDU`(main `8160f35`)로 되돌립니다. 이 배포는 이전 API 주소가 들어간 빌드를 그대로 씁니다. main을 운영으로 다시 빌드하려면 Production Branch와 Production `VITE_ARCO_API_BASE`를 함께 되돌려야 하고, 이전 주소는 먼저 확인해야 합니다.
 - Render Secret File은 `/etc/secrets`뿐 아니라 앱 루트에도 놓이고, 빌드 중에도 읽힙니다. 의존성 설치 스크립트도 키스토어와 비밀번호 파일에 접근할 수 있습니다. 실제 자산을 다루기 전에 KMS에 둔 새 운영자 키로 옮겨야 하는 이유가 하나 더 생긴 셈입니다.
 
+## staging
+
+운영(`release/app-arco-financial`, app.arco.financial)에 올리기 전에 같은 코드를 `staging` 브랜치의 Vercel Preview에서 먼저 확인합니다.
+
+- 주소: `https://arco-giwa-git-staging-whdqkf88-8213s-projects.vercel.app` (Vercel 브랜치 별칭)
+- 화면만 분리합니다. API(Render `arco-giwa-api-release`), Supabase, GIWA 체인, 서명기는 운영과 같이 씁니다. staging에서 한 거래는 운영 데이터에 그대로 남습니다.
+- Vercel 변수: Preview의 `staging` 브랜치 전용으로 `VITE_ARCO_API_BASE`(운영과 같은 API 주소)와 `VITE_CUSTOMER_PRESENTATION=true`를 둡니다. `VITE_DYNAMIC_ENVIRONMENT_ID`와 `VITE_GIWA_ADMIN_ADDRESSES`는 이미 Production and Preview에 있습니다.
+- API의 `CORS_ALLOWED_ORIGINS`에 staging 주소를 넣습니다. 서버를 다시 빌드하지 않도록 "Save and deploy"로 반영합니다.
+
+흐름:
+
+1. 작업한 커밋을 `staging`에 합쳐 push합니다.
+2. staging 주소에서 확인합니다.
+3. 운영으로 올립니다: `git push origin staging:release/app-arco-financial`. 그 사이 release가 움직였으면 거절되므로, release를 staging에 먼저 합칩니다.
+
+주의:
+
+- release에 직접 push하지 않습니다. 어드민 콘솔, 거래 한도 같은 다른 작업도 staging을 거칩니다.
+- 이미 빌드된 커밋을 가리키기만 하는 push(새 커밋 없음)는 Vercel이 빌드하지 않습니다. 필요하면 `git commit --allow-empty`로 빈 커밋을 만들어 push합니다.
+- 2026-09-26 기준으로 Render API는 `7bcda4d`에서 돌고 있습니다. 어드민 콘솔 서버와 `ADMIN_*` 변수는 이미 들어가 있습니다. release에 있는 종목별 거래 한도 서버 변경(`fc1e8a7`)은 아직 배포 전이고, DB 마이그레이션을 먼저 적용해야 합니다(`docs/contracts/stocks-trading-limits.md`). 그 전에는 Render를 최신 커밋으로 다시 빌드하지 않습니다. 고객 화면은 새 서버 없이도 예전처럼 거래합니다. 한도 확인은 서버가 답하지 않으면 건너뜁니다.
+
 ## 다른 작업과 이어지는 설정
 
 - 통합 어드민 콘솔(별도 작업)이 합쳐지면: 새 API에 `ADMIN_OPERATORS`를 넣고 어드민 원점을 `CORS_ALLOWED_ORIGINS`에 추가합니다. Vercel에는 두 번째 프로젝트(`npm run build:admin`, 출력 `dist-admin`)를 만들고, 고객 앱에 `VITE_ADMIN_CONSOLE_URL`을 넣습니다.
