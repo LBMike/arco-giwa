@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { address, ensure, immutable, manifestDigest, type Manifest } from '../stocks/contracts.js';
 import { createDeploymentEvidence } from '../stocks-execution/deployment.js';
 import { parseStocksRuntimeConfig } from '../stocks-runtime/runtime.js';
+import { isPrivateNetworkSignerUrl } from '../stocks-runtime/transport.js';
 import { validTradingControlText } from '../stocks-trading-control/validation.js';
 
 function object(value: unknown, keys: string[]): Record<string, unknown> {
@@ -21,6 +22,17 @@ function url(value: unknown, originOnly: boolean, localDemoFrontend = false): st
   return originOnly ? parsed.origin : parsed.href;
 }
 
+// A hosted signer may sit on the platform's private network (http + one DNS label +
+// explicit port). Every other server endpoint keeps the HTTPS rule above.
+function signerOrigin(value: unknown): string {
+  if (typeof value === 'string' && !/[\s\\?#]/.test(value)) {
+    let parsed: URL | undefined;
+    try { parsed = new URL(value); } catch { parsed = undefined; }
+    if (parsed && isPrivateNetworkSignerUrl(parsed) && !parsed.username && !parsed.password && parsed.pathname === '/') return parsed.origin;
+  }
+  return url(value, true);
+}
+
 /** Offline configuration assembly, not chain evidence or permission to trade. */
 export function prepareStocksIntegrationBundle(manifestValue: unknown, settingsValue: unknown) {
   const settings = object(settingsValue, ['expectedManifestDigest', 'contractPolicyVerified', 'rpcUrl', 'publicRpcUrl', 'signerUrl', 'apiBaseUrl', 'frontendOrigins', 'operators']);
@@ -32,7 +44,7 @@ export function prepareStocksIntegrationBundle(manifestValue: unknown, settingsV
   const digest = manifestDigest(manifest);
   ensure(typeof settings.expectedManifestDigest === 'string' && /^[0-9a-f]{64}$/.test(settings.expectedManifestDigest) && settings.expectedManifestDigest === digest, 'BUNDLE_MANIFEST_DIGEST_MISMATCH');
   const rpcUrl = url(settings.rpcUrl, false), publicRpcUrl = url(settings.publicRpcUrl, false);
-  const signerUrl = url(settings.signerUrl, true), apiBaseUrl = url(settings.apiBaseUrl, true);
+  const signerUrl = signerOrigin(settings.signerUrl), apiBaseUrl = url(settings.apiBaseUrl, true);
   ensure(Array.isArray(settings.frontendOrigins) && settings.frontendOrigins.length > 0 && settings.frontendOrigins.length <= 10, 'INVALID_FRONTEND_ORIGINS');
   const origins = settings.frontendOrigins.map(value => url(value, true, true));
   ensure(new Set(origins).size === origins.length, 'DUPLICATE_FRONTEND_ORIGIN');

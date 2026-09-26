@@ -10,7 +10,7 @@ import { giwaConfirmedTransport } from '../stocks/giwa-confirmation.js';
 import type { StocksPricing } from '../stocks/pricing.js';
 import { stocksPricingFromEnvironment } from './pricing.js';
 import { StocksFinalizedObserver } from './observer.js';
-import { endpoint, externalStocksSigner, httpStocksRpc } from './transport.js';
+import { endpoint, externalStocksSigner, httpStocksRpc, signerEndpoint } from './transport.js';
 import { parseStocksOperators, type NamedOperator } from './operators.js';
 import { readStocksPublicJson } from './public-config.js';
 import { StocksObservationHealth } from './health.js';
@@ -47,7 +47,7 @@ export function parseStocksRuntimeConfig(value: unknown, localCustomer = false):
   endpoint(row.rpcUrl);
   const operators = parseStocksOperators(row.operators);
   if (localCustomer) validateLocalCustomerRuntime({ ...row, operators });
-  else endpoint(row.signerUrl);
+  else signerEndpoint(row.signerUrl);
   return { ...structuredClone(row), operators };
 }
 

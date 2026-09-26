@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { httpStocksRpc, externalStocksSigner, type HttpFetch } from './transport.js';
+import { endpoint, httpStocksRpc, externalStocksSigner, signerEndpoint, type HttpFetch } from './transport.js';
 import { authorizedCall } from '../stocks/chain.js';
 import { callDigest, manifestDigest, StocksError } from '../stocks/contracts.js';
 import { testManifest, a, h } from '../stocks/test-fixtures.js';
@@ -58,4 +58,18 @@ test('RPC still rejects a foreign envelope ID and never retries or accepts write
   await assert.rejects(rpc('eth_chainId', []), /STOCKS_RPC_RESPONSE_UNAVAILABLE/);
   await assert.rejects(rpc('eth_sendRawTransaction', []), /READ_ONLY_RPC_METHOD/);
   assert.equal(calls, 1);
+});
+
+test('only signer URLs may use plain HTTP, and only for a single-label private host with an explicit port', () => {
+  assert.equal(signerEndpoint('http://arco-stocks-signer:4394').href, 'http://arco-stocks-signer:4394/');
+  assert.equal(signerEndpoint('http://signer9:10000/').href, 'http://signer9:10000/');
+  assert.equal(signerEndpoint('https://signer.example.test').href, 'https://signer.example.test/');
+  for (const value of ['http://arco-stocks-signer', 'http://signer.example.test:4394', 'http://localhost:4394',
+    'http://127.0.0.1:4394', 'http://10.0.0.5:4394', 'http://2130706433:4394', 'http://-bad:4394',
+    'http://user:pw@arco-stocks-signer:4394', 'http://arco-stocks-signer:4394/?x=1', 'http://arco-stocks-signer:4394/#x',
+    'ftp://arco-stocks-signer:4394'])
+    assert.throws(() => signerEndpoint(value), /INVALID_STOCKS_ENDPOINT/, value);
+  // RPC endpoints keep the HTTPS rule, and the local harness exemption is unchanged.
+  assert.throws(() => endpoint('http://arco-stocks-signer:4394'), /INVALID_STOCKS_ENDPOINT/);
+  assert.equal(signerEndpoint('http://127.0.0.1:4394', true).hostname, '127.0.0.1');
 });

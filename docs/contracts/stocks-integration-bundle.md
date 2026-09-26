@@ -13,7 +13,7 @@
 | `contractPolicyVerified` | 검토한 테스트 계약 정책이면 `true`. 이 입력은 온라인 검증을 대신하지 않습니다. |
 | `rpcUrl` | 서버용 HTTPS RPC. 브라우저 설정으로 복사하지 않습니다. |
 | `publicRpcUrl` | 브라우저에 공개 가능한 HTTPS RPC를 별도 지정합니다. 비밀 키가 포함된 주소를 넣지 마세요. |
-| `signerUrl` | 외부 서명 서비스의 HTTPS 원점. 루트 이외 경로는 허용하지 않습니다. |
+| `signerUrl` | 외부 서명 서비스의 HTTPS 원점. 루트 이외 경로는 허용하지 않습니다. 호스팅 플랫폼 사설 네트워크의 서명기는 `http://<점 없는 호스트>:<포트>` 형태의 HTTP 원점도 허용합니다. |
 | `apiBaseUrl` | UI가 연결할 API의 HTTPS 원점. 이 도구는 경로 접두사가 없는 배포만 지원합니다. |
 | `frontendOrigins` | 허용할 UI의 HTTPS 원점 배열, 1~10개. 와일드카드·경로·중복은 불가합니다. 포트는 CORS와 SIWE 도메인에 유지합니다. |
 | `operators` | 1~100개의 `{wallet, operatorId, permissions}`. 지갑과 ID는 중복되지 않아야 합니다. 모든 운영자에 `stocks:read`, 최소 한 명에 추가 `stocks:control` 권한이 필요합니다. 그 외 권한은 거절합니다. |

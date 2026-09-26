@@ -126,3 +126,12 @@ test('Finalized observer retains its cursor for unapplied settlement or nonfinal
   rpc.blocks.set('10', { number: '10', hash: h(99), timestamp: Math.floor(Date.now() / 1000).toString() });
   await assert.rejects(() => observer.runOnce(), /OBSERVER_CURSOR_OR_FINALITY_INVALID/); assert.equal(unlocked, 4);
 });
+
+test('runtime config accepts a private-network signer URL but never plain HTTP to a public or loopback host', () => {
+  const config = { profile: 'DEMO_TESTNET', manifest: testManifest(), rpcUrl: 'https://rpc.example.test',
+    signerUrl: 'http://arco-stocks-signer:4394', contractPolicyVerified: true, paused: true, operators: [] };
+  assert.equal(parseStocksRuntimeConfig(config).signerUrl, 'http://arco-stocks-signer:4394');
+  for (const signerUrl of ['http://signer.example.test:4394', 'http://127.0.0.1:4394', 'http://localhost:4394', 'http://arco-stocks-signer'])
+    assert.throws(() => parseStocksRuntimeConfig({ ...config, signerUrl }), /INVALID_STOCKS_ENDPOINT/, signerUrl);
+  assert.throws(() => parseStocksRuntimeConfig({ ...config, rpcUrl: 'http://arco-stocks-signer:4394' }), /INVALID_STOCKS_ENDPOINT/);
+});

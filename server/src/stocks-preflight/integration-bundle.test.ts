@@ -138,3 +138,14 @@ test('CLI emits private-permission files without inherited secrets, rejects over
     assert.equal(invoke(['--help']).status, 0);
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });
+
+test('a hosted signer on the platform private network may use plain HTTP; every other endpoint may not', () => {
+  const f = fixture(); f.settings.signerUrl = 'http://arco-stocks-signer:4394/';
+  const bundle = prepareStocksIntegrationBundle(f.manifest, f.settings);
+  assert.equal(parseStocksRuntimeConfig(JSON.parse(bundle.runtimeText)).signerUrl, 'http://arco-stocks-signer:4394');
+  for (const value of ['http://arco-stocks-signer', 'http://arco-stocks-signer:4394/v1', 'http://signer.example.test:4394',
+    'http://localhost:4394', 'http://user@arco-stocks-signer:4394', 'http://arco-stocks-signer:4394?'])
+    assert.throws(() => prepareStocksIntegrationBundle(f.manifest, { ...f.settings, signerUrl: value }), value);
+  for (const key of ['rpcUrl', 'publicRpcUrl', 'apiBaseUrl'] as const)
+    assert.throws(() => prepareStocksIntegrationBundle(f.manifest, { ...f.settings, [key]: 'http://arco-stocks-signer:4394' }), key);
+});

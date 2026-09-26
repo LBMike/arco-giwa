@@ -14,7 +14,7 @@
 | `STOCKS_DATABASE_URL` | 선택적인 Stocks DB 연결. 생략하면 기존 서버의 검증된 DATABASE_URL을 사용한다. |
 | `STOCKS_AUTODISPATCH` | 생략/`0`이면 새 주문이 차단되고 worker/observer tick은 실행되지 않는다. `1`은 DEMO_TESTNET과 완전한 설정을 요구한다. 다른 값은 시작 전 거절한다. |
 
-공개 JSON 구조는 `profile: "DEMO_TESTNET"`, `manifest: <검증된 v2 명세>`, `rpcUrl`, `signerUrl`, `contractPolicyVerified: true`, `paused: boolean`, `operators: [{wallet,operatorId,permissions:["stocks:read"]}]`다. 선택적 `operatorControls: true`로 영속 운영자 중지·재개 기능을 활성화할 수 있다. 생략 또는 false면 기존 경로와 동작을 유지한다. RPC·서명 URL은 HTTPS여야 하며 URL의 사용자 정보·query·fragment는 허용하지 않는다. 서명 서비스 URL은 루트 경로여야 한다. 실제 주소나 명세를 추측해 샘플 값으로 활성화하지 않는다.
+공개 JSON 구조는 `profile: "DEMO_TESTNET"`, `manifest: <검증된 v2 명세>`, `rpcUrl`, `signerUrl`, `contractPolicyVerified: true`, `paused: boolean`, `operators: [{wallet,operatorId,permissions:["stocks:read"]}]`다. 선택적 `operatorControls: true`로 영속 운영자 중지·재개 기능을 활성화할 수 있다. 생략 또는 false면 기존 경로와 동작을 유지한다. RPC·서명 URL은 HTTPS여야 하며 URL의 사용자 정보·query·fragment는 허용하지 않는다. 예외는 서명 URL 하나다. 서명기를 호스팅 플랫폼의 사설 네트워크(예: Render private service)에 둔 경우 `http://arco-stocks-signer:4394`처럼 점이 없는 단일 호스트 이름과 명시적 포트를 쓰는 HTTP 원점을 허용한다. 공개 도메인, IP, localhost는 여전히 HTTPS만 허용하고, RPC URL에는 이 예외가 없다. 서명 서비스 URL은 루트 경로여야 한다. 실제 주소나 명세를 추측해 샘플 값으로 활성화하지 않는다.
 
 운영자 디렉터리는 설정 파일 파싱·직접 런타임 구성·세션 생성에서 같은 규칙으로 검증한다. 지갑은 유효한 0이 아닌 EVM 주소이며 소문자로 정규화한 후 중복을 거절한다. `operatorId`는 1~128 UTF-16 코드 단위의 고유한 문자열이다. 앞뒤 공백·제어 문자·짝이 없는 surrogate는 허용하지 않으며, 정상 한글·이모지는 허용한다. ID는 대소문자를 구분하고 자동으로 잘라내거나 변경하지 않는다. 권한은 `stocks:read`, `stocks:control`만 허용하고 같은 권한의 중복을 거절한다. 위반 시 `INVALID_STOCKS_OPERATORS`로 실패하며 직접 런타임 구성에서도 RPC·서명 서비스·DB 호출 전에 차단한다.
 

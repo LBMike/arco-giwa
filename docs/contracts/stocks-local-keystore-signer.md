@@ -25,3 +25,32 @@ Only exact, bounded EIP-1559 transactions enter the custody adapter. It independ
 4. Start with Stocks paused, verify observer history and reconcile balances, then validate the user's wallet buy, portfolio refresh and partial sell on UI4392 before updating `app.arco.financial`.
 
 No public trading activation is claimed by the local custody tests.
+
+## Hosted secret-file keystore (Render private service)
+
+For a hosted deployment the same encrypted wallet can run without a terminal. The custody type
+`{ "type": "SECRET_FILE_KEYSTORE", "exclusiveAccountControlConfirmed": true }` is a separate,
+explicit choice; `LOCAL_KEYSTORE` keeps its hidden-TTY and loopback-only rules.
+
+```sh
+node scripts/stocks-signer/run-service.mjs --config /etc/secrets/stocks-signer.json \
+  --keystore /etc/secrets/signer-keystore.json --password-file /etc/secrets/signer-keystore-password --serve
+```
+
+- The encrypted keystore and its password are two platform secret files. The password is never
+  read from the environment; the launcher still refuses `DEPLOYER_PRIVATE_KEY`,
+  `GIWA_KEYSTORE_PASSWORD`, `STOCKS_SIGNER_PRIVATE_KEY` and `STOCKS_SIGNER_KEYSTORE_PASSWORD`.
+- The unchanged strict loader only opens an owner-only file without links, so the launcher hands it
+  a private `0600` copy in a fresh `0700` temporary directory and deletes the copy after unlocking.
+- The host may bind `0.0.0.0` inside a private service. It must never get a public ingress. The API
+  reaches it at the platform's internal address, e.g. `http://arco-stocks-signer:4394`, with the
+  same bearer token (`STOCKS_SIGNER_TOKEN`). Failures print one fixed line with the stage only.
+- Anyone who can read both secret files, or run code in that service, can use the key. That is the
+  accepted trade-off for the testnet; move signing to a KMS-held key before real assets.
+
+The journal is the same `stocks_signer` schema (`server/src/stocks-signer/migrations`), applied
+explicitly. `scripts/stocks-signer/journal.mjs --config <path> --status` shows the chain nonces as the
+signer's readiness sees them and the journal row (read-only). `--seed <nonce>` writes the single
+account row only when the nonce equals the config's `reviewedInitialNonce` and the chain is quiet at
+exactly that nonce (finalized = pending). It never inserts an operation or picks a nonce itself.
+Before seeding a new journal, drain and stop every other signer that uses the same account.

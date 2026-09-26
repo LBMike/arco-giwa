@@ -54,3 +54,19 @@ test('local keystore host configuration has no credential fields and only binds 
     { custody: { ...local.custody, region: 'ap-northeast-2' } }])
     assert.throws(() => parseSignerHostConfig({ ...local, ...patch }), /^Error: SIGNER_HOST_CONFIGURATION_INVALID$/);
 });
+test('secret-file keystore custody has no credential fields and may bind the platform private network', () => {
+  const hosted = { ...config(), listen: { host: '0.0.0.0', port: 4394 }, custody: { type: 'SECRET_FILE_KEYSTORE', exclusiveAccountControlConfirmed: true } };
+  const parsed = parseSignerHostConfig(hosted);
+  assert.equal(parsed.custody.type, 'SECRET_FILE_KEYSTORE'); assert.equal(parsed.listen.host, '0.0.0.0');
+  assert.equal(parseSignerHostConfig({ ...hosted, listen: { host: '127.0.0.1', port: 4394 } }).listen.host, '127.0.0.1');
+  for (const patch of [{ custody: { ...hosted.custody, password: 'REJECT_INPUT' } },
+    { custody: { ...hosted.custody, passwordFile: '/etc/secrets/REJECT_INPUT' } },
+    { custody: { ...hosted.custody, keystorePath: '/etc/secrets/REJECT_INPUT' } },
+    { custody: { ...hosted.custody, exclusiveAccountControlConfirmed: false } },
+    { custody: { ...hosted.custody, region: 'ap-northeast-2' } },
+    { listen: { host: '10.0.0.5', port: 4394 } }])
+    assert.throws(() => parseSignerHostConfig({ ...hosted, ...patch }), /^Error: SIGNER_HOST_CONFIGURATION_INVALID$/);
+  // The Mac keystore custody keeps its loopback-only rule.
+  assert.throws(() => parseSignerHostConfig({ ...hosted, custody: { type: 'LOCAL_KEYSTORE', exclusiveAccountControlConfirmed: true } }),
+    /^Error: SIGNER_HOST_CONFIGURATION_INVALID$/);
+});

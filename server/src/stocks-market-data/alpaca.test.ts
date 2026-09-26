@@ -131,6 +131,34 @@ test('runtime provider/catalog/feed selection is explicit, default-compatible, a
   for (const settings of [{ STOCKS_MARKET_DATA_PROVIDER: 'BAD_PRIVATE_VALUE' }, { ALPACA_DATA_FEED: 'BAD_PRIVATE_VALUE' }, { STOCKS_MARKET_DATA_CATALOG: 'BAD_PRIVATE_VALUE' }, { STOCKS_MARKET_DATA_PROVIDER: 'ALPACA', ALPACA_API_KEY_ID: 'ID\n', ALPACA_API_SECRET_KEY: 'secret' }]) assert.throws(() => configuredStocksMarketData(settings), /^Error: INVALID_MARKET_DATA_CONFIG$/);
 });
 
+test('ALPACA runtime defaults to the local free-plan limits; explicit ports and the MASSIVE provider keep their own', async () => {
+  const env = { STOCKS_MARKET_DATA_PROVIDER: 'ALPACA', STOCKS_MARKET_DATA_CATALOG: 'CURATED_40', ALPACA_API_KEY_ID: 'ID', ALPACA_API_SECRET_KEY: 'SECRET', MASSIVE_API_KEY: 'TEST_MASSIVE' };
+  const ranges = ['1D', '1W', '1M', '3M', '1Y'] as const;
+  const counted = (ports: { requestsPerMinute?: number } = {}) => {
+    const calls = { alpaca: 0, massive: 0 };
+    const service = configuredStocksMarketData(env, { ...ports, now: () => NOW, fetch: async input => {
+      if (new URL(String(input)).hostname === 'data.alpaca.markets') calls.alpaca++; else calls.massive++;
+      return response('{}');
+    } });
+    return { calls, service };
+  };
+  const { calls, service } = counted();
+  const symbols = service.catalog().data!.securities.map(item => item.symbol);
+  for (const symbol of symbols.slice(0, 13)) for (const range of ranges) await service.chart(symbol, range);
+  assert.equal(calls.alpaca, 60, 'one list view can read all 40 one-day charts in a minute');
+  for (const symbol of symbols.slice(0, 6)) await service.profile(symbol);
+  assert.equal(calls.massive, 4, 'Massive Basic (5 a minute) keeps one call of headroom');
+  const pinned = counted({ requestsPerMinute: 5 });
+  for (const range of ranges) await pinned.service.chart('NVDA', range);
+  await pinned.service.chart('MU', '1D');
+  assert.equal(pinned.calls.alpaca, 5, 'an explicit port still wins');
+  let massive = 0;
+  const legacy = configuredStocksMarketData({ MASSIVE_API_KEY: 'TEST_MASSIVE' }, { now: () => NOW, fetch: async () => { massive++; return response('{}'); } });
+  for (const range of ranges) await legacy.chart('NVDA', range);
+  await legacy.profile('NVDA');
+  assert.equal(massive, 5, 'the MASSIVE provider keeps its default budget');
+});
+
 test('derived percent overflow preserves price and omits unrepresentable percentage', async () => {
   const service = createStocksMarketDataService({ ...credentials, now: () => NOW, fetch: async () => response('{"NVDA":{"latestTrade":{"p":999999999999999999999999999999,"t":"2026-09-21T17:59:59Z"},"prevDailyBar":{"c":0.000000000000000001,"t":"2026-09-18T04:00:00Z"}}}') });
   const q = (await service.quotes()).data![0]; assert.equal(q.price, '999999999999999999999999999999'); assert.equal(q.changePercent, null); assert.equal(q.status, 'AVAILABLE');
