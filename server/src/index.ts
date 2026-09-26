@@ -6,7 +6,8 @@ import { closeOnce, installServerShutdown, startManagedStocksServer } from "./st
 import { stocksSessionResolvers } from "./stocks-runtime/session.js"
 import { sessionDomains } from "./admin-auth/session.js"
 import { StocksSubmissionsService } from "./stocks-submissions/service.js"
-import { configuredStocksMarketClock, configuredStocksMarketData } from "./stocks-market-runtime/config.js"
+import { configuredStocksMarketClock, configuredStocksMarketData, stocksMarketProfileStoreEnabled } from "./stocks-market-runtime/config.js"
+import { createSqlProfileStore, prismaProfileStoreSql } from "./stocks-market-data/profile-store.js"
 import type { StocksMarketDataService } from "./stocks-market-data/index.js"
 import { createPublicClient, http, keccak256, parseAbi, toBytes, type Hex } from "viem"
 import { buildApp, type PauseStateVaultRef, type VaultPauseState } from "./app.js"
@@ -32,11 +33,13 @@ export async function startServer(envSource: NodeJS.ProcessEnv = process.env, cl
   }
   const env = validateServerEnv(envSource)
   const autodispatch = stocksAutodispatch(envSource)
-  const stocksMarketData = configuredStocksMarketData(envSource)
-  const stocksMarketClock = configuredStocksMarketClock(envSource)
+  const marketProfileStore = stocksMarketProfileStoreEnabled(envSource)
   const prisma = createPrismaClient()
   const closeDatabase = closeOnce(() => prisma.$disconnect())
   try {
+    // STOCKS_MARKET_PROFILE_STORE=1: the market page's company facts survive a restart (stocks_market_profiles table).
+    const stocksMarketData = configuredStocksMarketData(envSource, marketProfileStore ? { profileStore: createSqlProfileStore(prismaProfileStoreSql(prisma)) } : {})
+    const stocksMarketClock = configuredStocksMarketClock(envSource)
     return await composeServer(envSource, env, prisma, closeDatabase, autodispatch, cliOwnsSignals, stocksMarketData, stocksMarketClock, localCustomer)
   } catch (error) {
     await closeDatabase()

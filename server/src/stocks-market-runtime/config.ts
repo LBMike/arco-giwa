@@ -8,7 +8,7 @@ import {
 import { createAlpacaMarketClock } from "../stocks-market-data/session.js"
 
 const delays: readonly string[] = ["UNKNOWN", "DELAYED_15_MIN", "END_OF_DAY", "REALTIME"]
-type RuntimePorts = Pick<StocksMarketDataOptions, "catalog" | "fetch" | "now" | "requestsPerMinute" | "massiveRequestsPerMinute" | "etfGlobalEnabled" | "issuerFundamentalsEnabled" | "profileCachePath" | "snapshotStore">
+type RuntimePorts = Pick<StocksMarketDataOptions, "catalog" | "fetch" | "now" | "requestsPerMinute" | "massiveRequestsPerMinute" | "etfGlobalEnabled" | "issuerFundamentalsEnabled" | "profileCachePath" | "snapshotStore" | "profileStore">
 
 /**
  * Alpaca Basic (IEX) prices with Massive Basic profiles: the limits the local live market already runs with
@@ -50,6 +50,17 @@ export function configuredStocksMarketData(
     alpacaSecretKey: source.ALPACA_API_SECRET_KEY || undefined,
     profileCachePath: ports.profileCachePath ?? source.STOCKS_MARKET_PROFILE_CACHE_PATH ?? undefined,
   })
+}
+
+/**
+ * STOCKS_MARKET_PROFILE_STORE=1 keeps the market page's company facts (market cap, shares outstanding, fund assets) in
+ * Postgres, so a restart does not empty the Mkt Cap column while the free Massive plan refetches them a few a minute.
+ * It needs the stocks_market_profiles migration. Unset or 0: in memory only, as before.
+ */
+export function stocksMarketProfileStoreEnabled(source: NodeJS.ProcessEnv): boolean {
+  const value = source.STOCKS_MARKET_PROFILE_STORE
+  if (value !== undefined && value !== "0" && value !== "1") throw new Error("INVALID_MARKET_DATA_CONFIG")
+  return value === "1"
 }
 
 /** Market-open information is independent of quote freshness and order eligibility. */

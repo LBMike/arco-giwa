@@ -6,6 +6,7 @@ import { issuerFundamentals } from './issuer.js';
 import { AlpacaTransport, MassiveTransport, IssuerTransport } from './transport.js';
 import { loadProfileDiskCache, profileCachePath, saveProfileDiskCache, type ProfileCacheEntry } from './profile-disk-cache.js';
 import { snapshotSourceTimestamp, validatedSnapshotData, type MarketSnapshotStore } from './snapshot-store.js';
+import { isProfileStoreKey } from './profile-store.js';
 
 export interface StocksMarketDataOptions {
   apiKey?: string;
@@ -26,6 +27,11 @@ export interface StocksMarketDataOptions {
   profileCachePath?: string;
   /** Optional durable store for validated public market facts. */
   snapshotStore?: MarketSnapshotStore;
+  /**
+   * Optional durable store for the company facts only (profile, AUM and issuer entries): a restart restores them at once.
+   * Quotes and charts keep their in-memory policy. Ignored when snapshotStore is set (it already keeps every key).
+   */
+  profileStore?: MarketSnapshotStore;
 }
 export interface StocksMarketDataService {
   catalog(): MarketResponse<DisplayCatalog>;
@@ -73,6 +79,7 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
   const priceTransport = provider === 'ALPACA' ? alpaca : transport;
   const cache = new Map<string, Entry>(); const flights = new Map<string, Promise<void>>();
   const snapshotStore = options.snapshotStore;
+  const profileStore = options.profileStore;
   const snapshotScope = createHash('sha256').update(JSON.stringify({ provider, feed: provider === 'ALPACA' ? alpacaFeed : null, delay, symbols: [...symbols].sort() })).digest('hex');
   const hydrated = new Set<string>();
   const diskPath = options.profileCachePath === undefined ? null : profileCachePath(options.profileCachePath);
@@ -92,7 +99,9 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
   async function get<T>(key: string, policy: { ttl: number; maxAge: number }, load: () => Promise<T>): Promise<MarketResponse<T>> {
     const maxAge = snapshotStore && (key === 'quotes' || key.startsWith('chart:')) ? 7 * 86400000 : policy.maxAge;
     const hasTransport = Boolean(key === 'quotes' || key.startsWith('chart:') ? priceTransport : transport);
-    if (!hasTransport && !snapshotStore) return envelope('UNCONFIGURED', 'NOT_CONFIGURED', null);
+    // The durable store for this key: every key with snapshotStore, only the company facts with profileStore.
+    const store = snapshotStore ?? (profileStore && isProfileStoreKey(key) ? profileStore : undefined);
+    if (!hasTransport && !store) return envelope('UNCONFIGURED', 'NOT_CONFIGURED', null);
     let entry = cache.get(key); let time = now();
     if (hasTransport && entry?.data !== undefined && entry.fetched !== undefined && !entry.reason && time - entry.fetched < policy.ttl) return envelope('AVAILABLE', null, entry.data as T, entry.fetched);
     if (!entry || entry.retryAt <= time) {
@@ -102,10 +111,10 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
         flight = (async () => {
           // A restored row is always provisional until the provider has refreshed it.
           // The source fetch time is retained, so a failed refresh cannot make it fresh.
-          if (snapshotStore && !hydrated.has(key)) {
+          if (store && !hydrated.has(key)) {
             if (cache.get(key)?.data === undefined) {
               try {
-                const stored = await snapshotStore.read(snapshotScope, key);
+                const stored = await store.read(snapshotScope, key);
                 hydrated.add(key);
                 const at = now();
                 if (stored && Number.isSafeInteger(stored.fetchedAt) && stored.fetchedAt <= at && at - stored.fetchedAt <= maxAge) {
@@ -150,11 +159,11 @@ export function createStocksMarketDataService(options: StocksMarketDataOptions =
             }
             cache.set(key, { data, fetched: now(), retryAt: 0, reason: null });
             if (key.startsWith('profile:') || key.startsWith('aum:') || key.startsWith('issuer:')) saveProfiles();
-            if (snapshotStore) {
+            if (store) {
               const fetchedAt = cache.get(key)!.fetched!;
               const publicData = validatedSnapshotData(key, data, symbols, now());
               if (publicData !== null) try {
-                await snapshotStore.write(snapshotScope, key, { data: publicData, fetchedAt, sourceTimestamp: snapshotSourceTimestamp(key, publicData) });
+                await store.write(snapshotScope, key, { data: publicData, fetchedAt, sourceTimestamp: snapshotSourceTimestamp(key, publicData) });
               } catch { /* A database error cannot hide a valid provider response. */ }
             }
           } catch (error) {

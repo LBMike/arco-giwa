@@ -16,6 +16,7 @@
 ## 확인된 사실 (2026-09-26)
 
 - DB: Supabase Arco 프로젝트의 `_prisma_migrations` 16개가 이 브랜치의 `prisma/migrations` 16개와 이름이 같고 모두 완료 상태입니다. 16번째인 거래 한도 마이그레이션(`20260927000000_stocks_trading_limits`)은 2026-09-26 10:56 UTC에 적용했습니다. 배포할 때 마이그레이션을 실행하지 않습니다.
+- DB: 17번째인 시장 기업 정보 마이그레이션(`20260928000000_stocks_market_profiles`)은 2026-09-26 17:47 UTC에 Supabase `apply_migration`으로 적용했습니다(테이블 `arco_evm."StocksMarketProfile"` 생성 확인). `_prisma_migrations`에 기록하는 행은 아직 넣지 않았습니다. 넣을 때 checksum은 `bfd52b3d1dcb6aaa4745b9feafc08ff7927f910f65b59efb8bafc46f0820b6d9`(migration.sql의 SHA-256)입니다.
 - 기존 Savings·Funds 서버 코드는 main과 거의 같습니다(`server/src/app.ts`, `server/src/index.ts`의 Stocks 연결 부분만 다름). 로컬 데모는 Savings·Funds 요청을 운영 API로 보냈으므로, 이 브랜치 서버로 처리하는 것은 1단계가 처음입니다.
 - 시세: API가 `/api/v1/stocks/market/*`(목록, 시세, 차트, 프로필, NVDA 실시간·스트림)를 직접 제공합니다. Stocks 런타임이 꺼져 있어도 시세는 동작합니다.
 - Stocks 런타임은 시작할 때 서명기(`signerUrl`, HTTPS 원점만 허용)에 연결해 정책을 검증합니다. 서명기에 닿지 않으면 Stocks를 켤 수 없습니다.
@@ -170,8 +171,11 @@ npm run stocks:integration:prepare -- \
 | `STOCKS_AUTODISPATCH` | `1` | 아니요 |
 | `STOCKS_PRICING` | `ALPACA_LIVE` | 아니요 |
 | `STOCKS_TRADING_LIMITS` | `1` | 아니요 |
+| `STOCKS_MARKET_PROFILE_STORE` | `1` | 아니요 |
 
 `STOCKS_DATABASE_URL`은 비워 둡니다. 기존 `DATABASE_URL`을 씁니다. Render의 Secret File과 환경변수 변경은 다시 배포해야 반영됩니다.
+
+`STOCKS_MARKET_PROFILE_STORE=1`은 시세 화면의 기업 정보(시가총액, 발행 주식 수, ETF 자산)를 Supabase 테이블 `arco_evm."StocksMarketProfile"`에 저장합니다. 이 값이 없으면 기업 정보는 서버 메모리에만 있어서, Render를 다시 빌드하거나 재시작할 때마다 지워집니다. Massive 무료 플랜은 1분에 4건만 받아올 수 있어서 40종목을 다시 채우는 데 10분쯤 걸리고, 그동안 Mkt Cap 칸이 비어 보입니다. 저장해 두면 재시작 직후에도 바로 복원됩니다. 시세와 차트는 저장하지 않고 지금처럼 메모리에서만 다룹니다. 테이블은 `prisma/migrations/20260928000000_stocks_market_profiles` 마이그레이션이 만듭니다. 마이그레이션을 먼저 적용하고 나서 이 변수를 켭니다.
 
 ### 켜는 순서
 
