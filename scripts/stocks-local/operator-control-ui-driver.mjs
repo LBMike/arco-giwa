@@ -86,17 +86,17 @@ export async function runOperatorControlUiScenario({ host, stack, wallet, browse
     return row.data ?? row;
   }
   const current = () => call(root);
-  async function change(paused, reason, expected = 'accepted', double = false) {
+  // The console fills the recorded reason itself; `label` only names the step in failures.
+  async function change(paused, label, expected = 'accepted', double = false) {
     const walletAttemptsBefore = walletAttempts.length;
     await ready();
     if (await outcome().count() && await outcome().getByRole('button', { name: 'Close', exact: true }).count()) {
       await outcome().getByRole('button', { name: 'Close', exact: true }).click(); await ready();
     }
-    await panel().getByLabel('Reason (recorded in the change history)', { exact: true }).fill(reason);
     await panel().getByRole('button', { name: paused ? 'Review pause' : 'Review resume', exact: true }).click();
     const confirm = panel().getByRole('button', { name: paused ? 'Confirm pause' : 'Confirm resume', exact: true });
     if (double) await confirm.dblclick(); else await confirm.click();
-    await wait(async () => await outcome().getAttribute('data-outcome') === expected, `Command ${expected}`);
+    await wait(async () => await outcome().getAttribute('data-outcome') === expected, `${label}: command ${expected}`);
     assert.equal(walletAttempts.length, walletAttemptsBefore, 'A control command must not request any wallet operation');
     if (expected === 'accepted') assert.doesNotMatch(await gate().innerText(), /in the future \(clock skew\)/, 'Fresh local change is not clock skew');
   }

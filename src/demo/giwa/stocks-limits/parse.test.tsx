@@ -1,5 +1,5 @@
 // Trading limits: the contracts as the client reads them, checked against the server's own plugin (real Fastify
-// injection) so the two cannot drift apart silently, plus the amount and reason rules the operator types against.
+// injection) so the two cannot drift apart silently, plus the amount rules the operator types against and the fixed reason.
 import assert from "node:assert/strict"
 import test from "node:test"
 import Fastify from "fastify"
@@ -10,11 +10,11 @@ import { StocksContractError } from "../stocks-admin/parse"
 import { LIMITS_HISTORY_PATH, LIMITS_PATH, limitPath } from "./client"
 import { LIM_DIGEST, LIM_PROFILE, LIM_WINDOW, limEvent, limRead, limRow, limState } from "./fixtures"
 import {
+  LIMIT_CHANGE_REASON,
   capInputText,
   capText,
   cashText,
   checkCapInput,
-  checkReason,
   describeChange,
   describeEvent,
   limitStatus,
@@ -31,7 +31,7 @@ const command = (overrides: Partial<TradingLimitCommand> = {}): TradingLimitComm
   dailyCashLimit: "50000000000",
   expectedVersion: 0,
   idempotencyKey: "limit-key-0001",
-  reason: "Reason for version 1",
+  reason: LIMIT_CHANGE_REASON,
   ...overrides,
 })
 
@@ -167,11 +167,12 @@ test("status, share and change wording follow the server's rule: at the cap even
   assert.equal(describeEvent(parseLimitHistory({ items: [limEvent("SELL", 3, { previousEnabled: false, enabled: true })] }).items[0]), "Off → On")
 })
 
-test("reason: required, trimmed, one line, at most 500 characters", () => {
-  assert.deepEqual(checkReason("  Cap buys for the launch  "), { ok: true, reason: "Cap buys for the launch" })
-  for (const bad of ["", "   ", "line\nbreak", "tab\there", "x".repeat(501), "lone \uD800 surrogate"]) assert.equal(checkReason(bad).ok, false, JSON.stringify(bad))
-  assert.equal(checkReason("x".repeat(500)).ok, true)
-  assert.equal(checkReason("😀 drill").ok, true)
+test("reason: the console sends one fixed text that meets the server's rule (1–500 characters, trimmed, one line)", () => {
+  assert.equal(LIMIT_CHANGE_REASON, "Changed in the admin console")
+  assert.equal(LIMIT_CHANGE_REASON.trim(), LIMIT_CHANGE_REASON)
+  assert.ok(LIMIT_CHANGE_REASON.length >= 1 && LIMIT_CHANGE_REASON.length <= 500)
+  assert.doesNotMatch(LIMIT_CHANGE_REASON, /[\u0000-\u001f\u007f-\u009f]/)
+  // The parity test below sends it through the real plugin's input checks.
 })
 
 // ---------------------------------------------------------------- parity with the real server plugin
@@ -202,7 +203,7 @@ test("parity: whatever the real limits plugin returns, the client parses to the 
     assert.deepEqual(parseLimitsRead(body.data), read)
     await app.close()
   }
-  // The client's own PUT body passes the server's input checks and its answer parses back.
+  // The client's own PUT body (with the fixed reason) passes the server's input checks and its answer parses back.
   for (const [sent, replayedState] of [
     [command(), null],
     [command({ enabled: false, dailyCashLimit: null, expectedVersion: 6, idempotencyKey: "limit-key-0002" }), limState("SELL", 9)],

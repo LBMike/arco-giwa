@@ -104,7 +104,6 @@ try {
     await until(async () => await gate().getAttribute('data-phase') === 'ready', 'control ready');
     const close = page.getByTestId('stocks-trading-control-outcome').getByRole('button', { name: 'Close', exact: true });
     if (await close.count()) await close.click();
-    await panel.getByLabel('Reason (recorded in the change history)', { exact: true }).fill('Owner workspace verification');
     await panel.getByRole('button', { name: paused ? 'Review pause' : 'Review resume', exact: true }).click();
     await panel.getByRole('button', { name: paused ? 'Confirm pause' : 'Confirm resume', exact: true }).click();
     await until(async () => await page.getByTestId('stocks-trading-control-outcome').getAttribute('data-outcome') === 'accepted', 'control accepted');

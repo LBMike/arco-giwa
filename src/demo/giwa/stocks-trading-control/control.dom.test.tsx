@@ -225,15 +225,6 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     assert.ok(element, `missing button: ${label}\n${text().slice(0, 800)}`)
     await act(async () => { element!.dispatchEvent(new w.MouseEvent("click", { bubbles: true })) })
   }
-  const typeReason = async (value: string) => {
-    const area = container.querySelector("textarea") as HTMLTextAreaElement | null
-    assert.ok(area, "reason field")
-    const setter = Object.getOwnPropertyDescriptor(w.HTMLTextAreaElement.prototype, "value")!.set!
-    await act(async () => {
-      setter.call(area, value)
-      area!.dispatchEvent(new w.Event("input", { bubbles: true }))
-    })
-  }
   const gatePhase = () => q("stocks-trading-control-gate")?.getAttribute("data-phase") ?? null
   const outcome = () => q("stocks-trading-control-outcome")?.getAttribute("data-outcome") ?? null
   const postsLogged = () => log.filter((entry) => entry.method === "POST")
@@ -244,8 +235,9 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     await render(props(token, extra))
     await ready()
   }
-  async function command(action: "Review resume" | "Review pause", reason: string) {
-    await typeReason(reason)
+  // There is no reason to type: the console sends its fixed text ("Paused/Resumed in the admin console").
+  async function command(action: "Review resume" | "Review pause") {
+    assert.equal(container.querySelector("textarea"), null, "no reason field")
     await click(action)
     await until(() => q("stocks-trading-control-review") !== null, "review")
   }
@@ -296,14 +288,14 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       assert.match(text(), /No change recorded yet/)
       assert.equal(postsLogged().length, 0, "reads only until the operator confirms")
       assert.equal(memory.events.length, 0)
-      await command("Review resume", "  Verified local reconciliation  ")
+      await command("Review resume")
       assert.match(q("stocks-trading-control-review")!.textContent!, /Resume the manual gate\. The server records it as version 1 only if the state is still version 0/)
       assert.match(q("stocks-trading-control-review")!.textContent!, /Configured pause/)
       assert.equal(postsLogged().length, 0, "the review sends nothing")
       await click("Confirm resume")
       await until(() => outcome() === "accepted", "accepted")
       const post = postsLogged()[0]
-      assert.deepEqual(JSON.parse(post.body!), { paused: false, expectedVersion: 0, idempotencyKey: JSON.parse(post.body!).idempotencyKey, reason: "Verified local reconciliation" })
+      assert.deepEqual(JSON.parse(post.body!), { paused: false, expectedVersion: 0, idempotencyKey: JSON.parse(post.body!).idempotencyKey, reason: "Resumed in the admin console" })
       assert.match(JSON.parse(post.body!).idempotencyKey, /^tc-[0-9a-f-]{36}$/)
       assert.equal(post.bearer, fingerprint(token))
       assert.equal(post.status, 200)
@@ -319,7 +311,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     await t.test("a read-only operator reads but the server refuses the change (403); a stranger's session reads nothing", async () => {
       await reset()
       await open(mint(WALLET.reader))
-      await command("Review resume", "Trying without control permission")
+      await command("Review resume")
       await click("Confirm resume")
       await until(() => outcome() === "rejected", "refused")
       assert.match(text(), /The server refused the change \(403\)/)
@@ -335,27 +327,14 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       assertTraffic("stranger")
     })
 
-    await t.test("an invalid reason never reaches the review or the server; Back returns without sending", async () => {
+    await t.test("no reason to type: Review opens the review directly; Back returns to the review button without sending", async () => {
       await reset()
       await open(mint(WALLET.controlA))
-      const area = () => container.querySelector("textarea")!
-      for (const [value, message] of [
-        ["   ", /Enter a reason\. It is recorded with the change\./],
-        ["two\nlines", /Line breaks, tabs and other control characters are not allowed\./],
-        ["x".repeat(501), /The reason is 501 characters; the limit is 500\./],
-      ] as const) {
-        await typeReason(value)
-        await click("Review resume")
-        assert.equal(q("stocks-trading-control-review"), null, JSON.stringify(value.slice(0, 10)))
-        assert.equal(area().getAttribute("aria-invalid"), "true")
-        // The textarea is described by the help text and by the (live) validation message.
-        const described = area().getAttribute("aria-describedby")!.split(" ").map((id: string) => w.document.getElementById(id)?.textContent ?? "").join(" ")
-        assert.match(described, message)
-        assert.equal(w.document.activeElement, area(), "focus stays on the reason")
-      }
-      await command("Review resume", "A valid reason")
+      await command("Review resume")
+      assert.doesNotMatch(q("stocks-trading-control-review")!.textContent!, /Reason/)
       await click("Back")
       assert.equal(q("stocks-trading-control-review"), null)
+      assert.equal(w.document.activeElement, button("Review resume"), "focus returns to the review button")
       assert.equal(postsLogged().length, 0, "nothing sent without Confirm")
       assert.equal(memory.events.length, 0)
     })
@@ -363,7 +342,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     await t.test("the review is frozen: a refresh that finds another operator's change never turns it into the opposite command", async () => {
       await reset()
       await open(mint(WALLET.controlA))
-      await command("Review resume", "Resume after my review")
+      await command("Review resume")
       assert.equal(w.document.activeElement, q("stocks-trading-control-review"), "focus moves to the review")
       assert.equal((await directChange(WALLET.controlB, { paused: false, expectedVersion: 0, idempotencyKey: "other-operator-3", reason: "Operator B resumed first" })).statusCode, 200)
       await click("Refresh")
@@ -374,7 +353,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       assert.equal(button("Confirm resume"), null)
       assert.equal(button("Confirm pause"), null, "never the opposite action")
       await click("Back")
-      assert.equal(w.document.activeElement, container.querySelector("textarea"), "focus returns to the reason")
+      assert.equal(w.document.activeElement, button("Review pause"), "focus returns to the review button")
       assert.match(text(), /Possible change: pause new orders/)
       assert.equal(postsLogged().length, 0)
     })
@@ -382,7 +361,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     await t.test("a retry refused by the server after a lost answer stays unknown and re-reads; the change is visible as recorded", async () => {
       await reset()
       await open(mint(WALLET.controlA))
-      await command("Review resume", "Resume with an ending session")
+      await command("Review resume")
       loseNextPostResponse = true
       await click("Confirm resume")
       await until(() => outcome() === "unknown", "unknown")
@@ -399,7 +378,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     await t.test("double click on Confirm sends one command", async () => {
       await reset()
       await open(mint(WALLET.controlA))
-      await command("Review resume", "One command only")
+      await command("Review resume")
       const confirm = button("Confirm resume")!
       await act(async () => {
         confirm.dispatchEvent(new w.MouseEvent("click", { bubbles: true }))
@@ -414,7 +393,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     await t.test("CAS conflict: another operator changes the state first; 409, re-read, nothing resent; a new command uses the new version", async () => {
       await reset()
       await open(mint(WALLET.controlA))
-      await command("Review resume", "Resume after my review")
+      await command("Review resume")
       assert.equal((await directChange(WALLET.controlB, { paused: false, expectedVersion: 0, idempotencyKey: "other-operator-1", reason: "Operator B resumed first" })).statusCode, 200)
       await click("Confirm resume")
       await until(() => outcome() === "conflict", "conflict")
@@ -422,7 +401,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       await settle()
       assert.deepEqual([postsLogged().length, postsLogged()[0].status], [1, 409], "never resent")
       assert.match(text(), /Not applied: the state changed first \(409\)/)
-      await command("Review pause", "Pause after reviewing B's change")
+      await command("Review pause")
       await click("Confirm pause")
       await until(() => outcome() === "accepted", "new command")
       const second = JSON.parse(postsLogged()[1].body!)
@@ -435,7 +414,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     await t.test("a lost response after the server recorded the change: unknown, then the same key replays; one event", async () => {
       await reset()
       await open(mint(WALLET.controlA))
-      await command("Review resume", "Resume with a flaky network")
+      await command("Review resume")
       loseNextPostResponse = true
       await click("Confirm resume")
       await until(() => outcome() === "unknown", "unknown")
@@ -455,7 +434,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     await t.test("discarding an unknown command keeps an unresolved note, reads again, and lets the operator check the history", async () => {
       await reset()
       await open(mint(WALLET.controlA))
-      await command("Review resume", "Resume that is then discarded")
+      await command("Review resume")
       loseNextPostResponse = true
       await click("Confirm resume")
       await until(() => outcome() === "unknown", "unknown")
@@ -465,14 +444,14 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       const card = q("stocks-trading-control-command")!.textContent!
       assert.match(card, /An earlier command has no verified result/)
       // 003F-1 P2-01: a matching entry never identifies this command (the history has no keys).
-      assert.match(card, /A matching entry does not identify this command\. If the entry at version 1 is a different action or has a different reason than “ ?Resume that is then discarded ?”, this command was not recorded, and it can no longer be\./)
+      assert.match(card, /A matching entry does not identify this command\. If the entry at version 1 is a different action or has a different reason than “ ?Resumed in the admin console ?”, this command was not recorded, and it can no longer be\./)
       assert.doesNotMatch(card, /means it was recorded/)
       assert.doesNotMatch(q("stocks-trading-control-gate")!.textContent!, /Read before a command whose result is unknown/, "the fresh read is not flagged")
       await until(() => /Version 1 · was paused/.test(q("stocks-trading-control-history")?.textContent ?? ""), "history shows it")
       assert.equal(outcome(), null)
       assert.ok(button("Review pause"), "a new command from the fresh read")
       await click("Close")
-      assert.equal(w.document.activeElement, container.querySelector("textarea"), "focus goes to the reason after closing the note")
+      assert.equal(w.document.activeElement, button("Review pause"), "focus goes to the review button after closing the note")
       assert.deepEqual([postsLogged().length, memory.events.length], [1, 1], "never resent")
       assertTraffic("discard unknown")
     })
@@ -480,7 +459,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     await t.test("an old resume replayed after a later pause shows the old event and the current paused state", async () => {
       await reset()
       await open(mint(WALLET.controlA))
-      await command("Review resume", "Resume that loses its answer")
+      await command("Review resume")
       loseNextPostResponse = true
       await click("Confirm resume")
       await until(() => outcome() === "unknown", "unknown")
@@ -498,7 +477,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
     await t.test("503 after the change was recorded and a client timeout are unknown; a retry replays", async () => {
       await reset()
       await open(mint(WALLET.controlA))
-      await command("Review resume", "Resume while the store is flaky")
+      await command("Review resume")
       memory.failChangeAfterCommit = true
       await click("Confirm resume")
       await until(() => outcome() === "unknown", "503 unknown")
@@ -510,7 +489,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
 
       await reset()
       await open(mint(WALLET.controlA), { commandTimeoutMs: 150 })
-      await command("Review resume", "Resume with a slow answer")
+      await command("Review resume")
       const slow = hold((method) => method === "POST")
       await click("Confirm resume")
       await until(() => outcome() === "unknown", "timed out")
@@ -529,7 +508,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       for (const change of ["account", "logout", "api"] as const) {
         await reset()
         await open(mint(WALLET.controlA))
-        await command("Review resume", `Resume before ${change}`)
+        await command("Review resume")
         const slow = hold((method) => method === "POST")
         await click("Confirm resume")
         await until(() => outcome() === "sending", "sending")
@@ -606,12 +585,12 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       await t.test(`003F-1 P2-01: ${label} records the same version, action and reason after this page's request never reached the server`, async () => {
         await reset()
         await open(mint(WALLET.controlA))
-        await command("Review resume", "Shared resume reason")
+        await command("Review resume")
         failNextPostBeforeServer = true
         await click("Confirm resume")
         await until(() => outcome() === "unknown", "unknown")
         assert.equal(memory.events.length, 0, "this page's command was never recorded")
-        assert.equal((await directChange(wallet, { paused: false, expectedVersion: 0, idempotencyKey: key, reason: "Shared resume reason" })).statusCode, 200)
+        assert.equal((await directChange(wallet, { paused: false, expectedVersion: 0, idempotencyKey: key, reason: "Resumed in the admin console" })).statusCode, 200)
         await click("Read state and history")
         await until(() => /Version 1 · was paused/.test(q("stocks-trading-control-history")?.textContent ?? "") && button("Retry the same command") !== null, "someone else's entry is shown")
         const unknown = q("stocks-trading-control-outcome")!.textContent!
@@ -656,7 +635,7 @@ test("operator trading control against the real routes (set GIWA_ADMIN_DOM_RUNTI
       }
       memory.clock = mountedAt + 500 // apply() adds 1000 ms: the event is recorded at T+1500
       clientNow = mountedAt + 1_600
-      await command("Review resume", "Fresh change on a fixed clock")
+      await command("Review resume")
       await click("Confirm resume")
       await until(() => outcome() === "accepted", "accepted")
       assert.equal(Date.parse(memory.state().updatedAt!), mountedAt + 1_500)

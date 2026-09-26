@@ -4,7 +4,7 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { formatUtcMs } from "../stocks-admin/format"
 import { Button, Card, EmptyRow, FOCUS_RING, Field, Fields, Mono, Notice, Pill, RefreshButton, Time } from "../stocks-admin/ui"
-import { MAX_VERSION, REASON_MAX_LENGTH, checkReason } from "./parse"
+import { MAX_VERSION, controlChangeReason } from "./parse"
 import { canLoadOlder, readBeforeUnresolved, retryReadiness, type RetryRefusal, type StartRefusal } from "./store"
 import type {
   AbandonedCommand,
@@ -39,7 +39,7 @@ export type TradingControlViewProps = {
   /** False when the host knows this operator lacks stocks:control (see GiwaStocksTradingControlFeatureProps). */
   readonly canControl?: boolean
   /** Test seam: open the command card on a given step (a review captures the state shown at first render). */
-  readonly initialDraft?: { readonly step: "edit" | "review"; readonly reason: string }
+  readonly initialDraft?: { readonly step: "edit" | "review" }
 }
 
 const gateWord = (paused: boolean) => (paused ? "Paused" : "Resumed")
@@ -385,7 +385,7 @@ function AdmissionCard({ runtime, control, gateCurrent }: { runtime: ResourceSta
 }
 
 /** What the operator reviewed: frozen when the review opens, never re-derived from a later read. */
-type Reviewed = { readonly target: boolean; readonly version: number; readonly paused: boolean; readonly observedAt: string; readonly reason: string }
+type Reviewed = { readonly target: boolean; readonly version: number; readonly paused: boolean; readonly observedAt: string }
 
 function CommandCard(props: TradingControlViewProps) {
   const { snapshot } = props
@@ -393,16 +393,12 @@ function CommandCard(props: TradingControlViewProps) {
   const control = snapshot.control
   const value = control.value
   const state = value?.data ?? null
-  const [text, setText] = useState(props.initialDraft?.reason ?? "")
-  const [reviewed, setReviewed] = useState<Reviewed | null>(() => {
-    const draft = props.initialDraft
-    const check = draft ? checkReason(draft.reason) : null
-    return draft?.step === "review" && state && value && check?.ok ? { target: !state.paused, version: state.version, paused: state.paused, observedAt: value.meta.observedAt, reason: check.reason } : null
-  })
-  const [showError, setShowError] = useState(false)
+  const [reviewed, setReviewed] = useState<Reviewed | null>(() =>
+    props.initialDraft?.step === "review" && state && value ? { target: !state.paused, version: state.version, paused: state.paused, observedAt: value.meta.observedAt } : null,
+  )
   const [refusal, setRefusal] = useState<StartRefusal | null>(null)
-  const [focus, setFocus] = useState<"review" | "reason" | "outcome" | null>(null)
-  const reasonRef = useRef<HTMLTextAreaElement>(null)
+  const [focus, setFocus] = useState<"review" | "form" | "outcome" | null>(null)
+  const actionsRef = useRef<HTMLDivElement>(null)
   const reviewRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const command = snapshot.command
@@ -410,7 +406,6 @@ function CommandCard(props: TradingControlViewProps) {
   const ready = control.phase === "ready" && control.error === null && state !== null && value !== null
   const busy = command?.phase === "sending" || command?.phase === "unknown"
   const beforeUnresolved = readBeforeUnresolved(snapshot)
-  const check = checkReason(text)
   const target = state ? !state.paused : true
   const reasonsLeft = remainingReasons(snapshot.runtime)
   const atLimit = state !== null && state.version >= MAX_VERSION
@@ -421,38 +416,33 @@ function CommandCard(props: TradingControlViewProps) {
     if (focus === null) return
     // When the target is not rendered (for example no form while the state is read again), focus stays in this card.
     const outcome = document.getElementById(`${ids}-outcome`)
+    const reviewButton = actionsRef.current?.querySelector("button")
+    const form = reviewButton && !reviewButton.disabled ? reviewButton : null
     if (focus === "review") (reviewRef.current ?? cardRef.current)?.focus()
-    else if (focus === "reason") (reasonRef.current ?? cardRef.current)?.focus()
-    else (outcome ?? reasonRef.current ?? cardRef.current)?.focus()
+    else if (focus === "form") (form ?? cardRef.current)?.focus()
+    else (outcome ?? form ?? cardRef.current)?.focus()
     setFocus(null)
   }, [focus, ids])
 
   const openReview = () => {
     setRefusal(null)
-    if (!check.ok || !state || !value) {
-      setShowError(true)
-      setFocus("reason")
-      return
-    }
-    setShowError(false)
-    setReviewed({ target, version: state.version, paused: state.paused, observedAt: value.meta.observedAt, reason: check.reason })
+    if (!state || !value) return
+    setReviewed({ target, version: state.version, paused: state.paused, observedAt: value.meta.observedAt })
     setFocus("review")
   }
   const back = () => {
     setReviewed(null)
-    setFocus("reason")
+    setFocus("form")
   }
   const confirm = () => {
     if (!reviewed || reviewStale) return
-    const outcome = props.onStart({ paused: reviewed.target, reason: reviewed.reason, reviewed: { version: reviewed.version, paused: reviewed.paused, observedAt: reviewed.observedAt } })
+    const request = { paused: reviewed.target, reason: controlChangeReason(reviewed.target), reviewed: { version: reviewed.version, paused: reviewed.paused, observedAt: reviewed.observedAt } }
+    const outcome = props.onStart(request)
     // A second click while the first command is being sent is simply ignored.
     if (outcome === "busy") return
     setRefusal(outcome)
     setReviewed(null)
-    if (outcome === null) {
-      setText("")
-      setFocus("outcome")
-    } else setFocus("reason")
+    setFocus(outcome === null ? "outcome" : "form")
   }
   const staleCopy =
     control.phase === "loading"
@@ -471,7 +461,7 @@ function CommandCard(props: TradingControlViewProps) {
               <Button
                 onClick={() => {
                   props.onDismissAbandoned()
-                  setFocus("reason")
+                  setFocus("form")
                 }}
               >
                 Close
@@ -491,7 +481,7 @@ function CommandCard(props: TradingControlViewProps) {
             }}
             onDiscard={() => {
               props.onDiscard()
-              setFocus("reason")
+              setFocus("form")
             }}
             onRefresh={props.onRefresh}
           />
@@ -517,9 +507,6 @@ function CommandCard(props: TradingControlViewProps) {
               <Field label="Change to send" wide>
                 {reviewed.target ? "Pause new orders" : "Resume the manual gate"}. The server records it as version {reviewed.version + 1} only if the state is still
                 version {reviewed.version}; otherwise it refuses and nothing changes.
-              </Field>
-              <Field label="Reason" wide>
-                <span className="break-words">{reviewed.reason}</span>
               </Field>
             </Fields>
             {reviewed.target ? (
@@ -559,32 +546,6 @@ function CommandCard(props: TradingControlViewProps) {
               The manual gate is <strong>{gateWord(state.paused).toLowerCase()}</strong> (version {state.version}, read {value?.meta.observedAt}). Possible change:{" "}
               {target ? "pause new orders" : "resume the manual gate"}. The server decides whether this session may make it.
             </p>
-            <label htmlFor={`${ids}-reason`} className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-arco-text-soft)]">
-              Reason (recorded in the change history)
-            </label>
-            <textarea
-              ref={reasonRef}
-              id={`${ids}-reason`}
-              value={text}
-              rows={3}
-              maxLength={REASON_MAX_LENGTH + 100}
-              aria-invalid={showError && !check.ok}
-              aria-describedby={`${ids}-reason-help ${ids}-reason-error`}
-              onChange={(event) => {
-                setText(event.target.value)
-                setRefusal(null)
-              }}
-              className={`w-full min-w-0 resize-y rounded-[var(--radius-control)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-2 py-1.5 text-xs text-[var(--color-arco-ink)] ${FOCUS_RING}`}
-            />
-            <p id={`${ids}-reason-help`} className="text-[11px] text-[var(--color-arco-text-soft)]">
-              Required, up to {REASON_MAX_LENGTH} characters, one line. Leading and trailing spaces are removed.{" "}
-              <span className="font-mono">
-                {text.trim().length}/{REASON_MAX_LENGTH}
-              </span>
-            </p>
-            <p id={`${ids}-reason-error`} className="text-[11px] text-[var(--color-arco-down)]" aria-live="polite">
-              {showError && !check.ok ? check.message : ""}
-            </p>
             {refusal === "stale_review" && (
               <Notice tone="attention" title="The state changed while you were reviewing" live>
                 Nothing was sent. Review the current state and the change again.
@@ -605,7 +566,7 @@ function CommandCard(props: TradingControlViewProps) {
                 rule.
               </Notice>
             )}
-            <div>
+            <div ref={actionsRef}>
               <Button onClick={openReview} disabled={props.canControl === false}>
                 {target ? "Review pause" : "Review resume"}
               </Button>

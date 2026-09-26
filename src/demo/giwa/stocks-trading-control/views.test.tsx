@@ -98,17 +98,17 @@ test("the runtime's cached manual gate is labelled as cached and flagged when it
 })
 
 test("review shows the current state and the exact change; pause and resume warnings say what they do not do", () => {
-  const resume = text(render(snapshot({ runtime: loaded(runtime({ configuredPause: true })) }), { initialDraft: { step: "review", reason: "  Verified local reconciliation " } }))
+  const resume = text(render(snapshot({ runtime: loaded(runtime({ configuredPause: true })) }), { initialDraft: { step: "review" } }))
   assert.match(resume, /Current state \(as read\) Paused · version 0 · server response 2026-09-19T09:00:00\.000Z/)
-  assert.match(resume, /Change to send Resume the manual gate\. The server records it as version 1 only if the state is still version 0; otherwise it refuses and nothing changes\./)
-  assert.match(resume, /Reason Verified local reconciliation /)
+  // No reason to review: the console records its fixed text, so the change is followed directly by what it does.
+  assert.match(resume, /Change to send Resume the manual gate\. The server records it as version 1 only if the state is still version 0; otherwise it refuses and nothing changes\. What a resume does/)
   assert.match(resume, /What a resume does It clears the manual gate only\. New orders stay paused while any other reason remains: Configured pause \(as last reported\)\./)
   assert.match(resume, /Confirm resume Back/)
-  const pause = text(render(snapshot({ control: loaded(state(1, false)), runtime: loaded(runtime({ operatorControl: { status: "RESUMED", version: 1 } })) }), { initialDraft: { step: "review", reason: "Drill" } }))
+  const pause = text(render(snapshot({ control: loaded(state(1, false)), runtime: loaded(runtime({ operatorControl: { status: "RESUMED", version: 1 } })) }), { initialDraft: { step: "review" } }))
   assert.match(pause, /Change to send Pause new orders\./)
   assert.match(pause, /What a pause does New admissions that check the manual gate are blocked\. Transactions that were already approved or sent are not cancelled, issued wallet requests and execution policies stay valid, and in-flight work may still complete\. Order lookup and hash recovery stay available\./)
   assert.match(pause, /Confirm pause/)
-  const noRuntime = text(render(snapshot({ runtime: { phase: "error", value: null, error: failed("disabled", 404) } }), { initialDraft: { step: "review", reason: "x" } }))
+  const noRuntime = text(render(snapshot({ runtime: { phase: "error", value: null, error: failed("disabled", 404) } }), { initialDraft: { step: "review" } }))
   assert.match(noRuntime, /runtime status is not available, so the other reasons are unknown/)
 })
 
@@ -223,7 +223,7 @@ test("history: newest first with Load older, an explicit end, and a retry after 
 test("only the reviewed command controls exist; every button is one of a fixed set", () => {
   const htmls = [
     render(snapshot()),
-    render(snapshot(), { initialDraft: { step: "review", reason: "x" } }),
+    render(snapshot(), { initialDraft: { step: "review" } }),
     render(snapshot({ controlReadSeq: 3, command: command("unknown", { error: failed("network"), unknownSeq: 2 }) })),
     render(snapshot({ command: command("conflict", { error: failed("request", 409, "CONTROL_VERSION_CONFLICT") }) })),
     render(snapshot({ history: { ...EMPTY_HISTORY, items: [event(1, false, { previousPaused: true })], complete: false, nextBeforeVersion: 1 } })),
@@ -281,7 +281,7 @@ test("retained values are never stated as the present: gate card, admission noti
 
 test("remaining reasons include the control store and unknown runtime; in-flight warnings stay in header and pause outcome", () => {
   const unavailable = loaded(runtime({ operatorControl: { status: "UNAVAILABLE", version: null } }))
-  const review = text(render(snapshot({ runtime: unavailable }), { initialDraft: { step: "review", reason: "x" } }))
+  const review = text(render(snapshot({ runtime: unavailable }), { initialDraft: { step: "review" } }))
   assert.match(review, /New orders stay paused while any other reason remains: Manual gate unavailable to this process \(as last reported\)\./)
   const acceptedResume = (runtimeState: TradingControlSnapshot["runtime"]) =>
     text(render(snapshot({ control: loaded(state(1, false)), runtime: runtimeState, command: command("accepted", { result: { change: { state: state(1, false, { reason: "Verified local reconciliation" }), change: event(1, false, { previousPaused: true, reason: "Verified local reconciliation" }), replayed: false }, meta: META } }) })))
@@ -345,10 +345,10 @@ test("the version limit offers no command; event ids keep their full value; read
   assert.match(failedAll, /role="status" class="sr-only">Could not read: trading control state, runtime status, change history\.</)
   const disabled = render(snapshot({ control: { phase: "error", value: null, error: failed("disabled", 404) }, history: { ...EMPTY_HISTORY, phase: "error", error: failed("disabled", 404), failedPage: "first" } }))
   assert.match(disabled, /role="status" class="sr-only">Trading control is not enabled on this server \(404\)\.</)
-  // The reason help is not a live region; only the validation message is.
+  // The command form has no reason to type: the state, the possible change and the review button.
   const edit = render(snapshot())
-  assert.doesNotMatch(edit, /id="[^"]*-reason-help"[^>]*aria-live/)
-  assert.match(edit, /id="[^"]*-reason-error"[^>]*aria-live="polite"/)
+  assert.doesNotMatch(edit, /<textarea|-reason-(help|error)/)
+  assert.match(text(edit), /The manual gate is paused \(version 0, read 2026-09-19T09:00:00\.000Z\)\. Possible change: resume the manual gate\. The server decides whether this session may make it\. Review resume/)
 })
 
 test("a review that can no longer be confirmed says why, by read phase, and offers only Back", () => {
@@ -357,7 +357,7 @@ test("a review that can no longer be confirmed says why, by read phase, and offe
     [{ ...loaded(state(0, true)), phase: "error", error: failed("network") }, /Reading the state again failed This review can no longer be confirmed\. Read the state successfully, then go back and review it\. Nothing was sent\./],
   ]
   for (const [control, copy] of cases) {
-    const html = render(snapshot({ control }), { initialDraft: { step: "review", reason: "Verified local reconciliation" } })
+    const html = render(snapshot({ control }), { initialDraft: { step: "review" } })
     assert.match(text(html), copy)
     assert.doesNotMatch(html, />Confirm (pause|resume)</)
     assert.match(html, /role="group"[^>]*aria-labelledby="[^"]*-review-title"/)

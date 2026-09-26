@@ -59,7 +59,7 @@ Account A를 고르는 것은 Dynamic이나 본인 지갑 연결을 검증한 �
 1. 터미널에 표시된 운영자 화면 주소를 브라우저에서 엽니다.
 2. 위쪽 로컬 제어 영역에서 **Operator (sign-in only)**를 누릅니다.
 3. **Sign in to Stocks**로 로그인합니다. 로컬 테스트 계정이므로 개인 지갑 승인은 없습니다.
-4. 거래 제어 영역의 사유를 입력하고 **Review resume → Confirm resume**을 누릅니다.
+4. 거래 제어 영역에서 **Review resume → Confirm resume**을 누릅니다. 사유는 입력하지 않습니다(콘솔이 채웁니다).
 5. 다시 막으려면 **Review pause → Confirm pause**를 사용합니다. 변경 이력이 DB에 기록됩니다.
 
 처음에는 중지 상태입니다. 운영자의 재개는 체인 관찰 등 다른 조건을 무시하지 않습니다.

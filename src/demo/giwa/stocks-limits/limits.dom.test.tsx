@@ -145,21 +145,22 @@ test("trading limits panel against the real routes (set GIWA_ADMIN_DOM_RUNTIME)"
   }
   const puts = () => log.filter((entry) => entry.method === "PUT")
 
-  // 1. A control operator reads the limits and history, turns Buy off with a reason, reviews and confirms.
+  // 1. A control operator reads the limits and history, turns Buy off, reviews and confirms. There is no reason to type:
+  //    the console sends its fixed text.
   await render({ session: { id: "session-control", accessToken: "control-token" }, canControl: true })
   await until(() => text().includes("NVDA") && text().includes("No change has been recorded yet"), "first read")
   assert.match(text(), /Status On Today 12\.5 tUSDC used · no cap/)
   await click(button("Change the NVDA Buy limit"))
   await click(container.querySelector('input[role="switch"]')!)
-  await type(container.querySelector("textarea"), "  Pause buys for the audit  ")
+  assert.equal(container.querySelector("textarea"), null, "no reason to type")
   await click(button("Review change"))
   await until(() => text().includes("Review the NVDA Buy change"), "review")
-  assert.match(text(), /Now \(version 0\) On · No cap.*After saving \(version 1\) Off · No cap.*Reason Pause buys for the audit/)
+  assert.match(text(), /Now \(version 0\) On · No cap.*After saving \(version 1\) Off · No cap/)
   await click(button("Confirm change"))
   await until(() => text().includes("Saved: NVDA Buy"), "saved")
   await until(() => /Side Buy Status Off/.test(text()) && text().includes("On → Off"), "read again after saving")
   assert.deepEqual(puts().map((entry) => [entry.path, entry.body]), [
-    ["/api/v1/admin/stocks/limits/NVDA/BUY", '{"enabled":false,"dailyCashLimit":null,"expectedVersion":0,"idempotencyKey":"limit-key-0001","reason":"Pause buys for the audit"}'],
+    ["/api/v1/admin/stocks/limits/NVDA/BUY", '{"enabled":false,"dailyCashLimit":null,"expectedVersion":0,"idempotencyKey":"limit-key-0001","reason":"Changed in the admin console"}'],
   ])
   assert.equal(stateOf("NVDA", "BUY").version, 1)
 
@@ -168,7 +169,6 @@ test("trading limits panel against the real routes (set GIWA_ADMIN_DOM_RUNTIME)"
   await click(button("Change the NVDA Sell limit"))
   await click(container.querySelector('input[type="checkbox"]:not([role="switch"])')!)
   await type(container.querySelector('input[type="text"]'), "10,000")
-  await type(container.querySelector("textarea"), "Cap sells")
   await click(button("Review change"))
   await until(() => text().includes("Review the NVDA Sell change"), "sell review")
   const direct = await server.inject({ method: "PUT", url: "/api/v1/admin/stocks/limits/NVDA/SELL", headers: { authorization: "Bearer other-control-token", "content-type": "application/json" }, payload: { enabled: false, dailyCashLimit: null, expectedVersion: 0, idempotencyKey: "other-key-0001", reason: "Sells off" } })
@@ -185,7 +185,6 @@ test("trading limits panel against the real routes (set GIWA_ADMIN_DOM_RUNTIME)"
   await click(container.querySelector('input[role="switch"]')!)
   await click(container.querySelector('input[type="checkbox"]:not([role="switch"])')!)
   await type(container.querySelector('input[type="text"]'), "25000")
-  await type(container.querySelector("textarea"), "Reopen buys with a cap")
   await click(button("Review change"))
   await until(() => text().includes("After saving (version 2) On · 25,000 tUSDC"), "buy review")
   loseNextPutAnswer = true
@@ -204,7 +203,7 @@ test("trading limits panel against the real routes (set GIWA_ADMIN_DOM_RUNTIME)"
   // 4. A read-only operator (a new session) sees everything and can change nothing.
   const before = log.length
   await render({ session: { id: "session-reader", accessToken: "reader-token" }, canControl: false })
-  await until(() => text().includes("Read only for this operator") && text().includes("Reopen buys with a cap"), "reader view")
+  await until(() => text().includes("Read only for this operator") && text().includes("Changed in the admin console"), "reader view")
   assert.equal(container.querySelector('button[aria-label^="Change the"]'), null)
   assert.deepEqual(new Set(log.slice(before).map((entry) => entry.method)), new Set(["GET"]))
   assert.ok(log.slice(before).every((entry) => entry.bearer === "Bearer reader-token"))

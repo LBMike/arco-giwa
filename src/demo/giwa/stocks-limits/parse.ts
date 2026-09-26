@@ -171,22 +171,15 @@ export function parseLimitChange(data: unknown, request: { readonly symbol: stri
   return { state, change, replayed }
 }
 
+// ---------------------------------------------------------------- the reason recorded with a change
+
+/**
+ * The server records a reason with every change (1–500 characters). Operators do not type one: the console sends this
+ * fixed text, and the change record itself holds what changed, who changed it and when.
+ */
+export const LIMIT_CHANGE_REASON = "Changed in the admin console"
+
 // ---------------------------------------------------------------- what the operator types
-
-export const REASON_MAX_LENGTH = 500
-const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
-
-export type ReasonCheck = { readonly ok: true; readonly reason: string } | { readonly ok: false; readonly message: string }
-
-/** The server accepts 1–500 UTF-16 code units, trimmed, without control characters. Surrounding spaces are removed here. */
-export function checkReason(input: string): ReasonCheck {
-  const reason = input.trim()
-  if (reason.length === 0) return { ok: false, message: "Enter a reason. It is recorded with the change." }
-  if (CONTROL_CHARS.test(reason)) return { ok: false, message: "Line breaks, tabs and other control characters are not allowed." }
-  if (LONE_SURROGATE.test(reason)) return { ok: false, message: "The reason contains an invalid character." }
-  if (reason.length > REASON_MAX_LENGTH) return { ok: false, message: `The reason is ${reason.length} characters; the limit is ${REASON_MAX_LENGTH}.` }
-  return { ok: true, reason }
-}
 
 export type CapCheck = { readonly ok: true; readonly baseUnits: string } | { readonly ok: false; readonly message: string }
 

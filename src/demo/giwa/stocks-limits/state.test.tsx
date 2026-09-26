@@ -3,7 +3,7 @@ import test from "node:test"
 import { parseEnvelope } from "../stocks-admin/parse"
 import type { StocksAdminError } from "../stocks-admin/types"
 import { LIM_NOW, limEnvelope, limEvent, limRead, limRow, limState } from "./fixtures"
-import { parseLimitChange, parseLimitsRead } from "./parse"
+import { LIMIT_CHANGE_REASON, parseLimitChange, parseLimitsRead } from "./parse"
 import { LIMITS_INITIAL, checkDraft, commandFor, limitsReducer, type LimitsAction, type LimitsState } from "./state"
 
 const META = parseEnvelope(limEnvelope(null)).meta
@@ -12,7 +12,7 @@ const read = (items = [limRow("BUY", 2, { dailyCashLimit: "50000000000" }, "1250
 const ready = (data = read()) => run(LIMITS_INITIAL, { type: "limits/start" }, { type: "limits/loaded", data, meta: META, at: LIM_NOW })
 const error = (kind: StocksAdminError["kind"], status: number | null = null, code: string | null = null): StocksAdminError => ({ kind, status, code })
 
-function reviewed(patch: Parameters<typeof limitsReducer>[1] & { type: "draft" } = { type: "draft", patch: { enabled: false, noCap: true, reasonText: "  Pause buys for the audit  " } }) {
+function reviewed(patch: Parameters<typeof limitsReducer>[1] & { type: "draft" } = { type: "draft", patch: { enabled: false, noCap: true } }) {
   return run(ready(), { type: "edit", symbol: "NVDA", side: "BUY" }, patch, { type: "review" })
 }
 function sending(key = "limit-key-0001") {
@@ -22,9 +22,9 @@ function sending(key = "limit-key-0001") {
   return run(state, { type: "send", command })
 }
 function saved(key = "limit-key-0001") {
-  const change = limEvent("BUY", 3, { enabled: false, dailyCashLimit: null, reason: "Pause buys for the audit" })
-  const state = limState("BUY", 3, { enabled: false, reason: "Pause buys for the audit", updatedAt: change.createdAt })
-  return parseLimitChange({ state, change, replayed: false }, { symbol: "NVDA", side: "BUY", command: { enabled: false, dailyCashLimit: null, expectedVersion: 2, idempotencyKey: key, reason: "Pause buys for the audit" } })
+  const change = limEvent("BUY", 3, { enabled: false, dailyCashLimit: null, reason: LIMIT_CHANGE_REASON })
+  const state = limState("BUY", 3, { enabled: false, reason: LIMIT_CHANGE_REASON, updatedAt: change.createdAt })
+  return parseLimitChange({ state, change, replayed: false }, { symbol: "NVDA", side: "BUY", command: { enabled: false, dailyCashLimit: null, expectedVersion: 2, idempotencyKey: key, reason: LIMIT_CHANGE_REASON } })
 }
 
 test("editing starts only from a successful read and copies the row as its basis", () => {
@@ -33,21 +33,24 @@ test("editing starts only from a successful read and copies the row as its basis
   assert.equal(loading.draft, null, "not while reading again")
   const state = run(ready(), { type: "edit", symbol: "NVDA", side: "BUY" })
   assert.deepEqual(
-    state.draft && { enabled: state.draft.enabled, noCap: state.draft.noCap, capText: state.draft.capText, reasonText: state.draft.reasonText, version: state.draft.basis.version },
-    { enabled: true, noCap: false, capText: "50000", reasonText: "", version: 2 },
+    state.draft && { enabled: state.draft.enabled, noCap: state.draft.noCap, capText: state.draft.capText, version: state.draft.basis.version },
+    { enabled: true, noCap: false, capText: "50000", version: 2 },
   )
   assert.equal(run(ready(), { type: "edit", symbol: "TSLA", side: "BUY" }).draft, null)
   assert.equal(run(state, { type: "cancel" }).draft, null)
 })
 
-test("review checks the cap and the reason the way the server will; the review freezes the inputs", () => {
+test("review checks the cap the way the server will and needs no typed reason; the review freezes the inputs", () => {
   const empty = run(ready(), { type: "edit", symbol: "NVDA", side: "BUY" }, { type: "draft", patch: { capText: "0" } }, { type: "review" })
   assert.equal(empty.draft?.reviewing, false)
   assert.equal(empty.draft?.showErrors, true)
-  assert.deepEqual(empty.draft && checkDraft(empty.draft), { ok: false, cap: "A cap must be more than 0. To stop this side, turn it off instead.", reason: "Enter a reason. It is recorded with the change." })
-  const state = reviewed({ type: "draft", patch: { capText: "75,000.5", reasonText: " Launch cap " } })
+  assert.deepEqual(empty.draft && checkDraft(empty.draft), { ok: false, cap: "A cap must be more than 0. To stop this side, turn it off instead." })
+  // Nothing typed but the cap: the review opens straight away.
+  const unchanged = run(ready(), { type: "edit", symbol: "NVDA", side: "BUY" }, { type: "review" })
+  assert.deepEqual([unchanged.draft?.reviewing, unchanged.draft && checkDraft(unchanged.draft)], [true, { ok: true, enabled: true, dailyCashLimit: "50000000000" }])
+  const state = reviewed({ type: "draft", patch: { capText: "75,000.5" } })
   assert.equal(state.draft?.reviewing, true)
-  assert.deepEqual(state.draft && checkDraft(state.draft), { ok: true, enabled: true, dailyCashLimit: "75000500000", reason: "Launch cap" })
+  assert.deepEqual(state.draft && checkDraft(state.draft), { ok: true, enabled: true, dailyCashLimit: "75000500000" })
   assert.equal(run(state, { type: "draft", patch: { capText: "1" } }).draft?.capText, "75,000.5", "inputs are frozen while reviewing")
   assert.equal(run(state, { type: "back" }).draft?.reviewing, false)
 })
@@ -60,13 +63,13 @@ test("a confirmed change is frozen with the basis version as the expected versio
     symbol: "NVDA",
     side: "BUY",
     basis: 2,
-    command: { enabled: false, dailyCashLimit: null, expectedVersion: 2, idempotencyKey: "limit-key-0001", reason: "Pause buys for the audit" },
+    command: { enabled: false, dailyCashLimit: null, expectedVersion: 2, idempotencyKey: "limit-key-0001", reason: LIMIT_CHANGE_REASON },
     phase: "sending",
     attempts: 1,
     error: null,
   })
   // One change at a time: a second confirm or edit does nothing while one is open.
-  const second = commandFor({ ...reviewed().draft!, reasonText: "Other" }, "limit-key-0002")!
+  const second = commandFor({ ...reviewed().draft!, capText: "1" }, "limit-key-0002")!
   assert.equal(run(state, { type: "send", command: second }).command?.command.idempotencyKey, "limit-key-0001")
   assert.equal(run(state, { type: "edit", symbol: "NVDA", side: "SELL" }).draft, null)
 })
@@ -115,13 +118,13 @@ test("a refused retry says nothing about the first attempt: the change stays unk
 })
 
 test("a read that shows the edited row moved on ends the draft without sending anything", () => {
-  const editing = run(ready(), { type: "edit", symbol: "NVDA", side: "BUY" }, { type: "draft", patch: { reasonText: "x" } })
+  const editing = run(ready(), { type: "edit", symbol: "NVDA", side: "BUY" }, { type: "draft", patch: { capText: "7" } })
   const same = run(editing, { type: "limits/start" }, { type: "limits/loaded", data: read(), meta: META, at: LIM_NOW + 1 })
-  assert.equal(same.draft?.reasonText, "x", "same version: the draft stays")
+  assert.equal(same.draft?.capText, "7", "same version: the draft stays")
   const moved = run(editing, { type: "limits/loaded", data: read([limRow("BUY", 3, { enabled: false }), limRow("SELL")]), meta: META, at: LIM_NOW + 2 })
   assert.deepEqual([moved.draft, moved.outcome?.kind], [null, "changed_while_editing"])
   const failed = run(editing, { type: "limits/start" }, { type: "limits/failed", error: error("network") })
   assert.equal(failed.limits.phase, "error")
   assert.equal(failed.limits.value?.data.items.length, 2, "the last read stays, labelled")
-  assert.equal(failed.draft?.reasonText, "x")
+  assert.equal(failed.draft?.capText, "7")
 })

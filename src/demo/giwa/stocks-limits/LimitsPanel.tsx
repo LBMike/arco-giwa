@@ -6,11 +6,9 @@ import { newLimitIdempotencyKey, readTradingLimitHistory, readTradingLimits, sen
 import {
   HISTORY_LIMIT,
   LIMIT_CASH_UNIT,
-  REASON_MAX_LENGTH,
   capText,
   cashText,
   checkCapInput,
-  checkReason,
   describeChange,
   describeEvent,
   limitStatus,
@@ -304,7 +302,6 @@ function LastChange({ row }: { row: TradingLimitRow }) {
       <span className="block">
         v{row.version} · <Time iso={row.updatedAt} /> · <Mono value={row.operatorId} />
       </span>
-      <span className="block break-words text-[11px] text-[var(--color-arco-text-soft)]">{row.reason}</span>
     </span>
   )
 }
@@ -315,7 +312,6 @@ function Editor({ draft, onDraft, onReview, onBack, onCancel, onConfirm }: { dra
   const name = target(draft.symbol, draft.side)
   const side = sideWord(draft.side)
   const capCheck = draft.noCap ? null : checkCapInput(draft.capText)
-  const reasonCheck = checkReason(draft.reasonText)
   return (
     <section aria-labelledby={`${ids}-title`} data-testid="stocks-limits-editor" className="flex min-w-0 flex-col gap-3 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-3">
       <h3 id={`${ids}-title`} className="text-xs font-semibold text-[var(--color-arco-ink)]">
@@ -332,9 +328,6 @@ function Editor({ draft, onDraft, onReview, onBack, onCancel, onConfirm }: { dra
             </Field>
             <Field label="Change" wide>
               {describeChange(draft.basis, check)}
-            </Field>
-            <Field label="Reason" wide>
-              <span className="break-words">{check.reason}</span>
             </Field>
           </Fields>
           {check.enabled && check.dailyCashLimit !== null && BigInt(draft.basis.usedToday) >= BigInt(check.dailyCashLimit) && (
@@ -402,30 +395,6 @@ function Editor({ draft, onDraft, onReview, onBack, onCancel, onConfirm }: { dra
               {draft.showErrors && capCheck !== null && !capCheck.ok ? capCheck.message : ""}
             </p>
           </fieldset>
-          <div className="flex min-w-0 flex-col gap-1">
-            <label htmlFor={`${ids}-reason`} className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-arco-text-soft)]">
-              Reason (recorded in the change history)
-            </label>
-            <textarea
-              id={`${ids}-reason`}
-              value={draft.reasonText}
-              rows={2}
-              maxLength={REASON_MAX_LENGTH + 100}
-              aria-invalid={draft.showErrors && !reasonCheck.ok}
-              aria-describedby={`${ids}-reason-help ${ids}-reason-error`}
-              onChange={(event) => onDraft({ reasonText: event.target.value })}
-              className={`w-full min-w-0 resize-y rounded-[var(--radius-control)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-2 py-1.5 text-xs text-[var(--color-arco-ink)] ${FOCUS_RING}`}
-            />
-            <p id={`${ids}-reason-help`} className="text-[11px] text-[var(--color-arco-text-soft)]">
-              Required, up to {REASON_MAX_LENGTH} characters, one line.{" "}
-              <span className="font-mono">
-                {draft.reasonText.trim().length}/{REASON_MAX_LENGTH}
-              </span>
-            </p>
-            <p id={`${ids}-reason-error`} className="text-[11px] text-[var(--color-arco-down)]" aria-live="polite">
-              {draft.showErrors && !reasonCheck.ok ? reasonCheck.message : ""}
-            </p>
-          </div>
           <div className="flex flex-wrap gap-2">
             <Button onClick={onReview}>Review change</Button>
             <Button onClick={onCancel}>Cancel</Button>
@@ -466,7 +435,7 @@ function rejectedCopy(error: StocksAdminError): { title: string; body: string } 
   if (error.kind === "unauthorized") return { title: "Session expired (401)", body: "Sign in again. Nothing was changed." }
   if (error.kind === "disabled") return { title: "Trading limits are not turned on (404)", body: "The limits routes are not registered on this server. Nothing was changed." }
   if (error.code === "LIMIT_IDEMPOTENCY_CONFLICT") return { title: "The change key was already used (409)", body: "The server refused it. Nothing was changed; start the change again." }
-  if (error.kind === "request" && error.status === 400) return { title: "The server refused the input (400)", body: "Nothing was changed. Check the cap and the reason." }
+  if (error.kind === "request" && error.status === 400) return { title: "The server refused the input (400)", body: "Nothing was changed. Check the cap." }
   const copy = errorCopy(error)
   return { title: copy.title, body: "Nothing was changed." }
 }

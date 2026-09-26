@@ -5,7 +5,7 @@
 // change whose answer was lost is recorded at most once. Only a verified answer ends it. A version conflict proves the key
 // was never recorded; any other refusal (400, 401, 403, 404, 409) ends it only on the first attempt, because a refused retry
 // says nothing about the earlier attempt. Anything else leaves it unknown until retried or discarded.
-import { capInputText, checkCapInput, checkReason } from "./parse"
+import { LIMIT_CHANGE_REASON, capInputText, checkCapInput } from "./parse"
 import type { Loaded, ResourceState, StocksAdminError, StocksEnvelopeMeta, TradingLimitChange, TradingLimitCommand, TradingLimitHistory, TradingLimitRow, TradingLimitsRead, TradingSide } from "./types"
 
 export type LimitDraft = {
@@ -16,7 +16,6 @@ export type LimitDraft = {
   readonly enabled: boolean
   readonly noCap: boolean
   readonly capText: string
-  readonly reasonText: string
   readonly reviewing: boolean
   /** Validation messages show after the first review attempt. */
   readonly showErrors: boolean
@@ -47,7 +46,7 @@ export type LimitsState = {
   readonly outcome: LimitOutcome | null
 }
 
-export type DraftPatch = Partial<Pick<LimitDraft, "enabled" | "noCap" | "capText" | "reasonText">>
+export type DraftPatch = Partial<Pick<LimitDraft, "enabled" | "noCap" | "capText">>
 
 export type LimitsAction =
   | { readonly type: "limits/start" }
@@ -81,15 +80,14 @@ export function rowOf(state: LimitsState, symbol: string, side: TradingSide): Tr
 }
 
 export type DraftCheck =
-  | { readonly ok: true; readonly enabled: boolean; readonly dailyCashLimit: string | null; readonly reason: string }
-  | { readonly ok: false; readonly cap: string | null; readonly reason: string | null }
+  | { readonly ok: true; readonly enabled: boolean; readonly dailyCashLimit: string | null }
+  | { readonly ok: false; readonly cap: string }
 
-/** Both inputs checked the way the server will check them. */
+/** The cap checked the way the server will check it; the reason is the console's fixed text. */
 export function checkDraft(draft: LimitDraft): DraftCheck {
   const cap = draft.noCap ? null : checkCapInput(draft.capText)
-  const reason = checkReason(draft.reasonText)
-  if ((cap === null || cap.ok) && reason.ok) return { ok: true, enabled: draft.enabled, dailyCashLimit: cap === null ? null : cap.baseUnits, reason: reason.reason }
-  return { ok: false, cap: cap !== null && !cap.ok ? cap.message : null, reason: reason.ok ? null : reason.message }
+  if (cap === null || cap.ok) return { ok: true, enabled: draft.enabled, dailyCashLimit: cap === null ? null : cap.baseUnits }
+  return { ok: false, cap: cap.message }
 }
 
 /** The frozen change for a reviewed draft, or null when there is nothing valid to send. */
@@ -101,7 +99,7 @@ export function commandFor(draft: LimitDraft | null, idempotencyKey: string): Li
     symbol: draft.symbol,
     side: draft.side,
     basis: draft.basis,
-    command: { enabled: check.enabled, dailyCashLimit: check.dailyCashLimit, expectedVersion: draft.basis.version, idempotencyKey, reason: check.reason },
+    command: { enabled: check.enabled, dailyCashLimit: check.dailyCashLimit, expectedVersion: draft.basis.version, idempotencyKey, reason: LIMIT_CHANGE_REASON },
     phase: "sending",
     attempts: 1,
     error: null,
@@ -159,7 +157,6 @@ export function limitsReducer(state: LimitsState, action: LimitsAction): LimitsS
           enabled: row.enabled,
           noCap: row.dailyCashLimit === null,
           capText: row.dailyCashLimit === null ? "" : capInputText(row.dailyCashLimit),
-          reasonText: "",
           reviewing: false,
           showErrors: false,
         },

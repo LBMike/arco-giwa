@@ -227,7 +227,15 @@ export function parseRuntimeStatus(data: unknown, observedAt: string): RuntimeSt
   }
 }
 
-// ---------------------------------------------------------------- the reason the operator types
+// ---------------------------------------------------------------- the reason recorded with a command
+
+/**
+ * The server records a reason with every command (1–500 characters). Operators do not type one: the console sends this
+ * fixed text, and the change history itself holds the action, the operator and the time.
+ */
+export function controlChangeReason(paused: boolean): string {
+  return paused ? "Paused in the admin console" : "Resumed in the admin console"
+}
 
 export const REASON_MAX_LENGTH = 500
 
@@ -237,7 +245,7 @@ export type ReasonCheck = { readonly ok: true; readonly reason: string } | { rea
 
 /**
  * The server accepts 1–500 UTF-16 code units, already trimmed, without C0/C1 control characters.
- * Leading and trailing whitespace is removed here (the review shows the exact text that will be sent).
+ * The store checks every command's reason with this before it sends the command.
  */
 export function checkReason(input: string): ReasonCheck {
   const reason = input.trim()

@@ -8,7 +8,7 @@ import { parseEnvelope } from "../stocks-admin/parse"
 import type { StocksAdminError } from "../stocks-admin/types"
 import { LIM_NOW, limEnvelope, limEvent, limRead, limRow, limState } from "./fixtures"
 import { LimitsView, StocksLimitsPanel, type LimitsViewProps } from "./LimitsPanel"
-import { parseLimitChange, parseLimitHistory, parseLimitsRead } from "./parse"
+import { LIMIT_CHANGE_REASON, parseLimitChange, parseLimitHistory, parseLimitsRead } from "./parse"
 import { LIMITS_INITIAL, commandFor, limitsReducer, type LimitsAction, type LimitsState } from "./state"
 
 const META = parseEnvelope(limEnvelope(null)).meta
@@ -16,6 +16,12 @@ const noop = () => {}
 const run = (state: LimitsState, ...actions: LimitsAction[]) => actions.reduce(limitsReducer, state)
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;|&apos;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ")
 const error = (kind: StocksAdminError["kind"], status: number | null = null, code: string | null = null): StocksAdminError => ({ kind, status, code })
+/** The editor (and its review) alone, without the table and the history around it. */
+function editorOf(html: string) {
+  const start = html.indexOf('data-testid="stocks-limits-editor"')
+  assert.ok(start >= 0, "no editor")
+  return html.slice(start, html.indexOf("</section>", start))
+}
 
 const ROWS = [
   limRow("BUY", 2, { dailyCashLimit: "50000000000", reason: "Launch cap for the first week" }, "12345000000"),
@@ -69,7 +75,7 @@ test("each stock and side shows its status, today's usage against the cap, the c
   const page = text(html)
   assert.match(page, /Trading limits/)
   assert.match(page, /NVDA Side Buy Status On Today 12,345 tUSDC used of 50,000 tUSDC \(24\.6%\) Daily cap 50,000 tUSDC Last change v2/)
-  assert.match(page, /Launch cap for the first week/)
+  assert.doesNotMatch(page, /Launch cap for the first week/, "the reason is in the change history, not in the row")
   assert.match(page, /NVDA Side Sell Status Off Today 0 tUSDC used · no cap Daily cap No cap Last change v1/)
   assert.match(page, /ops-limits-b/)
   assert.match(page, /Today counts from 2026-09-25 15:00:00 UTC and resets at 2026-09-26 15:00:00 UTC \(00:00 KST, in 11h 59m\)/)
@@ -90,41 +96,41 @@ test("read-only operators see the limits and history without any Change button",
   assert.doesNotMatch(render(run(loaded(), { type: "edit", symbol: "NVDA", side: "BUY" }), { canControl: false }), /stocks-limits-editor/)
 })
 
-test("the editor offers on/off, a cap or No cap, and a required reason; errors show after the first review", () => {
+test("the editor offers on/off and a cap or No cap, with no reason to type; errors show after the first review", () => {
   const editing = run(loaded(), { type: "edit", symbol: "NVDA", side: "BUY" })
   const html = render(editing)
   assert.match(html, /data-testid="stocks-limits-editor"/)
   assert.match(html, /role="switch"[^>]*checked=""|checked=""[^>]*role="switch"/)
   assert.match(html, /value="50000"/)
-  assert.match(text(html), /Change the NVDA Buy limit.*Take new Buy orders.*SIDE_DISABLED.*No cap.*= 50,000 tUSDC a day \(50000000000 base units\).*DAILY_LIMIT_REACHED.*Reason/)
-  assert.doesNotMatch(text(html), /Enter a reason/)
+  assert.match(text(html), /Change the NVDA Buy limit.*Take new Buy orders.*SIDE_DISABLED.*No cap.*= 50,000 tUSDC a day \(50000000000 base units\).*DAILY_LIMIT_REACHED.*Review change/)
+  assert.doesNotMatch(editorOf(html), /<textarea|Reason/)
   const invalid = run(editing, { type: "draft", patch: { capText: "abc" } }, { type: "review" })
   const shown = text(render(invalid))
   assert.match(shown, /Use digits with an optional decimal point/)
-  assert.match(shown, /Enter a reason\. It is recorded with the change\./)
+  assert.doesNotMatch(text(editorOf(render(invalid))), /reason/i)
   assert.match(render(invalid), /aria-invalid="true"/)
   const noCap = text(render(run(editing, { type: "draft", patch: { noCap: true } })))
   assert.match(noCap, /No daily cap: while it is on, this side takes any amount\./)
 })
 
-test("the review shows now, after saving, the change and the reason; a cap at today's usage warns", () => {
-  const review = run(loaded(), { type: "edit", symbol: "NVDA", side: "BUY" }, { type: "draft", patch: { capText: "10,000", reasonText: " Tighter cap " } }, { type: "review" })
+test("the review shows now, after saving and the change; a cap at today's usage warns", () => {
+  const review = run(loaded(), { type: "edit", symbol: "NVDA", side: "BUY" }, { type: "draft", patch: { capText: "10,000" } }, { type: "review" })
   const page = text(render(review))
   assert.match(page, /Review the NVDA Buy change/)
   assert.match(page, /Now \(version 2\) On · 50,000 tUSDC/)
   assert.match(page, /After saving \(version 3\) On · 10,000 tUSDC/)
   assert.match(page, /Change Cap 50,000 tUSDC → 10,000 tUSDC/)
-  assert.match(page, /Reason Tighter cap/)
+  assert.doesNotMatch(text(editorOf(render(review))), /Reason/)
   assert.match(page, /At or below what today already used.*12,345 tUSDC today.*until 00:00 KST/)
   assert.match(page, /only if this limit is still version 2/)
   assert.match(page, /Confirm change/)
-  const same = text(render(run(loaded(), { type: "edit", symbol: "NVDA", side: "SELL" }, { type: "draft", patch: { reasonText: "Record the current setting" } }, { type: "review" })))
+  const same = text(render(run(loaded(), { type: "edit", symbol: "NVDA", side: "SELL" }, { type: "review" })))
   assert.match(same, /Saved again without a change \(Off · No cap\)/)
   assert.doesNotMatch(same, /At or below/)
 })
 
 test("a change in flight, an unknown result and each outcome are announced", () => {
-  const review = run(loaded(), { type: "edit", symbol: "NVDA", side: "BUY" }, { type: "draft", patch: { enabled: false, noCap: true, reasonText: "Pause buys" } }, { type: "review" })
+  const review = run(loaded(), { type: "edit", symbol: "NVDA", side: "BUY" }, { type: "draft", patch: { enabled: false, noCap: true } }, { type: "review" })
   const command = commandFor(review.draft, "limit-key-0001")!
   const inFlight = run(review, { type: "send", command })
   const sending = text(render(inFlight))
@@ -133,7 +139,7 @@ test("a change in flight, an unknown result and each outcome are announced", () 
   const unknown = run(inFlight, { type: "result", key: "limit-key-0001", result: { ok: false, error: error("network") } })
   assert.match(text(render(unknown)), /The NVDA Buy change was not confirmed Could not reach the API\. It may or may not have been saved\..*Retry.*Discard and read again/)
   assert.match(text(render(run(unknown, { type: "retry" }))), /attempt 2, same change key/)
-  const change = limEvent("BUY", 3, { enabled: false, reason: "Pause buys" })
+  const change = limEvent("BUY", 3, { enabled: false, reason: LIMIT_CHANGE_REASON })
   const data = parseLimitChange({ state: limState("BUY", 4, { dailyCashLimit: "5" }), change, replayed: true }, { symbol: "NVDA", side: "BUY", command: command.command })
   const saved = text(render(run(inFlight, { type: "result", key: "limit-key-0001", result: { ok: true, data } })))
   assert.match(saved, /Already saved earlier: NVDA Buy.*nothing was saved twice.*Version 3: On → Off\. A later change \(version 4\) is already recorded\./)
