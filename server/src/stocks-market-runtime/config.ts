@@ -10,6 +10,19 @@ import { createAlpacaMarketClock } from "../stocks-market-data/session.js"
 const delays: readonly string[] = ["UNKNOWN", "DELAYED_15_MIN", "END_OF_DAY", "REALTIME"]
 type RuntimePorts = Pick<StocksMarketDataOptions, "catalog" | "fetch" | "now" | "requestsPerMinute" | "massiveRequestsPerMinute" | "etfGlobalEnabled" | "issuerFundamentalsEnabled" | "profileCachePath" | "snapshotStore">
 
+/**
+ * Alpaca Basic (IEX) prices with Massive Basic profiles: the limits the local live market already runs with
+ * (scripts/stocks-local/live-market.ts). Alpaca's free plan allows 200 data calls a minute, so 60 lets one list view read
+ * all 40 one-day charts; Massive Basic allows 5, so profiles and logos keep one call of headroom. ETF Global is not part of
+ * Massive Basic, and DRAM/RAM AUM comes from the issuer instead. Explicit ports still win.
+ */
+export const ALPACA_FREE_PLAN_LIMITS = Object.freeze({
+  requestsPerMinute: 60,
+  massiveRequestsPerMinute: 4,
+  etfGlobalEnabled: false,
+  issuerFundamentalsEnabled: true,
+})
+
 /** One service per server instance: the provider budget/cache is shared across routes. */
 export function configuredStocksMarketData(
   source: NodeJS.ProcessEnv,
@@ -23,8 +36,13 @@ export function configuredStocksMarketData(
   if (!delays.includes(feedDelay)) throw new Error("INVALID_MARKET_DATA_CONFIG")
   // Do not trim or echo credentials. The service validates any nonempty key.
   const apiKey = source.MASSIVE_API_KEY || undefined
+  const plan = provider === "ALPACA" ? ALPACA_FREE_PLAN_LIMITS : null
   return createStocksMarketDataService({
     ...ports,
+    requestsPerMinute: ports.requestsPerMinute ?? plan?.requestsPerMinute,
+    massiveRequestsPerMinute: ports.massiveRequestsPerMinute ?? plan?.massiveRequestsPerMinute,
+    etfGlobalEnabled: ports.etfGlobalEnabled ?? plan?.etfGlobalEnabled,
+    issuerFundamentalsEnabled: ports.issuerFundamentalsEnabled ?? plan?.issuerFundamentalsEnabled,
     catalog: ports.catalog ?? (catalogMode === "CURATED_40" ? CURATED_40_CATALOG : undefined),
     apiKey, feedDelay: feedDelay as FeedDelay, provider: provider as "MASSIVE" | "ALPACA",
     alpacaFeed: alpacaFeed as "iex" | "sip",

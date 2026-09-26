@@ -56,8 +56,11 @@
 | `STOCKS_MARKET_DATA_FEED_DELAY` | `REALTIME` | 아니요 |
 | `ALPACA_API_KEY_ID` | 로컬 데모와 같은 값 | 예 |
 | `ALPACA_API_SECRET_KEY` | 로컬 데모와 같은 값 | 예 |
+| `MASSIVE_API_KEY` | 로컬 데모와 같은 값. 없으면 회사 정보·로고·배당만 비어 있습니다 | 예 |
 
 Preview 원점은 push한 뒤 Vercel이 만든 이 브랜치의 주소를 확인해서 넣습니다.
+
+Alpaca 두 칸에는 대시보드의 Key와 Secret을 넣습니다. Endpoint 주소(`https://…alpaca.markets…`)를 넣으면 시세가 `PROVIDER_UNAUTHORIZED`로 비어 있습니다. 호출 한도는 로컬과 같습니다(Alpaca 분당 60회, Massive 분당 4회). Render는 배포할 때마다 메모리 캐시가 비므로, 배포 직후에는 회사 정보와 로고가 20분쯤에 걸쳐 채워집니다.
 
 ### Vercel Preview 환경변수 (Git 브랜치 `release/app-arco-financial`에만 적용)
 
