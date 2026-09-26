@@ -1,9 +1,9 @@
 import { immutable, manifestDigest, PROFILE } from '../stocks/contracts.js';
-import { parseStocksRuntimeConfig, stocksAutodispatch, type StocksRuntimeConfig } from '../stocks-runtime/runtime.js';
+import { parseStocksRuntimeConfig, stocksAutodispatch, stocksTradingLimits, type StocksRuntimeConfig } from '../stocks-runtime/runtime.js';
 import { createDeploymentEvidence } from '../stocks-execution/deployment.js';
 
 export type Check = { id: string; status: 'PASS' | 'FAIL' | 'NOT_CHECKED'; code: string };
-export type Prepared = { config: StocksRuntimeConfig; databaseUrl: string; historySchema: 'public' | 'arco_evm'; signerToken: string };
+export type Prepared = { config: StocksRuntimeConfig; databaseUrl: string; historySchema: 'public' | 'arco_evm'; signerToken: string; tradingLimits?: boolean };
 export type Report = typeof PROFILE & {
     observedAt: string; mode: 'OFFLINE' | 'ONLINE';
     status: 'DISABLED' | 'BLOCKED' | 'CONFIGURED_NOT_PROBED' | 'STARTUP_CHECKS_PASSED';
@@ -25,6 +25,10 @@ export async function checkStocksPreflight(env: NodeJS.ProcessEnv, options: {
     let autodispatch = false;
     try { autodispatch = stocksAutodispatch(env); checks.push(result('mode', true, 'MODE_VALID')); }
     catch { checks.push(result('mode', false, 'INVALID_MODE_OR_AUTODISPATCH')); return report('BLOCKED'); }
+    // The runtime refuses to start on any value other than unset, 0 or 1, whatever the mode; so does this check.
+    let tradingLimits = false;
+    try { tradingLimits = stocksTradingLimits(env); }
+    catch { checks.push(result('tradingLimits', false, 'INVALID_STOCKS_TRADING_LIMITS')); return report('BLOCKED'); }
     if (env.STOCKS_MODE !== 'DEMO_TESTNET') return report('DISABLED');
 
     let config: StocksRuntimeConfig | undefined;
@@ -61,7 +65,8 @@ export async function checkStocksPreflight(env: NodeJS.ProcessEnv, options: {
     if (checks.some(c => c.status === 'FAIL') || !config) return report('BLOCKED');
     if (!online) return report('CONFIGURED_NOT_PROBED');
     let probes: Probes;
-    try { probes = options.probes({ config: immutable(config), databaseUrl, historySchema, signerToken }); }
+    // STOCKS_TRADING_LIMITS=1 also requires the trading limit tables and guards.
+    try { probes = options.probes({ config: immutable(config), databaseUrl, historySchema, signerToken, ...(tradingLimits ? { tradingLimits } : {}) }); }
     catch { checks.push(result('probeSetup', false, 'PROBE_SETUP_FAILED')); return report('BLOCKED'); }
     // Checks are independent read-only requests. Each adapter owns a bounded
     // timeout and resource cleanup; no signing or startup port is provided.

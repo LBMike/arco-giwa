@@ -3,7 +3,7 @@
 // order key, the DIRECT_ORDER_NOT_CREATED audit entry says why (its `hold`). Read-only: this module never writes,
 // and returning or refunding a held payment is out of scope (it needs the signer and a two-person approval).
 import { StocksError, type SqlPool } from './contracts.js';
-import type { DirectHold } from './direct.js';
+import { DIRECT_HOLDS, type DirectHold } from './direct.js';
 
 export type StocksHeldPayment = {
   /** StocksFunding.id (BUY) or StocksCustody.id (SELL). */
@@ -30,7 +30,7 @@ type HeldCursor = { readonly t: string; readonly s: 'BUY' | 'SELL'; readonly i: 
 export const HELD_DEFAULT_LIMIT = 50;
 export const HELD_MAX_LIMIT = 100;
 const INVALID = 'INVALID_HELD_QUERY';
-const HOLDS: readonly string[] = ['TRADING_PAUSED', 'PRICE_UNAVAILABLE', 'BELOW_ONE_UNIT'] satisfies DirectHold[];
+const HOLDS: readonly string[] = DIRECT_HOLDS;
 const CURSOR_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
 
 function invalid(): never { throw new StocksError(INVALID, 400); }

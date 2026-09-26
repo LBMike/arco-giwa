@@ -2,11 +2,12 @@ import { enrollWalletSubmission } from '../stocks-submissions/enrollment.js';
 import { recoverOrder } from './order-recovery.js';
 import { StocksSellService, type EscrowReturnPolicy } from './sell-service.js';
 import { randomUUID } from 'node:crypto';
-import { address, ensure, immutable, liquidityScope, manifestDigest, operationKey, PROFILE, units, validateActor, freezeManifest, type Activation, type Actor, type Manifest, type PausePolicy, type SqlClient } from './contracts.js';
+import { address, ensure, immutable, liquidityScope, manifestDigest, operationKey, PROFILE, StocksError, units, validateActor, freezeManifest, type Activation, type Actor, type Manifest, type PausePolicy, type SqlClient } from './contracts.js';
 import { authorizedCall, ReceiptVerifier } from './chain.js';
 import { StocksRepository } from './repository.js';
 import { buyCost, buyQuantity, feeBps, FIXED_PRICE, FIXED_PRICING, formatPriceUnits, type StocksPricing } from './pricing.js';
-import { ACTIVITY_LIMIT, directActorId, directIdempotencyKey, directPrice, isDirectOrderKey, type DirectHold, type DirectOrderStatus, type StocksActivityEntry } from './direct.js';
+import { ACTIVITY_LIMIT, DIRECT_HOLDS, directActorId, directIdempotencyKey, directPrice, isDirectOrderKey, type DirectHold, type DirectOrderStatus, type StocksActivityEntry } from './direct.js';
+import type { TradingLimitGate, TradingSide } from '../stocks-trading-limits/contracts.js';
 import type { Hex } from 'viem';
 export type RefundPolicy = (input: {
     fundingId: string;
@@ -25,8 +26,11 @@ export class StocksService {
      * (configured or operator pause, stopped runtime, changed cash identity). It defaults to `paused`. Transient states
      * that only delay dispatch (the observer catching up after a restart) must not hold a wallet's own payment: its order
      * is created and then waits for dispatch like any other.
+     *
+     * `limits` (STOCKS_TRADING_LIMITS=1) refuses new orders for a disabled side or past the side's daily cap, and holds a
+     * direct payment or escrow instead of taking it as an order. Without it every side is open with no cap, as before.
      */
-    constructor(readonly repo: StocksRepository, readonly manifest: Manifest, readonly verifier: ReceiptVerifier, private readonly activation?: Activation, readonly paused: PausePolicy = async () => true, private readonly refundPolicy: RefundPolicy = async () => false, returnPolicy?: EscrowReturnPolicy, readonly pricing: StocksPricing = FIXED_PRICING, readonly directHalted: PausePolicy = paused) {
+    constructor(readonly repo: StocksRepository, readonly manifest: Manifest, readonly verifier: ReceiptVerifier, private readonly activation?: Activation, readonly paused: PausePolicy = async () => true, private readonly refundPolicy: RefundPolicy = async () => false, returnPolicy?: EscrowReturnPolicy, readonly pricing: StocksPricing = FIXED_PRICING, readonly directHalted: PausePolicy = paused, readonly limits?: TradingLimitGate) {
         feeBps(pricing.mintFeeBps);
         feeBps(pricing.burnFeeBps);
         this.manifest = freezeManifest(manifest);
@@ -46,6 +50,17 @@ export class StocksService {
         ensure(binding?.deploymentDigest === this.digest, 'VAULT_ALREADY_BOUND_TO_OTHER_DEPLOYMENT', 503);
     }
     async ready(): Promise<void> { await this.bindDeployment(); ensure(this.activation?.manifestDigest === this.digest && this.activation.contractPolicyVerified === true, 'STOCKS_NOT_ACTIVATED', 503); ensure(!(await this.paused()), 'STOCKS_PAUSED', 503); }
+    /**
+     * A trading limit refuses a new order with 409 SIDE_DISABLED or DAILY_LIMIT_REACHED. With `db` (inside the transaction
+     * that creates the order) the check is serialized per (symbol, side); without it, before a quote, it is a hint.
+     */
+    async requireLimit(symbol: string, side: TradingSide, cash: bigint, db?: SqlClient): Promise<void> {
+        if (!this.limits)
+            return;
+        const block = db ? await this.limits.admit(db, symbol, side, cash) : await this.limits.check(symbol, side, cash);
+        if (block)
+            throw new StocksError(block, 409);
+    }
     /** The price a quote uses now. The profile's priceSource name stays FIXED_MOCK_PRICE: each quote fixes its price. */
     async currentPrice(): Promise<bigint> { const price = await this.pricing.price(); this.lastPrice = price; return price; }
     /** The catalog route: the current price when it can be read, otherwise the last one seen. Quotes always need a current one. */
@@ -53,6 +68,18 @@ export class StocksService {
         try { await this.currentPrice(); }
         catch (error) { if (this.lastPrice === null) throw error; }
         return this.catalog();
+    }
+    /**
+     * Public: whether a new order of `side` for `cashAmount` cash base units (default: the smallest amount) would be taken
+     * now. A direct Buy or Sell asks before the wallet sends anything, because the server cannot refuse a transaction
+     * that is already on GIWA, only hold it. The answer is a hint: the order itself (or the observed payment) decides.
+     */
+    async tradingAvailability(side: unknown, cashAmount: unknown) {
+        ensure(side === 'BUY' || side === 'SELL', 'INVALID_SIDE', 400);
+        ensure(cashAmount === undefined || (typeof cashAmount === 'string' && /^[1-9]\d{0,30}$/.test(cashAmount) && BigInt(cashAmount) <= 10n ** 30n), 'INVALID_CASH_AMOUNT', 400);
+        const cash = cashAmount === undefined ? 1n : BigInt(cashAmount);
+        const block = (await this.directHalted()) ? 'TRADING_PAUSED' : this.limits ? await this.limits.check('NVDA', side, cash) : null;
+        return { symbol: 'NVDA', side, accepts: block === null, block };
     }
     /**
      * Public. `tokenAddress` is the verified NVDA token, so a wallet's balance can be read on GIWA without signing in;
@@ -66,6 +93,7 @@ export class StocksService {
         ensure(symbol === 'NVDA', 'UNSUPPORTED_SYMBOL');
         const value = units(quantity, 9);
         const cash = buyCost(value, await this.currentPrice(), this.pricing.mintFeeBps);
+        await this.requireLimit(symbol, 'BUY', cash);
         return this.insertQuote(actor, symbol, value, cash);
     }
     /** A Buy for an exact tUSDC amount: the NVDA it buys at the current price, less the mint fee, rounded down. */
@@ -77,6 +105,7 @@ export class StocksService {
         const cash = units(cashAmount, 6);
         const value = buyQuantity(cash, await this.currentPrice(), this.pricing.mintFeeBps);
         ensure(value > 0n, 'QUOTE_TOO_SMALL');
+        await this.requireLimit(symbol, 'BUY', cash);
         return this.insertQuote(actor, symbol, value, cash);
     }
     private insertQuote(actor: Actor, symbol: string, value: bigint, cash: bigint) {
@@ -105,6 +134,7 @@ export class StocksService {
             ensure(q.deploymentDigest === this.digest && q.valid, 'QUOTE_EXPIRED_OR_DEPLOYMENT_CHANGED', 409);
             const used = (await db.query('SELECT id FROM arco_evm."StocksOrder" WHERE "quoteId"=$1', [quoteId])).rows[0];
             ensure(!used, 'QUOTE_ALREADY_USED', 409);
+            await this.requireLimit(q.symbol, 'BUY', BigInt(q.cashAmount), db);
             const id = randomUUID();
             const row = (await db.query('INSERT INTO arco_evm."StocksOrder" (id,"orderKey","quoteId","actorId",wallet,symbol,quantity,"cashAmount","idempotencyKey","deploymentId","deploymentDigest","quoteExpiresAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *', [id, operationKey(`${this.manifest.networkInstance}:${id}`), q.id, q.actorId, q.wallet, q.symbol, q.quantity, q.cashAmount, idempotencyKey, this.manifest.deploymentId, this.digest, q.expiresAt])).rows[0];
             await enrollWalletSubmission(db, this.manifest, row, 'BUY');
@@ -149,10 +179,12 @@ export class StocksService {
             if (duplicate)
                 return duplicate.proof.evidenceDigest === evidenceDigest ? duplicate : this.fundingConflict(db, duplicate, evidenceDigest);
             let order = (await db.query('SELECT * FROM arco_evm."StocksOrder" WHERE "orderKey"=$1 FOR UPDATE', [funding.orderKey])).rows[0];
-            if (!order && direct && 'quantity' in direct)
+            // A direct Buy past a trading limit is held like a paused one: the chain has already moved the payment.
+            const limited = !order && direct && 'quantity' in direct && this.limits ? await this.limits.admit(db, 'NVDA', 'BUY', BigInt(funding.amount)) : null;
+            if (!order && direct && 'quantity' in direct && !limited)
                 order = await this.insertDirectBuy(db, funding, direct.quantity, direct.price);
             else if (!order && isDirectOrderKey(funding.orderKey))
-                await this.repo.audit(db, funding.orderKey, 'DIRECT_ORDER_NOT_CREATED', { side: 'BUY', fundingId: funding.eventId, txHash, amount: funding.amount, hold: direct && 'hold' in direct ? direct.hold : null });
+                await this.repo.audit(db, funding.orderKey, 'DIRECT_ORDER_NOT_CREATED', { side: 'BUY', fundingId: funding.eventId, txHash, amount: funding.amount, hold: limited ?? (direct && 'hold' in direct ? direct.hold : null) });
             let reason = 'UNIDENTIFIED_ORDER';
             if (order) {
                 if (order.deploymentDigest !== this.digest)
@@ -221,7 +253,7 @@ export class StocksService {
             const held = (await this.repo.pool.query('SELECT detail,"createdAt" FROM arco_evm."StocksAudit" WHERE subject=$1 AND action=\'DIRECT_ORDER_NOT_CREATED\' AND "deploymentDigest"=$2 ORDER BY "createdAt" LIMIT 1', [orderKey, this.digest])).rows[0];
             ensure(held, 'DIRECT_ORDER_NOT_FOUND', 404);
             const escrow = held.detail?.side === 'SELL';
-            const hold = ['TRADING_PAUSED', 'PRICE_UNAVAILABLE', 'BELOW_ONE_UNIT'].includes(held.detail?.hold) ? held.detail.hold as DirectHold : undefined;
+            const hold = DIRECT_HOLDS.includes(held.detail?.hold) ? held.detail.hold as DirectHold : undefined;
             return { side: escrow ? 'SELL' : 'BUY', state: escrow ? 'ESCROW_REVIEW_REQUIRED' : 'FUNDING_REVIEW_REQUIRED', quantity: escrow ? String(held.detail?.quantity ?? '0') : '0', cashAmount: escrow ? '0' : String(held.detail?.amount ?? '0'), createdAt: time(held.createdAt), updatedAt: time(held.createdAt), ...(hold ? { hold } : {}) };
         }
         return { side: buy ? 'BUY' : 'SELL', state: row.state, quantity: row.quantity, cashAmount: row.cashAmount, createdAt: time(row.createdAt), updatedAt: time(row.updatedAt) };

@@ -24,6 +24,7 @@ export class StocksSellService {
         const value = units(quantity, 9);
         const cash = sellPayout(value, await this.parent.currentPrice(), this.parent.pricing.burnFeeBps);
         ensure(cash > 0n, 'ZERO_SELL_PAYOUT');
+        await this.parent.requireLimit(symbol, 'SELL', cash);
         return this.parent.repo.tx(async (db) => {
             const row = (await db.query(`INSERT INTO arco_evm."StocksSellQuote" (id,"actorId",wallet,symbol,quantity,"cashAmount","deploymentDigest","expiresAt") VALUES ($1,$2,$3,'NVDA',$4,$5,$6,clock_timestamp()+interval '60 seconds') RETURNING *`, [randomUUID(), actor.actorId, address(actor.wallet), value.toString(), cash.toString(), this.parent.digest])).rows[0];
             await this.parent.repo.audit(db, row.id, 'SELL_QUOTE_CREATED', { actorId: actor.actorId });
@@ -59,6 +60,7 @@ export class StocksSellService {
             await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`stock-wallet:${s.digest}:${q.wallet}`]);
             const position = await s.repo.walletPosition(db, q.wallet);
             ensure(BigInt(position.availableQuantity) >= BigInt(q.quantity), 'INSUFFICIENT_AVAILABLE_STOCK', 409);
+            await s.requireLimit('NVDA', 'SELL', BigInt(q.cashAmount), db);
             const id = randomUUID();
             const row = (await db.query(`INSERT INTO arco_evm."StocksSellOrder" (id,"orderKey","quoteId","actorId",wallet,symbol,quantity,"cashAmount","idempotencyKey","deploymentId","deploymentDigest","quoteExpiresAt") VALUES($1,$2,$3,$4,$5,'NVDA',$6,$7,$8,$9,$10,$11) RETURNING *`, [id, operationKey(`sell:${s.manifest.networkInstance}:${id}`), q.id, actor.actorId, q.wallet, q.quantity, q.cashAmount, key, s.manifest.deploymentId, s.digest, q.expiresAt])).rows[0];
             await enrollWalletSubmission(db, s.manifest, row, 'SELL');
@@ -111,10 +113,12 @@ export class StocksSellService {
             }
             await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`stock-wallet:${s.digest}:${fact.payer}`]);
             let order = (await db.query('SELECT * FROM arco_evm."StocksSellOrder" WHERE "orderKey"=$1 FOR UPDATE', [fact.orderKey])).rows[0];
-            if (!order && direct && 'cash' in direct)
+            // A direct Sell past a trading limit is held like a paused one: the NVDA is already in escrow.
+            const limited = !order && direct && 'cash' in direct && s.limits ? await s.limits.admit(db, 'NVDA', 'SELL', direct.cash) : null;
+            if (!order && direct && 'cash' in direct && !limited)
                 order = await this.insertDirectSell(db, fact, direct.cash, direct.price);
             else if (!order && isDirectOrderKey(fact.orderKey))
-                await s.repo.audit(db, fact.orderKey, 'DIRECT_ORDER_NOT_CREATED', { side: 'SELL', custodyId: fact.eventId, txHash, quantity: fact.quantity, hold: direct && 'hold' in direct ? direct.hold : null });
+                await s.repo.audit(db, fact.orderKey, 'DIRECT_ORDER_NOT_CREATED', { side: 'SELL', custodyId: fact.eventId, txHash, quantity: fact.quantity, hold: limited ?? (direct && 'hold' in direct ? direct.hold : null) });
             let reason = 'UNIDENTIFIED_ORDER';
             if (order) {
                 if (order.deploymentDigest !== s.digest)

@@ -33,7 +33,8 @@ test('monotonic timeout rejects delayed completion before timer callback and rej
 });
 
 function catalogFixture(controlTables: string[] = [], unreadable?: string) {
-    const controls = new Set(['StocksTradingControl', 'StocksTradingControlEvent']);
+    // Optional tables (operator controls, trading limits) exist only when listed in controlTables.
+    const controls = new Set(['StocksTradingControl', 'StocksTradingControlEvent', 'StocksTradingLimit', 'StocksTradingLimitEvent']);
     const queries: string[] = [], requested: string[][] = [];
     let connections = 0, releases = 0;
     const pool: SqlPool = {
@@ -94,6 +95,27 @@ test('enabled control preflight requires both readable control tables and remain
     assert.equal(f.queries[0], 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     assert.ok(f.queries.every(sql => !/INSERT|UPDATE|DELETE|FOR SHARE|pg_advisory/.test(sql)));
     assert.deepEqual(f.counts(), { connections: 1, releases: 1 });
+});
+
+test('trading limit preflight requires both limit tables and their guards, alone or with operator controls', async () => {
+    const limitTables = ['StocksTradingLimit', 'StocksTradingLimitEvent'];
+    for (const available of [[], ['StocksTradingLimit'], ['StocksTradingLimitEvent']]) {
+        const f = catalogFixture(available);
+        const checks = await checkPreflightDatabase(f.pool, testManifest(), migrations, 'arco_evm', { tradingLimits: true });
+        assert.equal(checks.find(item => item.id === 'stockTables')?.status, 'FAIL');
+        assert.equal(checks.find(item => item.id === 'vaultBinding')?.status, 'NOT_CHECKED');
+        assert.equal(f.requested[0].length, 21);
+        assert.ok(f.requested[0].includes('StocksTradingLimit') && !f.requested[0].includes('StocksTradingControl'));
+    }
+    const limits = catalogFixture(limitTables);
+    assert.ok((await checkPreflightDatabase(limits.pool, testManifest(), migrations, 'arco_evm', { tradingLimits: true })).every(item => item.status === 'PASS'));
+    const both = catalogFixture(['StocksTradingControl', 'StocksTradingControlEvent', ...limitTables]);
+    assert.ok((await checkPreflightDatabase(both.pool, testManifest(), migrations, 'arco_evm', { operatorControls: true, tradingLimits: true })).every(item => item.status === 'PASS'));
+    assert.equal(both.requested[0].length, 23);
+    const off = catalogFixture(limitTables);
+    assert.ok((await checkPreflightDatabase(off.pool, testManifest(), migrations, 'arco_evm', { tradingLimits: false })).every(item => item.status === 'PASS'));
+    assert.equal(off.requested[0].length, 19);
+    await assert.rejects(checkPreflightDatabase(off.pool, testManifest(), migrations, 'arco_evm', { tradingLimits: 'yes' as never }), /INVALID_STOCKS_TRADING_LIMITS/);
 });
 
 test('invalid operator-control preflight flags fail before any connection', async () => {

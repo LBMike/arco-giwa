@@ -542,3 +542,41 @@ model StocksTradingControlEvent {
   @@unique([deploymentDigest, idempotencyKey])
   @@schema("arco_evm")
 }
+
+// Per-symbol, per-side Stocks trading limits (STOCKS_TRADING_LIMITS=1). A missing row, like the version-0 row,
+// means enabled with no daily cap. dailyCashLimit is cash token base units per KST day; null means no cap.
+model StocksTradingLimit {
+  deploymentDigest String
+  symbol String
+  side String
+  enabled Boolean @default(true)
+  dailyCashLimit Decimal? @db.Decimal
+  version Int @default(0)
+  updatedAt DateTime? @db.Timestamptz
+  operatorId String?
+  reason String?
+  events StocksTradingLimitEvent[]
+  @@id([deploymentDigest, symbol, side])
+  @@schema("arco_evm")
+}
+
+model StocksTradingLimitEvent {
+  id String @id
+  deploymentDigest String
+  symbol String
+  side String
+  limit StocksTradingLimit @relation(fields: [deploymentDigest, symbol, side], references: [deploymentDigest, symbol, side], onDelete: Restrict, onUpdate: Restrict)
+  version Int
+  expectedVersion Int
+  previousEnabled Boolean
+  previousDailyCashLimit Decimal? @db.Decimal
+  enabled Boolean
+  dailyCashLimit Decimal? @db.Decimal
+  operatorId String
+  reason String
+  idempotencyKey String
+  createdAt DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz
+  @@unique([deploymentDigest, symbol, side, version])
+  @@unique([deploymentDigest, idempotencyKey])
+  @@schema("arco_evm")
+}

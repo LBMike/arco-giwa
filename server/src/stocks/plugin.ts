@@ -33,6 +33,14 @@ export async function stocksPlugin(app: FastifyInstance, options: StocksPluginOp
             orderKey: string;
         };
     }>('/api/v1/stocks/direct/:orderKey', async (r) => envelope(await s.directOrder(r.params.orderKey)));
+    // Public: whether a new order of a side (and cash amount) would be taken now; a direct trade asks before the wallet sends.
+    app.get<{
+        Querystring: Record<string, unknown>;
+    }>('/api/v1/stocks/availability', async (r) => {
+        const query = r.query ?? {};
+        ensure(Object.keys(query).every(k => k === 'side' || k === 'cashAmount'), 'UNEXPECTED_FIELDS');
+        return envelope(await s.tradingAvailability(query.side, query.cashAmount));
+    });
     // Public, like a wallet's product activity: its Stocks trades and their GIWA transactions.
     app.get<{
         Params: {

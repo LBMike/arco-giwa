@@ -3,6 +3,7 @@ import { stocksSubmissionDiagnosticsPlugin, type StocksSubmissionDiagnosticsPlug
 import { stocksRuntimeStatusPlugin, type StocksRuntimeStatusPluginOptions } from './stocks-runtime-status/plugin.js'
 import { stocksReadinessPlugin } from './stocks-runtime-status/readiness.js'
 import { stocksTradingControlPlugin, type StocksTradingControlPluginOptions } from './stocks-trading-control/plugin.js'
+import { stocksTradingLimitsPlugin, type StocksTradingLimitsPluginOptions } from './stocks-trading-limits/plugin.js'
 import { createRequire } from "node:module"
 import cors from "@fastify/cors"
 import { stocksPlugin, type StocksPluginOptions } from "./stocks/plugin.js"
@@ -97,6 +98,7 @@ export type ArcoAppServices = {
   readonly stocksSubmissionDiagnostics?: StocksSubmissionDiagnosticsPluginOptions
   readonly stocksRuntimeStatus?: StocksRuntimeStatusPluginOptions
   readonly stocksTradingControl?: StocksTradingControlPluginOptions
+  readonly stocksTradingLimits?: StocksTradingLimitsPluginOptions
   readonly stocksExecution?: StocksExecutionPluginOptions
   readonly stocksSubmissions?: StocksSubmissionsPluginOptions
   readonly stocksMarketData?: StocksMarketDataService
@@ -1400,6 +1402,7 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     app.register(stocksReadinessPlugin, { getSnapshot: services.stocksRuntimeStatus.getSnapshot })
   }
   if (services.stocksTradingControl) app.register(stocksTradingControlPlugin, services.stocksTradingControl)
+  if (services.stocksTradingLimits) app.register(stocksTradingLimitsPlugin, services.stocksTradingLimits)
   if (services.stocksSubmissionDiagnostics) app.register(stocksSubmissionDiagnosticsPlugin, services.stocksSubmissionDiagnostics)
   if (services.stocksExecution) app.register(stocksExecutionPlugin, services.stocksExecution)
   if (services.stocksSubmissions) app.register(stocksSubmissionsPlugin, services.stocksSubmissions)

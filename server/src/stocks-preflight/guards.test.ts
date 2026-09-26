@@ -11,19 +11,27 @@ test('guard contract covers every current migration trigger and final replaced f
   assert.equal(f.parsedFunctions, f.functionDeclarations);
   assert.deepEqual(f.guards, stocksGuards);
   assert.deepEqual(Object.fromEntries(Object.entries(f.functions).map(([name, body]) => [name, createHash('sha256').update(body).digest('hex')])), stocksGuardFunctions);
-  assert.ok(stockGuardsMatch(f.rows, true));
-  const legacy = f.rows.filter(r => !(r.table_name as string).startsWith('StocksTradingControl'));
+  assert.ok(stockGuardsMatch(f.rows, true, true));
+  // Trading limit guards are required only with STOCKS_TRADING_LIMITS=1, and unexpected without it.
+  assert.equal(stockGuardsMatch(f.rows, true), false);
+  const withoutLimits = f.rows.filter(r => !(r.table_name as string).startsWith('StocksTradingLimit'));
+  assert.ok(stockGuardsMatch(withoutLimits, true));
+  assert.equal(stockGuardsMatch(withoutLimits, true, true), false);
+  const legacy = withoutLimits.filter(r => !(r.table_name as string).startsWith('StocksTradingControl'));
   assert.ok(stockGuardsMatch(legacy, false));
   assert.equal(stockGuardsMatch(legacy, true), false);
+  const limitsWithoutControls = f.rows.filter(r => !(r.table_name as string).startsWith('StocksTradingControl'));
+  assert.ok(stockGuardsMatch(limitsWithoutControls, false, true));
+  assert.equal(f.rows.length - withoutLimits.length, 6);
 });
 
 test('missing, duplicate, unexpected and individually disabled guards never pass', () => {
   const { rows } = migrationGuardFixture();
-  assert.equal(stockGuardsMatch([...rows, { ...rows[0], trigger_name: 'Unexpected' }], true), false);
-  assert.equal(stockGuardsMatch([...rows.slice(1), rows[1]], true), false);
+  assert.equal(stockGuardsMatch([...rows, { ...rows[0], trigger_name: 'Unexpected' }], true, true), false);
+  assert.equal(stockGuardsMatch([...rows.slice(1), rows[1]], true, true), false);
   for (let i = 0; i < rows.length; i++) {
-    assert.equal(stockGuardsMatch(rows.filter((_, index) => i !== index), true), false);
-    assert.equal(stockGuardsMatch(rows.map((r, index) => i === index ? { ...r, enabled: 'D' } : r), true), false);
+    assert.equal(stockGuardsMatch(rows.filter((_, index) => i !== index), true, true), false);
+    assert.equal(stockGuardsMatch(rows.map((r, index) => i === index ? { ...r, enabled: 'D' } : r), true, true), false);
   }
 });
 
@@ -38,6 +46,6 @@ test('same-name weakened trigger or function fails; ALWAYS firing is accepted', 
     { body: 'BEGIN RETURN NEW; END' }, { body: null }, { language: 'sql' },
     { returns_trigger: false }, { function_arguments: 1 }, { security_definer: true },
     { function_settings: ['session_replication_role=replica'] }, { volatility: 's' },
-  ]) assert.equal(stockGuardsMatch([{ ...rows[0], ...mutation }, ...rows.slice(1)], true), false, JSON.stringify(mutation));
-  assert.ok(stockGuardsMatch(rows.map(r => ({ ...r, enabled: 'A' })), true));
+  ]) assert.equal(stockGuardsMatch([{ ...rows[0], ...mutation }, ...rows.slice(1)], true, true), false, JSON.stringify(mutation));
+  assert.ok(stockGuardsMatch(rows.map(r => ({ ...r, enabled: 'A' })), true, true));
 });

@@ -13,6 +13,7 @@
 | `STOCKS_SIGNER_TOKEN` | 외부 서명 서비스 인증 토큰. 서버 secret 설정으로만 제공하며 공개 JSON·브라우저·로그에 넣지 않는다. 개인키가 아니다. |
 | `STOCKS_DATABASE_URL` | 선택적인 Stocks DB 연결. 생략하면 기존 서버의 검증된 DATABASE_URL을 사용한다. |
 | `STOCKS_AUTODISPATCH` | 생략/`0`이면 새 주문이 차단되고 worker/observer tick은 실행되지 않는다. `1`은 DEMO_TESTNET과 완전한 설정을 요구한다. 다른 값은 시작 전 거절한다. |
+| `STOCKS_TRADING_LIMITS` | 생략/`0`이면 종목별 거래 제한을 쓰지 않는다(기존 동작). `1`이면 종목·방향별 켜고 끄기와 하루 상한을 검사하고, 시작 전 점검이 제한 테이블을 요구한다. 다른 값은 시작 전 거절한다. [거래 제한](stocks-trading-limits.md) 참고. |
 
 공개 JSON 구조는 `profile: "DEMO_TESTNET"`, `manifest: <검증된 v2 명세>`, `rpcUrl`, `signerUrl`, `contractPolicyVerified: true`, `paused: boolean`, `operators: [{wallet,operatorId,permissions:["stocks:read"]}]`다. 선택적 `operatorControls: true`로 영속 운영자 중지·재개 기능을 활성화할 수 있다. 생략 또는 false면 기존 경로와 동작을 유지한다. RPC·서명 URL은 HTTPS여야 하며 URL의 사용자 정보·query·fragment는 허용하지 않는다. 예외는 서명 URL 하나다. 서명기를 호스팅 플랫폼의 사설 네트워크(예: Render private service)에 둔 경우 `http://arco-stocks-signer:4394`처럼 점이 없는 단일 호스트 이름과 명시적 포트를 쓰는 HTTP 원점을 허용한다. 공개 도메인, IP, localhost는 여전히 HTTPS만 허용하고, RPC URL에는 이 예외가 없다. 서명 서비스 URL은 루트 경로여야 한다. 실제 주소나 명세를 추측해 샘플 값으로 활성화하지 않는다.
 

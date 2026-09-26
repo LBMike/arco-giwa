@@ -331,6 +331,7 @@ async function composeServer(
           stocksExecution: stocks ? { service: stocks.execution, resolveActor: sessions!.resolveActor } : undefined,
           stocksRuntimeStatus: stocks ? { getSnapshot: stocks.status, resolveOperator: sessions!.resolveOperator } : undefined,
           stocksTradingControl: stocks?.control ? { service: stocks.control, resolveOperator: sessions!.resolveOperator } : undefined,
+          stocksTradingLimits: stocks?.limits ? { service: stocks.limits, resolveOperator: sessions!.resolveOperator } : undefined,
           stocksSubmissionDiagnostics: stocks ? { service: new StocksSubmissionDiagnosticsService(stocks.service), resolveOperator: sessions!.resolveOperator } : undefined,
           stocksSubmissions: stocks ? {
             service: new StocksSubmissionsService(stocks.service, stocks.submissionReceipts),

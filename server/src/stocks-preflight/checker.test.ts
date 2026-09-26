@@ -30,6 +30,23 @@ test('disabled and malformed modes perform no config read or external initializa
     for (const env of [{ STOCKS_MODE: 'MAINNET' }, { STOCKS_AUTODISPATCH: '1' }, { STOCKS_MODE: 'DEMO_TESTNET', STOCKS_AUTODISPATCH: 'true' }]) assert.equal((await checkStocksPreflight(env, f.options)).status, 'BLOCKED');
     assert.deepEqual(f.counts(), { reads: 0, creates: 0 });
 });
+test('STOCKS_TRADING_LIMITS: only unset, 0 or 1, in any mode (as the runtime); 1 asks the database probe for the limit tables', async () => {
+    const f = fixture();
+    for (const value of ['true', 'yes', '', ' 1', '2']) {
+        for (const env of [{ ...f.env, STOCKS_TRADING_LIMITS: value }, { STOCKS_MODE: 'DISABLED', STOCKS_TRADING_LIMITS: value }]) {
+            const report = await checkStocksPreflight(env, { ...f.options, online: true });
+            assert.equal(report.status, 'BLOCKED', JSON.stringify(value));
+            assert.deepEqual(report.checks.find(c => c.id === 'tradingLimits'), { id: 'tradingLimits', status: 'FAIL', code: 'INVALID_STOCKS_TRADING_LIMITS' });
+        }
+    }
+    assert.deepEqual(f.counts(), { reads: 0, creates: 0 });
+    const seen: Array<boolean | undefined> = [];
+    for (const value of [undefined, '0', '1']) {
+        const report = await checkStocksPreflight({ ...f.env, ...(value === undefined ? {} : { STOCKS_TRADING_LIMITS: value }) }, { ...f.options, online: true, probes: prepared => { seen.push(prepared.tradingLimits); return f.options.probes(prepared); } });
+        assert.equal(report.checks.some(c => c.id === 'tradingLimits'), false, 'a valid value adds no check');
+    }
+    assert.deepEqual(seen, [undefined, undefined, true]);
+});
 test('offline checks configuration with zero probes and never reports readiness or secret values', async () => {
     const f = fixture(), report = await checkStocksPreflight(f.env, f.options);
     assert.equal(report.status, 'CONFIGURED_NOT_PROBED'); assert.equal(report.tradingAuthorized, false);

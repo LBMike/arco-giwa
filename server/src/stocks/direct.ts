@@ -26,8 +26,12 @@ export function directIdempotencyKey(orderKey: string): string {
   return `direct:${orderKey.slice(2)}`;
 }
 
-/** Why a direct payment or escrow was not taken as an order; it then waits for review like any unknown key. */
-export type DirectHold = 'TRADING_PAUSED' | 'PRICE_UNAVAILABLE' | 'BELOW_ONE_UNIT';
+/**
+ * Why a direct payment or escrow was not taken as an order; it then waits for review like any unknown key.
+ * SIDE_DISABLED and DAILY_LIMIT_REACHED come from the trading limits (STOCKS_TRADING_LIMITS=1).
+ */
+export type DirectHold = 'TRADING_PAUSED' | 'PRICE_UNAVAILABLE' | 'BELOW_ONE_UNIT' | 'SIDE_DISABLED' | 'DAILY_LIMIT_REACHED';
+export const DIRECT_HOLDS: readonly string[] = ['TRADING_PAUSED', 'PRICE_UNAVAILABLE', 'BELOW_ONE_UNIT', 'SIDE_DISABLED', 'DAILY_LIMIT_REACHED'] satisfies DirectHold[];
 
 /** How long a direct order waits for a readable price before it is held for review instead of holding up the observer. */
 export const DIRECT_PRICE_WAIT_SECONDS = 600n;

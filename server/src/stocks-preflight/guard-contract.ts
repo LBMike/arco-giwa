@@ -45,6 +45,12 @@ export const stocksGuards = [
   ["StocksTradingControlEvent", "StocksTradingControlEvent_immutable", "StocksRejectMutation", 27, false],
   ["StocksTradingControlEvent", "StocksTradingControlEvent_no_truncate", "StocksRejectMutation", 34, false],
   ["StocksTradingControlEvent", "StocksTradingControlEvent_applied", "stocks_trading_control_event_applied", 5, true],
+  ["StocksTradingLimit", "StocksTradingLimit_guard", "stocks_trading_limit_state_guard", 31, false],
+  ["StocksTradingLimit", "StocksTradingLimit_no_truncate", "stocks_trading_limit_state_guard", 34, false],
+  ["StocksTradingLimitEvent", "StocksTradingLimitEvent_binding", "stocks_trading_limit_event_guard", 7, false],
+  ["StocksTradingLimitEvent", "StocksTradingLimitEvent_immutable", "StocksRejectMutation", 27, false],
+  ["StocksTradingLimitEvent", "StocksTradingLimitEvent_no_truncate", "StocksRejectMutation", 34, false],
+  ["StocksTradingLimitEvent", "StocksTradingLimitEvent_applied", "stocks_trading_limit_event_applied", 5, true],
 ] as const;
 
 // SHA-256 of the exact final pg_proc.prosrc body (including whitespace).
@@ -61,5 +67,8 @@ export const stocksGuardFunctions: Readonly<Record<string, string>> = {
   "stocks_wallet_proof_binding": "1a161b5f79060321cce3f59a4811ab656c6bc0e7abc83a220e12e597e7951e20",
   "stocks_trading_control_state_guard": "23bb6f3e93f45629750e8e6e1f6636bad7f5ee9295eaf284364504953097d281",
   "stocks_trading_control_event_guard": "22fc81b898fb795ce3ad19df351cc86ce3a04c638448be14d4297c71a2ba0ff6",
-  "stocks_trading_control_event_applied": "fae5babdbf41603448c0e5e0102abd60562b3c72e3c3d805d6a23f795f686af2"
+  "stocks_trading_control_event_applied": "fae5babdbf41603448c0e5e0102abd60562b3c72e3c3d805d6a23f795f686af2",
+  "stocks_trading_limit_state_guard": "e04e5137a2187c7e096acec332634716e6b0ca3f6f60863b9a2f172f8e3ba55a",
+  "stocks_trading_limit_event_guard": "0dce521c8cfcda4caaca5faf668bb83be007b7cd76b77630b6f2814ab0714536",
+  "stocks_trading_limit_event_applied": "73ff5d571dc7c333b37557b9512581ff82e94e5c365084183cd52acf1af40885"
 };

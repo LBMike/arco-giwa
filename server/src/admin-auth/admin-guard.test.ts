@@ -42,6 +42,7 @@ function guardedApp(legacyTokenAuth: boolean) {
     stocks: { service: wire('stocks.service'), resolveActor: resolvers.resolveActor, resolveOperator: resolvers.resolveOperator, reconciliationCoverage: wire('stocks.coverage') },
     stocksRuntimeStatus: { getSnapshot: wire('runtime.getSnapshot'), resolveOperator: resolvers.resolveOperator },
     stocksTradingControl: { service: wire('control'), resolveOperator: resolvers.resolveOperator },
+    stocksTradingLimits: { service: { symbols: ['NVDA'], read: wire('limits.read'), change: wire('limits.change'), history: wire('limits.history') }, resolveOperator: resolvers.resolveOperator },
     stocksSubmissionDiagnostics: { service: wire('diagnostics'), resolveOperator: resolvers.resolveOperator },
     adminAudit: () => {},
   } as unknown as ArcoAppServices;
@@ -49,7 +50,7 @@ function guardedApp(legacyTokenAuth: boolean) {
 }
 
 const PARAMS: Record<string, string> = {
-  chainId: '91342', productId: 'acapix', id: 'card-1', address: a(72), requestId: '1', side: 'BUY', orderId: 'order-1',
+  chainId: '91342', productId: 'acapix', id: 'card-1', address: a(72), requestId: '1', side: 'BUY', orderId: 'order-1', symbol: 'NVDA',
 };
 const concrete = (url: string) => url.replace(/:([A-Za-z]+)/g, (_match, name: string) => PARAMS[name] ?? 'x');
 const isStocks = (url: string) => url.startsWith('/api/v1/admin/stocks/');
@@ -81,6 +82,9 @@ const KNOWN = [
   'GET /api/v1/admin/stocks/trading-control',
   'POST /api/v1/admin/stocks/trading-control',
   'GET /api/v1/admin/stocks/trading-control/history',
+  'GET /api/v1/admin/stocks/limits',
+  'GET /api/v1/admin/stocks/limits/history',
+  'PUT /api/v1/admin/stocks/limits/:symbol/:side',
   'GET /api/v1/admin/stocks/wallet-submissions/:side/:orderId',
 ];
 

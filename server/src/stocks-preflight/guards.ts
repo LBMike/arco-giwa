@@ -20,8 +20,8 @@ export const guardCatalogSql = `SELECT c.relname AS table_name, t.tgname AS trig
  JOIN pg_catalog.pg_language l ON l.oid=p.prolang
  WHERE n.nspname=$1 AND c.relname=ANY($2::text[]) AND NOT t.tgisinternal`;
 
-export function stockGuardsMatch(rows: Record<string, unknown>[], operatorControls: boolean): boolean {
-  const required = stocksGuards.filter(([table]) => operatorControls || !table.startsWith('StocksTradingControl'));
+export function stockGuardsMatch(rows: Record<string, unknown>[], operatorControls: boolean, tradingLimits = false): boolean {
+  const required = stocksGuards.filter(([table]) => (operatorControls || !table.startsWith('StocksTradingControl')) && (tradingLimits || !table.startsWith('StocksTradingLimit')));
   // Extra user triggers can suppress an insert/update before a guard runs, or
   // otherwise change its behavior. Require an exact inventory in checked tables.
   if (rows.length !== required.length) return false;

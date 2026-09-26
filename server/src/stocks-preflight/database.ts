@@ -6,11 +6,12 @@ export type Migration = { name: string; checksum: string };
 const tables = ['StocksQuote', 'StocksOrder', 'StocksFunding', 'StocksOutbox', 'StocksJournal', 'StocksHolding', 'StocksAudit', 'StocksProviderReceipt', 'StocksSellQuote', 'StocksSellOrder', 'StocksQuantityReservation', 'StocksCustody', 'StocksQuantityMovement', 'StocksCashReservation', 'StocksObserverCursor', 'StocksLiquidityBinding', 'StocksWalletSubmissionEnrollment', 'StocksWalletSubmission', 'StocksWalletSubmissionProof'];
 const check = (id: string, ok: boolean, good: string, bad: string): Check => ({ id, status: ok ? 'PASS' : 'FAIL', code: ok ? good : bad });
 
-export async function checkPreflightDatabase(pool: SqlPool, manifest: Manifest, migrations: readonly Migration[], historySchema: 'public' | 'arco_evm', options: { timeoutMs?: number; monotonicNow?: () => number; operatorControls?: boolean } = {}): Promise<Check[]> {
+export async function checkPreflightDatabase(pool: SqlPool, manifest: Manifest, migrations: readonly Migration[], historySchema: 'public' | 'arco_evm', options: { timeoutMs?: number; monotonicNow?: () => number; operatorControls?: boolean; tradingLimits?: boolean } = {}): Promise<Check[]> {
     ensure(historySchema === 'public' || historySchema === 'arco_evm', 'INVALID_HISTORY_SCHEMA');
     ensure(migrations.length > 0 && new Set(migrations.map(m => m.name)).size === migrations.length && migrations.every(m => /^[a-zA-Z0-9_]+$/.test(m.name) && /^[0-9a-f]{64}$/.test(m.checksum)), 'INVALID_EXPECTED_MIGRATIONS');
     ensure(options.operatorControls === undefined || typeof options.operatorControls === 'boolean', 'INVALID_STOCKS_OPERATOR_CONTROLS');
-    const requiredTables = options.operatorControls === true ? [...tables, 'StocksTradingControl', 'StocksTradingControlEvent'] : tables;
+    ensure(options.tradingLimits === undefined || typeof options.tradingLimits === 'boolean', 'INVALID_STOCKS_TRADING_LIMITS');
+    const requiredTables = [...tables, ...(options.operatorControls === true ? ['StocksTradingControl', 'StocksTradingControlEvent'] : []), ...(options.tradingLimits === true ? ['StocksTradingLimit', 'StocksTradingLimitEvent'] : [])];
     const timeout = options.timeoutMs ?? 5000, mono = options.monotonicNow ?? (() => performance.now());
     ensure(Number.isSafeInteger(timeout) && timeout > 0 && timeout <= 5000, 'INVALID_PREFLIGHT_TIMEOUT');
     const start = mono(); let closed = false, timer: ReturnType<typeof setTimeout> | undefined;
@@ -35,7 +36,7 @@ export async function checkPreflightDatabase(pool: SqlPool, manifest: Manifest, 
             const matched = active.every(row => row.finished_at !== null && expected.get(row.migration_name) === row.checksum) && migrations.every(m => active.filter(row => row.migration_name === m.name).length === 1);
             checks.push(check('migrationHistory', matched, 'MIGRATION_HISTORY_MATCHES', historyExists ? 'MIGRATION_HISTORY_MISSING_FAILED_OR_CHANGED' : 'MIGRATION_HISTORY_UNAVAILABLE'));
             const guards = (await query(guardCatalogSql, ['arco_evm', requiredTables])).rows;
-            checks.push(check('stockMutationGuards', schemaOk && stockGuardsMatch(guards, options.operatorControls === true), 'STOCK_MUTATION_GUARDS_MATCH', 'STOCK_MUTATION_GUARDS_MISSING_DISABLED_OR_CHANGED'));
+            checks.push(check('stockMutationGuards', schemaOk && stockGuardsMatch(guards, options.operatorControls === true, options.tradingLimits === true), 'STOCK_MUTATION_GUARDS_MATCH', 'STOCK_MUTATION_GUARDS_MISSING_DISABLED_OR_CHANGED'));
             if (schemaOk) {
                 const binding = (await query('SELECT "deploymentDigest" FROM arco_evm."StocksLiquidityBinding" WHERE "scopeKey"=$1', [liquidityScope(manifest)])).rows[0];
                 checks.push(check('vaultBinding', !binding || binding.deploymentDigest === manifestDigest(manifest), binding ? 'VAULT_BINDING_MATCHES' : 'VAULT_UNBOUND_BEFORE_FIRST_START', 'VAULT_BOUND_TO_OTHER_DEPLOYMENT'));

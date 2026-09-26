@@ -16,13 +16,13 @@ export async function boundedProbe<T>(work: () => Promise<T>, timeoutMs: number,
 }
 
 export function createPreflightProbes(prepared: Prepared, migrations: readonly Migration[]) {
-    const { config, databaseUrl, historySchema, signerToken } = prepared;
+    const { config, databaseUrl, historySchema, signerToken, tradingLimits } = prepared;
     return {
         async database() {
             const { Pool } = createRequire(import.meta.url)('pg') as { Pool: new (config: unknown) => SqlPool & { end(): Promise<void>; on(event: string, listener: () => void): void } };
             const pool = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 2000, statement_timeout: 2000, query_timeout: 2500, lock_timeout: 2000, idle_in_transaction_session_timeout: 3000, application_name: 'stocks_readonly_preflight' });
             pool.on('error', () => { /* never log database credentials or raw messages */ });
-            try { return await checkPreflightDatabase(pool, config.manifest, migrations, historySchema, { operatorControls: config.operatorControls }); }
+            try { return await checkPreflightDatabase(pool, config.manifest, migrations, historySchema, { operatorControls: config.operatorControls, tradingLimits: tradingLimits === true }); }
             finally { await pool.end(); }
         },
         async deployment() {

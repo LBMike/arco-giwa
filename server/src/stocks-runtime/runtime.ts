@@ -22,6 +22,7 @@ import { createDeploymentEvidence } from '../stocks-execution/deployment.js';
 import { StocksExecutionService } from '../stocks-execution/service.js';
 import { StocksTradingControlService } from '../stocks-trading-control/service.js';
 import { StocksTradingControlPolicy } from '../stocks-trading-control/policy.js';
+import { StocksTradingLimitService } from '../stocks-trading-limits/service.js';
 import { watchStocksPoolErrors } from './database-failure.js';
 import { validateLocalCustomerRuntime } from './local-customer.js';
 import { verifyCurrentCashIdentity } from '../stocks/cash-identity.js';
@@ -37,6 +38,11 @@ export function stocksAutodispatch(env: NodeJS.ProcessEnv): boolean {
   const enabled = env.STOCKS_AUTODISPATCH === '1';
   ensure(!enabled || env.STOCKS_MODE === 'DEMO_TESTNET', 'STOCKS_AUTODISPATCH_REQUIRES_TESTNET');
   return enabled;
+}
+/** STOCKS_TRADING_LIMITS=1 turns on the per-symbol, per-side trading limits (it needs the stocks_trading_limits migration). */
+export function stocksTradingLimits(env: NodeJS.ProcessEnv): boolean {
+  ensure(env.STOCKS_TRADING_LIMITS === undefined || env.STOCKS_TRADING_LIMITS === '0' || env.STOCKS_TRADING_LIMITS === '1', 'INVALID_STOCKS_TRADING_LIMITS');
+  return env.STOCKS_TRADING_LIMITS === '1';
 }
 export function parseStocksRuntimeConfig(value: unknown, localCustomer = false): StocksRuntimeConfig {
   ensure(value !== null && typeof value === 'object' && !Array.isArray(value), 'INVALID_STOCKS_CONFIG');
@@ -55,6 +61,7 @@ export function parseStocksRuntimeConfig(value: unknown, localCustomer = false):
 // This function never creates tables, deploys contracts, or handles signing keys.
 export async function configuredStocksRuntime(env: NodeJS.ProcessEnv, fallbackDatabaseUrl: string, localCustomer = false) {
   const autodispatch = stocksAutodispatch(env);
+  const tradingLimits = stocksTradingLimits(env);
   if (env.STOCKS_MODE === undefined || env.STOCKS_MODE === 'DISABLED') return null;
   ensure(env.STOCKS_MODE === 'DEMO_TESTNET' && env.STOCKS_CONFIG_PATH && env.STOCKS_SIGNER_TOKEN, 'STOCKS_CONFIGURATION_REQUIRED');
   const config = parseStocksRuntimeConfig(await readStocksPublicJson(env.STOCKS_CONFIG_PATH), localCustomer);
@@ -67,7 +74,7 @@ export async function configuredStocksRuntime(env: NodeJS.ProcessEnv, fallbackDa
     // Settle on GIWA confirmation, not Ethereum finality (see giwa-confirmation.ts).
     const transport = giwaConfirmedTransport(httpStocksRpc(config.rpcUrl));
     const signer = externalStocksSigner({ url: config.signerUrl, authorization: env.STOCKS_SIGNER_TOKEN, deploymentDigest: manifestDigest(config.manifest), manifest: config.manifest, localHarness: localCustomer });
-    runtime = await createStocksRuntime({ manifest: config.manifest, pool, transport, signer, autodispatch, paused: config.paused, operators: config.operators, operatorControls: config.operatorControls, pricing: stocksPricingFromEnvironment(env) });
+    runtime = await createStocksRuntime({ manifest: config.manifest, pool, transport, signer, autodispatch, paused: config.paused, operators: config.operators, operatorControls: config.operatorControls, tradingLimits, pricing: stocksPricingFromEnvironment(env) });
     return runtime;
   } catch (error) { await pool.end(); throw error; }
 }
@@ -83,6 +90,8 @@ export async function createStocksRuntime(options: {
   paused: boolean;
   operators: NamedOperator[];
   operatorControls?: boolean;
+  /** Per-symbol, per-side trading limits (STOCKS_TRADING_LIMITS=1). Default: off, every side open with no cap. */
+  tradingLimits?: boolean;
   /** How quotes are priced. Default: the fixed mock price. */
   pricing?: StocksPricing;
 }) {
@@ -91,6 +100,7 @@ export async function createStocksRuntime(options: {
   const operators = parseStocksOperators(options.operators);
   ensure(typeof autodispatch === 'boolean' && typeof paused === 'boolean', 'INVALID_STOCKS_RUNTIME_POLICY');
   ensure(options.operatorControls === undefined || typeof options.operatorControls === 'boolean', 'INVALID_STOCKS_OPERATOR_CONTROLS');
+  ensure(options.tradingLimits === undefined || typeof options.tradingLimits === 'boolean', 'INVALID_STOCKS_TRADING_LIMITS');
   const digest = manifestDigest(manifest);
   const rpc = createStocksRpcPort(transport, manifest);
   await verifyStocksDeployment(manifest, rpc, transport);
@@ -109,6 +119,10 @@ export async function createStocksRuntime(options: {
   // Enabling controls requires its migration before startup. An absent control
   // row is initially paused, and no startup path creates or resumes that row.
   if (control) await control.read();
+  // NVDA is the one tradable symbol of this deployment (see StocksService.catalog). Enabling the limits requires their
+  // migration: this read fails startup when the table is missing, and never creates a row.
+  const limits = options.tradingLimits === true ? new StocksTradingLimitService(pool, digest, ['NVDA']) : undefined;
+  if (limits) await limits.read();
   const basePaused = () => stopped || !autodispatch || paused || !cashIdentityReady || !health.current();
   // A direct payment or escrow is held only for an explicit halt, never for observation health: the observer reads
   // deposits made while it was down or catching up, and their orders then wait for dispatch like any other.
@@ -122,7 +136,7 @@ export async function createStocksRuntime(options: {
     if (directHalted()) return true;
     const operatorPaused = control ? await control.isPaused() : false;
     return operatorPaused || directHalted();
-  });
+  }, limits);
   // Check the migrated database and immutable physical-vault binding before
   // exposing any configured routes. This never creates schema or tables.
   await service.bindDeployment();
@@ -164,6 +178,7 @@ export async function createStocksRuntime(options: {
   return {
     service, execution: new StocksExecutionService(service, createDeploymentEvidence(manifest, transport, { available: () => !stopped })), submissionReceipts: createSubmissionReceiptVerifier(manifest, rpc), operators, reconciliationCoverage: () => observer.coverage(),
     control,
+    limits,
     status: () => runtimeSnapshot({ deploymentId: manifest.deploymentId, deploymentDigest: digest, autodispatch, configuredPause: paused, stopped, tickInFlight: current !== null, health: health.snapshot(), ...(control ? { operatorControl: control.snapshot() } : {}) }),
     tick,
     notifyDatabaseFailure,

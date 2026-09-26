@@ -7,7 +7,7 @@ import { authorizedCall, redemptionCall } from '../stocks/chain.js';
 import { a, h, testManifest, TestChain } from '../stocks/test-fixtures.js';
 import { stocksSessionResolvers } from './session.js';
 import { endpoint, externalStocksSigner, httpStocksRpc, type HttpFetch } from './transport.js';
-import { parseStocksRuntimeConfig, configuredStocksRuntime, stocksAutodispatch } from './runtime.js';
+import { parseStocksRuntimeConfig, configuredStocksRuntime, stocksAutodispatch, stocksTradingLimits } from './runtime.js';
 import { StocksFinalizedObserver } from './observer.js';
 import { StocksObservationHealth } from './health.js';
 import { toEventSelector } from 'viem';
@@ -91,6 +91,16 @@ test('Stocks dispatch flags fail closed before file, RPC, signer or database acc
   assert.equal(stocksAutodispatch({ STOCKS_MODE: 'DEMO_TESTNET', STOCKS_AUTODISPATCH: '1' }), true);
   for (const env of [{ STOCKS_AUTODISPATCH: '1' }, { STOCKS_MODE: 'DISABLED', STOCKS_AUTODISPATCH: '1' }, { STOCKS_MODE: 'DEMO_TESTNET', STOCKS_AUTODISPATCH: 'true' }, { STOCKS_MODE: 'MAINNET' }]) await assert.rejects(() => configuredStocksRuntime(env, 'never-connect'), /STOCKS/);
   assert.equal(await configuredStocksRuntime({ STOCKS_MODE: 'DISABLED', STOCKS_CONFIG_PATH: '/does-not-exist', STOCKS_AUTODISPATCH: '0' }, 'never-connect'), null);
+});
+
+test('STOCKS_TRADING_LIMITS is off unless exactly 1, and an unknown value fails before anything is read', async () => {
+  for (const flag of [undefined, '0']) assert.equal(stocksTradingLimits({ STOCKS_TRADING_LIMITS: flag }), false);
+  assert.equal(stocksTradingLimits({ STOCKS_TRADING_LIMITS: '1' }), true);
+  for (const flag of ['true', 'yes', '', ' 1', '2']) {
+    assert.throws(() => stocksTradingLimits({ STOCKS_TRADING_LIMITS: flag }), /INVALID_STOCKS_TRADING_LIMITS/);
+    await assert.rejects(() => configuredStocksRuntime({ STOCKS_MODE: 'DEMO_TESTNET', STOCKS_TRADING_LIMITS: flag }, 'never-connect'), /INVALID_STOCKS_TRADING_LIMITS/);
+  }
+  assert.equal(await configuredStocksRuntime({ STOCKS_MODE: 'DISABLED', STOCKS_TRADING_LIMITS: '1' }, 'never-connect'), null);
 });
 
 test('Observation readiness expires without another tick and immediately closes after failure or clock reversal', () => {
