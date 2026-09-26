@@ -3,12 +3,18 @@
 // each under a new random order key. The server prices it when GIWA confirms it and settles it on the usual path; this
 // panel shows the wallet steps, GIWA's receipt and then only the server's progress. It computes no outcome itself: the
 // amounts shown before the server answers are the page's estimate at the price on screen.
+//
+// One press of Buy / Sell opens the transaction modal (../TransactionFlowModal): the approval first when the wallet has
+// not approved the amount, then the trade, then the result. Closed before the end, the panel shows the trade inline.
 
 import { assetLabel } from "../asset-label"
-import { useEffect, useId, useMemo, useRef } from "react"
+import { useEffect, useId, useMemo, useRef, useState, type RefObject } from "react"
 import { Loader2 } from "lucide-react"
 
+import { GIWA_EXPLORER } from "../config"
 import { AmountBlock, AmountField, InfoRow } from "../invest-panel-ui"
+import { StockLogo } from "../stocks-market/StockLogo"
+import { TransactionFlowModal, type FlowStep, type FlowStepState } from "../TransactionFlowModal"
 import { useStocksFundingReadContext } from "../stocks-execution-host/StocksExecutionProvider"
 import {
   clearDirectTrade,
@@ -107,7 +113,8 @@ export function directStep(input: DirectStepInput): DirectStep {
   if (input.approval === "pending" || (input.approval === "confirmed" && input.approvalNeeded === true)) return { kind: "approving", label: "Confirming approval on GIWA…", hint: null }
   if (input.approvalNeeded === null) return input.wallet === "error" ? { kind: "unreadable", label: trade, hint: null } : { kind: "checking", label: "Checking your wallet…", hint: null }
   if (input.short) return { kind: "short", label: `Not enough ${symbol}`, hint: null }
-  if (input.approvalNeeded) return { kind: "approve", label: `Approve ${symbol}`, hint: null }
+  // The approval is the transaction modal's first step, so the button still names the trade.
+  if (input.approvalNeeded) return { kind: "approve", label: trade, hint: null }
   return { kind: "trade", label: trade, hint: null }
 }
 
@@ -253,6 +260,176 @@ export function DirectTradeView({ trade, onMore, onCheckAgain }: { trade: Direct
   )
 }
 
+// ── the trade in the transaction modal ────────────────────────────────────
+
+/** One press of Buy / Sell: the approval first when the wallet had not approved the amount, then the trade. */
+export type DirectFlow = Readonly<{
+  id: number
+  side: StocksSide
+  /** The approval runs first in this flow. */
+  approval: boolean
+  /** The trade this flow started, once it has. */
+  tradeId: number | null
+  /** What the trade moves (tUSDC base units for a Buy, NVDA base units for a Sell) and the page's estimate back. */
+  amount: string
+  estimate: string | null
+}>
+
+type DirectToken = "cash" | "stock"
+type DirectFlowAmount = Readonly<{ caption: string; amount: string | null; symbol: string; sub: string | null; token: DirectToken }>
+type DirectFlowSide = Readonly<{ amount: string; symbol: string; token: DirectToken }>
+
+export type DirectFlowView = Readonly<{
+  title: string
+  pay: DirectFlowAmount
+  receive: DirectFlowAmount
+  steps: readonly (Omit<FlowStep, "icon"> & { token: DirectToken })[]
+  result: Readonly<{ tone: "success" | "held"; title: string; message: string; from: DirectFlowSide | null; to: DirectFlowSide | null; hash: string }> | null
+  error: string | null
+  /** Still going after the page stopped asking: what to say above "Check again". */
+  slow: string | null
+}>
+
+export type DirectFlowInput = Readonly<{
+  flow: DirectFlow
+  approval: TokenApprovalState
+  /** Null while the wallet's allowance is not known. */
+  approvalNeeded: boolean | null
+  /** The flow's own trade (matched by id), or null before it starts. */
+  trade: DirectTrade | null
+  cashSymbol: string
+}>
+
+/** The modal's words for one direct trade: a purchase or a sale, its steps, then what the server settled. */
+export function directFlowView({ flow, approval, approvalNeeded, trade, cashSymbol }: DirectFlowInput): DirectFlowView {
+  const sell = flow.side === "SELL"
+  const state = trade?.state ?? null
+  const status = state !== null && "status" in state ? state.status : null
+  const given: DirectFlowSide = sell ? { amount: formatQuantity(flow.amount), symbol: "NVDA", token: "stock" } : { amount: formatCash(flow.amount), symbol: cashSymbol, token: "cash" }
+  // What comes back is the page's estimate until the server has priced it.
+  const back = status !== null ? (sell ? formatCash(status.cashAmount) : formatQuantity(status.quantity)) : flow.estimate === null ? null : `≈${sell ? formatCash(flow.estimate) : formatQuantity(flow.estimate)}`
+  const stockUsd = sell ? (flow.estimate === null ? null : `≈${formatUsd(flow.estimate)}`) : `≈${formatUsd(flow.amount)}`
+  const pay: DirectFlowAmount = { caption: sell ? "You sell" : "You pay", amount: given.amount, symbol: given.symbol, sub: sell ? stockUsd : null, token: given.token }
+  const receive: DirectFlowAmount = { caption: "You receive", amount: back, symbol: sell ? cashSymbol : "NVDA", sub: sell ? null : stockUsd, token: sell ? "cash" : "stock" }
+
+  const steps: (Omit<FlowStep, "icon"> & { token: DirectToken })[] = []
+  if (flow.approval) {
+    const symbol = sell ? "NVDA" : cashSymbol
+    const approvalState: FlowStepState =
+      flow.tradeId !== null ? "done"
+        : approval.status === "wallet" ? "wallet"
+          : approval.status === "pending" ? "processing"
+            : approval.status === "confirmed" ? (approvalNeeded === false ? "done" : "processing")
+              : approval.status === "error" ? "failed"
+                : "upcoming"
+    steps.push({
+      id: "approve",
+      label: `Approve ${symbol}`,
+      walletLabel: `Approve ${symbol} in your wallet`,
+      processingLabel: `Approving ${symbol}…`,
+      hint: approvalState === "processing" ? "Waiting for GIWA to confirm the approval." : null,
+      help: { question: "Why do I have to approve?", answer: `Approving lets Arco move ${symbol} from your wallet when you ${sell ? "sell" : "buy"} NVDA. You only do this once.` },
+      state: approvalState,
+      token: sell ? "stock" : "cash",
+    })
+  }
+  const phase = state?.phase ?? null
+  const tradeState: FlowStepState =
+    flow.tradeId === null || phase === null ? "upcoming"
+      : phase === "WALLET" ? "wallet"
+        : phase === "FAILED" ? "failed"
+          : phase === "DONE" || phase === "HELD" ? "done"
+            : "processing"
+  const liquidity = phase === "SETTLING" && status?.side === "SELL" && status.state === "LIQUIDITY_PENDING"
+  const hint =
+    phase === "CONFIRMING" ? (sell ? "Waiting for GIWA to confirm your sale." : "Waiting for GIWA to confirm your payment.")
+      : phase === "SETTLING" ? (liquidity ? "Waiting for payout liquidity. Your NVDA stays held until it is paid out." : sell ? "Sale confirmed. Paying out USDC…" : "Payment confirmed. Delivering NVDA…")
+        : null
+  steps.push({
+    id: "trade",
+    label: sell ? "Confirm sale" : "Confirm purchase",
+    walletLabel: sell ? "Confirm sale in your wallet" : "Confirm purchase in your wallet",
+    processingLabel: sell ? "Sale pending…" : "Purchase pending…",
+    hint,
+    help: null,
+    state: tradeState,
+    token: "stock",
+  })
+
+  let result: DirectFlowView["result"] = null
+  if (state !== null && state.phase === "DONE") {
+    const received: DirectFlowSide = sell ? { amount: formatCash(state.status.cashAmount), symbol: cashSymbol, token: "cash" } : { amount: formatQuantity(state.status.quantity), symbol: "NVDA", token: "stock" }
+    result = {
+      tone: "success",
+      title: sell ? "Sale successful!" : "Purchase successful!",
+      message: `${received.amount} ${received.symbol} has been added to your wallet.`,
+      from: given,
+      to: received,
+      hash: state.hash,
+    }
+  } else if (state !== null && state.phase === "HELD") {
+    result = { tone: "held", title: sell ? "Sale held for review" : "Purchase held for review", message: directHeldMessage(state.status), from: null, to: null, hash: state.hash }
+  }
+  const error =
+    flow.approval && flow.tradeId === null && approval.status === "error" ? approvalMessage(approval.code, sell ? "NVDA" : cashSymbol)
+      : state !== null && state.phase === "FAILED" ? directFailureMessage(state.code, flow.side)
+        : null
+  const slow =
+    state !== null && state.phase === "SLOW"
+      ? state.stage === "RECEIPT" ? "Your transaction was sent. GIWA has not confirmed it yet." : "GIWA confirmed your transaction. Settlement is taking longer than usual."
+      : null
+  return { title: sell ? "Review sale" : "Review purchase", pay, receive, steps, result, error, slow }
+}
+
+/** A token's mark at the modal's three sizes: the amount rows (40), the steps (28) and the result line (16). Decorative. */
+function DirectMark({ token, size }: { token: DirectToken; size: 16 | 28 | 40 }) {
+  if (token === "cash") return <img src="/logos/usdc.svg" alt="" width={size} height={size} className="shrink-0" />
+  if (size === 40) return <StockLogo symbol="NVDA" size={40} />
+  return (
+    <span className={`inline-flex shrink-0 ${size === 28 ? "size-7" : "size-4"} [&>span]:size-full [&>span]:text-[10px]`}>
+      <StockLogo symbol="NVDA" size={32} />
+    </span>
+  )
+}
+
+function DirectFlowModal({ view, onClose, onRetry, onCheckAgain, returnFocusTo }: {
+  view: DirectFlowView
+  onClose: () => void
+  onRetry: () => void
+  onCheckAgain: () => void
+  returnFocusTo: RefObject<HTMLInputElement>
+}) {
+  const side = (value: DirectFlowSide | null) => (value === null ? null : { amount: value.amount, symbol: value.symbol, icon: <DirectMark token={value.token} size={16} /> })
+  const row = (value: DirectFlowAmount) => ({ caption: value.caption, amount: value.amount, symbol: value.symbol, sub: value.sub, icon: <DirectMark token={value.token} size={40} /> })
+  return (
+    <TransactionFlowModal
+      open
+      dismissible={view.result !== null || view.error !== null}
+      title={view.title}
+      pay={row(view.pay)}
+      receive={row(view.receive)}
+      steps={view.steps.map(({ token, ...step }) => ({ ...step, icon: <DirectMark token={token} size={28} /> }))}
+      result={
+        view.result === null
+          ? null
+          : {
+              tone: view.result.tone,
+              title: view.result.title,
+              message: view.result.message,
+              from: side(view.result.from),
+              to: side(view.result.to),
+              explorerHref: `${GIWA_EXPLORER}/tx/${view.result.hash}`,
+            }
+      }
+      error={view.error}
+      note={view.slow === null ? null : { message: view.slow, action: { label: "Check again", onClick: onCheckAgain } }}
+      onClose={onClose}
+      onRetry={view.error === null ? null : onRetry}
+      returnFocusTo={returnFocusTo}
+    />
+  )
+}
+
 // ── the panel ─────────────────────────────────────────────────────────────
 
 export type DirectTradePanelProps = {
@@ -280,6 +457,7 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
   const ctaHintId = `${inputId}-cta-hint`
   const detailsId = `${inputId}-details`
   const inputRef = useRef<HTMLInputElement>(null)
+  const payRef = useRef<HTMLInputElement>(null)
   const catalog = state.catalog.status === "ready" ? state.catalog.catalog : null
   const instrument = catalog?.instruments.find((item) => item.symbol === "NVDA") ?? null
   const sell = state.side === "SELL"
@@ -288,6 +466,9 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
   const approval = useStocksTokenApproval(walletCash.refresh)
   const trade = useDirectTrade(owner)
   const showTrade = trade !== null && trade.state.phase !== "FAILED"
+  const [flow, setFlow] = useState<DirectFlow | null>(null)
+  const flowSeq = useRef(0)
+  const flowTrade = flow !== null && trade !== null && trade.id === flow.tradeId ? trade : null
   const read = walletCash.data
   const cashSymbol = assetLabel(read?.cashSymbol ?? "tUSDC")
 
@@ -337,13 +518,53 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
     if (sell) actions.setQuantity("")
     else actions.setPayAmount("", marketPrice)
   }
-  const submit = () => {
-    if (step.kind !== "trade" || owner === null || amount === null || ports === null || directTradeActive(trade)) return
-    startDirectTrade({ side: state.side, owner, contracts, amount, estimate }, ports)
+  const submit = (): DirectTrade | null => {
+    if (step.kind !== "trade" || owner === null || amount === null || ports === null || directTradeActive(trade)) return null
+    return startDirectTrade({ side: state.side, owner, contracts, amount, estimate }, ports)
   }
   const approve = () => {
     if (owner === null) return
     void approval.approve(sell ? { owner, token: contracts.stockToken, spender: contracts.redemptionEscrow } : { owner, token: contracts.cashToken, spender: contracts.fundingVault })
+  }
+  // One press opens the modal: the approval first when the wallet has not approved the amount, else the trade itself.
+  const begin = () => {
+    if (owner === null || amount === null || (step.kind !== "approve" && step.kind !== "trade")) return
+    const id = flowSeq.current + 1
+    flowSeq.current = id
+    if (step.kind === "approve") {
+      setFlow({ id, side: state.side, approval: true, tradeId: null, amount, estimate })
+      approve()
+      return
+    }
+    const started = submit()
+    if (started !== null) setFlow({ id, side: state.side, approval: false, tradeId: started.id, amount, estimate })
+  }
+  // The flow's approval is confirmed and the allowance reads back: its trade starts, still from the user's one press.
+  // Closing the modal before this (flow null) starts nothing.
+  useEffect(() => {
+    if (flow === null || !flow.approval || flow.tradeId !== null) return
+    if (approval.state.status !== "confirmed" || step.kind !== "trade") return
+    const started = submit()
+    if (started !== null) setFlow((current) => (current !== null && current.id === flow.id ? { ...current, tradeId: started.id } : current))
+  })
+  // Closing after a completed trade starts a fresh one; closing before the end leaves the trade inline in the panel.
+  const closeFlow = () => {
+    const completed = flowTrade !== null && flowTrade.state.phase === "DONE"
+    setFlow(null)
+    if (completed) more()
+  }
+  const retryFlow = () => {
+    if (flow === null) return
+    if (flow.approval && flow.tradeId === null && approval.state.status === "error") {
+      approve()
+      return
+    }
+    if (flowTrade === null || flowTrade.state.phase !== "FAILED") return
+    const started = submit()
+    if (started !== null) setFlow({ ...flow, tradeId: started.id })
+  }
+  const checkAgain = () => {
+    if (ports !== null) resumeDirectTrade(owner, ports)
   }
 
   const stockBalance = read?.stockBalance ?? null
@@ -399,6 +620,7 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
       onMax={cashBalance !== null && cashBalance !== "0" ? () => setPay(formatBaseUnits(cashBalance, STOCKS_CASH_SCALE)) : undefined}
       maxClassName={FOCUS_RING}
       className={FIELD_FOCUS}
+      inputRef={payRef}
       inputProps={{ autoComplete: "off", spellCheck: false, placeholder: "0", "aria-describedby": hintId, "aria-invalid": payCheck !== null && !payCheck.ok }}
     />
   )
@@ -416,7 +638,7 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
       {step.label}
     </button>
   ) : step.kind === "approve" ? (
-    <button key="approve" type="button" className={CTA_READY} onClick={approve}>
+    <button key="approve" type="button" className={CTA_READY} onClick={begin}>
       {step.label}
     </button>
   ) : (
@@ -439,18 +661,18 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
     <section className="flex w-full flex-col" aria-label="Trade NVDA" data-testid="stocks-trade-panel" data-mode="direct">
       <p className="sr-only" aria-live="polite" data-testid="stocks-trade-status">
         {/* The result and failure notices announce themselves; the steps before them are said here. */}
-        {phase === "WALLET" || phase === "CONFIRMING" || phase === "SETTLING" || phase === "SLOW" ? directTradeAnnouncement(trade) : ""}
+        {flow === null && (phase === "WALLET" || phase === "CONFIRMING" || phase === "SETTLING" || phase === "SLOW") ? directTradeAnnouncement(trade) : ""}
       </p>
       {blockNotice !== null ? <Notice tone="info">{tradeBlockMessage(blockNotice)}</Notice> : null}
       {showTrade && trade !== null ? (
-        <DirectTradeView trade={trade} onMore={more} onCheckAgain={() => { if (ports !== null) resumeDirectTrade(owner, ports) }} />
+        <DirectTradeView trade={trade} onMore={more} onCheckAgain={checkAgain} />
       ) : (
         <form
           className="flex w-full flex-col"
           noValidate
           onSubmit={(event) => {
             event.preventDefault()
-            submit()
+            begin()
           }}
         >
           <fieldset className="flex w-full min-w-0 flex-col" disabled={blockNotice !== null}>
@@ -496,6 +718,15 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
           ) : null}
         </form>
       )}
+      {flow !== null ? (
+        <DirectFlowModal
+          view={directFlowView({ flow, approval: approval.state, approvalNeeded, trade: flowTrade, cashSymbol })}
+          onClose={closeFlow}
+          onRetry={retryFlow}
+          onCheckAgain={checkAgain}
+          returnFocusTo={sell ? inputRef : payRef}
+        />
+      ) : null}
     </section>
   )
 }

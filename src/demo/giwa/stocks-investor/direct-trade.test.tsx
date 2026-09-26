@@ -6,7 +6,7 @@ import { DemoPresentationContext } from "../demo-presentation"
 import type { DirectTrade, DirectTradeState } from "../stocks-direct"
 import type { GiwaStocksAccess } from "./access"
 import { actionsFor } from "./actions"
-import { directFailureMessage, directHeldMessage, directStep, DirectTradeView, type DirectStepInput } from "./DirectTrade"
+import { directFailureMessage, directFlowView, directHeldMessage, directStep, DirectTradeView, type DirectFlow, type DirectFlowInput, type DirectStepInput } from "./DirectTrade"
 import { createHarness, WALLET_A } from "./fixtures/controller-harness"
 import { DIRECT_CONTRACTS } from "./fixtures/fake-stocks-server"
 import { GiwaStocksFeatureView } from "./GiwaStocksFeature"
@@ -41,8 +41,9 @@ test("the direct trade asks for no sign-in: wallet → network → amount → ap
   assert.equal(step({ approvalNeeded: null, wallet: "error" }).kind, "unreadable")
   assert.deepEqual(step({ short: true }), { kind: "short", label: "Not enough USDC", hint: null })
   assert.deepEqual(step({ side: "SELL", short: true }), { kind: "short", label: "Not enough NVDA", hint: null })
-  assert.deepEqual(step({ approvalNeeded: true }), { kind: "approve", label: "Approve USDC", hint: null })
-  assert.deepEqual(step({ side: "SELL", approvalNeeded: true }), { kind: "approve", label: "Approve NVDA", hint: null })
+  // The approval is the transaction modal's first step: the button still names the trade.
+  assert.deepEqual(step({ approvalNeeded: true }), { kind: "approve", label: "Buy NVDA", hint: null })
+  assert.deepEqual(step({ side: "SELL", approvalNeeded: true }), { kind: "approve", label: "Sell NVDA", hint: null })
   assert.equal(step({ approvalNeeded: true, approval: "wallet" }).label, "Approve in your wallet…")
   assert.equal(step({ approvalNeeded: true, approval: "pending" }).label, "Confirming approval on GIWA…")
   assert.equal(step({ approvalNeeded: true, approval: "confirmed" }).label, "Confirming approval on GIWA…", "until the allowance reads back")
@@ -120,4 +121,78 @@ test("held and slow trades say what happened and never claim a result", () => {
   assert.equal(directHeldMessage(status({ state: "FUNDING_REVIEW_REQUIRED", quantity: "0", hold: "SIDE_DISABLED" })), "Buying NVDA was paused when GIWA confirmed your payment, so it is held for review. Nothing was bought.")
   assert.equal(directHeldMessage(status({ side: "SELL", state: "ESCROW_REVIEW_REQUIRED", hold: "DAILY_LIMIT_REACHED" })), "Today's NVDA sell limit was reached when GIWA confirmed your escrow, so it is held for review. Nothing was sold.")
   assert.match(view(trade({ phase: "HELD", hash: HASH, status: status({ state: "FUNDING_REVIEW_REQUIRED", quantity: "0", hold: "DAILY_LIMIT_REACHED" }) })), /^Purchase held for review You pay 60 USDC Today's NVDA buy limit was reached when GIWA confirmed your payment/)
+})
+
+// ── the transaction modal ──────────────────────────────────────────────────
+
+const BUY_FLOW: DirectFlow = { id: 1, side: "BUY", approval: true, tradeId: null, amount: "60000000", estimate: "500000000" }
+const SELL_FLOW: DirectFlow = { id: 2, side: "SELL", approval: false, tradeId: 7, amount: "250000000", estimate: "30000000" }
+const flowView = (patch: Partial<DirectFlowInput>) =>
+  directFlowView({ flow: BUY_FLOW, approval: { status: "idle" }, approvalNeeded: true, trade: null, cashSymbol: "USDC", ...patch })
+const states = (view: ReturnType<typeof directFlowView>) => view.steps.map((step) => `${step.id}:${step.state}`).join(" ")
+
+test("the modal's purchase: the approval first, then the trade starts; the amounts are the page's estimate until the server's", () => {
+  const wallet = flowView({ approval: { status: "wallet" } })
+  assert.equal(wallet.title, "Review purchase")
+  assert.deepEqual(wallet.pay, { caption: "You pay", amount: "60", symbol: "USDC", sub: null, token: "cash" })
+  assert.deepEqual(wallet.receive, { caption: "You receive", amount: "≈0.5", symbol: "NVDA", sub: "≈$60", token: "stock" })
+  assert.equal(states(wallet), "approve:wallet trade:upcoming")
+  assert.deepEqual(wallet.steps.map((step) => [step.label, step.walletLabel, step.processingLabel]), [
+    ["Approve USDC", "Approve USDC in your wallet", "Approving USDC…"],
+    ["Confirm purchase", "Confirm purchase in your wallet", "Purchase pending…"],
+  ])
+  assert.match(wallet.steps[0]!.help?.answer ?? "", /move USDC from your wallet when you buy NVDA\. You only do this once\./)
+  assert.equal(states(flowView({ approval: { status: "pending", hash: HASH } })), "approve:processing trade:upcoming")
+  assert.equal(flowView({ approval: { status: "pending", hash: HASH } }).steps[0]!.hint, "Waiting for GIWA to confirm the approval.")
+  assert.equal(states(flowView({ approval: { status: "confirmed", hash: HASH }, approvalNeeded: true })), "approve:processing trade:upcoming", "until the allowance reads back")
+  assert.equal(states(flowView({ approval: { status: "confirmed", hash: HASH }, approvalNeeded: false })), "approve:done trade:upcoming")
+  const declined = flowView({ approval: { status: "error", code: "WALLET_REQUEST_REJECTED" } })
+  assert.equal(states(declined), "approve:failed trade:upcoming")
+  assert.equal(declined.error, "The USDC approval was declined in your wallet. Approve again to continue.")
+  // The trade the flow started.
+  const started = { ...BUY_FLOW, tradeId: 7 }
+  const at = (state: DirectTradeState) => flowView({ flow: started, approval: { status: "confirmed", hash: HASH }, approvalNeeded: false, trade: trade(state) })
+  assert.equal(states(at({ phase: "WALLET" })), "approve:done trade:wallet")
+  assert.equal(states(at({ phase: "CONFIRMING", hash: HASH })), "approve:done trade:processing")
+  assert.equal(at({ phase: "CONFIRMING", hash: HASH }).steps[1]!.hint, "Waiting for GIWA to confirm your payment.")
+  assert.equal(at({ phase: "SETTLING", hash: HASH, status: null }).steps[1]!.hint, "Payment confirmed. Delivering NVDA…")
+  assert.equal(at({ phase: "SETTLING", hash: HASH, status: status({}) }).receive.amount, "0.498", "the server's quantity once it has priced the payment")
+  const done = at({ phase: "DONE", hash: HASH, status: status({ state: "COMPLETED" }) })
+  assert.equal(states(done), "approve:done trade:done")
+  assert.deepEqual(done.result, {
+    tone: "success",
+    title: "Purchase successful!",
+    message: "0.498 NVDA has been added to your wallet.",
+    from: { amount: "60", symbol: "USDC", token: "cash" },
+    to: { amount: "0.498", symbol: "NVDA", token: "stock" },
+    hash: HASH,
+  })
+  assert.equal(done.error, null)
+})
+
+test("the modal's sale, and what it says when the trade is held, slow or fails", () => {
+  const at = (state: DirectTradeState) => flowView({ flow: SELL_FLOW, approval: { status: "idle" }, approvalNeeded: false, trade: trade(state, "SELL") })
+  const wallet = at({ phase: "WALLET" })
+  assert.equal(wallet.title, "Review sale")
+  assert.equal(states(wallet), "trade:wallet", "no approval step when the wallet had approved the amount")
+  assert.deepEqual(wallet.pay, { caption: "You sell", amount: "0.25", symbol: "NVDA", sub: "≈$30", token: "stock" })
+  assert.deepEqual(wallet.receive, { caption: "You receive", amount: "≈30", symbol: "USDC", sub: null, token: "cash" })
+  assert.equal(wallet.steps[0]!.walletLabel, "Confirm sale in your wallet")
+  assert.equal(at({ phase: "SETTLING", hash: HASH, status: status({ side: "SELL", state: "LIQUIDITY_PENDING", quantity: "250000000", cashAmount: "29990000" }) }).steps[0]!.hint, "Waiting for payout liquidity. Your NVDA stays held until it is paid out.")
+  const done = at({ phase: "DONE", hash: HASH, status: status({ side: "SELL", state: "COMPLETED", quantity: "250000000", cashAmount: "29990000" }) })
+  assert.equal(done.result?.title, "Sale successful!")
+  assert.equal(done.result?.message, "29.99 USDC has been added to your wallet.")
+  assert.deepEqual([done.result?.from, done.result?.to], [{ amount: "0.25", symbol: "NVDA", token: "stock" }, { amount: "29.99", symbol: "USDC", token: "cash" }])
+  const held = at({ phase: "HELD", hash: HASH, status: status({ side: "SELL", state: "ESCROW_REVIEW_REQUIRED", hold: "DAILY_LIMIT_REACHED" }) })
+  assert.equal(held.result?.tone, "held")
+  assert.equal(held.result?.title, "Sale held for review")
+  assert.match(held.result?.message ?? "", /^Today's NVDA sell limit was reached/)
+  assert.equal(held.result?.to, null, "nothing to show as received")
+  const slow = at({ phase: "SLOW", hash: HASH, status: null, stage: "SETTLEMENT" })
+  assert.equal(states(slow), "trade:processing")
+  assert.equal(slow.slow, "GIWA confirmed your transaction. Settlement is taking longer than usual.")
+  const failed = at({ phase: "FAILED", code: "WALLET_REQUEST_REJECTED" })
+  assert.equal(states(failed), "trade:failed")
+  assert.equal(failed.error, "The escrow was declined in your wallet. Nothing was sent.")
+  assert.equal(failed.result, null)
 })

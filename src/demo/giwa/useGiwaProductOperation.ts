@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { maxUint256 } from "viem"
 import { giwaApi } from "./api"
@@ -10,12 +10,22 @@ import {
   readGreenlistEnforced,
   readPriceFeedState,
   readTokenBalance,
+  receivedTokenAmount,
   submitProductOperation,
   toBaseUnits,
   waitForSuccessfulReceipt,
 } from "./contracts"
 import { pauseStateOf } from "./catalog"
 import { vaultAddressForOperation, type ProductOperation } from "./operation-routing"
+import {
+  displayAmount,
+  initialOperationSteps,
+  isRequestOperation,
+  runOperationFlow,
+  type OperationFlow,
+  type OperationReview,
+  type StepOutcome,
+} from "./operation-flow"
 import { fromAnswer } from "./price-policy"
 import type { GiwaCatalogItem, HexAddress, UiPhase } from "./types"
 import { useGiwaWallet } from "./wallet"
@@ -41,9 +51,13 @@ function confirmLabel(operation: ProductOperation): string {
   }
 }
 
+const BUSY_PHASES: readonly UiPhase[] = ["approving", "simulating", "submitting", "confirming"]
+
 // Container hook for the invest/redeem panel: every per-product read, the operation state, and the
-// approve/submit/claim handlers, returning exactly the props GiwaInvestPanel needs. Feedback is
-// INLINE status only (error / successLabel / txHashes) — no toasts, matching current behavior.
+// approve/submit/claim handlers, returning exactly the props GiwaInvestPanel needs. A press of the
+// primary action opens the transaction modal (`flow`, rendered once per page by GiwaOperationModal),
+// which runs the approval when needed and then the operation; the panel keeps its INLINE status
+// (error / successLabel / txHashes) as well.
 export function useGiwaProductOperation(product: GiwaCatalogItem) {
   const wallet = useGiwaWallet()
   const queryClient = useQueryClient()
@@ -54,6 +68,10 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
   const [operationPhase, setOperationPhase] = useState<UiPhase>("ready")
   const [operationError, setOperationError] = useState<string | null>(null)
   const [successLabel, setSuccessLabel] = useState<string | null>(null)
+  const [flow, setFlow] = useState<OperationFlow | null>(null)
+  const flowSeq = useRef(0)
+  // The flow the user closed while it was running: what it already sent may finish, but it asks the wallet for nothing more.
+  const closedFlow = useRef<number | null>(null)
 
   const walletEnabled = Boolean(wallet.address)
   const paymentDecimals = product.paymentAsset?.decimals ?? 18
@@ -142,10 +160,12 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
 
   async function waitForReceipts(hashes: HexAddress[]) {
     setOperationPhase("confirming")
+    let last: Awaited<ReturnType<typeof waitForSuccessfulReceipt>> | null = null
     for (const hash of hashes) {
-      await waitForSuccessfulReceipt(hash)
+      last = await waitForSuccessfulReceipt(hash)
     }
     await refreshReads()
+    return last
   }
 
   // The GIWA testnet RPC can serve the PRE-approve allowance right after the tx confirms; poll
@@ -160,8 +180,9 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     return null
   }
 
-  async function approveDepositVault() {
-    if (!wallet.address) return
+  // `onSent` fires when the wallet has sent the transaction (the modal's step turns from "in your wallet" to pending).
+  async function approveDepositVault(onSent?: () => void): Promise<StepOutcome> {
+    if (!wallet.address) return { ok: false, message: "Connect your wallet first." }
     setOperationError(null)
     setSuccessLabel(null)
     setTxHashes([])
@@ -176,41 +197,101 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
         amount: maxUint256,
       })
       setTxHashes([hash])
+      onSent?.()
       await afterConfirmedReceipt(hash, refreshReads)
       // Phase stays "approving" (button disabled) until the allowance is confirmed on-chain.
       const confirmed = await waitForAllowanceAtLeast(amountBase)
       if (confirmed) queryClient.setQueryData(allowanceQueryKey, confirmed)
       setSuccessLabel("Approval confirmed")
       setOperationPhase("success")
+      return { ok: true, hash }
     } catch (err) {
+      const message = readableError(err)
       setOperationPhase("failed")
-      setOperationError(readableError(err))
+      setOperationError(message)
+      return { ok: false, message }
     }
   }
 
-  async function submitOperation(nextOperation = operation, nextRequestId = requestId) {
-    if (!wallet.address) return
+  async function submitOperation(nextOperation = operation, nextRequestId = requestId, onSent?: () => void): Promise<StepOutcome> {
+    if (!wallet.address) return { ok: false, message: "Connect your wallet first." }
+    const account = wallet.address
     setOperationError(null)
     setSuccessLabel(null)
     setTxHashes([])
     try {
       setOperationPhase("simulating")
       const hash = await submitProductOperation({
-        account: wallet.address,
+        account,
         product,
         operation: nextOperation,
         amount: amountBase,
         requestId: BigInt(nextRequestId || "0"),
       })
       setTxHashes([hash])
-      await waitForReceipts([hash])
+      onSent?.()
+      const receipt = await waitForReceipts([hash])
       const label = confirmLabel(nextOperation)
       setSuccessLabel(label)
       setOperationPhase(nextOperation === "requestRedeem" ? "pending-redemption" : "success")
+      // What actually arrived, read from the receipt's Transfer logs: shares on a deposit, the payment asset on an
+      // instant redemption. A request pays nothing yet.
+      const credited =
+        nextOperation === "deposit"
+          ? { token: product.productTokenAddress, decimals: 18 }
+          : nextOperation === "redeemInstant"
+            ? { token: product.paymentAssetAddress, decimals: paymentDecimals }
+            : null
+      const received = credited === null ? null : receivedTokenAmount(receipt, credited.token, account, credited.decimals)
+      return { ok: true, hash, received: received === null ? null : displayAmount(received) }
     } catch (err) {
+      const message = readableError(err)
       setOperationPhase("failed")
-      setOperationError(readableError(err))
+      setOperationError(message)
+      return { ok: false, message }
     }
+  }
+
+  function updateFlow(id: number, update: (current: OperationFlow) => OperationFlow) {
+    setFlow((current) => (current !== null && current.id === id ? update(current) : current))
+  }
+
+  // One press of the primary action: the modal opens and runs the approval (when the vault may not take the amount
+  // yet), then the operation, one wallet request at a time.
+  function startFlow(review: OperationReview) {
+    if (!wallet.address || BUSY_PHASES.includes(operationPhase)) return
+    const id = flowSeq.current + 1
+    flowSeq.current = id
+    closedFlow.current = null
+    const withApproval = allowanceRequired && (review.operation === "deposit" || review.operation === "requestDeposit")
+    setFlow({ id, review, steps: initialOperationSteps(withApproval), outcome: null, open: true })
+    void runOperationFlow({
+      approve: withApproval ? (onSent) => approveDepositVault(onSent) : null,
+      submit: (onSent) => submitOperation(review.operation, requestId, onSent),
+      stopped: () => closedFlow.current === id,
+      step: (step, state) =>
+        updateFlow(id, (current) => ({ ...current, steps: current.steps.map((entry) => (entry.id === step ? { ...entry, state } : entry)) })),
+      finish: (outcome) => updateFlow(id, (current) => ({ ...current, outcome })),
+      requested: isRequestOperation(review.operation),
+    })
+  }
+
+  // Closing a finished flow forgets it. Closing a running one hides it: a transaction already sent still finishes (the
+  // panel shows the result inline), but no new wallet request starts.
+  function closeFlow() {
+    if (flow === null) return
+    const id = flow.id
+    if (flow.outcome === null) {
+      closedFlow.current = id
+      updateFlow(id, (current) => ({ ...current, open: false }))
+    } else {
+      setFlow((current) => (current !== null && current.id === id ? null : current))
+    }
+  }
+
+  function retryFlow() {
+    if (flow === null || flow.outcome?.kind !== "failed") return
+    startFlow(flow.review)
   }
 
   function claimRedemption(nextRequestId: string) {
@@ -237,6 +318,10 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     txHashes,
     successLabel,
     pendingRedemptions: redemptionsQuery.data ?? [],
+    flow,
+    onStart: startFlow,
+    onFlowClose: closeFlow,
+    onFlowRetry: retryFlow,
     onOperationChange: (next: ProductOperation) => {
       setOperation(next)
       setOperationError(null)

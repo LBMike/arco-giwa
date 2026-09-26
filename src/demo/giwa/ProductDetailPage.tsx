@@ -7,6 +7,7 @@ import { vaultDisplayName } from "./catalog"
 import { parseAumToNumber } from "./display-profile"
 import { GiwaInvestPanel, GiwaNetworkIcon } from "./components"
 import { GiwaInvestDock } from "./GiwaInvestDock"
+import { GiwaOperationModal } from "./GiwaOperationModal"
 import { useGiwaVaultDetail } from "./useGiwaVaultDetail"
 import { PerformanceSection, TransparencySection, MoreInfoSection } from "./detail-sections"
 import { GIWA_FUNDS_ROUTE } from "./routes"
@@ -115,6 +116,9 @@ export function ProductDetailView({ product }: { product: GiwaCatalogItem }) {
 
       {/* Mobile (< lg) — sticky Invest/Redeem bar + slide-up bottom sheet hosting the SAME panel. */}
       <GiwaInvestDock {...detail.panel} instantLiquidityUsd={detail.instantLiquidityUsd} baseUsd={detail.baseUsd} />
+
+      {/* One transaction modal for both panels (they share one flow). */}
+      <GiwaOperationModal flow={detail.panel.flow} onClose={detail.panel.onFlowClose} onRetry={detail.panel.onFlowRetry} />
     </div>
   )
 }

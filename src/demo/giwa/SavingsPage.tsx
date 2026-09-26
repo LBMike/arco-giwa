@@ -5,6 +5,7 @@ import { giwaApi } from "./api"
 import { GIWA_CHAIN_ID, GIWA_LIVE_REFETCH } from "./config"
 import { useGiwaVaultDetail } from "./useGiwaVaultDetail"
 import { GiwaInvestPanel } from "./components"
+import { GiwaOperationModal } from "./GiwaOperationModal"
 import { PerformanceSection, TransparencySection, MoreInfoSection } from "./detail-sections"
 import { parseAumToNumber } from "./display-profile"
 import { marketApyPercent } from "./price-policy"
@@ -113,6 +114,7 @@ function SavingsDetail({ vault, acceptAssetIcon }: { vault: GiwaCatalogItem; acc
         variant="flow"
         savings={{ apyText: detail.apyText, apyPercent: marketApyPercent(detail.market), acceptAssetIcon }}
       />
+      <GiwaOperationModal flow={detail.panel.flow} onClose={detail.panel.onFlowClose} onRetry={detail.panel.onFlowRetry} />
       <PerformanceSection market={detail.market} history={detail.history} isBuiltIn={detail.isBuiltIn} />
       <TransparencySection
         portfolio={detail.portfolioForCard}

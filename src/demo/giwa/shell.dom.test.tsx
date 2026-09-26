@@ -228,7 +228,8 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
     assert.equal(m.sidebar().querySelector<HTMLAnchorElement>('a[href="/savings"]')?.getAttribute("aria-label"), "Savings")
     assert.deepEqual(currentLabels(m.sidebar()), ["Savings"])
     assert.equal(m.sidebar().querySelector('[aria-label="Savings categories"]'), null)
-    assert.equal(m.sidebar().querySelector('[aria-disabled="true"]')?.closest('a, button'), null)
+    // A "coming soon" item (none today, since Send left the menu) is never a link or a button.
+    assert.equal(m.sidebar().querySelector('[aria-disabled="true"]')?.closest('a, button') ?? null, null)
 
     await m.open()
     assert.ok(m.dialog()?.querySelector('a[href="/savings"]')?.textContent?.includes("Savings"), "mobile drawer keeps full labels")

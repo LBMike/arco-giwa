@@ -26,6 +26,7 @@ import {
 } from "./contracts"
 import { requiredPaymentInvariant } from "./operation-routing"
 import { computeQuote } from "./price-policy"
+import { displayAmount, type FlowOperation, type OperationReview } from "./operation-flow"
 import type {
   GiwaActivity,
   GiwaCatalogItem,
@@ -1291,6 +1292,7 @@ export function GiwaInvestPanel({
   onApprove,
   onSubmit,
   onRequestRedeem,
+  onStart,
   onConnect,
   onSwitchNetwork,
 }: {
@@ -1335,6 +1337,10 @@ export function GiwaInvestPanel({
   // Redeem fallback: submit a redemption REQUEST (requestRedeem) when instant liquidity
   // can't cover the payout — the panel auto-routes here instead of hitting the revert.
   onRequestRedeem: () => void
+  // The transaction modal (useGiwaProductOperation): one press opens it with what the panel shows, and it runs the
+  // approval when needed and then the operation. The button then names the operation even when an approval is still
+  // needed (the approval is the modal's first step). Without it the panel keeps its separate Approve press.
+  onStart?: (review: OperationReview) => void
   onClaim: (requestId: string) => void
   onConnect: () => void
   onSwitchNetwork: () => void
@@ -1385,7 +1391,7 @@ export function GiwaInvestPanel({
     tab !== "pending" && !BALANCE_BLIND_PHASES.includes(phase) && exceedsBalance(amount, topBalance, payDecimals)
   const actionLabel = primaryActionLabel(
     phase,
-    allowanceRequired,
+    allowanceRequired && !onStart,
     operation === "deposit"
       ? "Invest"
       : operation === "requestDeposit"
@@ -1408,9 +1414,29 @@ export function GiwaInvestPanel({
     // Defensive: the button is already disabled, but never let an over-balance amount reach the
     // vault (it would revert with "ERC20: transfer amount exceeds balance").
     if (insufficientBalance) return
+    if (onStart && operation !== "claimRedeem") return onStart(review(liquidityShort ? "requestRedeem" : operation))
     if (allowanceRequired) return onApprove()
     if (liquidityShort) return onRequestRedeem()
     return onSubmit()
+  }
+
+  // What the modal shows while it runs: the amounts, symbols and marks exactly as the panel shows them at the press.
+  function review(next: FlowOperation): OperationReview {
+    const payIcon = tab === "redeem" ? vaultImageFor(product) : paymentAssetIcon(product.paymentAssetSymbol)
+    const receiveIcon = tab === "redeem" ? paymentAssetIcon(product.paymentAssetSymbol) : vaultImageFor(product)
+    return {
+      kind: savings ? "savings" : "funds",
+      operation: next,
+      productName: vaultDisplayName(product),
+      pay: { amount: displayAmount(amount), symbol: paySymbol, icon: payIcon ?? null, sub: subValueText },
+      receive: {
+        amount: Number(amount) > 0 && quote !== null ? displayAmount(quoteText(quote)) : null,
+        symbol: receiveSymbol,
+        icon: receiveIcon ?? null,
+        sub: subValueText,
+      },
+      apyText: savings?.apyText ?? null,
+    }
   }
 
   return (

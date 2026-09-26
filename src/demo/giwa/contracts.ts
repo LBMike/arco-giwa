@@ -8,10 +8,12 @@ import {
   http,
   keccak256,
   parseAbi,
+  parseEventLogs,
   parseUnits,
   toBytes,
   type Abi,
   type Hex,
+  type Log,
   type WalletClient,
 } from "viem"
 import { GIWA_PUBLIC_RPC, giwaSepolia } from "./config"
@@ -117,7 +119,7 @@ export function walletClient() {
 }
 
 type ReceiptClient = {
-  waitForTransactionReceipt(args: { hash: Hex }): Promise<{ status: string }>
+  waitForTransactionReceipt(args: { hash: Hex }): Promise<{ status: string; logs?: readonly Log[] }>
 }
 
 type EstimateGasClient = {
@@ -157,6 +159,26 @@ export async function waitForSuccessfulReceipt(hash: Hex, client: ReceiptClient 
   const receipt = await client.waitForTransactionReceipt({ hash })
   if (receipt.status !== "success") throw new Error("Transaction reverted before confirmation")
   return receipt
+}
+
+/**
+ * How much of `token` reached `recipient` in a confirmed transaction: the sum of its ERC-20 Transfer logs to them, as a
+ * decimal string at `decimals`. Null when the receipt holds no such log (or no logs at all).
+ */
+export function receivedTokenAmount(
+  receipt: { logs?: readonly Log[] } | null | undefined,
+  token: HexAddress | null | undefined,
+  recipient: HexAddress,
+  decimals: number,
+): string | null {
+  if (!receipt?.logs || !token) return null
+  let total = 0n
+  for (const log of parseEventLogs({ abi: erc20Abi, eventName: "Transfer", logs: [...receipt.logs] })) {
+    if (log.address.toLowerCase() !== token.toLowerCase()) continue
+    if (log.args.to.toLowerCase() !== recipient.toLowerCase()) continue
+    total += log.args.value
+  }
+  return total > 0n ? formatUnits(total, decimals) : null
 }
 
 export async function afterConfirmedReceipt(
