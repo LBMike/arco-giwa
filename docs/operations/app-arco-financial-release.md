@@ -219,6 +219,21 @@ npm run stocks:integration:prepare -- \
 - Stocks: Trading control로 거래를 멈추고 Unfinished orders가 0건이 된 뒤 새 API의 `STOCKS_MODE`를 `DISABLED`로 바꾸고 재시작합니다. 서명기 서비스도 멈춥니다. Render 서명기가 한 번이라도 서명했다면 Mac의 서명 기록은 체인보다 뒤처져 있으므로, 로컬 데모의 서명기를 그대로 다시 켤 수는 없습니다.
 - 기존 `arco-giwa-api`와 인덱서는 이 절차에서 바꾸지 않으므로 그대로 동작합니다.
 
+## 2026-09-26 실제 전환 기록
+
+2단계와 3단계를 이날 마쳤습니다. 계획과 달라진 점과 다음에 다시 쓸 값을 적습니다.
+
+- 서명기 서비스는 `arco-stocks-signer`, 내부 주소는 `http://arco-stocks-signer:4394`입니다. 환경변수를 넣기 전에 배포가 시작되면 `SIGNER_SERVICE_START_FAILED stage=ENVIRONMENT`로 멈춥니다. 변수와 Secret File을 넣고 다시 배포하면 됩니다. 포트 4394를 찾으면 Render가 배포를 한 번 다시 시작합니다.
+- Secret File 이름은 정확히 `stocks-signer.json`, `signer-keystore.json`, `signer-keystore-password`여야 합니다. 이날 키스토어가 설정 파일 이름으로 저장되어 이름을 바로잡았습니다.
+- nonce 확인과 시작값 기록은 API 서비스에 `stocks-signer.json`을 올리지 않고 진행했습니다. API Shell에서 저장소의 manifest로 `/tmp/stocks-signer.json`을 만들어 실행했습니다. 시작 nonce는 237이고, Render 서명기의 첫 서명(매수 1건)으로 다음 nonce가 238이 되었습니다.
+- 원장·체인 대조는 어드민 화면 대신 `server/src/stocks/reconciliation.ts`와 같은 식을 Supabase 조회와 RPC `eth_call`로 계산했습니다. 블록 37050208 기준으로 일치했습니다.
+- Render Web Shell은 연결 직후 첫 입력을 자주 놓치고, 브라우저 탭이 뒤에 있으면 출력을 늦게 그립니다. 가벼운 명령을 먼저 한 번 입력하고, 결과는 탭을 앞으로 가져와 확인합니다.
+- Vercel은 `VITE_` 접두사가 붙은 Secret 타입 변수를 수정하지 못하게 막습니다. 기존 `VITE_ARCO_API_BASE`(Production and Preview, Secret)를 지우고 Production에만 Config로 다시 만들었습니다. 지운 값(이전 API 주소)은 따로 적어 두지 않았습니다. 일반 Preview 배포에는 이 변수가 없어서 API 주소가 `localhost:8080`으로 잡힙니다.
+- Vercel은 브랜치 전용 Preview 변수가 있는 브랜치를 Production Branch로 정하지 못하게 합니다. `release/app-arco-financial` 전용 Preview 변수 두 개는 Production과 값이 같아서 지운 뒤 브랜치를 바꿨습니다.
+- 이제 `release/app-arco-financial`에 push하면 Vercel이 바로 운영 배포를 만듭니다. Render는 자동 배포를 꺼 두었으므로 직접 배포합니다.
+- 전환 후 첫 운영 배포는 `FYJTaN5s53hKvAqgsfAu9fVTYfPq`입니다. 문제가 생기면 Vercel Instant Rollback으로 `FS58rvjCVXzaZP3js3SGSBir2YDU`(main `8160f35`)로 되돌립니다. 이 배포는 이전 API 주소가 들어간 빌드를 그대로 씁니다. main을 운영으로 다시 빌드하려면 Production Branch와 Production `VITE_ARCO_API_BASE`를 함께 되돌려야 하고, 이전 주소는 먼저 확인해야 합니다.
+- Render Secret File은 `/etc/secrets`뿐 아니라 앱 루트에도 놓이고, 빌드 중에도 읽힙니다. 의존성 설치 스크립트도 키스토어와 비밀번호 파일에 접근할 수 있습니다. 실제 자산을 다루기 전에 KMS에 둔 새 운영자 키로 옮겨야 하는 이유가 하나 더 생긴 셈입니다.
+
 ## 다른 작업과 이어지는 설정
 
 - 통합 어드민 콘솔(별도 작업)이 합쳐지면: 새 API에 `ADMIN_OPERATORS`를 넣고 어드민 원점을 `CORS_ALLOWED_ORIGINS`에 추가합니다. Vercel에는 두 번째 프로젝트(`npm run build:admin`, 출력 `dist-admin`)를 만들고, 고객 앱에 `VITE_ADMIN_CONSOLE_URL`을 넣습니다.
