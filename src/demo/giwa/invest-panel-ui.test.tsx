@@ -124,8 +124,8 @@ test("an info row's help sits behind a closed \"?\" badge; a row without help ke
     renderToStaticMarkup(<InfoRow label="Price" value="120" />),
     '<div class="flex items-center justify-between border-t border-[var(--color-arco-border)] py-2.5 text-sm"><span class="text-[var(--color-arco-text-soft)]">Price</span><span class="tabular-nums text-[var(--color-arco-ink)]">120</span></div>',
   )
-  const html = renderToStaticMarkup(<InfoRow label="Quote" value="1 NVDA = 120 tUSDC" help="Why this price" />)
+  const html = renderToStaticMarkup(<InfoRow label="Quote" value="1 NVDA = 120 USDC" help="Why this price" />)
   assert.match(html, /<button type="button" title="Why this price" aria-label="About Quote" aria-expanded="false"[^>]*>\?<\/button>/)
-  assert.match(html, /1 NVDA = 120 tUSDC/)
+  assert.match(html, /1 NVDA = 120 USDC/)
   assert.doesNotMatch(html, /<p/, "the explanation opens on press")
 })

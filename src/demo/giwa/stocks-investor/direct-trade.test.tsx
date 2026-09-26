@@ -61,7 +61,7 @@ test("with published contracts the customer panel is the direct one: no sign-in 
   )
   assert.match(html, /data-mode="direct"/)
   assert.doesNotMatch(text(html), /Sign in|sign-in|Get quote|Place buy order/i)
-  assert.match(text(html), /Quote \? 1 NVDA = 120 tUSDC \(\$120\) Order details Connect wallet$/, "one NVDA's price at the price on screen, above the details")
+  assert.match(text(html), /Quote \? 1 NVDA = 120 USDC \(\$120\) Order details Connect wallet$/, "one NVDA's price at the price on screen, above the details")
   assert.match(text(html), /You pay .*You receive/)
   assert.match(text(html), /Order details Connect wallet$/, "the details hold the fees only (collapsed), then the one action")
   assert.doesNotMatch(text(html), /Side|Quantity|Order capability|Deployment/)

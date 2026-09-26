@@ -457,7 +457,7 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
               <InfoRow
                 label="Quote"
                 help={QUOTE_HELP}
-                value={<>{`1 NVDA = ${formatCash(perShareCash(state.side, unitPrice).toString())} ${cashSymbol}`} <span className="text-[var(--color-arco-text-soft)]">{`(${formatUsd(unitPrice.toString())})`}</span></>}
+                value={<>{`1 NVDA = ${formatCash(perShareCash(state.side, unitPrice).toString())} USDC`} <span className="text-[var(--color-arco-text-soft)]">{`(${formatUsd(unitPrice.toString())})`}</span></>}
               />
             ) : null}
             <InfoRow label="Order details" expandable tone="soft" bodyId={detailsId} buttonClassName={FOCUS_RING}>
