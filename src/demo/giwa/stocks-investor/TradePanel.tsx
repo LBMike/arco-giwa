@@ -1,3 +1,4 @@
+import { assetLabel } from "../asset-label"
 import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 // Quote → order for NVDA, in the GIWA invest-panel look. The quote is the server's; this panel never computes an amount,
 // never replaces an expired quote on its own, and never turns an unconfirmed request into a new one. Cash reads are
@@ -111,7 +112,7 @@ export function attemptTitle(attempt: OrderAttempt, state: StocksInvestorState):
 function AttemptView({ attempt, state, cashSymbol, actions }: { attempt: OrderAttempt; state: StocksInvestorState; cashSymbol: StocksCashSymbol | null; actions: StocksInvestorActions }) {
   const demo = useDemoPresentation()
   const tusdc = state.catalog.status === "ready" && state.catalog.catalog.cashSymbol === "tUSDC"
-  const cash = tusdc ? cashSymbol ?? "test cash" : demo ? "USDC" : cashSymbol ?? "test cash"
+  const cash = tusdc ? assetLabel(cashSymbol) ?? "test cash" : demo ? "USDC" : cashSymbol ?? "test cash"
   const headingRef = useRef<HTMLHeadingElement>(null)
   useRescueFocus(headingRef, `${attempt.body.idempotencyKey}:${attempt.status}`)
   const request = (
@@ -391,7 +392,7 @@ function SessionTradePanel({ state, actions, titleId, headingRef, marketPrice = 
   const approval = useStocksTokenApproval(walletCash.refresh)
   const cashBalance = walletCash.data?.balance ?? funding.data?.balance ?? null
   const cashSymbol = tusdcCatalog ? walletCash.data?.cashSymbol ?? funding.data?.cashSymbol ?? null : catalog?.cashSymbol ?? null
-  const cash = tusdcCatalog ? cashSymbol ?? "test cash" : demo ? "USDC" : cashSymbol ?? "test cash"
+  const cash = tusdcCatalog ? assetLabel(cashSymbol) ?? "test cash" : demo ? "USDC" : cashSymbol ?? "test cash"
   const block = tradeBlock(state)
   const attempt = state.attempt
   const showForm = attempt === null || attempt.status === "REJECTED"
@@ -441,7 +442,7 @@ function SessionTradePanel({ state, actions, titleId, headingRef, marketPrice = 
   const spendable = sell ? available ?? walletRead?.stockBalance ?? null : cashBalance
   const short = demo && !tooSmall && required !== null && spendable !== null && BigInt(spendable) < BigInt(required)
   const approving = approval.state.status === "wallet" || approval.state.status === "pending" || (approval.state.status === "confirmed" && approvalNeeded === true)
-  const approveSymbol = sell ? "NVDA" : cashSymbol ?? "tUSDC"
+  const approveSymbol = sell ? "NVDA" : assetLabel(cashSymbol ?? "tUSDC")
   const tradeLabel = sell ? "Sell NVDA" : "Buy NVDA"
   const sessionWallet = state.session.status === "verified" ? state.session.wallet : null
 
@@ -510,7 +511,7 @@ function SessionTradePanel({ state, actions, titleId, headingRef, marketPrice = 
       caption="You pay"
       symbol={tusdcCatalog ? cashSymbol ?? "Test cash" : "USDC"}
       icon={<img src="/logos/usdc.svg" alt="" width={18} height={18} />}
-      balance={tusdcCatalog && cashBalance !== null ? `${formatCash(cashBalance)} tUSDC` : "--"}
+      balance={tusdcCatalog && cashBalance !== null ? `${formatCash(cashBalance)} USDC` : "--"}
       symbolNote={<TestNote>TEST</TestNote>}
       value={payValue}
       onChange={(next) => actions.setPayAmount(next, marketPrice)}
@@ -527,9 +528,9 @@ function SessionTradePanel({ state, actions, titleId, headingRef, marketPrice = 
       tone="soft"
       copyButton={false}
       caption={sell ? "You receive" : "You pay"}
-      symbol={tusdcCatalog ? cashSymbol ?? "Test cash" : demo ? "USDC" : cashSymbol ?? "Test cash"}
+      symbol={tusdcCatalog ? assetLabel(cashSymbol) ?? "Test cash" : demo ? "USDC" : cashSymbol ?? "Test cash"}
       icon={demo ? <img src="/logos/usdc.svg" alt="" width={18} height={18} /> : undefined}
-      balance={tusdcCatalog ? cashBalance !== null ? `${formatCash(cashBalance)} tUSDC` : "--" : demo ? "--" : undefined}
+      balance={tusdcCatalog ? cashBalance !== null ? `${formatCash(cashBalance)} USDC` : "--" : demo ? "--" : undefined}
       symbolNote={<TestNote>TEST</TestNote>}
       value={quote ? formatCash(quote.cashAmount) : demo ? (tradeCash !== null && tradeCash !== "0" ? formatCash(tradeCash) : "0") : "—"}
       subValue={demo ? undefined : quote ? `${quote.cashAmount} base units (6 decimals)` : "Shown after the server quote"}
@@ -737,7 +738,7 @@ function SessionTradePanel({ state, actions, titleId, headingRef, marketPrice = 
                 ? PAY_REASON[payCheck.reason] ?? "Enter a valid amount."
                 : tooSmall
                   ? sell
-                    ? "This quantity pays out less than 0.000001 tUSDC. Enter a larger quantity."
+                    ? "This quantity pays out less than 0.000001 USDC. Enter a larger quantity."
                     : "This amount buys less than 0.000000001 NVDA. Enter a larger amount."
                   : invalid
                     ? QUANTITY_REASON[state.quantityCheck.ok ? "" : state.quantityCheck.reason] ?? "Enter a valid quantity."

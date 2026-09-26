@@ -4,6 +4,7 @@
 // panel shows the wallet steps, GIWA's receipt and then only the server's progress. It computes no outcome itself: the
 // amounts shown before the server answers are the page's estimate at the price on screen.
 
+import { assetLabel } from "../asset-label"
 import { useEffect, useId, useMemo, useRef } from "react"
 import { Loader2 } from "lucide-react"
 
@@ -137,7 +138,7 @@ export function directHeldMessage(status: StocksDirectStatus): string {
       return `No price could be read when GIWA confirmed your ${sell ? "escrow" : "payment"}, so it is held for review. Nothing was ${sell ? "sold" : "bought"}.`
     case "BELOW_ONE_UNIT":
       return sell
-        ? "This quantity pays out less than 0.000001 tUSDC, so it is held for review. Nothing was sold."
+        ? "This quantity pays out less than 0.000001 USDC, so it is held for review. Nothing was sold."
         : "This amount buys less than 0.000000001 NVDA, so it is held for review. Nothing was bought."
     default:
       return orderStatusMeaning({ side: status.side, state: status.state }).detail
@@ -168,7 +169,7 @@ export function directTradeAnnouncement(trade: DirectTrade | null): string {
     case "SETTLING":
       return sell ? "GIWA confirmed your NVDA. Paying out." : "GIWA confirmed your payment. Delivering NVDA."
     case "DONE":
-      return sell ? `Sold. ${formatCash(state.status.cashAmount)} tUSDC is in your wallet.` : `Bought. ${formatQuantity(state.status.quantity)} NVDA is in your wallet.`
+      return sell ? `Sold. ${formatCash(state.status.cashAmount)} USDC is in your wallet.` : `Bought. ${formatQuantity(state.status.quantity)} NVDA is in your wallet.`
     case "HELD":
       return directHeldMessage(state.status)
     case "SLOW":
@@ -186,7 +187,7 @@ export function DirectTradeView({ trade, onMore, onCheckAgain }: { trade: Direct
   const status = "status" in state ? state.status : null
   // What the transaction moved is exact; what comes back is the page's estimate until the server has priced it.
   const nvda = sell ? `${formatQuantity(input.amount)} NVDA` : status !== null ? `${formatQuantity(status.quantity)} NVDA` : input.estimate !== null ? `≈${formatQuantity(input.estimate)} NVDA` : "NVDA"
-  const cash = sell ? (status !== null ? `${formatCash(status.cashAmount)} tUSDC` : input.estimate !== null ? `≈${formatCash(input.estimate)} tUSDC` : "tUSDC") : `${formatCash(input.amount)} tUSDC`
+  const cash = sell ? (status !== null ? `${formatCash(status.cashAmount)} USDC` : input.estimate !== null ? `≈${formatCash(input.estimate)} USDC` : "USDC") : `${formatCash(input.amount)} USDC`
   const held = state.phase === "HELD"
   const title =
     state.phase === "DONE" ? (sell ? `Sold ${nvda}` : `Bought ${nvda}`)
@@ -205,11 +206,11 @@ export function DirectTradeView({ trade, onMore, onCheckAgain }: { trade: Direct
       {state.phase === "WALLET" ? <Busy>Confirm the transaction in your wallet…</Busy> : null}
       {state.phase === "CONFIRMING" ? <Busy>{sell ? "Waiting for GIWA to confirm your escrow…" : "Waiting for GIWA to confirm your payment…"}</Busy> : null}
       {state.phase === "SETTLING" ? (
-        <Busy>{liquidity ? "Waiting for payout liquidity. Your NVDA stays held until it is paid out." : sell ? "GIWA confirmed your NVDA. Paying out tUSDC…" : "GIWA confirmed your payment. Delivering NVDA…"}</Busy>
+        <Busy>{liquidity ? "Waiting for payout liquidity. Your NVDA stays held until it is paid out." : sell ? "GIWA confirmed your NVDA. Paying out USDC…" : "GIWA confirmed your payment. Delivering NVDA…"}</Busy>
       ) : null}
       {state.phase === "DONE" ? (
         <Notice tone="success" announce="polite">
-          {sell ? `${formatCash(state.status.cashAmount)} tUSDC is in your wallet.` : `${formatQuantity(state.status.quantity)} NVDA is in your wallet.`}
+          {sell ? `${formatCash(state.status.cashAmount)} USDC is in your wallet.` : `${formatQuantity(state.status.quantity)} NVDA is in your wallet.`}
         </Notice>
       ) : null}
       {held ? (
@@ -278,7 +279,7 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
   const trade = useDirectTrade(owner)
   const showTrade = trade !== null && trade.state.phase !== "FAILED"
   const read = walletCash.data
-  const cashSymbol = read?.cashSymbol ?? "tUSDC"
+  const cashSymbol = assetLabel(read?.cashSymbol ?? "tUSDC")
 
   // Amounts: a Buy pays the typed tUSDC (or, with NVDA typed, its cost at the price on screen); a Sell escrows the typed NVDA.
   const unitPrice = priceUnits(marketPrice) ?? priceUnits(instrument?.price)
@@ -367,7 +368,7 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
       caption="You receive"
       symbol={cashSymbol}
       icon={<img src="/logos/usdc.svg" alt="" width={18} height={18} />}
-      balance={cashBalance === null ? "--" : `${formatCash(cashBalance)} tUSDC`}
+      balance={cashBalance === null ? "--" : `${formatCash(cashBalance)} USDC`}
       symbolNote={<TestNote>TEST</TestNote>}
       value={estimate !== null && estimate !== "0" ? formatCash(estimate) : "0"}
     />
@@ -380,7 +381,7 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
       caption="You pay"
       symbol={cashSymbol}
       icon={<img src="/logos/usdc.svg" alt="" width={18} height={18} />}
-      balance={cashBalance === null ? "--" : `${formatCash(cashBalance)} tUSDC`}
+      balance={cashBalance === null ? "--" : `${formatCash(cashBalance)} USDC`}
       symbolNote={<TestNote>TEST</TestNote>}
       value={state.payInput !== "" ? state.payInput : buyCash !== null ? formatBaseUnits(buyCash, STOCKS_CASH_SCALE) : ""}
       onChange={setPay}
@@ -420,7 +421,7 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
       ? QUANTITY_REASON[state.quantityCheck.reason] ?? "Enter a valid quantity."
       : tooSmall
       ? sell
-        ? "This quantity pays out less than 0.000001 tUSDC. Enter a larger quantity."
+        ? "This quantity pays out less than 0.000001 USDC. Enter a larger quantity."
         : "This amount buys less than 0.000000001 NVDA. Enter a larger amount."
       : ""
 

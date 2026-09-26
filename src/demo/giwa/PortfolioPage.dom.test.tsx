@@ -142,7 +142,7 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
     const m = await mount()
     try {
       await m.click("Activity")
-      assert.match(m.text(), /NVIDIA Corporation/); assert.match(m.text(), /Buy/); assert.match(m.text(), /0\.498 NVDA · 60 tUSDC/)
+      assert.match(m.text(), /NVIDIA Corporation/); assert.match(m.text(), /Buy/); assert.match(m.text(), /0\.498 NVDA · 60 USDC/)
       assert.doesNotMatch(m.text(), /No indexed activity yet/)
       boundary.stocksActivity = () => ({ status: "error" })
       await m.render()

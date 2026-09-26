@@ -20,7 +20,7 @@ const KEY = `0x4152434f44524354${"0f".repeat(24)}` as const
 const READY: DirectStepInput = {
   access: { wallet: "ready", host: "signed-out", hostError: null, canSignIn: true, signIn: noop },
   owner: WALLET_A, block: "SIGNED_OUT", side: "BUY", amount: "60000000", tooSmall: false, short: false, approvalNeeded: false,
-  wallet: "ready", approval: "idle", cashSymbol: "tUSDC",
+  wallet: "ready", approval: "idle", cashSymbol: "USDC",
 }
 
 test("the direct trade asks for no sign-in: wallet → network → amount → approval → Buy or Sell", () => {
@@ -39,9 +39,9 @@ test("the direct trade asks for no sign-in: wallet → network → amount → ap
   assert.equal(step({ tooSmall: true }).kind, "too-small")
   assert.deepEqual(step({ approvalNeeded: null, wallet: "loading" }), { kind: "checking", label: "Checking your wallet…", hint: null })
   assert.equal(step({ approvalNeeded: null, wallet: "error" }).kind, "unreadable")
-  assert.deepEqual(step({ short: true }), { kind: "short", label: "Not enough tUSDC", hint: null })
+  assert.deepEqual(step({ short: true }), { kind: "short", label: "Not enough USDC", hint: null })
   assert.deepEqual(step({ side: "SELL", short: true }), { kind: "short", label: "Not enough NVDA", hint: null })
-  assert.deepEqual(step({ approvalNeeded: true }), { kind: "approve", label: "Approve tUSDC", hint: null })
+  assert.deepEqual(step({ approvalNeeded: true }), { kind: "approve", label: "Approve USDC", hint: null })
   assert.deepEqual(step({ side: "SELL", approvalNeeded: true }), { kind: "approve", label: "Approve NVDA", hint: null })
   assert.equal(step({ approvalNeeded: true, approval: "wallet" }).label, "Approve in your wallet…")
   assert.equal(step({ approvalNeeded: true, approval: "pending" }).label, "Confirming approval on GIWA…")
@@ -88,23 +88,23 @@ const status = (patch: Partial<StocksDirectStatus>) => ({ side: "BUY", state: "B
 const view = (value: DirectTrade) => text(renderToStaticMarkup(<DirectTradeView trade={value} onMore={noop} onCheckAgain={noop} />))
 
 test("the trade's progress: wallet, GIWA confirmation, settlement, then the server's amounts", () => {
-  assert.equal(view(trade({ phase: "WALLET" })), "Buying NVDA You pay 60 tUSDC You receive ≈0.5 NVDA Confirm the transaction in your wallet…")
+  assert.equal(view(trade({ phase: "WALLET" })), "Buying NVDA You pay 60 USDC You receive ≈0.5 NVDA Confirm the transaction in your wallet…")
   assert.match(view(trade({ phase: "CONFIRMING", hash: HASH })), /Waiting for GIWA to confirm your payment…/)
   assert.match(view(trade({ phase: "SETTLING", hash: HASH, status: null })), /You receive ≈0\.5 NVDA GIWA confirmed your payment\. Delivering NVDA…/)
   assert.match(view(trade({ phase: "SETTLING", hash: HASH, status: status({}) })), /You receive 0\.498 NVDA/, "the server's quantity once it has priced the payment")
-  assert.equal(view(trade({ phase: "DONE", hash: HASH, status: status({ state: "COMPLETED" }) })), "Bought 0.498 NVDA You pay 60 tUSDC You received 0.498 NVDA 0.498 NVDA is in your wallet. Buy more")
+  assert.equal(view(trade({ phase: "DONE", hash: HASH, status: status({ state: "COMPLETED" }) })), "Bought 0.498 NVDA You pay 60 USDC You received 0.498 NVDA 0.498 NVDA is in your wallet. Buy more")
   // Sell: the NVDA escrowed is exact, the payout is the estimate until the server's.
-  assert.equal(view(trade({ phase: "WALLET" }, "SELL")), "Selling 0.25 NVDA You sell 0.25 NVDA You receive ≈30 tUSDC Confirm the transaction in your wallet…")
+  assert.equal(view(trade({ phase: "WALLET" }, "SELL")), "Selling 0.25 NVDA You sell 0.25 NVDA You receive ≈30 USDC Confirm the transaction in your wallet…")
   assert.match(view(trade({ phase: "CONFIRMING", hash: HASH }, "SELL")), /Waiting for GIWA to confirm your escrow…/)
-  assert.match(view(trade({ phase: "SETTLING", hash: HASH, status: status({ side: "SELL", state: "LIQUIDITY_PENDING", quantity: "250000000", cashAmount: "29990000" }) }, "SELL")), /You receive 29\.99 tUSDC Waiting for payout liquidity\. Your NVDA stays held until it is paid out\./)
-  assert.equal(view(trade({ phase: "DONE", hash: HASH, status: status({ side: "SELL", state: "COMPLETED", quantity: "250000000", cashAmount: "29990000" }) }, "SELL")), "Sold 0.25 NVDA You sell 0.25 NVDA You received 29.99 tUSDC 29.99 tUSDC is in your wallet. Sell more")
+  assert.match(view(trade({ phase: "SETTLING", hash: HASH, status: status({ side: "SELL", state: "LIQUIDITY_PENDING", quantity: "250000000", cashAmount: "29990000" }) }, "SELL")), /You receive 29\.99 USDC Waiting for payout liquidity\. Your NVDA stays held until it is paid out\./)
+  assert.equal(view(trade({ phase: "DONE", hash: HASH, status: status({ side: "SELL", state: "COMPLETED", quantity: "250000000", cashAmount: "29990000" }) }, "SELL")), "Sold 0.25 NVDA You sell 0.25 NVDA You received 29.99 USDC 29.99 USDC is in your wallet. Sell more")
 })
 
 test("held and slow trades say what happened and never claim a result", () => {
   const paused = view(trade({ phase: "HELD", hash: HASH, status: status({ state: "FUNDING_REVIEW_REQUIRED", quantity: "0", hold: "TRADING_PAUSED" }) }))
-  assert.equal(paused, "Purchase held for review You pay 60 tUSDC Trading was paused when GIWA confirmed your payment, so it is held for review. Nothing was bought. Buy more")
+  assert.equal(paused, "Purchase held for review You pay 60 USDC Trading was paused when GIWA confirmed your payment, so it is held for review. Nothing was bought. Buy more")
   assert.match(directHeldMessage(status({ state: "FUNDING_REVIEW_REQUIRED", quantity: "0", hold: "PRICE_UNAVAILABLE" })), /No price could be read/)
-  assert.match(directHeldMessage(status({ side: "SELL", state: "ESCROW_REVIEW_REQUIRED", hold: "BELOW_ONE_UNIT" })), /pays out less than 0\.000001 tUSDC/)
+  assert.match(directHeldMessage(status({ side: "SELL", state: "ESCROW_REVIEW_REQUIRED", hold: "BELOW_ONE_UNIT" })), /pays out less than 0\.000001 USDC/)
   assert.match(directHeldMessage(status({ state: "REVIEW_REQUIRED" })), /Operations must review this order/)
   assert.match(view(trade({ phase: "SLOW", hash: HASH, status: null, stage: "RECEIPT" })), /Your transaction was sent\. GIWA has not confirmed it yet\. Check again Start a new trade$/)
   assert.match(view(trade({ phase: "SLOW", hash: HASH, status: null, stage: "SETTLEMENT" }, "SELL")), /Settlement is taking longer than usual\. Check again Start a new trade$/)

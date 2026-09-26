@@ -369,7 +369,7 @@ test("legacy-style invest panel keeps deposit approval bound to the deposit vaul
   )
 
   assert.match(html, /Approve/)
-  assert.match(html, /tUSDC/)
+  assert.match(html, /\bUSDC\b/)
   assert.match(html, /aCAPIX/)
   assert.equal(encodedOperationCall(product, "deposit", 5n, "0x00000000000000000000000000000000000000aa").to, product.depositVaultAddress)
 })
@@ -970,7 +970,7 @@ test("redeem panel auto-switches to Request redemption when the payout exceeds i
   assert.match(html, /Request redemption/)
   assert.doesNotMatch(html, /Redeem instant/)
   // Neutral notice explains the fallback in the product's own symbols.
-  assert.match(html, /Instant liquidity is 1 tUSDC/)
+  assert.match(html, /Instant liquidity is 1 USDC/)
   assert.match(html, /processed as a redemption request/)
   assert.match(html, /your aCAPIX is redeemed now/)
 })
@@ -1042,7 +1042,7 @@ test("redeem fallback compares payout and liquidity in USD (payout is scaled by 
   )
   assert.match(html, /Request redemption/)
   assert.doesNotMatch(html, /Redeem instant/)
-  assert.match(html, /Instant liquidity is 4 tUSDC/) // 8 USD / baseUsd 2 = 4 payment-asset units
+  assert.match(html, /Instant liquidity is 4 USDC/) // 8 USD / baseUsd 2 = 4 payment-asset units
 })
 
 test("pending tab surfaces a REQUESTED redemption as Pending (the new request appears in the list)", () => {
@@ -1098,7 +1098,7 @@ test("redeem tab renders the Instant liquidity row in the payment asset", () => 
   // The row now renders on the redeem tab (previously invest-only) with the value in the
   // payment asset, matching the request-fallback notice format.
   assert.match(html, /Instant liquidity/)
-  assert.match(html, /1,000 tUSDC/)
+  assert.match(html, /1,000 USDC/)
   // Payout (1) is within liquidity (1000) → instant path, so no request-fallback notice.
   assert.doesNotMatch(html, /processed as a redemption request/)
   assert.match(html, /Redeem instant/)

@@ -74,7 +74,7 @@ test("faucet reads distinguish cooldown, capacity, pause and unavailable without
   const value = await readTusdcFunding(h.options)
   assert.equal(value.balance, "2000000001"); assert.equal(value.faucet.status, "UNAVAILABLE")
   const html = renderToStaticMarkup(<StocksFundingStatus funding={{ data: { ...value, gas: "0" }, status: "ready", refresh() {} }} requiredCash="3000000000" />)
-  assert.match(html, /Insufficient tUSDC/); assert.match(html, /Add GIWA test ETH/); assert.match(html, /could not be checked/)
+  assert.match(html, /Insufficient USDC/); assert.match(html, /Add GIWA test ETH/); assert.match(html, /could not be checked/)
 })
 
 test("funding scope rejects wallet, chain, epoch, API, session and source changes", () => {
@@ -160,20 +160,20 @@ test("the funding status shows the wallet's tUSDC before sign-in and keeps the b
     ({ status, data: balance === null ? null : { cashSymbol: "tUSDC", balance, blockNumber: "36979608", ...NO_APPROVALS }, refresh() {} })
   const signedOut = { data: null, status: "signed-out" as const, refresh() {} }
   // No wallet on GIWA (or no wallet read): connecting one is enough to see the balance, no sign-in needed.
-  assert.match(plain(<StocksFundingStatus funding={signedOut} requiredCash={null} />), /Connect a wallet on GIWA Sepolia to see its tUSDC balance\./)
-  assert.match(plain(<StocksFundingStatus funding={signedOut} wallet={wallet("unavailable")} requiredCash={null} />), /Connect a wallet on GIWA Sepolia to see its tUSDC balance\./)
+  assert.match(plain(<StocksFundingStatus funding={signedOut} requiredCash={null} />), /Connect a wallet on GIWA Sepolia to see its USDC balance\./)
+  assert.match(plain(<StocksFundingStatus funding={signedOut} wallet={wallet("unavailable")} requiredCash={null} />), /Connect a wallet on GIWA Sepolia to see its USDC balance\./)
   // A wallet read: no sign-in prompt for the balance, a refresh action, and a mint hint only for an empty wallet.
   const funded = plain(<StocksFundingStatus funding={signedOut} wallet={wallet("ready", "2000000000")} requiredCash={null} />)
-  assert.doesNotMatch(funded, /Connect a wallet|Sign in|no tUSDC yet/)
+  assert.doesNotMatch(funded, /Connect a wallet|Sign in|no USDC yet/)
   assert.match(funded, /Refresh balance/)
-  assert.match(plain(<StocksFundingStatus funding={signedOut} wallet={wallet("ready", "0")} requiredCash={null} />), /This wallet has no tUSDC yet\. Use Mint test assets to get test cash\./)
-  assert.match(plain(<StocksFundingStatus funding={signedOut} wallet={wallet("error")} requiredCash={null} />), /tUSDC balance could not be read from GIWA\. Refresh to try again\./)
+  assert.match(plain(<StocksFundingStatus funding={signedOut} wallet={wallet("ready", "0")} requiredCash={null} />), /This wallet has no USDC yet\. Use Mint test assets to get test cash\./)
+  assert.match(plain(<StocksFundingStatus funding={signedOut} wallet={wallet("error")} requiredCash={null} />), /USDC balance could not be read from GIWA\. Refresh to try again\./)
   assert.doesNotMatch(plain(<StocksFundingStatus funding={signedOut} wallet={wallet("loading")} requiredCash={null} />), /Connect a wallet|Sign in|could not/)
   // Signed in: the finalized read can lag a fresh mint by minutes; the quote check uses the balance on screen.
   const verified = { data: { cashSymbol: "tUSDC" as const, balance: "1000000000", gas: "1", blockNumber: "20", faucet: { status: "UNAVAILABLE" as const, amount: null, remainingSeconds: null }, cashToken: PLATFORM_TUSDC, fundingVault: VAULT, redemptionEscrow: ESCROW, stockToken: STOCK }, status: "ready" as const, refresh() {} }
   assert.doesNotMatch(plain(<StocksFundingStatus funding={verified} wallet={wallet("ready", "2000000000")} requiredCash="1500000000" />), /Insufficient/)
-  assert.match(plain(<StocksFundingStatus funding={verified} wallet={wallet("ready", "1000000000")} requiredCash="1500000000" />), /Insufficient tUSDC for this quote/)
-  assert.match(plain(<StocksFundingStatus funding={verified} requiredCash="1500000000" />), /Insufficient tUSDC for this quote/)
+  assert.match(plain(<StocksFundingStatus funding={verified} wallet={wallet("ready", "1000000000")} requiredCash="1500000000" />), /Insufficient USDC for this quote/)
+  assert.match(plain(<StocksFundingStatus funding={verified} requiredCash="1500000000" />), /Insufficient USDC for this quote/)
   // A failed verified read under a wallet balance names what is missing (gas and faucet), not the balance.
   const failed = plain(<StocksFundingStatus funding={{ data: null, status: "error", refresh() {} }} wallet={wallet("ready", "2000000000")} requiredCash={null} />)
   assert.match(failed, /Gas and faucet status could not be checked\. Refresh to try again\./)
@@ -203,7 +203,7 @@ test("the customer presentation shows only what the wallet must do: no 'test ETH
   const wallet = (gas?: string): WalletCashStatus => ({ status: "ready", data: { cashSymbol: "tUSDC", balance: "2000000000", blockNumber: "36979608", ...NO_APPROVALS, ...(gas === undefined ? {} : { gas }) }, refresh() {} })
   assert.match(plain(<StocksFundingStatus funding={signedOut} wallet={wallet("0")} requiredCash={null} />), /Add GIWA test ETH/)
   assert.doesNotMatch(plain(<StocksFundingStatus funding={signedOut} wallet={wallet("5")} requiredCash={null} />), /test ETH/)
-  assert.match(plain(<StocksFundingStatus funding={signedOut} wallet={wallet()} requiredCash="3000000000" />), /Not enough tUSDC for this amount\. Use Mint test assets, then refresh the balance\./)
+  assert.match(plain(<StocksFundingStatus funding={signedOut} wallet={wallet()} requiredCash="3000000000" />), /Not enough USDC for this amount\. Use Mint test assets, then refresh the balance\./)
   // The technical preview keeps every check.
   assert.match(renderToStaticMarkup(<StocksFundingStatus funding={verified("1")} requiredCash={null} />), /GIWA test ETH is present/)
 })

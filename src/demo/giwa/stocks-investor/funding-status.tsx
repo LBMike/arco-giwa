@@ -124,16 +124,16 @@ export function useStocksWalletCash(enabled: boolean, spender: string | null = n
 
 export function faucetMessage(data: FundingRead): string {
   switch (data.faucet.status) {
-    case "AVAILABLE": return `Use Mint test assets for ${formatCash(data.faucet.amount!)} tUSDC. Availability is checked again when you mint.`
+    case "AVAILABLE": return `Use Mint test assets for ${formatCash(data.faucet.amount!)} USDC. Availability is checked again when you mint.`
     case "COOLDOWN": {
       if (data.faucet.remainingSeconds === null) return "The faucet cooldown has not ended."
       const seconds = BigInt(data.faucet.remainingSeconds)
       return `Mint cooldown: ${seconds / 3600n}h ${seconds % 3600n / 60n}m ${seconds % 60n}s remaining at the last balance check.`
     }
-    case "DAILY_CAP": return "The faucet's daily tUSDC limit has been reached."
-    case "TOTAL_CAP": return "The faucet's total tUSDC limit has been reached."
+    case "DAILY_CAP": return "The faucet's daily USDC limit has been reached."
+    case "TOTAL_CAP": return "The faucet's total USDC limit has been reached."
     case "PAUSED": return "Mint test assets is paused."
-    case "DISABLED": return "tUSDC minting is disabled."
+    case "DISABLED": return "USDC minting is disabled."
     default: return "Faucet availability could not be checked. Use Mint test assets to check in your wallet."
   }
 }
@@ -150,22 +150,22 @@ export function StocksFundingStatus({ funding, wallet, requiredCash }: { funding
   const gas = data?.gas ?? walletCash?.gas ?? null
   const refresh = () => { funding.refresh(); wallet?.refresh() }
   if (demo) return <div className="mt-2 flex flex-col gap-1 text-xs leading-5 text-[var(--color-arco-text-soft)]" data-testid="stocks-funding-status">
-    {status === "signed-out" && walletStatus === "unavailable" ? <p>Connect a wallet on GIWA Sepolia to see its tUSDC balance.</p> : null}
-    {walletStatus === "error" && walletCash === null ? <p>tUSDC balance could not be read from GIWA. Refresh to try again.</p> : null}
-    {walletCash?.balance === "0" && !insufficient ? <p>This wallet has no tUSDC yet. Use Mint test assets to get test cash.</p> : null}
-    {insufficient ? <p>Not enough tUSDC for this amount. Use Mint test assets, then refresh the balance.</p> : null}
+    {status === "signed-out" && walletStatus === "unavailable" ? <p>Connect a wallet on GIWA Sepolia to see its USDC balance.</p> : null}
+    {walletStatus === "error" && walletCash === null ? <p>USDC balance could not be read from GIWA. Refresh to try again.</p> : null}
+    {walletCash?.balance === "0" && !insufficient ? <p>This wallet has no USDC yet. Use Mint test assets to get test cash.</p> : null}
+    {insufficient ? <p>Not enough USDC for this amount. Use Mint test assets, then refresh the balance.</p> : null}
     {gas === "0" ? <p>Add GIWA test ETH to this wallet for transaction gas.</p> : null}
     {status !== "signed-out" || walletStatus === "ready" || walletStatus === "error" ? <button type="button" onClick={refresh} disabled={status === "loading"} className={`${FOCUS_RING} self-start underline disabled:cursor-wait`}>
       Refresh balance
     </button> : null}
   </div>
   return <div className="mt-2 flex flex-col gap-1 text-xs leading-5 text-[var(--color-arco-text-soft)]" data-testid="stocks-funding-status">
-    {status === "signed-out" && walletStatus === "unavailable" ? <p>Connect a wallet on GIWA Sepolia to see its tUSDC balance.</p> : null}
-    {walletStatus === "error" && walletCash === null ? <p>tUSDC balance could not be read from GIWA. Refresh to try again.</p> : null}
-    {walletCash?.balance === "0" && !insufficient ? <p>This wallet has no tUSDC yet. Use Mint test assets to get test cash.</p> : null}
+    {status === "signed-out" && walletStatus === "unavailable" ? <p>Connect a wallet on GIWA Sepolia to see its USDC balance.</p> : null}
+    {walletStatus === "error" && walletCash === null ? <p>USDC balance could not be read from GIWA. Refresh to try again.</p> : null}
+    {walletCash?.balance === "0" && !insufficient ? <p>This wallet has no USDC yet. Use Mint test assets to get test cash.</p> : null}
     {status === "loading" ? <p>Checking test cash and gas…</p> : null}
     {status === "error" ? <p>{walletCash ? "Gas and faucet status could not be checked. Refresh to try again." : "Test cash balance could not be verified. Refresh before trading."}</p> : null}
-    {insufficient ? <p>Insufficient tUSDC for this quote. Use Mint test assets, then refresh the balance.</p> : null}
+    {insufficient ? <p>Insufficient USDC for this quote. Use Mint test assets, then refresh the balance.</p> : null}
     {data ? <>
       {data.gas === "0" ? <p>Add GIWA test ETH to this wallet for transaction gas.</p> : <p>GIWA test ETH is present. Your wallet checks the transaction gas cost.</p>}
       <p>{faucetMessage(data)}</p>

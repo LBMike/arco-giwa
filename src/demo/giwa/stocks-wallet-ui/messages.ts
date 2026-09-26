@@ -107,8 +107,8 @@ export function describeCode(code: string, side: Side | null): CodeDescription {
       return { reason: "A required check could not be completed in time.", next: "Check again.", step: "CHECK_AGAIN" }
     case "ALLOWANCE_REQUIRED":
       return {
-        reason: `This wallet has not approved ${s === "SELL" ? "NVDA" : "tUSDC"} for Stocks yet, so nothing was sent.`,
-        next: `Approve ${s === "SELL" ? "NVDA" : "tUSDC"} in the trade panel once, then try again.`,
+        reason: `This wallet has not approved ${s === "SELL" ? "NVDA" : "USDC"} for Stocks yet, so nothing was sent.`,
+        next: `Approve ${s === "SELL" ? "NVDA" : "USDC"} in the trade panel once, then try again.`,
         step: "CHECK_AGAIN",
       }
     case "ALLOWANCE_CHANGED":

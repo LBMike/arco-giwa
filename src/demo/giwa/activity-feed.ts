@@ -204,7 +204,7 @@ export function stockActivityRow(entry: StocksActivityEntry): ActivityRow {
   const date = formatDate(entry.createdAt)
   const parts = [
     entry.quantity !== "0" ? `${formatQuantity(entry.quantity)} NVDA` : null,
-    entry.cashAmount !== "0" ? `${formatCash(entry.cashAmount)} tUSDC` : null,
+    entry.cashAmount !== "0" ? `${formatCash(entry.cashAmount)} USDC` : null,
   ].filter((part): part is string => part !== null)
   return {
     key: `stock:${entry.side}:${entry.paymentTx}`,

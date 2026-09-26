@@ -1,3 +1,4 @@
+import { assetLabel } from "./asset-label"
 import { useDemoPresentation } from "./demo-presentation"
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
@@ -230,7 +231,7 @@ function productType(product: Pick<GiwaCatalogItem, "productId" | "paymentAssetS
 }
 
 function productBlurb(product: GiwaCatalogItem) {
-  return `${product.name} on GIWA Sepolia, accepting ${product.paymentAssetSymbol} only through the registry-bound vaults.`
+  return `${product.name} on GIWA Sepolia, accepting ${assetLabel(product.paymentAssetSymbol)} only through the registry-bound vaults.`
 }
 
 function networkLabel(chainId?: number | null) {
@@ -1341,8 +1342,8 @@ export function GiwaInvestPanel({
   const tab = operation === "deposit" || operation === "requestDeposit" ? "invest" : operation === "claimRedeem" ? "pending" : "redeem"
   const cfg = vaultConfigOf(product)
   const busy = ["approving", "simulating", "submitting", "confirming"].includes(phase)
-  const paySymbol = tab === "redeem" ? product.symbol : product.paymentAssetSymbol
-  const receiveSymbol = tab === "redeem" ? product.paymentAssetSymbol : product.symbol
+  const paySymbol = tab === "redeem" ? product.symbol : assetLabel(product.paymentAssetSymbol)
+  const receiveSymbol = tab === "redeem" ? assetLabel(product.paymentAssetSymbol) : product.symbol
   const side: "invest" | "redeem" = tab === "redeem" ? "redeem" : "invest"
   const quote = typeof price === "number" ? computeQuote({ payAmount: Number(amount), price, side }) : null
   // "~$" assumes a USD-pegged payment asset (tUSDC). For tBTC/tWETH/tXRP we show the value in the
@@ -1450,7 +1451,7 @@ export function GiwaInvestPanel({
                 icon={
                   tab === "redeem"
                     ? <GiwaBrandMark src={vaultImageFor(product)} label={product.symbol} size={18} />
-                    : <GiwaBrandMark src={paymentAssetIcon(product.paymentAssetSymbol)} label={product.paymentAssetSymbol} size={18} />
+                    : <GiwaBrandMark src={paymentAssetIcon(product.paymentAssetSymbol)} label={assetLabel(product.paymentAssetSymbol)} size={18} />
                 }
                 value={amount}
                 onChange={onAmountChange}
@@ -1463,7 +1464,7 @@ export function GiwaInvestPanel({
                 symbol={receiveSymbol}
                 icon={
                   tab === "redeem"
-                    ? <GiwaBrandMark src={paymentAssetIcon(product.paymentAssetSymbol)} label={product.paymentAssetSymbol} size={18} />
+                    ? <GiwaBrandMark src={paymentAssetIcon(product.paymentAssetSymbol)} label={assetLabel(product.paymentAssetSymbol)} size={18} />
                     : <GiwaBrandMark src={vaultImageFor(product)} label={product.symbol} size={18} />
                 }
                 value={Number(amount) > 0 ? (quote !== null ? quoteText(quote) : "Onchain quote") : "0"}
@@ -1509,7 +1510,7 @@ export function GiwaInvestPanel({
                       label="Instant liquidity"
                       value={
                         liquidityInPaymentAsset != null
-                          ? `${compactNumber(liquidityInPaymentAsset)} ${product.paymentAssetSymbol}`
+                          ? `${compactNumber(liquidityInPaymentAsset)} ${assetLabel(product.paymentAssetSymbol)}`
                           : "—"
                       }
                     />
@@ -1532,7 +1533,7 @@ export function GiwaInvestPanel({
               <div className={`${INVEST_NOTICE} text-[var(--color-arco-text-soft)]`}>
                 <AlertCircle className="mt-0.5 size-4 shrink-0" />
                 <span className="break-words">
-                  {`Instant liquidity is ${compactNumber(liquidityInPaymentAsset ?? 0)} ${product.paymentAssetSymbol}. This is processed as a redemption request — your ${product.symbol} is redeemed now and the ${product.paymentAssetSymbol} payout follows after processing.`}
+                  {`Instant liquidity is ${compactNumber(liquidityInPaymentAsset ?? 0)} ${assetLabel(product.paymentAssetSymbol)}. This is processed as a redemption request — your ${product.symbol} is redeemed now and the ${assetLabel(product.paymentAssetSymbol)} payout follows after processing.`}
                 </span>
               </div>
             )}

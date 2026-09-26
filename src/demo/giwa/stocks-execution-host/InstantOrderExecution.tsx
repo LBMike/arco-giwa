@@ -61,7 +61,7 @@ export function InstantOrderExecution({ owner, order, observedAt, unavailableCod
   }, [autoStart, payable, deposit, key])
 
   if (!payable) return null
-  const noun = side === "SELL" ? "NVDA escrow" : "tUSDC payment"
+  const noun = side === "SELL" ? "NVDA escrow" : "USDC payment"
   if (owner === null || !deposit) {
     const reason = describeCode(unavailableCode ?? (owner === null ? "CONTEXT_CHANGED" : "NOT_CONFIGURED"), side)
     return (
