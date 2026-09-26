@@ -24,7 +24,7 @@ for(const width of [375,1440])test(`singleton gap observations remain visible an
   const slider=page.getByLabel('관측값 선택 · 방향키로 이동 · 종가와 봉 시작 시각');await slider.scrollIntoViewIfNeeded();
   if(width===375)await slider.tap({position:{x:8,y:8}});else{await slider.focus();await page.keyboard.press('ArrowLeft')}
   await page.getByText('5m 구간 종가 · 시각은 봉 시작',{exact:true}).waitFor();
-  await page.getByRole('heading',{name:'NVDA · 테스트넷 모의 거래'}).click();
+  await page.getByRole('heading',{name:'NVDA · testnet mock trading'}).click();
   const pointerExit=await page.getByText('기초 주식 시세 · USD',{exact:true}).count();const pointerLeft=await page.getByText('5m 구간 종가 · 시각은 봉 시작',{exact:true}).count();
   await slider.focus();await page.getByRole('button',{name:'1D',exact:true}).focus();await page.getByRole('button',{name:'1D',exact:true}).evaluate(button=>button.blur());
   if(width===375)await slider.tap({position:{x:8,y:8}});else{await slider.focus();await page.keyboard.press('ArrowLeft')}

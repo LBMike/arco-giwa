@@ -22,7 +22,7 @@ test("selected stock uses the GIWA amount block with no NVDA fallback, fake bala
   assert.match(html, /USDC amount to buy SOXL/)
   assert.match(html, /171\.63/)
   assert.match(html, /disabled=""[^>]*>Trading coming soon/)
-  assert.doesNotMatch(html, /NVDA|조회 전용|모의|Place.*order/)
+  assert.doesNotMatch(html, /NVDA|View only|[Mm]ock|Place.*order/)
   const wrong = renderToStaticMarkup(<StockMarketInvestPanel symbol="SOXL" quote={fixtureTop40Quote("NVDA")} access={{ wallet: "disconnected", host: "signed-out", hostError: null, canSignIn: false }} />)
   assert.doesNotMatch(wrong, /231\.02/)
 })

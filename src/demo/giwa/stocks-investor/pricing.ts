@@ -26,6 +26,11 @@ export function sellPayout(quantity: bigint, price: bigint, feeBps: bigint = BUR
   return (quantity * price * (BPS - feeBps)) / (BPS * UNIT)
 }
 
+/** tUSDC for one whole NVDA at `price`: what a Buy of 1 NVDA costs or a Sell of 1 NVDA pays, fees included. */
+export function perShareCash(side: "BUY" | "SELL", price: bigint): bigint {
+  return side === "SELL" ? sellPayout(UNIT, price) : buyCost(UNIT, price)
+}
+
 /** A market or catalog price ("223.71", "120.000000") as tUSDC base units, rounded half up; null when it is not a positive price. */
 export function priceUnits(value: string | null | undefined): bigint | null {
   if (typeof value !== "string" || !PRICE.test(value)) return null

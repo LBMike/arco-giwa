@@ -532,7 +532,7 @@ function SessionTradePanel({ state, actions, titleId, headingRef, marketPrice = 
       balance={tusdcCatalog ? cashBalance !== null ? `${formatCash(cashBalance)} tUSDC` : "--" : demo ? "--" : undefined}
       symbolNote={<TestNote>TEST</TestNote>}
       value={quote ? formatCash(quote.cashAmount) : demo ? (tradeCash !== null && tradeCash !== "0" ? formatCash(tradeCash) : "0") : "—"}
-      subValue={demo ? undefined : quote ? `${quote.cashAmount} base units (6 decimals)` : "서버 견적 후 표시"}
+      subValue={demo ? undefined : quote ? `${quote.cashAmount} base units (6 decimals)` : "Shown after the server quote"}
     />
   )
 

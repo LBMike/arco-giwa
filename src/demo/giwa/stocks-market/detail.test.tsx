@@ -32,8 +32,8 @@ function detail(overrides: Partial<Parameters<typeof SecurityDetailView>[0]> = {
 
 test("stock detail distinguishes the rolling chart from About and Statistics", () => {
   const page = detail()
-  assert.match(page, /aria-label="최근 24시간 주가 차트/)
-  assert.match(text(page), /관측 구간 대비/)
+  assert.match(page, /aria-label="24-hour price chart/)
+  assert.match(text(page), /over the observed period/)
   assert.match(text(page), /About.*Statistics/)
 })
 
@@ -53,7 +53,7 @@ test("price card: 1D change follows the chart; other periods retain previous-clo
   const quote = fixtureTop40Quote("NVDA")
   assert.equal(count(html, "Underlying stock price · USD"), 1)
   assert.match(html, new RegExp(`<p title="${esc(dollars(quote.price))}"[^>]*text-\\[40px\\][^>]*>\\$[0-9,]+(\\.\\d{1,2})?</p>`))
-  assert.match(text(html), new RegExp(`${esc(windowChange(fixtureTop40Chart("NVDA", "1D"), quote))}관측 구간 대비`))
+  assert.match(text(html), new RegExp(`${esc(windowChange(fixtureTop40Chart("NVDA", "1D"), quote))}over the observed period`))
   assert.match(text(html), /Sep 16, 2026, 08:00:00 AM EDT · 15-minute delay/)
   const up = renderToStaticMarkup(<SecurityDetailView security={NVDA} profile={ready(envelope(PROFILE))} quote={{ ...quote, change: "5.01", changePercent: "2.81" }} quotes={ready(envelope([quote]))} capabilities={ORDERS} day={null} range="1W" onRange={() => {}} selection={null} chart={null} />)
   assert.match(up, /text-\[var\(--color-arco-up-text\)\]"><svg[^]*?Up <\/span>\$5\.01 \(2\.81%\)/, "rising change text uses the AA text token")
@@ -61,7 +61,7 @@ test("price card: 1D change follows the chart; other periods retain previous-clo
   assert.match(flat, /<span class="text-\[var\(--color-arco-text-soft\)\]">\$0 \(0%\)<\/span>/, "flat stays neutral")
   const missing = renderToStaticMarkup(<SecurityDetailView security={NVDA} profile={{ phase: "loading" }} quote={null} quotes={{ phase: "loading" }} capabilities={ORDERS} day={null} range="1D" onRange={() => {}} selection={null} chart={null} />)
   assert.equal(count(missing, "Underlying stock price · USD"), 1)
-  assert.match(text(missing), /Underlying stock price · USD—— ?관측 구간 대비/)
+  assert.match(text(missing), /Underlying stock price · USD—— ?over the observed period/)
   assert.match(text(missing), /Loading market data…/)
 })
 
@@ -119,7 +119,7 @@ test("price card: this symbol's own non-AVAILABLE quote status whatever the char
   // The chart read failed, or is loading (every period switch): the stale headline price still says it is stale.
   for (const chart of [<MarketStatus key="error" status="error" />, <MarketStatus key="loading" status="loading" />]) {
     const page = view(sgov, ready(envelope([sgov], "STALE")), chart)
-    assert.match(page, /Underlying stock price · USD\$422\.82—관측 구간 대비/, "the stale price is the headline without an unavailable 24h change")
+    assert.match(page, /Underlying stock price · USD\$422\.82—over the observed period/, "the stale price is the headline without an unavailable 24h change")
     assert.equal(page.split(stale).length - 1, 1, `one stale marker with a ${chart.props.status} chart`)
   }
   // Once an AVAILABLE chart loads, the marker is still there, once (the chart no longer repeats the quote's status).
@@ -132,7 +132,7 @@ test("price card: this symbol's own non-AVAILABLE quote status whatever the char
   const nvda = fixtureTop40Quote("NVDA")
   assert.doesNotMatch(view(nvda, ready(envelope([nvda, sgov], "STALE")), null), /Stale data/)
   for (const [status, copy] of [["UNAVAILABLE", "Market prices unavailable"], ["UNCONFIGURED", "Price feed setup pending"]] as const) {
-    assert.match(view(null, ready(envelope<Quote[]>(null, status)), null), new RegExp(`—— ?관측 구간 대비.*${copy}`), `no quote row: the envelope's ${status} explains the dashes`)
+    assert.match(view(null, ready(envelope<Quote[]>(null, status)), null), new RegExp(`—— ?over the observed period.*${copy}`), `no quote row: the envelope's ${status} explains the dashes`)
     const row: Quote = { ...sgov, status, price: null, change: null, changePercent: null }
     assert.match(view(row, ready(envelope([row], status)), null), new RegExp(copy), `the row's own ${status}`)
   }

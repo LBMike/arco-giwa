@@ -25,7 +25,7 @@ export function StocksHomeList({ withHighlights = false }: { withHighlights?: bo
     try { return { market: createMarketClient(apiBase, environment.fetch), orders: createGiwaStocksHttpClient({ baseUrl: apiBase, fetch: environment.fetch }) } }
     catch { return { market: null, orders: null } }
   }, [apiBase, environment.fetch])
-  if (!clients.market) return <HomeLayout withHighlights={withHighlights} status="Market data unavailable"><p role="status" className="text-sm text-[var(--color-arco-text-soft)]">시장정보 API 연결 준비 중</p></HomeLayout>
+  if (!clients.market) return <HomeLayout withHighlights={withHighlights} status="Market data unavailable"><p role="status" className="text-sm text-[var(--color-arco-text-soft)]">Market data API is not connected yet</p></HomeLayout>
   return <HomeCatalog key={clients.market.baseUrl} client={clients.market} ordersClient={clients.orders} withHighlights={withHighlights} />
 }
 function HomeCatalog({ client, ordersClient, withHighlights }: { client: MarketClient; ordersClient: OrdersCatalogClient | null; withHighlights: boolean }) {

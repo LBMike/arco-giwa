@@ -62,12 +62,12 @@ test("copyButton={false} drops the copy control; symbolNote follows the symbol",
 })
 
 test("display mode renders the value as text and no <input> at all", () => {
-  const html = payField({ display: true, value: "—", subValue: "서버 견적 후 표시", id: "cash", onMax: undefined, balance: undefined })
+  const html = payField({ display: true, value: "—", subValue: "Shown after the server quote", id: "cash", onMax: undefined, balance: undefined })
   assert.doesNotMatch(html, /<input/)
   assert.match(html, /<p id="cash" class="min-w-0 text-right tabular-nums text-lg text-\[var\(--color-arco-ink\)\] \[overflow-wrap:anywhere\]">—<\/p>/)
   // No input, so the caption is not a <label>.
   assert.match(html, /<p class="text-xs[^"]*">You pay<\/p>/)
-  assert.match(html, /서버 견적 후 표시/)
+  assert.match(html, /Shown after the server quote/)
 })
 
 test("balanceLabel, soft tone and the extra classes; muted stays on the placeholder only", () => {
@@ -117,4 +117,15 @@ test("the leaf imports react and lucide-react only; components.tsx takes the pie
 test("a closed BottomSheet renders nothing (no dialog, no content)", async () => {
   const { BottomSheet } = await import("./BottomSheet")
   assert.equal(renderToStaticMarkup(<BottomSheet open={false} onClose={() => undefined} label="Trade NVDA"><input inputMode="decimal" /></BottomSheet>), "")
+})
+
+test("an info row's help sits behind a closed \"?\" badge; a row without help keeps its markup", () => {
+  assert.equal(
+    renderToStaticMarkup(<InfoRow label="Price" value="120" />),
+    '<div class="flex items-center justify-between border-t border-[var(--color-arco-border)] py-2.5 text-sm"><span class="text-[var(--color-arco-text-soft)]">Price</span><span class="tabular-nums text-[var(--color-arco-ink)]">120</span></div>',
+  )
+  const html = renderToStaticMarkup(<InfoRow label="Quote" value="1 NVDA = 120 tUSDC" help="Why this price" />)
+  assert.match(html, /<button type="button" title="Why this price" aria-label="About Quote" aria-expanded="false"[^>]*>\?<\/button>/)
+  assert.match(html, /1 NVDA = 120 tUSDC/)
+  assert.doesNotMatch(html, /<p/, "the explanation opens on press")
 })

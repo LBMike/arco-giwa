@@ -6,7 +6,7 @@ const StocksAdminPage = lazy(() => import("./StocksPages").then(module => ({ def
 /** These are top-level siblings; Stocks admin never inherits the legacy operator gate. */
 export function stocksRoutes(shell: ReactNode): RouteObject[] {
   return [
-    { path: GIWA_STOCKS_ROUTE, element: shell, children: [{ index: true, element: <Suspense fallback={<p role="status">Stocks 불러오는 중…</p>}><StocksPage /></Suspense> }] },
-    { path: GIWA_ADMIN_STOCKS_ROUTE, element: shell, children: [{ index: true, element: <Suspense fallback={<p role="status">Stocks 관리자 불러오는 중…</p>}><StocksAdminPage /></Suspense> }] },
+    { path: GIWA_STOCKS_ROUTE, element: shell, children: [{ index: true, element: <Suspense fallback={<p role="status">Loading Stocks…</p>}><StocksPage /></Suspense> }] },
+    { path: GIWA_ADMIN_STOCKS_ROUTE, element: shell, children: [{ index: true, element: <Suspense fallback={<p role="status">Loading Stocks admin…</p>}><StocksAdminPage /></Suspense> }] },
   ]
 }

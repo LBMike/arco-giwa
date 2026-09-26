@@ -27,9 +27,9 @@ const runtime = process.env.GIWA_HOST_DOM_RUNTIME
  */
 const walletFor = (scenario: number, prefix: "a" | "b" = "a") => `0x${"0".repeat(36)}${prefix}${scenario.toString(16).padStart(3, "0")}`
 const READ_METHODS = new Set(["eth_chainId", "eth_accounts", "eth_getBlockByNumber", "eth_call"])
-const READY_COPY = "입금·매도 예치는 수락된 주문 카드에서 진행합니다"
-const SESSION_COPY = "입금·매도 예치는 주문한 지갑으로 Stocks에 로그인한 뒤 진행할 수 있습니다."
-const UNSUPPORTED_COPY = "현재 연결된 지갑 방식은 거래 요청을 한 번만 보내도록 보장할 수 없어"
+const READY_COPY = "Deposits and sell escrows are made from the accepted order card"
+const SESSION_COPY = "Deposits and sell escrows are available after you sign in to Stocks with the wallet that placed the order."
+const UNSUPPORTED_COPY = "The connected wallet cannot guarantee that a transaction request is sent only once"
 const SESSION_NOTICE = "A wallet request from your last Stocks session may still be open or its answer unrecorded"
 /** The whole notice as rendered (title and paragraphs concatenated by textContent). Any added promise changes it. */
 const SESSION_NOTICE_TEXT = [

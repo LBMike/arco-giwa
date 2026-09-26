@@ -256,7 +256,7 @@ test("the cash side shows only the server quote, in the catalog's cash symbol", 
   await h.enter(WALLET_A)
   h.controller.setQuantity("2.5")
   const before = panel(render(h.controller))
-  assert.match(text(before), /You pay ARCO_TEST_RLUSD TEST — 서버 견적 후 표시/)
+  assert.match(text(before), /You pay ARCO_TEST_RLUSD TEST — Shown after the server quote/)
   assert.doesNotMatch(before, /ARCO_TEST_USDC/)
   assert.doesNotMatch(text(before), /\b300\b/, "no client-side estimate")
   await h.quote("2.5")

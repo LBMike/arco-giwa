@@ -49,7 +49,7 @@ test("the direct trade asks for no sign-in: wallet → network → amount → ap
   assert.equal(step({ approvalNeeded: false, approval: "confirmed" }).kind, "trade")
 })
 
-test("with published contracts the customer panel is the direct one: no sign-in text, no quote, fees only in the details", async () => {
+test("with published contracts the customer panel is the direct one: no sign-in text, no quote step, one NVDA's price, fees only in the details", async () => {
   const h = createHarness()
   h.controls.setCatalogMode("direct")
   await h.enter(null)
@@ -60,7 +60,8 @@ test("with published contracts the customer panel is the direct one: no sign-in 
     </DemoPresentationContext.Provider>,
   )
   assert.match(html, /data-mode="direct"/)
-  assert.doesNotMatch(text(html), /Sign in|sign-in|Get quote|Place buy order|Quote/i)
+  assert.doesNotMatch(text(html), /Sign in|sign-in|Get quote|Place buy order/i)
+  assert.match(text(html), /Quote \? 1 NVDA = 120 tUSDC \(\$120\) Order details Connect wallet$/, "one NVDA's price at the price on screen, above the details")
   assert.match(text(html), /You pay .*You receive/)
   assert.match(text(html), /Order details Connect wallet$/, "the details hold the fees only (collapsed), then the one action")
   assert.doesNotMatch(text(html), /Side|Quantity|Order capability|Deployment/)

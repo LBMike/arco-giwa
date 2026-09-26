@@ -90,7 +90,7 @@ export function chartPoints(chart: Chart, latestQuote?: Quote | null): ChartPoin
   return chart.bars.map((bar, index) => { const timestamp = Date.parse(bar.timestamp); if (index && timestamp - Date.parse(chart.bars[index - 1].timestamp) > gap) segment++; return { timestamp, coordinate: Number(bar.close), price: bar.close, sourceTimestamp: bar.timestamp, bar, segment, index, carried: false, muted: false, closed: false, liveQuote: false } })
 }
 export function chartTooltip(point: ChartPoint): string {
-  const status = point.muted ? point.closed ? "장 마감 · 마지막 체결가" : "체결 없음 · 마지막 체결가" : point.liveQuote ? "마지막 체결가" : null
+  const status = point.muted ? point.closed ? "Market closed · last trade" : "No trades · last trade" : point.liveQuote ? "Last trade" : null
   return [dollars(point.price), time(point.sourceTimestamp), status].filter(Boolean).join(" · ")
 }
 /** Keep both endpoints and regular quarter-hour points for a compact 1D table sparkline. */

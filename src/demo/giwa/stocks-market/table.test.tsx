@@ -153,7 +153,7 @@ test("1D Chart draws a continuous 15-minute sparkline; missing data remains empt
   const chart = fixtureTop40Chart("NVDA", "1D")
   const html = render({ series: { NVDA: chart } })
   const row = rowOf(html, "NVDA")
-  assert.match(row, /<svg role="img" aria-label="최근 24시간 주가 · Down \d+\.\d\d%" width="148" height="48" viewBox="0 0 148 48" class="text-\[var\(--color-arco-down\)\]">/)
+  assert.match(row, /<svg role="img" aria-label="24-hour price · Down \d+\.\d\d%" width="148" height="48" viewBox="0 0 148 48" class="text-\[var\(--color-arco-down\)\]">/)
   assert.match(row, /stop-color="currentColor" stop-opacity="0.24"/)
   assert.match(row, /stroke="currentColor" stroke-opacity="1" stroke-width="2" stroke-linecap="round"/)
   assert.doesNotMatch(row, /차트 미로드/)

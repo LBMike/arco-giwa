@@ -193,6 +193,7 @@ export function InfoRow({
   tone = "muted",
   bodyId,
   buttonClassName,
+  help,
 }: {
   label: string
   value?: ReactNode
@@ -204,6 +205,8 @@ export function InfoRow({
   bodyId?: string
   /** Expandable only: extra classes for the toggle (e.g. a focus ring). */
   buttonClassName?: string
+  /** Non-expandable only: a short explanation behind a "?" badge after the label (shown on hover; a press toggles it). */
+  help?: string
 }) {
   const [open, setOpen] = useState(false)
 
@@ -227,6 +230,30 @@ export function InfoRow({
             {children}
           </div>
         )}
+      </div>
+    )
+  }
+
+  if (help) {
+    return (
+      <div className="border-t border-[var(--color-arco-border)] py-2.5 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <span className="flex items-center gap-1.5 text-[var(--color-arco-text-soft)]">
+            {label}
+            <button
+              type="button"
+              title={help}
+              aria-label={`About ${label}`}
+              aria-expanded={open}
+              onClick={() => setOpen((current) => !current)}
+              className="inline-flex size-5 items-center justify-center rounded-md bg-[var(--color-arco-chip)] text-xs font-medium text-[var(--color-arco-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-arco-ink)]"
+            >
+              ?
+            </button>
+          </span>
+          <span className="text-right tabular-nums text-[var(--color-arco-ink)]">{value}</span>
+        </div>
+        {open ? <p className="mt-1.5 text-xs leading-5 text-[var(--color-arco-text-soft)]">{help}</p> : null}
       </div>
     )
   }

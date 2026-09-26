@@ -61,7 +61,7 @@ export function MarketChart({ response, latestQuote = null, onSelection }: { res
         const next = event.key === "ArrowLeft" ? Math.max(0, index - 1) : event.key === "ArrowRight" ? Math.min(points.length - 1, index + 1) : event.key === "Home" ? 0 : event.key === "End" ? points.length - 1 : undefined
         if (next !== undefined) { event.preventDefault(); setSelected(next) }
         if (event.key === "Escape") setSelected(null)
-      } : undefined} onBlur={demo ? () => setSelected(null) : undefined} aria-label={rolling ? fallback ? "이전 거래일 주가 차트 · 방향키로 가격 확인" : "최근 24시간 주가 차트 · 방향키로 가격 확인" : demo ? "Closing price chart · use arrow keys to explore prices" : "Returned closing price chart. Select an observation below or review the raw data table."}>
+      } : undefined} onBlur={demo ? () => setSelected(null) : undefined} aria-label={rolling ? fallback ? "Previous session price chart · use arrow keys to explore prices" : "24-hour price chart · use arrow keys to explore prices" : demo ? "Closing price chart · use arrow keys to explore prices" : "Returned closing price chart. Select an observation below or review the raw data table."}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0}>
           <AreaChart data={drawing} onMouseMove={onMove} onMouseLeave={() => setSelected(null)} margin={{ top: 8, right: 0, bottom: 0, left: 0 }}>
             <defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="currentColor" stopOpacity={0.18} /><stop offset="100%" stopColor="currentColor" stopOpacity={0} /></linearGradient></defs>
@@ -76,9 +76,8 @@ export function MarketChart({ response, latestQuote = null, onSelection }: { res
         </ResponsiveContainer>
         {picked && <div role="status" className="pointer-events-none absolute right-2 top-2 max-w-[min(92%,260px)] rounded-lg border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-2 py-1 text-right text-xs text-[var(--color-arco-ink)] shadow-sm">{chartTooltip(picked)}</div>}
       </div>
-      {rolling && <p className="text-xs text-[var(--color-arco-text-soft)]">{fallback ? "이전 거래일 · 5분 간격" : "최근 24시간 · 5분 간격"}{chart?.seed && !fallback ? " · 창 시작값은 직전 마지막 체결가" : ""}</p>}
       <DemoDetails><div className="space-y-2">
-        <label htmlFor={sliderId} className="block text-xs text-[var(--color-arco-text-soft)]">{rolling ? "최근 24시간 관측값 선택 · 방향키로 이동" : "Select an observation · use arrow keys · closing price and bar start time"}</label>
+        <label htmlFor={sliderId} className="block text-xs text-[var(--color-arco-text-soft)]">{rolling ? "Select a 24-hour observation · use arrow keys" : "Select an observation · use arrow keys · closing price and bar start time"}</label>
         <input id={sliderId} type="range" min={0} max={points.length - 1} step={1} value={selected ?? points.length - 1} onChange={event => setSelected(Number(event.target.value))} onBlur={() => setSelected(null)} aria-valuetext={chartTooltip(picked ?? points[points.length - 1])} className="w-full accent-[var(--color-arco-ink)]" />
         {points.length === 1 && <p className="text-xs">One observation · period change cannot be calculated.</p>}
       </div></DemoDetails>

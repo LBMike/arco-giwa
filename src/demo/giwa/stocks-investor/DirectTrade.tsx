@@ -25,9 +25,9 @@ import type { StocksInvestorActions } from "./actions"
 import { approvalMessage, useStocksTokenApproval, type TokenApprovalState } from "./cash-approval"
 import { tradeBlock, type StocksInvestorState, type TradeBlock } from "./controller"
 import { formatBaseUnits, isDecimalKeystroke, parseHumanDecimal } from "./decimal"
-import { formatCash, formatQuantity, tradeBlockMessage } from "./display"
+import { formatCash, formatQuantity, formatUsd, tradeBlockMessage } from "./display"
 import { SIGNED_OUT_FUNDING, StocksFundingStatus, useStocksWalletCash } from "./funding-status"
-import { BURN_FEE_BPS, buyCost, buyQuantity, formatFee, MINT_FEE_BPS, priceUnits, sellPayout } from "./pricing"
+import { BURN_FEE_BPS, buyCost, buyQuantity, formatFee, MINT_FEE_BPS, perShareCash, priceUnits, sellPayout } from "./pricing"
 import { orderStatusMeaning } from "./status"
 import { CTA_BUSY, CTA_READY, FIELD_FOCUS, NvdaMark, TestNote } from "./trade-parts"
 import { STOCKS_CASH_SCALE, STOCKS_QUANTITY_SCALE, type HexAddress, type StocksDirectStatus, type StocksSide } from "./types"
@@ -252,6 +252,9 @@ export type DirectTradePanelProps = {
   marketPrice?: string | null
 }
 
+/** The quote row's "?": what its per-share price is and when the real one is set. */
+const QUOTE_HELP = "What one NVDA costs (Buy) or pays out (Sell) at the live price above, fees included. The server sets the final price when GIWA confirms your transaction."
+
 export function DirectTradePanel({ state, actions, contracts, marketPrice = null }: DirectTradePanelProps) {
   const access = useStocksAccess()
   const host = useStocksFundingReadContext()
@@ -450,6 +453,13 @@ export function DirectTradePanel({ state, actions, contracts, marketPrice = null
             </p>
           </fieldset>
           <div className="mt-3">
+            {unitPrice !== null ? (
+              <InfoRow
+                label="Quote"
+                help={QUOTE_HELP}
+                value={<>{`1 NVDA = ${formatCash(perShareCash(state.side, unitPrice).toString())} ${cashSymbol}`} <span className="text-[var(--color-arco-text-soft)]">{`(${formatUsd(unitPrice.toString())})`}</span></>}
+              />
+            ) : null}
             <InfoRow label="Order details" expandable tone="soft" bodyId={detailsId} buttonClassName={FOCUS_RING}>
               <dl className="w-full">
                 <Field label="Mint fee">{formatFee(MINT_FEE_BPS)}</Field>

@@ -19,6 +19,14 @@ export function formatCash(value: BaseUnits): string {
   return formatBaseUnits(value, STOCKS_CASH_SCALE, { group: true })
 }
 
+/** tUSDC base units per NVDA as dollars, like the price header: at most two decimals, half up, no forced trailing zeros. */
+export function formatUsd(value: BaseUnits): string {
+  const cents = (BigInt(value) + 5_000n) / 10_000n
+  const fraction = (cents % 100n).toString().padStart(2, "0").replace(/0+$/, "")
+  const whole = formatBaseUnits((cents / 100n).toString(), 0, { group: true })
+  return fraction === "" ? `$${whole}` : `$${whole}.${fraction}`
+}
+
 export function formatPrice(value: string): string {
   return formatHumanDecimal(value, { group: true })
 }

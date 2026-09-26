@@ -28,7 +28,7 @@ test("customer detail keeps prices, periods and facts but removes the requested 
   assert.match(demo, /About/)
   assert.match(demo, /Statistics/)
   assert.match(demo, /1Y/)
-  assert.match(demo, /최근 24시간 주가 차트 · 방향키로 가격 확인/)
+  assert.match(demo, /24-hour price chart · use arrow keys to explore prices/)
   assert.match(normal, /type="range"/)
   assert.match(normal, /Feed delay unknown/)
   assert.match(normal, /OHLCV/)
@@ -59,7 +59,7 @@ test("demo list omits the closed-market notice and retains delay and provider fa
   const failure = ready({ ...quotes.value, reason: "PROVIDER_UNAVAILABLE" })
   const failed = renderToStaticMarkup(<DemoPresentationContext.Provider value><MarketQuoteStatus quotes={failure} marketSession={{ state: "CLOSED", observedAt: null, nextOpen: null, nextClose: null }} /></DemoPresentationContext.Provider>)
   assert.match(failed, /Price updates delayed/)
-  assert.doesNotMatch(failed, /장 마감/)
+  assert.doesNotMatch(failed, /장 마감|Market closed/)
 })
 test("preview labels every listed stock Live without changing the server's order capability", () => {
   const capabilities = { phase: "ready" as const, bySymbol: new Map([["NVDA", "CHECK_PAUSE_AT_ORDER" as const]]) }

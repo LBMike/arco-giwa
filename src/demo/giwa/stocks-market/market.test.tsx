@@ -97,17 +97,21 @@ test("keyless/empty/one/partial/stale charts have explicit distinct presentation
     assert.match(html, new RegExp(kind === "empty" ? "No chart observations returned" : kind === "one" ? "One observation" : kind === "partial" ? "Partial history returned" : "Last observed prices · stale data"))
   }
 })
-test("1D chart names its rolling window in Korean while preserving raw OHLCV values", () => {
+test("1D chart names its rolling window in English, with no caption under it, while preserving raw OHLCV values", () => {
   const chart = fixtureChart()
   const response = { status: "AVAILABLE", reason: null, fetchedAt: null, cacheAgeMs: null, feedDelay: "UNKNOWN", data: chart } as const
   const full = renderToStaticMarkup(<MarketChart response={response} />)
   const preview = renderToStaticMarkup(<DemoPresentationContext.Provider value><MarketChart response={response} /></DemoPresentationContext.Provider>)
-  for (const html of [full, preview]) assert.match(html, /최근 24시간/)
+  for (const html of [full, preview]) {
+    assert.match(html, /24-hour price chart/)
+    assert.doesNotMatch(html, /[\uAC00-\uD7A3]/, "no Korean")
+  }
+  assert.doesNotMatch(preview, /5-minute|· 5m ·|window start/i, "the customer chart has no interval caption under it")
   assert.match(full, /Exact OHLCV source data \(12 observations\)/)
   assert.match(full, /Bar start \(New York\)/)
   assert.match(full, /Underlying asset volume/)
   assert.match(full, />1000<\/td>/)
-  assert.match(preview, /최근 24시간 주가 차트 · 방향키로 가격 확인/)
+  assert.match(preview, /24-hour price chart · use arrow keys to explore prices/)
 })
 
 test("monotonic elapsed guard rejects late success before a delayed timeout callback can run", async () => {

@@ -133,7 +133,7 @@ test("without a ready market catalog an unknown symbol is unverified: no view-on
   type View = { selection: { symbol: string | null }; unverified: boolean }
   const views: View[] = []
   // The page's rule (StocksPages): the view-only card for a non-NVDA symbol unless it is unverified.
-  const aside = (view: View) => { views.push(view); return view.selection.symbol !== null && view.selection.symbol !== "NVDA" && !view.unverified ? h("p", { key: "view-only", "data-probe": "view-only" }, "조회 전용") : null }
+  const aside = (view: View) => { views.push(view); return view.selection.symbol !== null && view.selection.symbol !== "NVDA" && !view.unverified ? h("p", { key: "view-only", "data-probe": "view-only" }, "View only") : null }
   const ordersClient = { async getCatalog() { return { instruments: [{ symbol: "NVDA", orderCapability: "CHECK_PAUSE_AT_ORDER" }] } } }
   // The catalog read fails, answers UNAVAILABLE without data, or never answers; or the page has no market client at all.
   const catalogs: [string, (() => Promise<Response>) | null][] = [

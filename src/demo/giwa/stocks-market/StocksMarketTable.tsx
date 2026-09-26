@@ -116,7 +116,7 @@ function Sparkline({ chart, quote }: { chart: Chart; quote: Quote | null }) {
   const runs = chartLineRuns(points, chart.range === "1D")
   const change = windowChange(chart, quote).slice(1)
   const fallback = chart.range === "1D" && chart.fallback === "PREVIOUS_SESSION"
-  return <svg role="img" aria-label={`${fallback ? "이전 거래일" : "최근 24시간"} 주가 · ${direction === "up" ? "Up" : direction === "down" ? "Down" : "Flat"} ${change}`} width={148} height={48} viewBox="0 0 148 48" className={direction === "up" ? "text-[var(--color-arco-stock-chart-up)]" : direction === "down" ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-text-soft)]"}>
+  return <svg role="img" aria-label={`${fallback ? "Previous session" : "24-hour"} price · ${direction === "up" ? "Up" : direction === "down" ? "Down" : "Flat"} ${change}`} width={148} height={48} viewBox="0 0 148 48" className={direction === "up" ? "text-[var(--color-arco-stock-chart-up)]" : direction === "down" ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-text-soft)]"}>
     <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="currentColor" stopOpacity={0.24} /><stop offset="1" stopColor="currentColor" stopOpacity={0} /></linearGradient></defs>
     {runs.map((run, index) => {
       if (run.points.length === 1) return null
