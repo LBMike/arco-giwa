@@ -15,7 +15,7 @@
 
 ## 확인된 사실 (2026-09-26)
 
-- DB: Supabase Arco 프로젝트의 `_prisma_migrations` 15개가 이 브랜치의 `prisma/migrations` 15개와 이름이 같고 모두 완료 상태입니다. 배포할 때 마이그레이션을 실행하지 않습니다.
+- DB: Supabase Arco 프로젝트의 `_prisma_migrations` 16개가 이 브랜치의 `prisma/migrations` 16개와 이름이 같고 모두 완료 상태입니다. 16번째인 거래 한도 마이그레이션(`20260927000000_stocks_trading_limits`)은 2026-09-26 10:56 UTC에 적용했습니다. 배포할 때 마이그레이션을 실행하지 않습니다.
 - 기존 Savings·Funds 서버 코드는 main과 거의 같습니다(`server/src/app.ts`, `server/src/index.ts`의 Stocks 연결 부분만 다름). 로컬 데모는 Savings·Funds 요청을 운영 API로 보냈으므로, 이 브랜치 서버로 처리하는 것은 1단계가 처음입니다.
 - 시세: API가 `/api/v1/stocks/market/*`(목록, 시세, 차트, 프로필, NVDA 실시간·스트림)를 직접 제공합니다. Stocks 런타임이 꺼져 있어도 시세는 동작합니다.
 - Stocks 런타임은 시작할 때 서명기(`signerUrl`, HTTPS 원점만 허용)에 연결해 정책을 검증합니다. 서명기에 닿지 않으면 Stocks를 켤 수 없습니다.
@@ -169,6 +169,7 @@ npm run stocks:integration:prepare -- \
 | `STOCKS_SIGNER_TOKEN` | 서명기 서비스와 같은 값 | 예 |
 | `STOCKS_AUTODISPATCH` | `1` | 아니요 |
 | `STOCKS_PRICING` | `ALPACA_LIVE` | 아니요 |
+| `STOCKS_TRADING_LIMITS` | `1` | 아니요 |
 
 `STOCKS_DATABASE_URL`은 비워 둡니다. 기존 `DATABASE_URL`을 씁니다. Render의 Secret File과 환경변수 변경은 다시 배포해야 반영됩니다.
 
@@ -253,7 +254,7 @@ npm run stocks:integration:prepare -- \
 
 - release에 직접 push하지 않습니다. 어드민 콘솔, 거래 한도 같은 다른 작업도 staging을 거칩니다.
 - 이미 빌드된 커밋을 가리키기만 하는 push(새 커밋 없음)는 Vercel이 빌드하지 않습니다. 필요하면 `git commit --allow-empty`로 빈 커밋을 만들어 push합니다.
-- 2026-09-26 기준으로 Render API는 `7bcda4d`에서 돌고 있습니다. 어드민 콘솔 서버와 `ADMIN_*` 변수는 이미 들어가 있습니다. release에 있는 종목별 거래 한도 서버 변경(`fc1e8a7`)은 아직 배포 전이고, DB 마이그레이션을 먼저 적용해야 합니다(`docs/contracts/stocks-trading-limits.md`). 그 전에는 Render를 최신 커밋으로 다시 빌드하지 않습니다. 고객 화면은 새 서버 없이도 예전처럼 거래합니다. 한도 확인은 서버가 답하지 않으면 건너뜁니다.
+- 2026-09-27 기준으로 Render API는 `644be54`에서 돌고 있습니다(2026-09-26 17:20 UTC 배포). 어드민 콘솔 서버와 `ADMIN_*` 변수, 종목별 거래 한도 서버(`STOCKS_TRADING_LIMITS=1`)가 들어가 있습니다. 거래 한도 마이그레이션은 배포 전에 적용했습니다(`docs/contracts/stocks-trading-limits.md`). 한도 값은 콘솔 Stocks › Limits에서 바꿉니다. Render를 다시 빌드할 때는 먼저 Trading control로 거래를 멈춥니다.
 
 ## 다른 작업과 이어지는 설정
 
