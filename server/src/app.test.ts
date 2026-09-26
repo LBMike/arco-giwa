@@ -11,6 +11,18 @@ import { EvmRegisterService, type RegisterProbe } from "./services/evm-register-
 import { EvmPortfolioService } from "./services/evm-portfolio-service.js"
 import { EvmRegistryService } from "./services/evm-registry-service.js"
 import { PrismaArcoService, type PrismaLike } from "./services/prisma-arco-service.js"
+import { createRequire } from "node:module"
+
+const { sign: signSession } = createRequire(import.meta.url)("jsonwebtoken") as typeof import("jsonwebtoken")
+const TEST_SESSION_SECRET = "test-secret-test-secret-test-secret"
+// Vault operator in makeApp's ADMIN_OPERATORS directory (read + write).
+const TEST_OPERATOR_WALLET = "0x00000000000000000000000000000000000000a1"
+
+// A SIWE session exactly as /api/v1/auth/verify issues it, for the app origin localhost:5173.
+function sessionHeaders(wallet: string) {
+  const token = signSession({ sub: wallet, domain: "localhost:5173", chainId: 91342 }, TEST_SESSION_SECRET, { expiresIn: "15m" })
+  return { authorization: `Bearer ${token}` }
+}
 
 type Row = Record<string, any>
 
@@ -288,6 +300,7 @@ function makeApp(options?: {
       authNonceTtlSeconds: 300,
       authJwtSecret: "test-secret-test-secret-test-secret",
       adminOperatorToken: "operator-token",
+      adminOperators: [{ wallet: TEST_OPERATOR_WALLET, operatorId: "test-operator", permissions: ["vault:read", "vault:write"] }],
       registryPath: "unused",
     },
     {
@@ -378,7 +391,8 @@ test("catalog route serializes BigInt-backed registry rows as decimal strings", 
   assert.equal(body[0].paymentAsset.deploymentBlock, "29212771")
 })
 
-const OPERATOR = { "x-operator-token": "operator-token" }
+// Admin routes take a signed operator session; the legacy shared token is off by default.
+const OPERATOR = sessionHeaders(TEST_OPERATOR_WALLET)
 
 async function catalogProductIds(app: ReturnType<typeof makeApp>["app"]): Promise<string[]> {
   const res = await app.inject({ method: "GET", url: "/api/v1/evm/catalog/91342" })
@@ -530,24 +544,24 @@ test("admin endpoints are gated and return unsigned transactions only", async ()
   const greenlist = await app.inject({
     method: "POST",
     url: `/api/v1/admin/wallets/${wallet}/greenlist`,
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   const price = await app.inject({
     method: "POST",
     url: "/api/v1/admin/products/acapix/price",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
     payload: { answer: "1000000000000000000" },
   })
   const healthyDiff = await app.inject({
     method: "POST",
     url: "/api/v1/admin/products/acapix/healthy-diff",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
     payload: { seconds: "31536000" },
   })
   const healthyDiffBadBody = await app.inject({
     method: "POST",
     url: "/api/v1/admin/products/acapix/healthy-diff",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
     payload: {},
   })
   prisma.indexedRedemptionRequest.rows.push({
@@ -559,7 +573,7 @@ test("admin endpoints are gated and return unsigned transactions only", async ()
   const fulfill = await app.inject({
     method: "POST",
     url: "/api/v1/admin/redemptions/1/fulfill",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
 
   assert.equal(denied.statusCode, 401)
@@ -598,14 +612,14 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   const withdrawBadTo = await app.inject({
     method: "POST",
     url: "/api/v1/admin/products/acapix/withdraw",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
     payload: { to: "not-an-address", amount: "1000000" },
   })
   assert.equal(withdrawBadTo.statusCode, 400)
   const withdraw = await app.inject({
     method: "POST",
     url: "/api/v1/admin/products/acapix/withdraw",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
     payload: { to: requester, amount: "1000000" },
   })
   assert.equal(withdraw.statusCode, 200)
@@ -615,7 +629,7 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   const pending = await app.inject({
     method: "GET",
     url: "/api/v1/admin/redemptions/pending",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   assert.equal(pending.statusCode, 200)
   assert.equal(pending.json().redemptions.length, 1)
@@ -625,7 +639,7 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   const payout = await app.inject({
     method: "POST",
     url: "/api/v1/admin/redemptions/7/payout",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
     payload: { amount: "5001000" },
   })
   assert.equal(payout.statusCode, 200)
@@ -637,14 +651,14 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   const payoutAgain = await app.inject({
     method: "POST",
     url: "/api/v1/admin/redemptions/7/payout",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
     payload: { amount: "5001000" },
   })
   assert.equal(payoutAgain.statusCode, 409)
   const fulfillWhileSettling = await app.inject({
     method: "POST",
     url: "/api/v1/admin/redemptions/7/fulfill",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   assert.equal(fulfillWhileSettling.statusCode, 409)
 
@@ -652,7 +666,7 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   const settleBadHash = await app.inject({
     method: "POST",
     url: "/api/v1/admin/redemptions/7/settle",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
     payload: { txHash: "0x123" },
   })
   assert.equal(settleBadHash.statusCode, 400)
@@ -660,7 +674,7 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   const settle = await app.inject({
     method: "POST",
     url: "/api/v1/admin/redemptions/7/settle",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
     payload: { txHash: payoutTxHash },
   })
   assert.equal(settle.statusCode, 200)
@@ -669,7 +683,7 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   const pendingAfter = await app.inject({
     method: "GET",
     url: "/api/v1/admin/redemptions/pending",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   assert.equal(pendingAfter.json().redemptions.length, 0)
 
@@ -677,14 +691,14 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   const settleAgain = await app.inject({
     method: "POST",
     url: "/api/v1/admin/redemptions/7/settle",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
     payload: { txHash: payoutTxHash },
   })
   assert.equal(settleAgain.statusCode, 409)
   const fulfillAfterSettle = await app.inject({
     method: "POST",
     url: "/api/v1/admin/redemptions/7/fulfill",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   assert.equal(fulfillAfterSettle.statusCode, 409)
 })
@@ -813,7 +827,7 @@ test("release recovers a cancelled payout (SETTLING -> REQUESTED) but never re-o
     status: "REQUESTED",
     createdAt: new Date(),
   })
-  const operator = { "x-operator-token": "operator-token" }
+  const operator = OPERATOR
 
   // guards: 401 without token; 409 while still REQUESTED (nothing to release)
   const releaseDenied = await app.inject({ method: "POST", url: "/api/v1/admin/redemptions/9/release" })
@@ -997,7 +1011,7 @@ test("monitoring overview sums TVL and outstanding/today pending values", async 
   const response = await app.inject({
     method: "GET",
     url: "/api/v1/admin/monitoring/91342/overview",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   assert.equal(response.statusCode, 200)
   const body = response.json()
@@ -1038,7 +1052,7 @@ test("monitoring overview: unpriceable vaults are 0-contribution in TVL (flagged
   const response = await app.inject({
     method: "GET",
     url: "/api/v1/admin/monitoring/91342/overview",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   assert.equal(response.statusCode, 200)
   const body = response.json()
@@ -1078,7 +1092,7 @@ test("monitoring overview TVL partial-sums non-null vaults and is null only when
   const response = await app.inject({
     method: "GET",
     url: "/api/v1/admin/monitoring/91342/overview",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   assert.equal(response.statusCode, 200)
   const body = response.json()
@@ -1171,7 +1185,7 @@ test("monitoring vaults aggregates flows, apy trend, depositors and pending per 
   const response = await app.inject({
     method: "GET",
     url: "/api/v1/admin/monitoring/91342/vaults",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   assert.equal(response.statusCode, 200)
   const body = response.json()
@@ -1273,7 +1287,7 @@ test("monitoring detail returns trends, depositor and requester lists (404 unkno
   const response = await app.inject({
     method: "GET",
     url: "/api/v1/admin/monitoring/91342/products/acapix",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   assert.equal(response.statusCode, 200)
   const body = response.json()
@@ -1305,7 +1319,7 @@ test("monitoring detail returns trends, depositor and requester lists (404 unkno
   const missing = await app.inject({
     method: "GET",
     url: "/api/v1/admin/monitoring/91342/products/nope",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   assert.equal(missing.statusCode, 404)
 })
@@ -1318,7 +1332,7 @@ test("vault-config GET requires the operator credential and returns defaults for
   const response = await app.inject({
     method: "GET",
     url: "/api/v1/admin/vault-config/91342",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
   })
   assert.equal(response.statusCode, 200)
   const body = response.json()
@@ -1335,7 +1349,7 @@ test("vault-config GET requires the operator credential and returns defaults for
 
 test("vault-config PUT validates cards, category taxonomy, address, and product id", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
 
   const allOff = await app.inject({
     method: "PUT",
@@ -1412,7 +1426,7 @@ test("public catalog carries the nested vaultConfig (saved values + defaults, hi
   const put = await app.inject({
     method: "PUT",
     url: "/api/v1/admin/vault-config/91342/acapix",
-    headers: { "x-operator-token": "operator-token" },
+    headers: OPERATOR,
     payload: { displayName: "Arco CAPIX Prime", pinned: true, hidden: true },
   })
   assert.equal(put.statusCode, 200)
@@ -1436,7 +1450,7 @@ test("public catalog carries the nested vaultConfig (saved values + defaults, hi
 
 test("function-pause route emits pauseFn/unpauseFn calldata for the kind's selectors", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const pauseFnAbi = [
     { type: "function", name: "pauseFn", inputs: [{ name: "selector", type: "bytes4" }], outputs: [] },
     { type: "function", name: "unpauseFn", inputs: [{ name: "selector", type: "bytes4" }], outputs: [] },
@@ -1566,7 +1580,7 @@ test("register-product guards: operator token, file-visibility 409, address mism
   })
   assert.equal(unauthorized.statusCode, 401)
 
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const notInFile = await app.inject({
     method: "POST",
     url: "/api/v1/admin/registry/register-product",
@@ -1598,7 +1612,7 @@ test("register-product enforces on-chain role wiring and custody references", as
     redemptionVault: extra.redemptionVault.proxy,
     priceFeed: extra.priceFeed.proxy,
   }
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
 
   const missingRole = makeApp({
     extraProducts: [extraProduct()],
@@ -1663,7 +1677,7 @@ test("register-product success inserts the DB row + hidden config and surfaces u
       return probe
     },
   })
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const response = await app.inject({
     method: "POST",
     url: "/api/v1/admin/registry/register-product",
@@ -1756,7 +1770,7 @@ test("server vault-config taxonomy matches shared/vault-taxonomy.ts (drift guard
 
 test("vault-config PUT validates + persists kind (product|saving), rejecting other values", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const url = "/api/v1/admin/vault-config/91342/acapix"
 
   // Unset config → kind defaults to "product" (stays in Products).
@@ -1777,7 +1791,7 @@ test("vault-config PUT validates + persists kind (product|saving), rejecting oth
 
 test("vault-config PUT validates + persists the display-profile fields", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const url = "/api/v1/admin/vault-config/91342/acapix"
 
   // Fee out of the 0–10000 bps range → 400.
@@ -1843,7 +1857,7 @@ test("vault-config PUT validates + persists the display-profile fields", async (
 
 test("vault-config PUT validates + persists portfolio slice arrays", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const url = "/api/v1/admin/vault-config/91342/acapix"
 
   // Sum not ~100 → 400.
@@ -1889,7 +1903,7 @@ test("vault-config PUT validates + persists portfolio slice arrays", async () =>
 
 test("vault-config PUT validates + persists accept-assets (real + dummy), rejecting dangling/duplicate", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const url = "/api/v1/admin/vault-config/91342/acapix"
 
   // Make acapix a saving vault so a real accept-asset may map to it (stricter check: ∈ saving vaults).
@@ -1965,7 +1979,7 @@ test("vault-config PUT validates + persists accept-assets (real + dummy), reject
 
 test("vault-config kind flip to product leaves stored accept-assets dormant (untouched, un-revalidated)", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const url = "/api/v1/admin/vault-config/91342/acapix"
 
   // Saving vault with a real accept-asset mapped to itself.
@@ -1988,7 +2002,7 @@ test("vault-config kind flip to product leaves stored accept-assets dormant (unt
 
 test("vault-config PUT round-trips accept-asset sortOrder (nullable integer ≥0)", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const url = "/api/v1/admin/vault-config/91342/acapix"
   await app.inject({ method: "PUT", url, headers, payload: { kind: "saving" } })
 
@@ -2020,7 +2034,7 @@ test("vault-config PUT round-trips accept-asset sortOrder (nullable integer ≥0
 
 test("savings-order route reorders across vaults, preserves other fields + unlisted order, rejects unknown", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const cfg = (productId: string, payload: any) =>
     app.inject({ method: "PUT", url: `/api/v1/admin/vault-config/91342/${productId}`, headers, payload })
   const orderUrl = "/api/v1/admin/savings-order/91342"
@@ -2069,7 +2083,7 @@ test("savings-order route reorders across vaults, preserves other fields + unlis
 
 test("vault-config PUT validates + persists the AUM display field", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const url = "/api/v1/admin/vault-config/91342/acapix"
 
   // Over the 24-char cap → 400.
@@ -2091,7 +2105,7 @@ test("vault-config PUT validates + persists the AUM display field", async () => 
 
 test("vault-config PUT validates + persists the More-info docs URLs (same rule as image URLs)", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const url = "/api/v1/admin/vault-config/91342/acapix"
 
   // Junk that is neither an http(s) URL nor a /path → 400, per key.
@@ -2124,7 +2138,7 @@ test("vault-config PUT validates + persists the More-info docs URLs (same rule a
 
 test("vault-config PUT validates the More-info show toggles as booleans, defaulting true", async () => {
   const { app } = makeApp()
-  const headers = { "x-operator-token": "operator-token" }
+  const headers = OPERATOR
   const url = "/api/v1/admin/vault-config/91342/acapix"
 
   // Unset config → shown defaults true, URLs null (so nothing renders yet).

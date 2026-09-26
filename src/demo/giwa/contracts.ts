@@ -6,8 +6,10 @@ import {
   erc20Abi,
   formatUnits,
   http,
+  keccak256,
   parseAbi,
   parseUnits,
+  toBytes,
   type Abi,
   type Hex,
   type WalletClient,
@@ -41,6 +43,15 @@ const redemptionVaultAbi = parseAbi([
 // Testnet-only zero slippage floor for GIWA preprod. Before any mainnet reuse,
 // minSharesOut/minAssetsOut must be made user-configurable and non-zero by default.
 const TESTNET_ZERO_SLIPPAGE_FLOOR = 0n
+
+const accessControlAbi = parseAbi(["function hasRole(bytes32 role, address account) view returns (bool)"])
+
+/** AccessControl role ids the admin screens check before a wallet signs (keccak256 of the role name). */
+export const ADMIN_ROLE_IDS = {
+  FEED_ADMIN_ROLE: keccak256(toBytes("FEED_ADMIN_ROLE")),
+  PAUSER_ROLE: keccak256(toBytes("PAUSER_ROLE")),
+} as const
+export type AdminRoleName = keyof typeof ADMIN_ROLE_IDS
 
 export const publicGiwaClient = createPublicClient({
   chain: giwaSepolia,
@@ -280,6 +291,16 @@ export async function readPriceFeedState(priceFeed: HexAddress): Promise<PriceFe
     maxDeviationBps: maxDeviationBps as bigint,
     decimals: Number(decimals),
   }
+}
+
+/** Read-only: whether `account` holds `role` on an AccessControl contract (price feed, vault). */
+export async function readHasRole(contract: HexAddress, role: AdminRoleName, account: HexAddress): Promise<boolean> {
+  return (await publicGiwaClient.readContract({
+    address: contract,
+    abi: accessControlAbi,
+    functionName: "hasRole",
+    args: [ADMIN_ROLE_IDS[role], account],
+  })) as boolean
 }
 
 // Reads productToken.totalSupply()/decimals() so the panel can derive human shares

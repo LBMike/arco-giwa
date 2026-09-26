@@ -36,6 +36,8 @@ export type TradingControlViewProps = {
   readonly onDismissAbandoned: () => void
   readonly onRetryAccess: () => void
   readonly onSignInRequired?: () => void
+  /** False when the host knows this operator lacks stocks:control (see GiwaStocksTradingControlFeatureProps). */
+  readonly canControl?: boolean
   /** Test seam: open the command card on a given step (a review captures the state shown at first render). */
   readonly initialDraft?: { readonly step: "edit" | "review"; readonly reason: string }
 }
@@ -597,8 +599,16 @@ function CommandCard(props: TradingControlViewProps) {
                     : "The command could not be prepared."}
               </Notice>
             )}
+            {props.canControl === false && (
+              <Notice tone="info" title="Read only for this operator">
+                The signed-in operator has stocks:read but not stocks:control, so pausing or resuming is not offered here. The server enforces the same
+                rule.
+              </Notice>
+            )}
             <div>
-              <Button onClick={openReview}>{target ? "Review pause" : "Review resume"}</Button>
+              <Button onClick={openReview} disabled={props.canControl === false}>
+                {target ? "Review pause" : "Review resume"}
+              </Button>
             </div>
           </div>
         )}

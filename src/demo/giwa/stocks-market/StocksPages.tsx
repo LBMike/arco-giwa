@@ -1,9 +1,5 @@
 import { DemoDetails, useDemoPresentation } from "../demo-presentation"
 import { useCallback, useContext, useId, useMemo } from "react"
-import { Link } from "react-router-dom"
-import { GIWA_ADMIN_STOCKS_ROUTE, GIWA_STOCKS_ROUTE } from "../routes"
-import { GiwaStocksAdminFeature } from "../stocks-admin"
-import { GiwaStocksTradingControlFeature } from "../stocks-trading-control"
 import { StocksExecutionProvider, StocksExecutionSessionNotice, useStocksExecutionCapability, useStocksOrderExecutionSlot } from "../stocks-execution-host"
 import { StocksSignIn, useGiwaStocksHost } from "../stocks-host"
 import { GiwaStocksFeature, createGiwaStocksHttpClient, type GiwaStocksFeatureProps } from "../stocks-investor"
@@ -13,10 +9,10 @@ import { StocksPageEnvironment, usePageApiBase } from "./environment"
 import { useStocksPageAccess } from "./page-access"
 import { StocksMarketFeature, type StocksAsideView } from "./StocksMarketFeature"
 import { StocksDemoMarketNotice } from "./StocksDemoMarketNotice"
+// The operator page is ./StocksAdminPage, loaded on its own route, so this customer page's chunk carries no admin code.
+import { StocksNavigation } from "./StocksNavigation"
 /** Re-exported under the same name for the verification pages and DOM suites that import it from here. */
 export { StocksPageEnvironment }
-const link = "rounded-lg border border-[var(--color-arco-border)] px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-arco-ink)]"
-function StocksNavigation() { return <nav aria-label="Stocks navigation" className="flex flex-wrap gap-2"><Link className={link} to={GIWA_STOCKS_ROUTE}>Stocks market data and mock trading</Link><Link className={link} to={GIWA_ADMIN_STOCKS_ROUTE}>Stocks admin view</Link></nav> }
 const CAPABILITY_COPY: Readonly<Record<string, string>> = {
   READY: "Deposits and sell escrows are made from the accepted order card: confirm the order → approve the exact amount → deposit or escrow with a separate button. Each step opens the wallet only when you press its button.",
   WALLET_SOURCE_UNSUPPORTED: "The connected wallet cannot guarantee that a transaction request is sent only once, so this app does not support deposits or sell escrows with it. You can create orders, but with this wallet you can only check their status.",
@@ -82,14 +78,4 @@ export function StocksPage() {
   return <StocksExecutionProvider apiBase={apiBase} fetch={environment.fetch as typeof globalThis.fetch | undefined} clock={environment.executionClock} activeSource={environment.activeWalletSource} knownHashes={environment.knownHashes}>
     <div className="w-full min-w-0 space-y-6"><DemoDetails><StocksNavigation /></DemoDetails><StocksDemoMarketNotice /><StocksMarketFeature client={clients.market} ordersClient={clients.investor} aside={aside} /></div>
   </StocksExecutionProvider>
-}
-/**
- * The operator sign-in shortcut is offered while the shared host can sign in, and stays while that sign-in is pending (a second
- * press joins the same attempt), so a keyboard user keeps focus on it. StocksSignIn above states why sign-in is impossible.
- */
-export function StocksAdminPage() {
-  const environment = useContext(StocksPageEnvironment); const host = useGiwaStocksHost(); const apiBase = usePageApiBase()
-  // Trading control (003F) uses the same signed session, API base and transport as the read-only console below it.
-  const onSignInRequired = host.canSignIn || host.snapshot.status === "signing-in" ? () => { void host.signIn() } : undefined
-  return <div className="w-full min-w-0 space-y-6"><StocksNavigation /><StocksSignIn />{apiBase ? <><GiwaStocksTradingControlFeature apiBase={apiBase} session={host.admin} fetch={environment.fetch} onSignInRequired={onSignInRequired} /><GiwaStocksAdminFeature apiBase={apiBase} session={host.admin} fetch={environment.fetch} onSignInRequired={onSignInRequired} /></> : <><h1 className="sr-only">Stocks operations</h1><p role="status">Stocks admin API is not connected yet</p></>}</div>
 }

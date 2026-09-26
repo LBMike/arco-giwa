@@ -12,6 +12,16 @@ import type { StocksMarketDataPluginOptions } from "./stocks-market-data/index.j
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify"
 import { generateNonce, SiweMessage } from "siwe"
 import { formatUnits, getAddress, isAddress, type Address } from "viem"
+import { auditParams, consoleAdminAudit, type AdminAuditSink } from "./admin-auth/audit.js"
+import {
+  createAdminAuthority,
+  requiredVaultPermission,
+  SESSION_REQUIRED,
+  type AdminPrincipal,
+} from "./admin-auth/authority.js"
+import type { AdminOperator } from "./admin-auth/operators.js"
+import { siweSessionWallet } from "./admin-auth/session.js"
+import type { Operator } from "./stocks/contracts.js"
 import {
   buildFulfillRedeemTransaction,
   buildFunctionPauseTransactions,
@@ -48,8 +58,13 @@ export type AppEnv = {
   readonly corsAllowedOrigins: readonly string[]
   readonly authNonceTtlSeconds: number
   readonly authJwtSecret: string
-  readonly adminOperatorToken: string
   readonly registryPath: string
+  /** Vault operator directory (ADMIN_OPERATORS). Missing or empty denies every Vault admin route. */
+  readonly adminOperators?: readonly AdminOperator[]
+  /** Legacy shared token (ADMIN_OPERATOR_TOKEN, "" when unset). Honored only when adminLegacyTokenAuth is true. */
+  readonly adminOperatorToken: string
+  /** ADMIN_LEGACY_TOKEN_AUTH=1. Off by default; never applies to the Stocks routes. */
+  readonly adminLegacyTokenAuth?: boolean
 }
 
 // Per-vault function-pause snapshot for the public catalog. `*Paused` OR-includes the
@@ -97,6 +112,36 @@ export type ArcoAppServices = {
   readonly readPauseState?: (vaults: PauseStateVaultRef[]) => Promise<Record<string, VaultPauseState> | null>
   readonly readVaultLimits?: (refs: { depositVault: string; redemptionVault: string }) => Promise<VaultLimitsRaw | null>
   readonly loadRegistry?: () => GiwaDeploymentRegistry
+  /** Stocks operator lookup (the Stocks session resolver) for GET /api/v1/admin/session and the
+   *  admin audit log. Absent when the Stocks runtime is off. */
+  readonly resolveStocksOperator?: (request: FastifyRequest) => Promise<Operator | null>
+  /** Admin write audit sink; defaults to one JSON line per write attempt on stdout. */
+  readonly adminAudit?: AdminAuditSink
+}
+
+// Every /api/v1/admin/* route is recorded with the guard it carries, so a test can prove that
+// no admin route is reachable without an authority check (see admin-guard.test.ts).
+const ADMIN_GUARD = Symbol("arco.adminGuard")
+export type AdminGuardKind = "vault" | "session"
+export type AdminRoute = { readonly method: string; readonly url: string; readonly guard: AdminGuardKind | null }
+const adminRouteInventories = new WeakMap<object, AdminRoute[]>()
+
+/** The /api/v1/admin/* routes registered on an app built by buildApp (complete after ready()). */
+export function adminRouteInventory(app: object): readonly AdminRoute[] {
+  return adminRouteInventories.get(app) ?? []
+}
+
+function adminGuard<T extends object>(kind: AdminGuardKind, guard: T): T {
+  Object.defineProperty(guard, ADMIN_GUARD, { value: kind })
+  return guard
+}
+
+function routeGuard(route: { onRequest?: unknown; preValidation?: unknown; preHandler?: unknown }): AdminGuardKind | null {
+  for (const hook of [route.onRequest, route.preValidation, route.preHandler].flat()) {
+    const kind = hook && typeof hook === "function" ? (hook as { [ADMIN_GUARD]?: AdminGuardKind })[ADMIN_GUARD] : undefined
+    if (kind) return kind
+  }
+  return null
 }
 
 export const DEFAULT_PAUSE_STATE: VaultPauseState = {
@@ -251,6 +296,14 @@ function dbRegistryToCatalog(registry: { assets: unknown[]; products: unknown[] 
 
 export function buildApp(env: AppEnv, services: ArcoAppServices) {
   const app = Fastify({ logger: false })
+  const adminRoutes: AdminRoute[] = []
+  adminRouteInventories.set(app, adminRoutes)
+  // First hook on the root context: plugin routes (registered at ready) inherit it too.
+  app.addHook("onRoute", (route) => {
+    if (!route.url.startsWith("/api/v1/admin/")) return
+    const guard = routeGuard(route)
+    for (const method of [route.method].flat()) adminRoutes.push({ method, url: route.url, guard })
+  })
   const loadRegistry = services.loadRegistry ?? (() => readRegistryFile(env.registryPath))
 
   // HTTP boundary convention: bigint values are encoded as decimal strings
@@ -289,12 +342,62 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     }
   }
 
-  async function requireOperator(request: FastifyRequest, reply: FastifyReply) {
-    const token = request.headers["x-operator-token"]
-    if (token !== env.adminOperatorToken) {
-      return reply.code(401).send({ error: "Invalid operator credential" })
+  // Vault admin authority: a SIWE operator session (the same check the Stocks routes use)
+  // looked up in ADMIN_OPERATORS. GET/HEAD need vault:read, every other method vault:write.
+  // The legacy shared token counts only when ADMIN_LEGACY_TOKEN_AUTH=1, and never on the
+  // Stocks routes, which resolve sessions only.
+  const adminAuthority = createAdminAuthority({
+    resolveSessionWallet: siweSessionWallet(env.authJwtSecret, env.corsAllowedOrigins),
+    vaultOperators: env.adminOperators ?? [],
+    legacyToken: env.adminLegacyTokenAuth ? env.adminOperatorToken : null,
+  })
+  const vaultPrincipals = new WeakMap<FastifyRequest, AdminPrincipal>()
+  const sessionWallets = new WeakMap<FastifyRequest, string>()
+
+  const requireOperator = adminGuard("vault", async (request: FastifyRequest, reply: FastifyReply) => {
+    const decision = await adminAuthority.authorizeVault(request, requiredVaultPermission(request.method))
+    if (!decision.ok) return reply.code(decision.status).send({ error: decision.error, code: decision.code })
+    vaultPrincipals.set(request, decision.principal)
+  })
+
+  const requireAdminSession = adminGuard("session", async (request: FastifyRequest, reply: FastifyReply) => {
+    const wallet = await adminAuthority.sessionWallet(request)
+    if (!wallet) return reply.code(SESSION_REQUIRED.status).send({ error: SESSION_REQUIRED.error, code: SESSION_REQUIRED.code })
+    sessionWallets.set(request, wallet)
+  })
+
+  // Structured audit line for every admin write attempt (Vault and Stocks), after the response.
+  const adminAudit = services.adminAudit ?? consoleAdminAudit
+  app.addHook("onResponse", async (request, reply) => {
+    const route = request.routeOptions.url
+    if (!route?.startsWith("/api/v1/admin/") || ["GET", "HEAD", "OPTIONS"].includes(request.method)) return
+    try {
+      const scope = route.startsWith("/api/v1/admin/stocks/") ? "stocks" : "vault"
+      let principal: { operatorId: string | null; wallet: string | null; via: AdminPrincipal["via"] | null } | null =
+        vaultPrincipals.get(request) ?? null
+      if (!principal) {
+        const wallet = await adminAuthority.sessionWallet(request)
+        const stocksOperator =
+          wallet && scope === "stocks" ? await services.resolveStocksOperator?.(request).catch(() => null) : null
+        principal = wallet ? { operatorId: stocksOperator?.operatorId ?? null, wallet, via: "session" } : null
+      }
+      adminAudit({
+        service: "arco-giwa-api",
+        event: "admin.write",
+        at: new Date().toISOString(),
+        scope,
+        method: request.method,
+        route,
+        params: auditParams(request.params),
+        statusCode: reply.statusCode,
+        operatorId: principal?.operatorId ?? null,
+        wallet: principal?.wallet ?? null,
+        via: principal?.via ?? null,
+      })
+    } catch {
+      /* Auditing never changes or breaks a response. */
     }
-  }
+  })
 
   app.get("/health", async () => ({ ok: true, service: "arco-giwa-api" }))
 
@@ -457,6 +560,26 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
       expiresIn: "15m",
     })
     return { token, walletAddress, chainId: message.chainId, expiresIn: 900 }
+  })
+
+  // Who is signed in and what the directories grant. 401 without a valid session; a wallet in
+  // neither directory is still a valid session (200, both null). The UI uses this to shape
+  // navigation only; every admin route checks its own permission again.
+  app.get("/api/v1/admin/session", { preHandler: requireAdminSession }, async (request, reply) => {
+    const wallet = sessionWallets.get(request)
+    if (!wallet) return reply.code(SESSION_REQUIRED.status).send({ error: SESSION_REQUIRED.error, code: SESSION_REQUIRED.code })
+    let stocks: Operator | null = null
+    try {
+      stocks = (await services.resolveStocksOperator?.(request)) ?? null
+    } catch {
+      stocks = null
+    }
+    reply.header("cache-control", "no-store")
+    return {
+      wallet,
+      vault: adminAuthority.vaultOperator(wallet),
+      stocks: stocks ? { operatorId: stocks.operatorId, permissions: [...stocks.permissions] } : null,
+    }
   })
 
   app.post("/api/v1/attestations", { preHandler: requireSession }, async (request) => {

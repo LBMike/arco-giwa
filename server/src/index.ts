@@ -4,6 +4,7 @@ import { configuredStocksRuntime, stocksAutodispatch } from "./stocks-runtime/ru
 import { validateLocalCustomerEnvironment } from "./stocks-runtime/local-customer.js"
 import { closeOnce, installServerShutdown, startManagedStocksServer } from "./stocks-runtime/lifecycle.js"
 import { stocksSessionResolvers } from "./stocks-runtime/session.js"
+import { sessionDomains } from "./admin-auth/session.js"
 import { StocksSubmissionsService } from "./stocks-submissions/service.js"
 import { configuredStocksMarketClock, configuredStocksMarketData } from "./stocks-market-runtime/config.js"
 import type { StocksMarketDataService } from "./stocks-market-data/index.js"
@@ -305,18 +306,23 @@ async function composeServer(
   const app = await startManagedStocksServer({
     createRuntime: () => configuredStocksRuntime(envSource, env.databaseUrl, localCustomer),
     buildApp: stocks => {
+      // The Vault admin routes use the same session check (buildApp) with ADMIN_OPERATORS,
+      // whether or not the Stocks runtime is on.
       const sessions = stocks ? stocksSessionResolvers(env.authJwtSecret,
-        env.corsAllowedOrigins.map(origin => new URL(origin).host), stocks.operators) : undefined
+        sessionDomains(env.corsAllowedOrigins), stocks.operators) : undefined
       return buildApp(
         {
           corsAllowedOrigins: env.corsAllowedOrigins,
           authNonceTtlSeconds: env.authNonceTtlSeconds,
           authJwtSecret: env.authJwtSecret,
+          adminOperators: env.adminOperators,
           adminOperatorToken: env.adminOperatorToken,
+          adminLegacyTokenAuth: env.adminLegacyTokenAuth,
           registryPath: env.registryPath,
         },
         {
           arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits, stocksMarketData, stocksMarketClock,
+          resolveStocksOperator: sessions?.resolveOperator,
           stocks: stocks ? {
             service: stocks.service,
             reconciliationCoverage: stocks.reconciliationCoverage,

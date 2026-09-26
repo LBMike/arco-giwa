@@ -100,6 +100,71 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
+/**
+ * Credentials for one admin request. The customer app's legacy /admin pages send the shared operator
+ * token; the admin console sends the signed SIWE operator session. api.ts never stores either.
+ */
+export type AdminAuth = {
+  /** False until a credential exists (no token typed, no session): admin queries stay idle. */
+  readonly ready: boolean
+  /** Credential headers for one request. */
+  headers(): Record<string, string>
+  /** Told when the server rejects the credential (401) or the permission (403). */
+  onAuthFailure?(status: 401 | 403): void
+}
+
+/** An admin API refusal; `status` lets a caller tell an expired session (401) from a missing permission (403). */
+export class AdminApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null,
+  ) {
+    super(message)
+    this.name = "AdminApiError"
+  }
+}
+
+/** Legacy: the shared operator token typed into the customer app's /admin pages. */
+export function operatorTokenAuth(token: string): AdminAuth {
+  return { ready: token.length > 0, headers: () => ({ "x-operator-token": token }) }
+}
+
+/** The admin console: the SIWE operator session issued by /api/v1/auth/verify (kept in memory only). */
+export function bearerSessionAuth(accessToken: string | null, onAuthFailure?: (status: 401 | 403) => void): AdminAuth {
+  return {
+    ready: Boolean(accessToken),
+    headers: (): Record<string, string> => (accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+    onAuthFailure,
+  }
+}
+
+async function adminJson<T>(auth: AdminAuth, path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(endpoint(path), {
+    ...init,
+    credentials: "omit",
+    headers: {
+      accept: "application/json",
+      // Only a request with a body declares one (a bodiless JSON DELETE is rejected by the server).
+      ...(init?.body !== undefined ? { "content-type": "application/json" } : {}),
+      ...auth.headers(),
+    },
+  })
+  const text = await response.text()
+  let body: { error?: unknown; code?: unknown } | null = null
+  try {
+    body = text ? JSON.parse(text) : null
+  } catch {
+    body = null
+  }
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) auth.onAuthFailure?.(response.status)
+    const message = typeof body?.error === "string" ? body.error : `Request failed: ${response.status}`
+    throw new AdminApiError(message, response.status, typeof body?.code === "string" ? body.code : null)
+  }
+  return body as T
+}
+
 export function asAddress(value: unknown): HexAddress | null {
   return typeof value === "string" && isAddress(value) ? getAddress(value) : null
 }
@@ -156,184 +221,149 @@ export const giwaApi = {
   priceHistory: (chainId: number, productId: string) =>
     fetchJson<GiwaPriceHistory>(`/api/v1/evm/market/${chainId}/${productId}/history`),
   monitoring: {
-    overview: (operatorToken: string, chainId: number) =>
-      fetchJson<GiwaMonitoringOverview>(`/api/v1/admin/monitoring/${chainId}/overview`, {
-        headers: { "x-operator-token": operatorToken },
-      }),
-    vaults: (operatorToken: string, chainId: number) =>
-      fetchJson<{ vaults: GiwaMonitoringVault[] }>(`/api/v1/admin/monitoring/${chainId}/vaults`, {
-        headers: { "x-operator-token": operatorToken },
-      }),
-    detail: (operatorToken: string, chainId: number, productId: string) =>
-      fetchJson<GiwaMonitoringDetail>(`/api/v1/admin/monitoring/${chainId}/products/${productId}`, {
-        headers: { "x-operator-token": operatorToken },
-      }),
+    overview: (auth: AdminAuth, chainId: number) =>
+      adminJson<GiwaMonitoringOverview>(auth, `/api/v1/admin/monitoring/${chainId}/overview`),
+    vaults: (auth: AdminAuth, chainId: number) =>
+      adminJson<{ vaults: GiwaMonitoringVault[] }>(auth, `/api/v1/admin/monitoring/${chainId}/vaults`),
+    detail: (auth: AdminAuth, chainId: number, productId: string) =>
+      adminJson<GiwaMonitoringDetail>(auth, `/api/v1/admin/monitoring/${chainId}/products/${productId}`),
   },
   admin: {
-    greenlist: (operatorToken: string, wallet: string) =>
-      fetchJson<{ transactions: UnsignedAdminTransaction[] }>(`/api/v1/admin/wallets/${wallet}/greenlist`, {
+    greenlist: (auth: AdminAuth, wallet: string) =>
+      adminJson<{ transactions: UnsignedAdminTransaction[] }>(auth, `/api/v1/admin/wallets/${wallet}/greenlist`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: "{}",
       }),
-    price: (operatorToken: string, productId: string, answer: string) =>
-      fetchJson<{ transaction: UnsignedAdminTransaction }>(`/api/v1/admin/products/${productId}/price`, {
+    price: (auth: AdminAuth, productId: string, answer: string) =>
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, `/api/v1/admin/products/${productId}/price`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify({ answer }),
       }),
-    setHealthyDiff: (operatorToken: string, productId: string, seconds: string) =>
-      fetchJson<{ transaction: UnsignedAdminTransaction }>(`/api/v1/admin/products/${productId}/healthy-diff`, {
+    setHealthyDiff: (auth: AdminAuth, productId: string, seconds: string) =>
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, `/api/v1/admin/products/${productId}/healthy-diff`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify({ seconds }),
       }),
-    pause: (operatorToken: string, productId: string, target: "depositVault" | "redemptionVault" | "allVaults") =>
-      fetchJson<{ transactions: UnsignedAdminTransaction[] }>(`/api/v1/admin/products/${productId}/pause`, {
+    pause: (auth: AdminAuth, productId: string, target: "depositVault" | "redemptionVault" | "allVaults") =>
+      adminJson<{ transactions: UnsignedAdminTransaction[] }>(auth, `/api/v1/admin/products/${productId}/pause`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify({ target }),
       }),
-    unpause: (operatorToken: string, productId: string, target: "depositVault" | "redemptionVault" | "allVaults") =>
-      fetchJson<{ transactions: UnsignedAdminTransaction[] }>(`/api/v1/admin/products/${productId}/unpause`, {
+    unpause: (auth: AdminAuth, productId: string, target: "depositVault" | "redemptionVault" | "allVaults") =>
+      adminJson<{ transactions: UnsignedAdminTransaction[] }>(auth, `/api/v1/admin/products/${productId}/unpause`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify({ target }),
       }),
-    liquidity: (operatorToken: string, productId: string, amount: string) =>
-      fetchJson<{ transaction: UnsignedAdminTransaction }>(`/api/v1/admin/products/${productId}/liquidity`, {
+    liquidity: (auth: AdminAuth, productId: string, amount: string) =>
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, `/api/v1/admin/products/${productId}/liquidity`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify({ amount }),
       }),
     // Per-vault limits. The two setters send HUMAN units and return an unsigned setLimits tx (the
     // server scales per decimals); `limits` reads the current values already de-scaled to human.
     setDepositLimits: (
-      operatorToken: string,
+      auth: AdminAuth,
       productId: string,
       limits: { minimumDeposit: string; maxSupplyCap: string; vaultMintAllowance: string },
     ) =>
-      fetchJson<{ transaction: UnsignedAdminTransaction }>(`/api/v1/admin/products/${productId}/deposit-limits`, {
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, `/api/v1/admin/products/${productId}/deposit-limits`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify(limits),
       }),
     setRedemptionLimits: (
-      operatorToken: string,
+      auth: AdminAuth,
       productId: string,
       limits: { minimumRedeem: string; vaultRedeemAllowance: string },
     ) =>
-      fetchJson<{ transaction: UnsignedAdminTransaction }>(`/api/v1/admin/products/${productId}/redemption-limits`, {
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, `/api/v1/admin/products/${productId}/redemption-limits`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify(limits),
       }),
-    limits: (operatorToken: string, productId: string) =>
-      fetchJson<GiwaVaultLimits>(`/api/v1/admin/products/${productId}/limits`, {
-        headers: { "x-operator-token": operatorToken },
-      }),
-    fulfill: (operatorToken: string, requestId: string) =>
-      fetchJson<{ transaction: UnsignedAdminTransaction }>(`/api/v1/admin/redemptions/${requestId}/fulfill`, {
+    limits: (auth: AdminAuth, productId: string) =>
+      adminJson<GiwaVaultLimits>(auth, `/api/v1/admin/products/${productId}/limits`),
+    fulfill: (auth: AdminAuth, requestId: string) =>
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, `/api/v1/admin/redemptions/${requestId}/fulfill`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: "{}",
       }),
-    withdraw: (operatorToken: string, productId: string, to: string, amount: string) =>
-      fetchJson<{ transaction: UnsignedAdminTransaction }>(`/api/v1/admin/products/${productId}/withdraw`, {
+    withdraw: (auth: AdminAuth, productId: string, to: string, amount: string) =>
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, `/api/v1/admin/products/${productId}/withdraw`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify({ to, amount }),
       }),
-    pendingRedemptions: (operatorToken: string) =>
-      fetchJson<{ redemptions: GiwaRedemption[] }>(`/api/v1/admin/redemptions/pending`, {
-        headers: { "x-operator-token": operatorToken },
-      }),
-    payout: (operatorToken: string, requestId: string, amount: string) =>
-      fetchJson<{ transaction: UnsignedAdminTransaction }>(`/api/v1/admin/redemptions/${requestId}/payout`, {
+    pendingRedemptions: (auth: AdminAuth) =>
+      adminJson<{ redemptions: GiwaRedemption[] }>(auth, `/api/v1/admin/redemptions/pending`),
+    payout: (auth: AdminAuth, requestId: string, amount: string) =>
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, `/api/v1/admin/redemptions/${requestId}/payout`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify({ amount }),
       }),
-    settle: (operatorToken: string, requestId: string, txHash: string) =>
-      fetchJson<{ ok: boolean }>(`/api/v1/admin/redemptions/${requestId}/settle`, {
+    settle: (auth: AdminAuth, requestId: string, txHash: string) =>
+      adminJson<{ ok: boolean }>(auth, `/api/v1/admin/redemptions/${requestId}/settle`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify({ txHash }),
       }),
-    release: (operatorToken: string, requestId: string) =>
-      fetchJson<{ ok: boolean }>(`/api/v1/admin/redemptions/${requestId}/release`, {
+    release: (auth: AdminAuth, requestId: string) =>
+      adminJson<{ ok: boolean }>(auth, `/api/v1/admin/redemptions/${requestId}/release`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: "{}",
       }),
-    functionPause: (operatorToken: string, productId: string, kind: "deposit" | "withdraw", paused: boolean) =>
-      fetchJson<{ transactions: UnsignedAdminTransaction[] }>(`/api/v1/admin/products/${productId}/function-pause`, {
+    functionPause: (auth: AdminAuth, productId: string, kind: "deposit" | "withdraw", paused: boolean) =>
+      adminJson<{ transactions: UnsignedAdminTransaction[] }>(auth, `/api/v1/admin/products/${productId}/function-pause`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify({ kind, paused }),
       }),
     registerProduct: (
-      operatorToken: string,
+      auth: AdminAuth,
       productId: string,
       addresses: { productToken: string; depositVault: string; redemptionVault: string; priceFeed: string },
     ) =>
-      fetchJson<{
+      adminJson<{
         ok: boolean
         productId: string
         symbol: string
         hidden: boolean
         unverified: string[]
         proxyAdminOwner: string | null
-      }>(`/api/v1/admin/registry/register-product`, {
+      }>(auth, `/api/v1/admin/registry/register-product`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify({ productId, addresses }),
       }),
-    vaultConfigs: (operatorToken: string) =>
-      fetchJson<{ configs: ({ productId: string; symbol: string } & GiwaVaultConfig)[] }>(
-        `/api/v1/admin/vault-config/${GIWA_CHAIN_ID}`,
-        { headers: { "x-operator-token": operatorToken } },
-      ),
-    saveVaultConfig: (operatorToken: string, productId: string, patch: Partial<GiwaVaultConfig>) =>
-      fetchJson<{ productId: string } & GiwaVaultConfig>(`/api/v1/admin/vault-config/${GIWA_CHAIN_ID}/${productId}`, {
+    vaultConfigs: (auth: AdminAuth) =>
+      adminJson<{ configs: ({ productId: string; symbol: string } & GiwaVaultConfig)[] }>(auth, `/api/v1/admin/vault-config/${GIWA_CHAIN_ID}`),
+    saveVaultConfig: (auth: AdminAuth, productId: string, patch: Partial<GiwaVaultConfig>) =>
+      adminJson<{ productId: string } & GiwaVaultConfig>(auth, `/api/v1/admin/vault-config/${GIWA_CHAIN_ID}/${productId}`, {
         method: "PUT",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify(patch),
       }),
     // Global cross-vault Savings selector order: the flat ordered list of { productId, symbol }; the
     // server assigns sortOrder = index and rewrites only that field (atomic across vaults).
-    saveSavingsOrder: (operatorToken: string, order: Array<{ productId: string; symbol: string }>) =>
-      fetchJson<{ ok: boolean; updated: string[] }>(`/api/v1/admin/savings-order/${GIWA_CHAIN_ID}`, {
+    saveSavingsOrder: (auth: AdminAuth, order: Array<{ productId: string; symbol: string }>) =>
+      adminJson<{ ok: boolean; updated: string[] }>(auth, `/api/v1/admin/savings-order/${GIWA_CHAIN_ID}`, {
         method: "PUT",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify({ order }),
       }),
     // Featured cards (products-page hero carousel). `featured` lists every row (hidden +
     // shown); `addFeatured` creates one hidden by default; save/remove mutate by row id.
-    featured: (operatorToken: string) =>
-      fetchJson<{ cards: GiwaFeaturedCard[] }>(`/api/v1/admin/featured/${GIWA_CHAIN_ID}`, {
-        headers: { "x-operator-token": operatorToken },
-      }).then((response) => response.cards),
-    addFeatured: (operatorToken: string, input: { productId: string; about?: string | null; shown?: boolean }) =>
-      fetchJson<GiwaFeaturedCard>(`/api/v1/admin/featured/${GIWA_CHAIN_ID}`, {
+    featured: (auth: AdminAuth) =>
+      adminJson<{ cards: GiwaFeaturedCard[] }>(auth, `/api/v1/admin/featured/${GIWA_CHAIN_ID}`).then((response) => response.cards),
+    addFeatured: (auth: AdminAuth, input: { productId: string; about?: string | null; shown?: boolean }) =>
+      adminJson<GiwaFeaturedCard>(auth, `/api/v1/admin/featured/${GIWA_CHAIN_ID}`, {
         method: "POST",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify(input),
       }),
     saveFeatured: (
-      operatorToken: string,
+      auth: AdminAuth,
       id: string,
       patch: Partial<Pick<GiwaFeaturedCard, "about" | "shown" | "position">>,
     ) =>
-      fetchJson<GiwaFeaturedCard>(`/api/v1/admin/featured/${GIWA_CHAIN_ID}/${id}`, {
+      adminJson<GiwaFeaturedCard>(auth, `/api/v1/admin/featured/${GIWA_CHAIN_ID}/${id}`, {
         method: "PUT",
-        headers: { "x-operator-token": operatorToken },
         body: JSON.stringify(patch),
       }),
-    removeFeatured: (operatorToken: string, id: string) =>
-      fetchJson<{ ok: boolean; id: string }>(`/api/v1/admin/featured/${GIWA_CHAIN_ID}/${id}`, {
+    removeFeatured: (auth: AdminAuth, id: string) =>
+      adminJson<{ ok: boolean; id: string }>(auth, `/api/v1/admin/featured/${GIWA_CHAIN_ID}/${id}`, {
         method: "DELETE",
-        headers: { "x-operator-token": operatorToken },
       }),
   },
 }

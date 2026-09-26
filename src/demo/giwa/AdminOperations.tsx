@@ -2,10 +2,12 @@ import { useMemo, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, CheckCircle2, Loader2, Send } from "lucide-react"
 import { giwaApi } from "./api"
+import type { AdminAuth } from "./api"
 import { pauseStateOf } from "./catalog"
 import { afterConfirmedReceipt, sendPreparedTransaction } from "./contracts"
 import { ActivityPanel } from "./components"
-import { useGiwaAdmin } from "./GiwaAdminLayout"
+import { AdminWriteGroup, useGiwaAdmin } from "./admin-context"
+import { useOnchainRole } from "./admin-roles"
 import { VaultOperationsPanel } from "./VaultAdmin"
 import type { GiwaCatalogItem, HexAddress, UiPhase, UnsignedAdminTransaction } from "./types"
 import { explorerTx } from "./wallet"
@@ -13,7 +15,7 @@ import { explorerTx } from "./wallet"
 const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {}
 
 export default function GiwaAdminOperationsPage() {
-  const { operatorToken, wallet } = useGiwaAdmin()
+  const { auth, wallet } = useGiwaAdmin()
   const catalogQuery = useQuery({ queryKey: ["giwa", "catalog", "admin"], queryFn: giwaApi.catalog })
   const registryQuery = useQuery({ queryKey: ["giwa", "registry"], queryFn: giwaApi.registry })
   const readinessQuery = useQuery({
@@ -74,16 +76,16 @@ export default function GiwaAdminOperationsPage() {
     setTxHashes([])
     setAdminPhase("ready")
     try {
-      if (!operatorToken) throw new Error("Operator token must be entered at runtime")
+      if (!auth.ready) throw new Error("Operator token must be entered at runtime")
       if (!selected) throw new Error("Select a product")
       const result =
         kind === "greenlist"
-          ? await giwaApi.admin.greenlist(operatorToken, targetWallet)
+          ? await giwaApi.admin.greenlist(auth, targetWallet)
           : kind === "pause"
-            ? await giwaApi.admin.pause(operatorToken, selected.productId, vaultTarget)
+            ? await giwaApi.admin.pause(auth, selected.productId, vaultTarget)
             : kind === "unpause"
-              ? await giwaApi.admin.unpause(operatorToken, selected.productId, vaultTarget)
-              : { transactions: [await giwaApi.admin.fulfill(operatorToken, requestId).then((r) => r.transaction)] }
+              ? await giwaApi.admin.unpause(auth, selected.productId, vaultTarget)
+              : { transactions: [await giwaApi.admin.fulfill(auth, requestId).then((r) => r.transaction)] }
       setPrepared(result.transactions)
     } catch (err) {
       setPrepared([])
@@ -138,12 +140,15 @@ export default function GiwaAdminOperationsPage() {
 
       <VaultOperationsPanel />
 
-      <VaultPauseSection products={products} operatorToken={operatorToken} walletAddress={wallet.address} />
+      <AdminWriteGroup>
+        <VaultPauseSection products={products} auth={auth} walletAddress={wallet.address} />
+      </AdminWriteGroup>
 
       <section className="grid gap-4 lg:grid-cols-[1fr_380px]">
         <div className="rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-5 shadow-[var(--shadow-control)]">
           <h2 className="text-sm font-semibold text-[var(--color-arco-ink)]">Tier 2 transaction console</h2>
           <p className="mt-1 text-xs text-[var(--color-arco-muted)]">Prepare unsigned transactions</p>
+          <AdminWriteGroup>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="text-xs text-[var(--color-arco-muted)]">
               Product
@@ -178,6 +183,7 @@ export default function GiwaAdminOperationsPage() {
             <ActionButton onClick={() => void requestUnsigned("unpause")}>Unpause</ActionButton>
             <ActionButton onClick={() => void requestUnsigned("fulfill")}>Fulfill</ActionButton>
           </div>
+          </AdminWriteGroup>
           <p className="mt-3 text-xs text-[var(--color-arco-muted)]">
             Price and staleness updates use the Prices section. Redemption-vault funding uses the vault cards above.
           </p>
@@ -247,11 +253,11 @@ type PauseActionPhase = "idle" | "preparing" | "signing" | "confirming" | "done"
 // Exported for the render-harness verification.
 export function VaultPauseSection({
   products,
-  operatorToken,
+  auth,
   walletAddress,
 }: {
   products: GiwaCatalogItem[]
-  operatorToken: string
+  auth: AdminAuth
   walletAddress: HexAddress | null
 }) {
   const queryClient = useQueryClient()
@@ -264,10 +270,10 @@ export function VaultPauseSection({
     setArmed(null)
     setErrors((current) => ({ ...current, [key]: "" }))
     try {
-      if (!operatorToken) throw new Error("Operator token must be entered at runtime")
+      if (!auth.ready) throw new Error("Operator token must be entered at runtime")
       if (!walletAddress) throw new Error("Connect the PAUSER operator wallet first")
       setPhases((current) => ({ ...current, [key]: "preparing" }))
-      const { transactions } = await giwaApi.admin.functionPause(operatorToken, product.productId, kind, paused)
+      const { transactions } = await giwaApi.admin.functionPause(auth, product.productId, kind, paused)
       for (const transaction of transactions) {
         setPhases((current) => ({ ...current, [key]: "signing" }))
         const hash = await sendPreparedTransaction(walletAddress, transaction)
@@ -318,6 +324,7 @@ export function VaultPauseSection({
                       key={kind}
                       product={product}
                       kind={kind}
+                      walletAddress={walletAddress}
                       phase={phases[`${product.productId}:${kind}`] ?? "idle"}
                       error={errors[`${product.productId}:${kind}`] ?? ""}
                       armed={armed === `${product.productId}:${kind}`}
@@ -338,6 +345,7 @@ export function VaultPauseSection({
 function PauseKindCell({
   product,
   kind,
+  walletAddress,
   phase,
   error,
   armed,
@@ -346,6 +354,7 @@ function PauseKindCell({
 }: {
   product: GiwaCatalogItem
   kind: PauseKind
+  walletAddress: HexAddress | null
   phase: PauseActionPhase
   error: string
   armed: boolean
@@ -357,6 +366,14 @@ function PauseKindCell({
   const partial = kind === "deposit" ? state.depositPartial : state.withdrawPartial
   const label = kind === "deposit" ? "deposits" : "withdrawals"
   const busy = phase === "preparing" || phase === "signing" || phase === "confirming"
+  // The vault checks PAUSER_ROLE on the signing wallet; say so before a signature is requested.
+  const role = useOnchainRole(
+    kind === "deposit" ? product.depositVaultAddress : product.redemptionVaultAddress,
+    "PAUSER_ROLE",
+    kind === "deposit" ? "deposit vault" : "redemption vault",
+    walletAddress,
+  )
+  const blocked = busy || role.status === "missing"
 
   return (
     <td className="py-2 pr-3">
@@ -377,7 +394,7 @@ function PauseKindCell({
         {paused && !partial ? (
           <button
             type="button"
-            disabled={busy}
+            disabled={blocked}
             onClick={() => onRun(false)}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--color-arco-border)] px-2.5 text-xs font-medium text-[var(--color-arco-ink)] disabled:opacity-50"
           >
@@ -387,7 +404,7 @@ function PauseKindCell({
         ) : armed ? (
           <button
             type="button"
-            disabled={busy}
+            disabled={blocked}
             onClick={() => onRun(true)}
             className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--color-arco-ink)] px-2.5 text-xs font-medium text-[var(--color-arco-on-dark)] disabled:opacity-50"
           >
@@ -397,7 +414,7 @@ function PauseKindCell({
         ) : (
           <button
             type="button"
-            disabled={busy}
+            disabled={blocked}
             onClick={onArm}
             title="Signs two wallet transactions (one per entry path)"
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--color-arco-border)] px-2.5 text-xs font-medium text-[var(--color-arco-ink)] disabled:opacity-50"
@@ -410,6 +427,9 @@ function PauseKindCell({
       </div>
       {phase === "failed" && error && (
         <p className="mt-1 max-w-[260px] break-words text-[10px] text-[var(--color-arco-down)]">{error}</p>
+      )}
+      {role.status === "missing" && (
+        <p className="mt-1 max-w-[260px] break-words text-[10px] text-[var(--color-arco-down)]">{role.message}</p>
       )}
     </td>
   )
