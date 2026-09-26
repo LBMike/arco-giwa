@@ -119,18 +119,18 @@ test("tabs follow the permissions: each group needs its read permission; / opens
   const labels = (vault: string[] | null, stocks: string[] | null) => visibleNav(accessOf(info(vault, stocks))).map((group) => [group.label, group.tabs.map((tab) => tab.label)])
   assert.deepEqual(labels(["vault:read", "vault:write"], ["stocks:read", "stocks:control"]), [
     ["Vaults", ["Operations", "Prices", "Vault Config", "Featured", "Monitoring"]],
-    ["Stocks", ["Trading control", "Overview", "Orders", "Reconciliation", "Audit", "Held payments"]],
+    ["Stocks", ["Limits", "Trading control", "Overview", "Orders", "Reconciliation", "Audit", "Held payments"]],
   ])
   assert.deepEqual(labels(["vault:read"], null).map(([group]) => group), ["Vaults"])
   assert.deepEqual(labels(null, ["stocks:read"]).map(([group]) => group), ["Stocks"])
   assert.deepEqual(labels(["vault:write"], ["stocks:read"]).map(([group]) => group), ["Stocks"])
   assert.equal(defaultPath(accessOf(info(["vault:read"], ["stocks:read"]))), "/vaults/operations")
-  assert.equal(defaultPath(accessOf(info(null, ["stocks:read"]))), "/stocks/trading-control")
+  assert.equal(defaultPath(accessOf(info(null, ["stocks:read"]))), "/stocks/limits")
   assert.equal(defaultPath(accessOf(info(null, null))), null)
   assert.equal(groupOfPath("/vaults/prices"), "vaults")
   assert.equal(groupOfPath("/stocks/held"), "stocks")
   assert.equal(groupOfPath("/"), null)
-  assert.equal(CONSOLE_NAV.flatMap((group) => group.tabs).length, 11)
+  assert.equal(CONSOLE_NAV.flatMap((group) => group.tabs).length, 12)
 })
 
 function shell(vault: string[] | null, stocks: string[] | null, path = "/") {
@@ -146,7 +146,7 @@ function shell(vault: string[] | null, stocks: string[] | null, path = "/") {
 
 test("the signed-in shell shows only the permitted groups, the operator identity and the session end", () => {
   const both = shell(["vault:read", "vault:write"], ["stocks:read"], "/stocks/held")
-  for (const href of ["/vaults/operations", "/vaults/prices", "/vaults/config", "/vaults/featured", "/vaults/monitoring", "/stocks/trading-control", "/stocks/overview", "/stocks/orders", "/stocks/reconciliation", "/stocks/audit", "/stocks/held"]) {
+  for (const href of ["/vaults/operations", "/vaults/prices", "/vaults/config", "/vaults/featured", "/vaults/monitoring", "/stocks/limits", "/stocks/trading-control", "/stocks/overview", "/stocks/orders", "/stocks/reconciliation", "/stocks/audit", "/stocks/held"]) {
     assert.match(both, new RegExp(`href="${href}"`), href)
   }
   assert.match(both, /href="\/stocks\/held"[^>]*aria-current="page"|aria-current="page"[^>]*href="\/stocks\/held"/)
@@ -178,6 +178,10 @@ test("Stocks tabs pass the one console session to the reused features and link h
   const render = (tab: Parameters<typeof StocksTabView>[0]["tab"], canControl = true) =>
     renderToStaticMarkup(<StocksTabView tab={tab} apiBase="https://api.example.test" session={session} canControl={canControl} onSignInRequired={noop} onNavigate={noop} />)
   assert.match(render("trading-control"), /data-testid="stocks-trading-control"/)
+  // Limits is the first Stocks page; before the first read it shows the loading row (the rows and buttons: stocks-limits tests).
+  const limits = render("limits")
+  assert.match(limits, /data-testid="stocks-limits"/)
+  assert.match(limits, /Reading the limits/)
   assert.match(render("held"), /data-testid="stocks-held"|Loading held payments|Held payments/)
   const orders = render("orders")
   assert.match(orders, /Stocks operations/)

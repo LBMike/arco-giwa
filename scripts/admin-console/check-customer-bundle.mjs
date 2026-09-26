@@ -22,6 +22,7 @@ export const ADMIN_MODULES = [
   /^src\/demo\/giwa\/stocks-market\/StocksAdminPage\.tsx$/,
   /^src\/demo\/giwa\/stocks-admin\//,
   /^src\/demo\/giwa\/stocks-trading-control\//,
+  /^src\/demo\/giwa\/stocks-limits\//,
 ]
 
 export const isAdminModule = (relative) => ADMIN_MODULES.some((pattern) => pattern.test(relative))

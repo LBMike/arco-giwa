@@ -10,9 +10,11 @@
 콘솔 메뉴는 두 그룹이다.
 
 - Vaults: Operations(기본), Prices, Vault Config, Featured, Monitoring — `/vaults/<탭>`
-- Stocks: Trading control, Overview, Orders, Reconciliation, Audit, Held payments — `/stocks/<탭>`
+- Stocks: Limits, Trading control, Overview, Orders, Reconciliation, Audit, Held payments — `/stocks/<탭>` (`/stocks`는 Limits로 연다)
 
 Held payments는 주문이 만들어지지 않은 입금·에스크로를 보여 주는 읽기 전용 목록이다(`GET /api/v1/admin/stocks/held`). 환불·반환 실행은 없다.
+
+Limits는 종목·방향(매수/매도)마다 새 주문을 받을지와 하루 전체 상한(tUSDC)을 정한다. 서버에 `STOCKS_TRADING_LIMITS=1`이 없으면 Limits 탭은 기능이 꺼져 있다는 안내만 보여 준다. 규칙과 API는 [거래 제한](contracts/stocks-trading-limits.md)에 있다.
 
 ## 권한 모델
 
@@ -29,7 +31,7 @@ Held payments는 주문이 만들어지지 않은 입금·에스크로를 보여
 | 경로 | 운영자 목록 | 읽기 | 쓰기 |
 |---|---|---|---|
 | `/api/v1/admin/*` 중 Stocks를 뺀 전부 (Vault) | `ADMIN_OPERATORS` 환경변수 | `vault:read` (GET·HEAD) | `vault:write` (POST·PUT·PATCH·DELETE) |
-| `/api/v1/admin/stocks/*` | Stocks 런타임 설정 JSON(`STOCKS_CONFIG_PATH`)의 `operators` (기존) | `stocks:read` | `stocks:control` (거래 일시정지·재개) |
+| `/api/v1/admin/stocks/*` | Stocks 런타임 설정 JSON(`STOCKS_CONFIG_PATH`)의 `operators` (기존) | `stocks:read` | `stocks:control` (거래 일시정지·재개, 거래 제한 변경) |
 | `GET /api/v1/admin/session` | 두 목록 모두 조회 | 유효한 세션이면 누구나 | — |
 
 - 쓰기 권한은 읽기 권한을 포함하지 않는다. 콘솔을 쓰는 운영자에게는 보통 `vault:read`와 `vault:write`를 둘 다 준다.
@@ -89,6 +91,7 @@ Vault 쓰기 작업의 상당수는 서버가 서명 전 트랜잭션을 만들�
 | `ADMIN_OPERATOR_TOKEN` | (비밀값) | 기존. `ADMIN_LEGACY_TOKEN_AUTH=1`일 때만 필요. 종료 후 삭제 |
 | `AUTH_JWT_SECRET` | (비밀값) | 기존. 세션 서명. 변경 없음 |
 | `STOCKS_CONFIG_PATH` | | 기존. Stocks 운영자는 이 JSON의 `operators`에 그대로 둔다 |
+| `STOCKS_TRADING_LIMITS` | `1` | 새로 추가(선택). Limits 탭의 서버 기능. 마이그레이션 `20260927000000_stocks_trading_limits`를 먼저 적용한다 |
 
 ### 고객 앱 (Vercel 기존 프로젝트)
 

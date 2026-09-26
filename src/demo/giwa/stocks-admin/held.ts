@@ -6,7 +6,8 @@ import type { StocksAdminError } from "./types"
 export const HELD_PATH = "/api/v1/admin/stocks/held"
 export const HELD_PAGE_SIZE = 50
 
-export type HeldHold = "TRADING_PAUSED" | "PRICE_UNAVAILABLE" | "BELOW_ONE_UNIT"
+/** Why the server held it; SIDE_DISABLED and DAILY_LIMIT_REACHED come from the trading limits (Stocks > Limits). */
+export type HeldHold = "TRADING_PAUSED" | "PRICE_UNAVAILABLE" | "BELOW_ONE_UNIT" | "SIDE_DISABLED" | "DAILY_LIMIT_REACHED"
 export type HeldPayment = {
   readonly id: string
   readonly side: "BUY" | "SELL"
@@ -27,6 +28,8 @@ export const HOLD_LABEL: Record<HeldHold, string> = {
   TRADING_PAUSED: "Trading was paused",
   PRICE_UNAVAILABLE: "No live price was available",
   BELOW_ONE_UNIT: "Too small for one whole unit",
+  SIDE_DISABLED: "The side was turned off in Limits",
+  DAILY_LIMIT_REACHED: "The daily cap in Limits was reached",
 }
 
 export const HELD_REASON_LABEL: Readonly<Record<string, string>> = {
@@ -45,7 +48,7 @@ const HASH = /^0x[0-9a-fA-F]{64}$/
 const WALLET = /^0x[0-9a-fA-F]{40}$/
 const CODE = /^[A-Z][A-Z0-9_]{0,63}$/
 const CURSOR = /^[A-Za-z0-9_-]{1,512}$/
-const HOLDS: readonly string[] = ["TRADING_PAUSED", "PRICE_UNAVAILABLE", "BELOW_ONE_UNIT"]
+const HOLDS: readonly string[] = Object.keys(HOLD_LABEL)
 
 function fail(path: string): never {
   throw new StocksContractError(path)

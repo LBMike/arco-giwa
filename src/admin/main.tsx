@@ -33,7 +33,7 @@ const router = createBrowserRouter([
           { path: "monitoring", element: <MonitoringPage /> },
         ],
       },
-      { path: "stocks", element: <Navigate to="/stocks/trading-control" replace /> },
+      { path: "stocks", element: <Navigate to="/stocks/limits" replace /> },
       { path: "stocks/:section", element: <StocksRoute /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],

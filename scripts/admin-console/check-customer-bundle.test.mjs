@@ -24,10 +24,10 @@ const rules = (dist, options = {}) => inspectCustomerBundle({ dist, ...options }
 test("admin signals come from admin modules only and cover every admin area", () => {
   const { markers, names } = adminSignals()
   assert.ok(markers.every((marker) => isAdminModule(marker.module)))
-  for (const area of [/^src\/admin\//, /^src\/demo\/giwa\/stocks-admin\//, /^src\/demo\/giwa\/stocks-trading-control\//, /^src\/demo\/giwa\/(?:Admin|VaultAdmin|PriceFeedAdminPanel)/]) {
+  for (const area of [/^src\/admin\//, /^src\/demo\/giwa\/stocks-admin\//, /^src\/demo\/giwa\/stocks-trading-control\//, /^src\/demo\/giwa\/stocks-limits\//, /^src\/demo\/giwa\/(?:Admin|VaultAdmin|PriceFeedAdminPanel)/]) {
     assert.ok(markers.some((marker) => area.test(marker.module)), `a marker from ${area}`)
   }
-  for (const name of ["AdminOperations", "AdminPrices", "GiwaAdminLayout", "RequireGiwaAdmin", "StocksAdminPage", "AdminConsoleApp"]) assert.ok(names.has(name), name)
+  for (const name of ["AdminOperations", "AdminPrices", "GiwaAdminLayout", "RequireGiwaAdmin", "StocksAdminPage", "AdminConsoleApp", "LimitsPanel"]) assert.ok(names.has(name), name)
   for (const name of ["index", "types", "main"]) assert.equal(names.has(name), false, name)
   assert.equal(isAdminModule("src/demo/giwa/stocks-market/StocksPages.tsx"), false)
   assert.equal(isAdminModule("src/demo/giwa/AdminConsoleRedirect.tsx"), false)

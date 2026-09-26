@@ -3,7 +3,7 @@
 // server checks its own permission again, so this model only shapes what the console offers.
 
 export type ConsoleGroup = "vaults" | "stocks"
-export type StocksTabId = "trading-control" | "overview" | "orders" | "reconciliation" | "audit" | "held"
+export type StocksTabId = "limits" | "trading-control" | "overview" | "orders" | "reconciliation" | "audit" | "held"
 export type VaultsTabId = "operations" | "prices" | "config" | "featured" | "monitoring"
 export type ConsoleTab = { readonly group: ConsoleGroup; readonly id: string; readonly label: string; readonly path: string }
 
@@ -15,7 +15,9 @@ export const VAULT_TABS: readonly ConsoleTab[] = [
   { group: "vaults", id: "monitoring", label: "Monitoring", path: "/vaults/monitoring" },
 ]
 
+// Limits is the first Stocks page: per-stock on/off and daily caps are the everyday control.
 export const STOCKS_TABS: readonly ConsoleTab[] = [
+  { group: "stocks", id: "limits", label: "Limits", path: "/stocks/limits" },
   { group: "stocks", id: "trading-control", label: "Trading control", path: "/stocks/trading-control" },
   { group: "stocks", id: "overview", label: "Overview", path: "/stocks/overview" },
   { group: "stocks", id: "orders", label: "Orders", path: "/stocks/orders" },

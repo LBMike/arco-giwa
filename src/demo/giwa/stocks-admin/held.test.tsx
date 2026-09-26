@@ -27,6 +27,8 @@ test("held path: page size and the opaque cursor only", () => {
 test("held page: strict contract; a single bad row rejects the whole page", () => {
   assert.deepEqual(parseHeldPage({ items: [buy, sell], nextCursor: "next_1" }), { items: [buy, sell], nextCursor: "next_1" })
   assert.deepEqual(parseHeldPage({ items: [], nextCursor: null }), { items: [], nextCursor: null })
+  // The trading limits add two holds.
+  for (const hold of ["SIDE_DISABLED", "DAILY_LIMIT_REACHED"]) assert.equal(parseHeldPage({ items: [{ ...buy, hold }], nextCursor: null }).items[0].hold, hold)
   for (const data of [
     null, [], {}, { items: {}, nextCursor: null }, { items: [], nextCursor: "has space" },
     { items: [{ ...buy, side: "HOLD" }], nextCursor: null }, { items: [{ ...buy, cashAmount: "1.5" }], nextCursor: null },
@@ -68,6 +70,10 @@ test("Held payments tab: rows with side, wallet, exact amount, hold reason, stat
   assert.match(plainText, /Trading was paused TRADING_PAUSED/)
   assert.match(plainText, /Too small for one whole unit BELOW_ONE_UNIT/)
   assert.match(plainText, /Plain transfer without an order key UNATTRIBUTED_TRANSFER/)
+  const limited = ready({ items: [{ ...buy, hold: "DAILY_LIMIT_REACHED" } as never, { ...sell, hold: "SIDE_DISABLED" } as never], nextCursor: null })
+  const limitedText = text(renderToStaticMarkup(<HeldPaymentsView state={limited} signedIn now={0} onRefresh={noop} onLoadOlder={noop} />))
+  assert.match(limitedText, /The daily cap in Limits was reached DAILY_LIMIT_REACHED/)
+  assert.match(limitedText, /The side was turned off in Limits SIDE_DISABLED/)
   assert.match(plainText, /Suspense/)
   assert.match(plainText, /Held in escrow/)
   for (const n of [1, 2, 3]) assert.match(html, new RegExp(`href="https://explorer.example.test/tx/${TX(n)}"`))

@@ -2,6 +2,7 @@ import { useMemo } from "react"
 import { Navigate, useNavigate, useParams } from "react-router-dom"
 import { GIWA_EXPLORER } from "../demo/giwa/config"
 import { GiwaStocksAdminFeature, HeldPaymentsPanel, type StocksAdminFetch } from "../demo/giwa/stocks-admin"
+import { StocksLimitsPanel } from "../demo/giwa/stocks-limits"
 import { GiwaStocksTradingControlFeature } from "../demo/giwa/stocks-trading-control"
 import { isStocksTab, stocksTabPath, type StocksTabId } from "./console-model"
 import { useConsoleSession } from "./console-session"
@@ -26,7 +27,7 @@ export function StocksRoute() {
     },
     [rejectSession, recheckSession, session.id],
   )
-  if (!isStocksTab(section)) return <Navigate to={stocksTabPath("trading-control")} replace />
+  if (!isStocksTab(section)) return <Navigate to={stocksTabPath("limits")} replace />
   return (
     <StocksTabView
       tab={section}
@@ -57,6 +58,9 @@ export function StocksTabView({
   onSignInRequired: () => void
   onNavigate: (path: string) => void
 }) {
+  if (tab === "limits") {
+    return <StocksLimitsPanel apiBase={apiBase} session={session} fetch={fetch} canControl={canControl} onSignInRequired={onSignInRequired} />
+  }
   if (tab === "trading-control") {
     return <GiwaStocksTradingControlFeature apiBase={apiBase} session={session} fetch={fetch} canControl={canControl} onSignInRequired={onSignInRequired} />
   }
