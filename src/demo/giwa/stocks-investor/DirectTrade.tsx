@@ -254,7 +254,7 @@ export type DirectTradePanelProps = {
 }
 
 /** The quote row's "?": what its per-share price is and when the real one is set. */
-const QUOTE_HELP = "What one NVDA costs (Buy) or pays out (Sell) at the live price above, fees included. The server sets the final price when GIWA confirms your transaction."
+const QUOTE_HELP = "This quote generally represents the expected execution price for your order. The final execution price will depend on market conditions at the time the trade is processed."
 
 export function DirectTradePanel({ state, actions, contracts, marketPrice = null }: DirectTradePanelProps) {
   const access = useStocksAccess()
