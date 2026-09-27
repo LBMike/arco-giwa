@@ -173,7 +173,7 @@ npm run stocks:integration:prepare -- \
 | `STOCKS_TRADING_LIMITS` | `1` | 아니요 |
 | `STOCKS_MARKET_PROFILE_STORE` | `1` | 아니요 |
 
-`STOCKS_DATABASE_URL`은 비워 둡니다. 기존 `DATABASE_URL`을 씁니다. Render의 Secret File과 환경변수 변경은 다시 배포해야 반영됩니다.
+`STOCKS_DATABASE_URL`은 비워 둡니다. 기존 `DATABASE_URL`을 씁니다. Render의 Secret File과 환경변수 변경은 다시 배포해야 반영됩니다. Render MCP(API)로 환경변수를 바꾸면 그 자리에서 release 최신 커밋으로 빌드와 배포가 시작되므로, 거래를 먼저 멈춘 뒤 바꿉니다(2026-09-27 확인).
 
 `STOCKS_MARKET_PROFILE_STORE=1`은 시세 화면의 기업 정보(시가총액, 발행 주식 수, ETF 자산)를 Supabase 테이블 `arco_evm."StocksMarketProfile"`에 저장합니다. 이 값이 없으면 기업 정보는 서버 메모리에만 있어서, Render를 다시 빌드하거나 재시작할 때마다 지워집니다. Massive 무료 플랜은 1분에 4건만 받아올 수 있어서 40종목을 다시 채우는 데 10분쯤 걸리고, 그동안 Mkt Cap 칸이 비어 보입니다. 저장해 두면 재시작 직후에도 바로 복원됩니다. 시세와 차트는 저장하지 않고 지금처럼 메모리에서만 다룹니다. 테이블은 `prisma/migrations/20260928000000_stocks_market_profiles` 마이그레이션이 만듭니다. 마이그레이션을 먼저 적용하고 나서 이 변수를 켭니다.
 
@@ -258,7 +258,7 @@ npm run stocks:integration:prepare -- \
 
 - release에 직접 push하지 않습니다. 어드민 콘솔, 거래 한도 같은 다른 작업도 staging을 거칩니다.
 - 이미 빌드된 커밋을 가리키기만 하는 push(새 커밋 없음)는 Vercel이 빌드하지 않습니다. 필요하면 `git commit --allow-empty`로 빈 커밋을 만들어 push합니다.
-- 2026-09-27 기준으로 Render API는 `644be54`에서 돌고 있습니다(2026-09-26 17:20 UTC 배포). 어드민 콘솔 서버와 `ADMIN_*` 변수, 종목별 거래 한도 서버(`STOCKS_TRADING_LIMITS=1`)가 들어가 있습니다. 거래 한도 마이그레이션은 배포 전에 적용했습니다(`docs/contracts/stocks-trading-limits.md`). 한도 값은 콘솔 Stocks › Limits에서 바꿉니다. Render를 다시 빌드할 때는 먼저 Trading control로 거래를 멈춥니다.
+- 2026-09-27 기준으로 Render API는 `085fea0`에서 돌고 있습니다(2026-09-27 14:12 UTC 배포). 어드민 콘솔 서버와 `ADMIN_*` 변수, 종목별 거래 한도 서버(`STOCKS_TRADING_LIMITS=1`), 기업 정보 저장(`STOCKS_MARKET_PROFILE_STORE=1`)이 들어가 있습니다. 거래 한도 마이그레이션은 배포 전에 적용했습니다(`docs/contracts/stocks-trading-limits.md`). 한도 값은 콘솔 Stocks › Limits에서 바꿉니다. Render를 다시 빌드할 때는 먼저 Trading control로 거래를 멈춥니다.
 
 ## 다른 작업과 이어지는 설정
 
