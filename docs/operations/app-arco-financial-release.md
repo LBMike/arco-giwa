@@ -15,8 +15,8 @@
 
 ## 확인된 사실 (2026-09-26)
 
-- DB: Supabase Arco 프로젝트의 `_prisma_migrations` 16개가 이 브랜치의 `prisma/migrations` 16개와 이름이 같고 모두 완료 상태입니다. 16번째인 거래 한도 마이그레이션(`20260927000000_stocks_trading_limits`)은 2026-09-26 10:56 UTC에 적용했습니다. 배포할 때 마이그레이션을 실행하지 않습니다.
-- DB: 17번째인 시장 기업 정보 마이그레이션(`20260928000000_stocks_market_profiles`)은 2026-09-26 17:47 UTC에 Supabase `apply_migration`으로 적용했습니다(테이블 `arco_evm."StocksMarketProfile"` 생성 확인). `_prisma_migrations`에 기록하는 행은 아직 넣지 않았습니다. 넣을 때 checksum은 `bfd52b3d1dcb6aaa4745b9feafc08ff7927f910f65b59efb8bafc46f0820b6d9`(migration.sql의 SHA-256)입니다.
+- DB: Supabase Arco 프로젝트의 `_prisma_migrations` 17개가 이 브랜치의 `prisma/migrations` 17개와 이름과 checksum(각 migration.sql의 SHA-256)이 같고 모두 완료 상태입니다. 16번째인 거래 한도 마이그레이션(`20260927000000_stocks_trading_limits`)은 2026-09-26 10:56 UTC에 적용했습니다. 배포할 때 마이그레이션을 실행하지 않습니다.
+- DB: 17번째인 시장 기업 정보 마이그레이션(`20260928000000_stocks_market_profiles`)은 2026-09-26 17:47 UTC에 Supabase `apply_migration`으로 적용했습니다(테이블 `arco_evm."StocksMarketProfile"`의 열과 제약이 migration.sql과 같음을 확인). `_prisma_migrations` 기록 행은 2026-09-27 04:02 UTC에 넣었습니다(checksum `bfd52b3d1dcb6aaa4745b9feafc08ff7927f910f65b59efb8bafc46f0820b6d9`).
 - 기존 Savings·Funds 서버 코드는 main과 거의 같습니다(`server/src/app.ts`, `server/src/index.ts`의 Stocks 연결 부분만 다름). 로컬 데모는 Savings·Funds 요청을 운영 API로 보냈으므로, 이 브랜치 서버로 처리하는 것은 1단계가 처음입니다.
 - 시세: API가 `/api/v1/stocks/market/*`(목록, 시세, 차트, 프로필, NVDA 실시간·스트림)를 직접 제공합니다. Stocks 런타임이 꺼져 있어도 시세는 동작합니다.
 - Stocks 런타임은 시작할 때 서명기(`signerUrl`, HTTPS 원점만 허용)에 연결해 정책을 검증합니다. 서명기에 닿지 않으면 Stocks를 켤 수 없습니다.
