@@ -36,7 +36,6 @@ export function DigiFTReferenceRow({
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate text-base font-medium leading-5 text-[var(--color-arco-ink)]" title={asset.name}>{asset.symbol}</span>
-            <span className="shrink-0 rounded-full bg-[var(--color-arco-chip)] px-1.5 py-0.5 text-[10px] leading-none text-[var(--color-arco-text-soft)]">Reference</span>
           </span>
           <span className="mt-1 w-fit rounded-full bg-[var(--color-arco-chip)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--color-arco-ink)] ring-[0.5px] ring-[var(--color-arco-border)]">
             {asset.category}
