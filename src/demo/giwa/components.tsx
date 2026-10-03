@@ -48,6 +48,7 @@ import { GiwaProductSearch } from "./GiwaProductSearch"
 import { GiwaHeaderMenu } from "./GiwaHeaderMenu"
 import { BrandMark } from "../components/BrandMark"
 import { DigiFTReferenceRow } from "./DigiFTReferenceRow"
+import { RiskTag, vaultCategoryRisk } from "./RiskTag"
 import type { DigiFTReferenceAsset } from "./digift-reference-assets"
 import { ASSET_MANAGERS, ISSUERS, ISSUER_OPTIONS, aumLabel, apyLabel, productById } from "../data/products"
 import { ACAPIX_INSTANT_FEES } from "../data/acapix-detail"
@@ -120,7 +121,7 @@ const STRATEGIES: Array<{
     category: "Prime Credit",
     title: "Prime Credit",
     blurb: "Alternative-credit exposure with deposit and redemption routed to split vaults.",
-    tag: "High Yield Strategies",
+    tag: "Medium Risk Strategies",
     bg: "var(--color-strategy-credit)",
   },
   {
@@ -137,7 +138,7 @@ const STRATEGIES: Array<{
     category: "Equity Exposure",
     title: "Equity Exposure",
     blurb: "Tokenized equity offering diversified growth and dividend income exposure.",
-    tag: "Equity Income Strategies",
+    tag: "High Risk Strategies",
     bg: "var(--color-strategy-equity)",
   },
 ]
@@ -942,7 +943,7 @@ function GiwaProductRow({
 // (operational columns: decimals / registry load-state / vault route) stays unchanged.
 const CATALOG_HEAD = "px-1.5 py-2.5 text-base font-medium text-[var(--color-arco-chip-ink)]"
 const CATALOG_COLS =
-  "grid-cols-[minmax(190px,1.5fr)_0.85fr_1.15fr_0.9fr_1fr_0.9fr_0.55fr]"
+  "grid-cols-[minmax(240px,1.5fr)_0.85fr_1.15fr_0.9fr_1fr_0.9fr_0.55fr]"
 
 // Base/settlement asset symbol without the testnet "t" prefix: tUSDC→USDC, tBTC→BTC,
 // tWETH→ETH, tXRP→XRP.
@@ -1111,6 +1112,7 @@ function GiwaCatalogRow({
   // Built-ins have null config, so they resolve to the same legacy values as before.
   const vaultImage = vaultImageFor(product)
   const subtitle = config.category ? categoryTitle(config.category) : productType(product)
+  const risk = vaultCategoryRisk(productCategory(product))
   const managerLabel = config.assetManagerName ?? am?.label ?? null
   const managerLogo = LOCAL_MANAGER_LOGOS[config.assetManagerImageUrl ?? ""] ?? config.assetManagerImageUrl ?? am?.logo
   const issuerLabel = config.issuerName ?? iss?.label ?? null
@@ -1145,8 +1147,11 @@ function GiwaCatalogRow({
           <span className="text-base font-medium leading-5 text-[var(--color-arco-ink)]">
             {vaultDisplayName(product)}
           </span>
-          <span className="mt-1 w-fit rounded-full bg-[var(--color-arco-chip)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--color-arco-ink)] ring-[0.5px] ring-[var(--color-arco-border)]">
-            {subtitle}
+          <span className="mt-1 flex flex-wrap items-center gap-1">
+            {risk && <RiskTag level={risk} />}
+            <span className="whitespace-nowrap rounded-full bg-[var(--color-arco-chip)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--color-arco-ink)] ring-[0.5px] ring-[var(--color-arco-border)]">
+              {subtitle}
+            </span>
           </span>
         </div>
       </div>

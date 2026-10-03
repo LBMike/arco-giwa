@@ -29,10 +29,10 @@ test("Strategies section shows the Equity Exposure card (with its badge) and HID
   ]
   const html = renderToStaticMarkup(<GiwaStrategyCards products={products} active={[]} onToggle={() => undefined} />)
 
-  // Equity Exposure card: title + Figma badge "Equity Income Strategies · <count>".
+  // Equity Exposure card: title + risk-tier badge "High Risk Strategies · <count>".
   assert.match(html, /Equity Exposure/)
   assert.match(html, /Tokenized equity offering diversified growth and dividend income exposure\./)
-  assert.match(html, /Equity Income Strategies · 1/) // one Equity Exposure vault
+  assert.match(html, /High Risk Strategies · 1/) // one Equity Exposure vault
 
   // The other two visible strategies still render.
   assert.match(html, /U\.S\. Treasuries/)
@@ -41,6 +41,21 @@ test("Strategies section shows the Equity Exposure card (with its badge) and HID
   // Arco Saving is hidden from the investor Strategies section (no card, title, blurb, or badge).
   assert.doesNotMatch(html, /Arco Saving/)
   assert.doesNotMatch(html, /Crypto Native Asset/)
+})
+
+test("Strategy badges read Low, Medium and High Risk from left to right", () => {
+  const products = [
+    vault("umint", "auMINT", "U.S Treasuries"),
+    vault("ibenji", "aiBENJI", "U.S Treasuries"),
+    vault("acapix", "aCAPIX", "Prime Credit"),
+    vault("beqty", "bEQTY", "Equity Exposure"),
+  ]
+  const html = renderToStaticMarkup(<GiwaStrategyCards products={products} active={[]} onToggle={() => undefined} />)
+  const low = html.indexOf("Low Risk Strategies · 2")
+  const medium = html.indexOf("Medium Risk Strategies · 1")
+  const high = html.indexOf("High Risk Strategies · 1")
+  assert.ok(low >= 0 && medium > low && high > medium, "U.S. Treasuries → Prime Credit → Equity Exposure read Low → Medium → High")
+  assert.doesNotMatch(html, /High Yield Strategies|Equity Income Strategies/)
 })
 
 test("GIWA_EMPTY_FILTERS has an empty category selection (no Arco Saving default)", () => {

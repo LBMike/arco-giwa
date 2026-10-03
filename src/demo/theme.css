@@ -121,6 +121,14 @@
   --color-strategy-saving: #5b3a5d;
   --color-strategy-equity: #5b2f3a;      /* Equity Exposure strategy card */
 
+  /* funds-list risk tags (traffic-light tiers). Each ink on its own bg is >= 5.1:1, AA for the 11px label. */
+  --color-risk-low-bg: #d9f0e3;
+  --color-risk-low-ink: #0a6b44;
+  --color-risk-medium-bg: #fbe9c4;
+  --color-risk-medium-ink: #8a5100;
+  --color-risk-high-bg: #fbdcdc;
+  --color-risk-high-ink: #b3261e;
+
   /* savings page */
   --color-arco-savings-accent: #0bb538;  /* selected accept-asset card border (Figma #0BB538) */
 
