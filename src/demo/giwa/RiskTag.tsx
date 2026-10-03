@@ -41,6 +41,13 @@ export function digiftCategoryRisk(category: DigiFTReferenceAsset["category"]): 
   return DIGIFT_CATEGORY_RISK[category]
 }
 
+// Admin dropdown label for a taxonomy value: names the tier customers will see for it. The option
+// value stays the bare category.
+export function categoryOptionLabel(category: VaultCategory): string {
+  const tier = vaultCategoryRisk(category)
+  return tier ? `${category} · ${RISK_LABEL[tier]}` : `${category} · no risk tag`
+}
+
 export function RiskTag({ level }: { level: RiskLevel }) {
   return (
     <span

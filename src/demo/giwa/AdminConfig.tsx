@@ -10,7 +10,9 @@ import { explorerAddress } from "./wallet"
 import { shortAddr } from "../lib/format"
 import { AdminWriteGroup, useGiwaAdmin } from "./admin-context"
 import type { GiwaCatalogItem, GiwaVaultConfig } from "./types"
-import { VAULT_CATEGORIES, type VaultCategory } from "../../../shared/vault-taxonomy"
+import { VAULT_CATEGORIES, isVaultCategory, type VaultCategory } from "../../../shared/vault-taxonomy"
+import { defaultProductCategory } from "./components"
+import { RiskTag, categoryOptionLabel, vaultCategoryRisk } from "./RiskTag"
 import { bpsToPercentInput, parseDecimalInput, percentInputToBps, validateAcceptAssets, validatePortfolioSlices } from "./display-profile"
 import type { GiwaAcceptAsset, GiwaPortfolioSlice } from "./types"
 import {
@@ -25,6 +27,29 @@ import {
 // make a vault unfilterable. Single source: shared/vault-taxonomy.ts (also used by the
 // 2c-2 deploy-params schema, so the Add-vault form below can never drift from here).
 const CATEGORY_OPTIONS = VAULT_CATEGORIES
+
+// The risk tag the investor funds list will show for this vault: the chosen category's tier or,
+// with no override, the tier of the category it inherits (a new USDC vault inherits U.S Treasuries,
+// so Low Risk). Saving vaults live on the Savings page and carry no tag.
+export function CustomerRiskHint({
+  product,
+  category,
+  kind,
+}: {
+  product: Pick<GiwaCatalogItem, "productId" | "paymentAssetSymbol">
+  category: string
+  kind: GiwaVaultConfig["kind"]
+}) {
+  const effective: VaultCategory = isVaultCategory(category) ? category : defaultProductCategory(product)
+  const tier = kind === "saving" ? null : vaultCategoryRisk(effective)
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--color-arco-muted)]">
+      Customers see:
+      {tier ? <RiskTag level={tier} /> : <span className="text-[var(--color-arco-ink)]">no risk tag</span>}
+      {kind === "saving" ? <span>(Savings page)</span> : !isVaultCategory(category) && <span>(inherited from {effective})</span>}
+    </span>
+  )
+}
 
 type CardKey = "cardSnapshot" | "cardIndustry" | "cardExposure"
 const CARD_TOGGLES: { key: CardKey; label: string }[] = [
@@ -372,7 +397,7 @@ export function AddVaultCard({ products }: { products: GiwaCatalogItem[] }) {
           Category (fixed taxonomy)
           <select value={form.category} onChange={(event) => patch({ category: event.target.value as VaultCategory })} className="mt-1 h-10 w-full rounded-md border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-3 text-sm">
             {VAULT_CATEGORIES.map((option) => (
-              <option key={option} value={option}>{option}</option>
+              <option key={option} value={option}>{categoryOptionLabel(option)}</option>
             ))}
           </select>
         </label>
@@ -951,10 +976,11 @@ export function VaultConfigCard({ product, auth }: { product: GiwaCatalogItem; a
             <option value="">No override (inherit)</option>
             {CATEGORY_OPTIONS.map((option) => (
               <option key={option} value={option}>
-                {option}
+                {categoryOptionLabel(option)}
               </option>
             ))}
           </select>
+          <CustomerRiskHint product={product} category={category} kind={kind} />
         </label>
         <label className="text-xs text-[var(--color-arco-muted)]">
           AUM (fund AUM, e.g. $50B)

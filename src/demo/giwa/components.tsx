@@ -206,6 +206,16 @@ function paymentAssetIcon(symbol: string) {
   return undefined
 }
 
+// The category a vault falls back to when no operator override is set (Vault Config "inherit").
+export function defaultProductCategory(product: Pick<GiwaCatalogItem, "productId" | "paymentAssetSymbol">): GiwaCategory {
+  const id = product.productId.toLowerCase()
+  if (id === "acapix") return "Prime Credit"
+  if (product.paymentAssetSymbol === "tBTC" || product.paymentAssetSymbol === "tXRP" || product.paymentAssetSymbol === "tWETH") {
+    return "Arco Saving"
+  }
+  return "U.S Treasuries"
+}
+
 function productCategory(
   product: Pick<GiwaCatalogItem, "productId" | "symbol" | "paymentAssetSymbol" | "vaultConfig">,
 ): GiwaCategory {
@@ -213,12 +223,7 @@ function productCategory(
   // built-in derivation.
   const override = vaultConfigOf(product).category
   if (isVaultCategory(override)) return override
-  const id = product.productId.toLowerCase()
-  if (id === "acapix") return "Prime Credit"
-  if (product.paymentAssetSymbol === "tBTC" || product.paymentAssetSymbol === "tXRP" || product.paymentAssetSymbol === "tWETH") {
-    return "Arco Saving"
-  }
-  return "U.S Treasuries"
+  return defaultProductCategory(product)
 }
 
 function productType(product: Pick<GiwaCatalogItem, "productId" | "paymentAssetSymbol">) {
