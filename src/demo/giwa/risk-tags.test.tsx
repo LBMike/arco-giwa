@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
-import { GiwaCatalogTable } from "./components"
+import { GIWA_EMPTY_FILTERS, GiwaCatalogTable, applyReferenceFilters, type GiwaCategory } from "./components"
 import { DIGIFT_REFERENCE_ASSETS } from "./digift-reference-assets"
 import snapshot from "./investor-shell/verification/deployed-giwa.snapshot.json"
 import type { GiwaCatalogItem } from "./types"
@@ -60,4 +60,17 @@ test("an Arco Saving row gets no risk tag", () => {
   assert.equal(arcoSaving.vaultConfig?.category, "Arco Saving")
   const html = render([arcoSaving], false)
   assert.doesNotMatch(html, /data-risk=/)
+})
+
+test("a selected risk card keeps the DigiFT products of the same tier", () => {
+  const symbols = (category: GiwaCategory[]) =>
+    applyReferenceFilters(DIGIFT_REFERENCE_ASSETS, { ...GIWA_EMPTY_FILTERS, category }).map((asset) => asset.symbol)
+  assert.equal(symbols([]).length, 7)
+  assert.deepEqual(symbols(["U.S Treasuries"]), ["CMBMINT", "ULTRA", "TKStable"])
+  assert.deepEqual(symbols(["Prime Credit"]), ["CMBBOND"])
+  assert.deepEqual(symbols(["Equity Exposure"]), ["JX", "kTW50", "GOLDX"])
+  assert.deepEqual(symbols(["U.S Treasuries", "Equity Exposure"]), ["CMBMINT", "ULTRA", "TKStable", "JX", "kTW50", "GOLDX"])
+  assert.deepEqual(symbols(["Arco Saving"]), [])
+  // GIWA-only filters cannot be asserted for reference profiles.
+  assert.deepEqual(applyReferenceFilters(DIGIFT_REFERENCE_ASSETS, { ...GIWA_EMPTY_FILTERS, issuer: ["arco"] }), [])
 })

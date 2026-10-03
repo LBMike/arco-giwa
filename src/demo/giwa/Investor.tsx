@@ -12,6 +12,7 @@ import {
   GiwaFilterBar,
   GiwaStrategyCards,
   applyGiwaFilters,
+  applyReferenceFilters,
   type GiwaCategory,
   type GiwaFilters,
 } from "./components"
@@ -44,16 +45,12 @@ export default function GiwaInvestorPage() {
     [catalogQuery.data],
   )
   const filteredProducts = useMemo(() => applyGiwaFilters(products, filters), [filters, products])
-  const referenceRows = useMemo(() => {
-    const assets = referenceAssetsForList(products.map((product) => product.symbol), filters.search)
-    // GIWA-only denomination, issuer and network filters cannot be asserted for reference profiles.
-    // The only shared category is Equity Exposure.
-    return assets.filter((asset) => {
-      if (filters.category.length && !filters.category.includes(asset.category as GiwaCategory)) return false
-      if (filters.denomination.length || filters.issuer.length || filters.network.length) return false
-      return true
-    })
-  }, [products, filters])
+  // Every DigiFT reference product not already deployed: the risk cards count these per tier.
+  const referenceAssets = useMemo(() => referenceAssetsForList(products.map((product) => product.symbol)), [products])
+  const referenceRows = useMemo(
+    () => applyReferenceFilters(referenceAssetsForList(products.map((product) => product.symbol), filters.search), filters),
+    [products, filters],
+  )
   // Real market APY per product (e.g. aCAPIX 11.58%); null for products without a published rate,
   // in which case the table falls back to the legacy apyLabel.
   const apyByProductId = useMemo(
@@ -93,7 +90,7 @@ export default function GiwaInvestorPage() {
       </section>
 
       <GiwaFeaturedCarousel cards={featuredQuery.data ?? []} catalog={products} />
-      <GiwaStrategyCards products={products} active={filters.category} onToggle={toggleCategory} />
+      <GiwaStrategyCards products={products} referenceAssets={referenceAssets} active={filters.category} onToggle={toggleCategory} />
 
       {catalogQuery.isError && <ErrorBox title="Registry unavailable" message={catalogQuery.error.message} />}
 

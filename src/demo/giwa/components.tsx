@@ -1,5 +1,4 @@
 import { assetLabel } from "./asset-label"
-import { useDemoPresentation } from "./demo-presentation"
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -48,7 +47,7 @@ import { GiwaProductSearch } from "./GiwaProductSearch"
 import { GiwaHeaderMenu } from "./GiwaHeaderMenu"
 import { BrandMark } from "../components/BrandMark"
 import { DigiFTReferenceRow } from "./DigiFTReferenceRow"
-import { RiskTag, vaultCategoryRisk } from "./RiskTag"
+import { RISK_LABEL, RiskTag, digiftCategoryRisk, vaultCategoryRisk, type RiskLevel } from "./RiskTag"
 import type { DigiFTReferenceAsset } from "./digift-reference-assets"
 import { ASSET_MANAGERS, ISSUERS, ISSUER_OPTIONS, aumLabel, apyLabel, productById } from "../data/products"
 import { ACAPIX_INSTANT_FEES } from "../data/acapix-detail"
@@ -99,29 +98,23 @@ const HOLDING_COLS =
 const ACTIVITY_COLS =
   "grid-cols-[0.85fr_minmax(160px,1.3fr)_0.8fr_0.85fr_0.9fr_0.6fr]"
 
-// Full category metadata (title/blurb/tag/bg) for ALL taxonomy values — single-sources
+// Full category metadata (title/bg) for ALL taxonomy values — single-sources
 // categoryTitle for every category, including ones hidden from the investor Strategies section.
 // `hidden` keeps a valid category (still selectable in admin) out of the investor cards + filter.
 const STRATEGIES: Array<{
   category: GiwaCategory
   title: string
-  blurb: string
-  tag: string
   bg: string
   hidden?: boolean
 }> = [
   {
     category: "U.S Treasuries",
     title: "U.S. Treasuries",
-    blurb: "Money-market and Treasury-shaped products funded with the required GIWA test asset.",
-    tag: "Low Risk Strategies",
     bg: "var(--color-strategy-treasuries)",
   },
   {
     category: "Prime Credit",
     title: "Prime Credit",
-    blurb: "Alternative-credit exposure with deposit and redemption routed to split vaults.",
-    tag: "Medium Risk Strategies",
     bg: "var(--color-strategy-credit)",
   },
   {
@@ -129,16 +122,12 @@ const STRATEGIES: Array<{
     // section; operators hide the Arco Saving vaults themselves.
     category: "Arco Saving",
     title: "Arco Saving",
-    blurb: "Crypto-native test products mapped one-to-one to BTC, XRP, or WETH payment assets.",
-    tag: "Crypto Native Asset",
     bg: "var(--color-strategy-saving)",
     hidden: true,
   },
   {
     category: "Equity Exposure",
     title: "Equity Exposure",
-    blurb: "Tokenized equity offering diversified growth and dividend income exposure.",
-    tag: "High Risk Strategies",
     bg: "var(--color-strategy-equity)",
   },
 ]
@@ -147,6 +136,13 @@ const STRATEGIES: Array<{
 // categories (Arco Saving excluded), in canonical order.
 const VISIBLE_STRATEGIES = STRATEGIES.filter((strategy) => !strategy.hidden)
 const INVESTOR_CATEGORIES: GiwaCategory[] = VISIBLE_STRATEGIES.map((strategy) => strategy.category)
+
+// Strategies cards are named by risk tier; the sentence says which product types the tier covers.
+const RISK_CARD_BLURB: Record<RiskLevel, string> = {
+  low: "U.S. Treasury and cash management funds.",
+  medium: "Prime credit and income strategies.",
+  high: "Equity exposure and alternative assets.",
+}
 
 // Display label for a taxonomy category, single-sourced from the strategy cards
 // (e.g. canonical "U.S Treasuries" → shown "U.S. Treasuries"). Unknown → as-is.
@@ -289,6 +285,18 @@ export function uniquePaymentAssets(products: GiwaCatalogItem[]) {
     })
   }
   return assets
+}
+
+// DigiFT reference rows under the shared filters. A strategy card selects a risk tier, so a selected
+// category keeps every reference product of the same tier. GIWA-only denomination, issuer and network
+// filters cannot be asserted for reference profiles, so any of them hides the reference rows.
+export function applyReferenceFilters(assets: readonly DigiFTReferenceAsset[], filters: GiwaFilters): DigiFTReferenceAsset[] {
+  const tiers = filters.category.map(vaultCategoryRisk).filter((tier): tier is RiskLevel => tier !== null)
+  return assets.filter((asset) => {
+    if (filters.category.length && !tiers.includes(digiftCategoryRisk(asset.category))) return false
+    if (filters.denomination.length || filters.issuer.length || filters.network.length) return false
+    return true
+  })
 }
 
 export function applyGiwaFilters(products: GiwaCatalogItem[], filters: GiwaFilters) {
@@ -683,21 +691,26 @@ export function GiwaFeaturedCarousel({ cards, catalog }: { cards: GiwaFeaturedCa
 
 export function GiwaStrategyCards({
   products,
+  referenceAssets = [],
   active,
   onToggle,
 }: {
   products: GiwaCatalogItem[]
+  referenceAssets?: readonly DigiFTReferenceAsset[]
   active: GiwaCategory[]
   onToggle: (category: GiwaCategory) => void
 }) {
-  const demo = useDemoPresentation()
   return (
     <section className="space-y-3">
       <h2 className="pl-1 text-lg font-medium text-[var(--color-arco-ink)]">Strategies</h2>
       <div className="flex gap-3 overflow-x-auto pb-1">
         {VISIBLE_STRATEGIES.map((strategy) => {
           const selected = active.includes(strategy.category)
-          const count = products.filter((product) => productCategory(product) === strategy.category).length
+          const risk = vaultCategoryRisk(strategy.category)
+          if (!risk) return null
+          const count =
+            products.filter((product) => productCategory(product) === strategy.category).length +
+            referenceAssets.filter((asset) => digiftCategoryRisk(asset.category) === risk).length
           return (
             <button
               key={strategy.category}
@@ -710,13 +723,13 @@ export function GiwaStrategyCards({
               style={{ background: strategy.bg, height: 136 }}
             >
               <div className="space-y-1">
-                <h3 className="text-lg font-medium leading-6 text-[var(--color-arco-cream)]">{strategy.title}</h3>
+                <h3 className="text-lg font-medium leading-6 text-[var(--color-arco-cream)]">{RISK_LABEL[risk]}</h3>
                 <p className="line-clamp-2 h-10 max-w-[280px] text-sm leading-5 text-[var(--color-arco-cream)] opacity-80">
-                  {demo && strategy.category === "U.S Treasuries" ? "Money-market funds and U.S. Treasury strategies." : demo && strategy.category === "Prime Credit" ? "Alternative-credit strategies for income-focused portfolios." : strategy.blurb}
+                  {RISK_CARD_BLURB[risk]}
                 </p>
               </div>
               <span className="rounded-[4px] bg-[var(--color-arco-overlay)] px-1 py-0.5 text-xs font-medium text-[var(--color-arco-cream)]">
-                {strategy.tag} · {count}
+                {`${count} ${count === 1 ? "Product" : "Products"}`}
               </span>
             </button>
           )
