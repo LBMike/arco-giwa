@@ -40,12 +40,13 @@ test("GIWA fund rows: risk tag first, then the product type", () => {
   assert.equal((html.match(/data-risk=/g) ?? []).length, 4)
 })
 
-test("DigiFT rows: risk tag mapped from the DigiFT category", () => {
+test("DigiFT rows: risk tag mapped from the category Arco shows", () => {
   const html = render([], true)
   assert.equal((html.match(pair("low", "Low Risk", "Cash Management")) ?? []).length, 3) // CMBMINT, ULTRA, TKStable
   assert.equal((html.match(pair("medium", "Medium Risk", "Income Strategies")) ?? []).length, 1) // CMBBOND
+  assert.equal((html.match(pair("medium", "Medium Risk", "Commodity")) ?? []).length, 1) // GOLDX
   assert.equal((html.match(pair("high", "High Risk", "Equity Exposure")) ?? []).length, 2) // JX, kTW50
-  assert.equal((html.match(pair("high", "High Risk", "Alternative Assets")) ?? []).length, 1) // GOLDX
+  assert.doesNotMatch(html, />Alternative Assets</) // GOLDX's DigiFT category is not shown
   assert.equal((html.match(/data-risk=/g) ?? []).length, 7)
 })
 
@@ -67,9 +68,9 @@ test("a selected risk card keeps the DigiFT products of the same tier", () => {
     applyReferenceFilters(DIGIFT_REFERENCE_ASSETS, { ...GIWA_EMPTY_FILTERS, category }).map((asset) => asset.symbol)
   assert.equal(symbols([]).length, 7)
   assert.deepEqual(symbols(["U.S Treasuries"]), ["CMBMINT", "ULTRA", "TKStable"])
-  assert.deepEqual(symbols(["Prime Credit"]), ["CMBBOND"])
-  assert.deepEqual(symbols(["Equity Exposure"]), ["JX", "kTW50", "GOLDX"])
-  assert.deepEqual(symbols(["U.S Treasuries", "Equity Exposure"]), ["CMBMINT", "ULTRA", "TKStable", "JX", "kTW50", "GOLDX"])
+  assert.deepEqual(symbols(["Prime Credit"]), ["CMBBOND", "GOLDX"])
+  assert.deepEqual(symbols(["Equity Exposure"]), ["JX", "kTW50"])
+  assert.deepEqual(symbols(["U.S Treasuries", "Equity Exposure"]), ["CMBMINT", "ULTRA", "TKStable", "JX", "kTW50"])
   assert.deepEqual(symbols(["Arco Saving"]), [])
   // GIWA-only filters cannot be asserted for reference profiles.
   assert.deepEqual(applyReferenceFilters(DIGIFT_REFERENCE_ASSETS, { ...GIWA_EMPTY_FILTERS, issuer: ["arco"] }), [])

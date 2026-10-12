@@ -1,8 +1,8 @@
 import { BrandMark } from "../components/BrandMark"
-import type { DigiFTReferenceAsset } from "./digift-reference-assets"
+import { digiftDisplayCategory, type DigiFTReferenceAsset } from "./digift-reference-assets"
 import { DigiFTProductMark } from "./DigiFTProductMark"
 import { DigiFTFirmMark } from "./DigiFTFirmMark"
-import { RiskTag, digiftCategoryRisk } from "./RiskTag"
+import { RiskTag, digiftAssetRisk } from "./RiskTag"
 
 function displayAum(value: string): string {
   return value.replace(/^USD /, "$").replace(" billion", "B").replace(" million", "M")
@@ -39,9 +39,9 @@ export function DigiFTReferenceRow({
             <span className="truncate text-base font-medium leading-5 text-[var(--color-arco-ink)]" title={asset.name}>{asset.symbol}</span>
           </span>
           <span className="mt-1 flex flex-wrap items-center gap-1">
-            <RiskTag level={digiftCategoryRisk(asset.category)} />
+            <RiskTag level={digiftAssetRisk(asset)} />
             <span className="whitespace-nowrap rounded-full bg-[var(--color-arco-chip)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--color-arco-ink)] ring-[0.5px] ring-[var(--color-arco-border)]">
-              {asset.category}
+              {digiftDisplayCategory(asset)}
             </span>
           </span>
         </div>

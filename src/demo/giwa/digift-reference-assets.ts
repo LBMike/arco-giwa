@@ -262,6 +262,19 @@ export const DIGIFT_REFERENCE_ASSETS: readonly DigiFTReferenceAsset[] = [
   },
 ]
 
+/** The category Arco shows for a reference product: DigiFT's own, unless Arco relabels it. */
+export type DigiFTDisplayCategory = DigiFTReferenceAsset['category'] | 'Commodity'
+
+// Arco display labels, not DigiFT source data. DigiFT files GOLDX, a physical gold fund, under
+// Alternative Assets; Arco shows it as a Commodity. The `category` field above stays as sourced.
+const DISPLAY_CATEGORY: Readonly<Partial<Record<string, DigiFTDisplayCategory>>> = {
+  'digift-goldx': 'Commodity',
+}
+
+export function digiftDisplayCategory(asset: Pick<DigiFTReferenceAsset, 'id' | 'category'>): DigiFTDisplayCategory {
+  return DISPLAY_CATEGORY[asset.id] ?? asset.category
+}
+
 export function digiftReferenceAssetById(id: string): DigiFTReferenceAsset | undefined {
   return DIGIFT_REFERENCE_ASSETS.find((asset) => asset.id === id)
 }
@@ -273,7 +286,7 @@ export function referenceAssetsForList(deployedSymbols: readonly string[], searc
   return DIGIFT_REFERENCE_ASSETS.filter((asset) => {
     if (deployed.has(asset.symbol.toLowerCase())) return false
     if (!query) return true
-    return [asset.symbol, asset.name, asset.category, asset.manager, asset.underlying, asset.description]
+    return [asset.symbol, asset.name, asset.category, digiftDisplayCategory(asset), asset.manager, asset.underlying, asset.description]
       .join(' ')
       .toLowerCase()
       .includes(query)

@@ -47,7 +47,7 @@ import { GiwaProductSearch } from "./GiwaProductSearch"
 import { GiwaHeaderMenu } from "./GiwaHeaderMenu"
 import { BrandMark } from "../components/BrandMark"
 import { DigiFTReferenceRow } from "./DigiFTReferenceRow"
-import { RISK_LABEL, RiskTag, digiftCategoryRisk, vaultCategoryRisk, type RiskLevel } from "./RiskTag"
+import { RISK_LABEL, RiskTag, digiftAssetRisk, vaultCategoryRisk, type RiskLevel } from "./RiskTag"
 import type { DigiFTReferenceAsset } from "./digift-reference-assets"
 import { ASSET_MANAGERS, ISSUERS, ISSUER_OPTIONS, aumLabel, apyLabel, productById } from "../data/products"
 import { ACAPIX_INSTANT_FEES } from "../data/acapix-detail"
@@ -140,7 +140,7 @@ const INVESTOR_CATEGORIES: GiwaCategory[] = VISIBLE_STRATEGIES.map((strategy) =>
 // Strategies cards are named by risk tier; the sentence says which product types the tier covers.
 const RISK_CARD_BLURB: Record<RiskLevel, string> = {
   low: "U.S. Treasury and cash management funds.",
-  medium: "Prime credit and income strategies.",
+  medium: "Prime credit, income strategies and commodities.",
   high: "Equity exposure and alternative assets.",
 }
 
@@ -298,7 +298,7 @@ export function uniquePaymentAssets(products: GiwaCatalogItem[]) {
 export function applyReferenceFilters(assets: readonly DigiFTReferenceAsset[], filters: GiwaFilters): DigiFTReferenceAsset[] {
   const tiers = filters.category.map(vaultCategoryRisk).filter((tier): tier is RiskLevel => tier !== null)
   return assets.filter((asset) => {
-    if (filters.category.length && !tiers.includes(digiftCategoryRisk(asset.category))) return false
+    if (filters.category.length && !tiers.includes(digiftAssetRisk(asset))) return false
     if (filters.denomination.length || filters.issuer.length || filters.network.length) return false
     return true
   })
@@ -715,7 +715,7 @@ export function GiwaStrategyCards({
           if (!risk) return null
           const count =
             products.filter((product) => productCategory(product) === strategy.category).length +
-            referenceAssets.filter((asset) => digiftCategoryRisk(asset.category) === risk).length
+            referenceAssets.filter((asset) => digiftAssetRisk(asset) === risk).length
           return (
             <button
               key={strategy.category}

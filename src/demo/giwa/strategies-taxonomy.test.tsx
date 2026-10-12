@@ -36,7 +36,7 @@ test("Strategies section shows the three risk cards and HIDES Arco Saving", () =
     ">Medium Risk<",
     ">High Risk<",
     "U.S. Treasury and cash management funds.",
-    "Prime credit and income strategies.",
+    "Prime credit, income strategies and commodities.",
     "Equity exposure and alternative assets.",
   ]) {
     assert.ok(html.includes(text), text)
@@ -62,13 +62,10 @@ test("risk cards read Low, Medium, High left to right and count DigiFT products 
   const medium = html.indexOf(">Medium Risk<")
   const high = html.indexOf(">High Risk<")
   assert.ok(low >= 0 && medium > low && high > medium, "Low → Medium → High")
-  // 2 GIWA + CMBMINT, ULTRA, TKStable | aCAPIX + CMBBOND | bEQTY + JX, kTW50, GOLDX
-  const five = html.indexOf(">5 Products<")
-  const two = html.indexOf(">2 Products<")
-  const four = html.indexOf(">4 Products<")
-  assert.ok(five > low && five < medium, "Low Risk counts 5")
-  assert.ok(two > medium && two < high, "Medium Risk counts 2")
-  assert.ok(four > high, "High Risk counts 4")
+  // 2 GIWA + CMBMINT, ULTRA, TKStable | aCAPIX + CMBBOND, GOLDX (Commodity) | bEQTY + JX, kTW50
+  assert.ok(html.slice(low, medium).includes(">5 Products<"), "Low Risk counts 5")
+  assert.ok(html.slice(medium, high).includes(">3 Products<"), "Medium Risk counts 3")
+  assert.ok(html.slice(high).includes(">3 Products<"), "High Risk counts 3")
   assert.doesNotMatch(html, /Strategies ·|High Yield|Equity Income/)
 })
 

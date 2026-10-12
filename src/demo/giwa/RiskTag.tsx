@@ -1,5 +1,5 @@
 import type { VaultCategory } from "../../../shared/vault-taxonomy"
-import type { DigiFTReferenceAsset } from "./digift-reference-assets"
+import { digiftDisplayCategory, type DigiFTDisplayCategory, type DigiFTReferenceAsset } from "./digift-reference-assets"
 
 export type RiskLevel = "low" | "medium" | "high"
 
@@ -13,10 +13,11 @@ const VAULT_CATEGORY_RISK: Partial<Record<VaultCategory, RiskLevel>> = {
 }
 
 // DigiFT reference products have their own category names; this is Arco's display mapping, not
-// DigiFT source data.
-const DIGIFT_CATEGORY_RISK: Record<DigiFTReferenceAsset["category"], RiskLevel> = {
+// DigiFT source data. It reads the category Arco shows, so GOLDX (shown as Commodity) is Medium.
+const DIGIFT_CATEGORY_RISK: Record<DigiFTDisplayCategory, RiskLevel> = {
   "Cash Management": "low",
   "Income Strategies": "medium",
+  Commodity: "medium",
   "Equity Exposure": "high",
   "Alternative Assets": "high",
 }
@@ -37,8 +38,13 @@ export function vaultCategoryRisk(category: VaultCategory): RiskLevel | null {
   return VAULT_CATEGORY_RISK[category] ?? null
 }
 
-export function digiftCategoryRisk(category: DigiFTReferenceAsset["category"]): RiskLevel {
+export function digiftCategoryRisk(category: DigiFTDisplayCategory): RiskLevel {
   return DIGIFT_CATEGORY_RISK[category]
+}
+
+// A reference product's tier, read from the category Arco shows for it (never the raw DigiFT one).
+export function digiftAssetRisk(asset: Pick<DigiFTReferenceAsset, "id" | "category">): RiskLevel {
+  return digiftCategoryRisk(digiftDisplayCategory(asset))
 }
 
 // Admin dropdown label for a taxonomy value: names the tier customers will see for it. The option

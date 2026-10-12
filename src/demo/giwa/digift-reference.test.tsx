@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import GiwaProductDetailPage from './ProductDetailPage'
 import { GiwaCatalogTable } from './components'
-import { DIGIFT_REFERENCE_ASSETS, digiftReferenceAssetById, referenceAssetsForList } from './digift-reference-assets'
+import { DIGIFT_REFERENCE_ASSETS, digiftDisplayCategory, digiftReferenceAssetById, referenceAssetsForList } from './digift-reference-assets'
 import { digiftPortfolioCardData } from './digift-reference-portfolio'
 import { DIGIFT_RESEARCH } from './digift-reference-research'
 
@@ -148,6 +148,26 @@ test('reference list removes deployed symbols and searches source-backed profile
   assert.deepEqual(referenceAssetsForList([], 'Income Strategies').map((asset) => asset.symbol), ['CMBBOND'])
   assert.deepEqual(referenceAssetsForList([], 'LBMA').map((asset) => asset.symbol), ['GOLDX'])
   assert.deepEqual(referenceAssetsForList([], 'not-a-product'), [])
+})
+
+test('GOLDX shows as Commodity while its DigiFT source category stays Alternative Assets', () => {
+  const goldx = digiftReferenceAssetById('digift-goldx')!
+  assert.equal(goldx.category, 'Alternative Assets')
+  assert.equal(digiftDisplayCategory(goldx), 'Commodity')
+  for (const asset of DIGIFT_REFERENCE_ASSETS.filter((entry) => entry.id !== goldx.id)) {
+    assert.equal(digiftDisplayCategory(asset), asset.category, `${asset.symbol} keeps its DigiFT category`)
+  }
+  assert.deepEqual(referenceAssetsForList([], 'commodity').map((asset) => asset.symbol), ['GOLDX'])
+
+  const html = renderToStaticMarkup(
+    <MemoryRouter initialEntries={[`/product/${goldx.id}`]}>
+      <Routes>
+        <Route path="/product/:id" element={<GiwaProductDetailPage />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+  assert.match(html, />Commodity<\/span>/)
+  assert.doesNotMatch(html, />Alternative Assets</)
 })
 
 test('one Funds table renders seven reference rows with live-table columns and no trading claims', () => {

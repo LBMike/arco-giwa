@@ -7,7 +7,7 @@ import { DocsLinksCard } from "../components/DocsLinksCard"
 import { MetricCard } from "../components/MetricCard"
 import { PortfolioCard } from "../components/PortfolioCard"
 import { SectionNav } from "../components/SectionNav"
-import type { DigiFTReferenceAsset } from "./digift-reference-assets"
+import { digiftDisplayCategory, type DigiFTReferenceAsset } from "./digift-reference-assets"
 import { digiftPortfolioCardData } from "./digift-reference-portfolio"
 import { DIGIFT_RESEARCH } from "./digift-reference-research"
 import { DigiFTFirmMark } from "./DigiFTFirmMark"
@@ -58,7 +58,7 @@ export function DigiFTReferenceDetail({ asset }: { asset: DigiFTReferenceAsset }
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-semibold text-[var(--color-arco-ink)]">{asset.symbol}</h1>
-              <span className="rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-2 py-0.5 text-[11px] text-[var(--color-arco-text-soft)]">{asset.category}</span>
+              <span className="rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-2 py-0.5 text-[11px] text-[var(--color-arco-text-soft)]">{digiftDisplayCategory(asset)}</span>
               <span className="rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-2 py-0.5 text-[11px] text-[var(--color-arco-text-soft)]">Reference profile</span>
             </div>
             <p className="mt-1 text-sm text-[var(--color-arco-text-soft)]">{asset.name}</p>
