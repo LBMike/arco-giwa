@@ -6,10 +6,7 @@ import {
   parseAumToNumber,
   percentInputToBps,
   parseDecimalInput,
-  portfolioClearOfAcapix,
-  remainingAcapixFallbacks,
   resolveDonutTotal,
-  resolvePortfolioHeader,
   resolveSliceValue,
   sliceToBreakdownRow,
   validatePortfolioSlices,
@@ -46,38 +43,6 @@ test("bpsToPercentInput round-trips a stored value into an editable percent", ()
   assert.equal(bpsToPercentInput(25), "0.25")
   assert.equal(bpsToPercentInput(20), "0.2")
   assert.equal(bpsToPercentInput(0), "0")
-})
-
-test("disclaimer invariant: aCAPIX never; partial profile shows; full profile clears", () => {
-  const allSet = {
-    hasAbout: true,
-    hasManagementFee: true,
-    hasPerformanceFee: true,
-    hasInstantMintingFee: true,
-    hasInstantRedemptionFee: true,
-    hasPortfolio: true,
-  }
-  // aCAPIX itself never shows the "someone else's sample" note.
-  assert.deepEqual(remainingAcapixFallbacks({ isAcapix: true, ...allSet, hasPortfolio: false }), [])
-
-  // Non-aCAPIX with nothing profiled → every aCAPIX-derived field listed.
-  const none = remainingAcapixFallbacks({
-    isAcapix: false,
-    hasAbout: false,
-    hasManagementFee: false,
-    hasPerformanceFee: false,
-    hasInstantMintingFee: false,
-    hasInstantRedemptionFee: false,
-    hasPortfolio: false,
-  })
-  assert.ok(none.length > 0)
-  assert.ok(none.includes("about") && none.includes("portfolio"))
-
-  // Partial profile (all P1 fields set, portfolio still fallback — the P1 reality) → still shows.
-  assert.deepEqual(remainingAcapixFallbacks({ isAcapix: false, ...allSet, hasPortfolio: false }), ["portfolio"])
-
-  // Fully profiled (P3-complete) → no disclaimer.
-  assert.deepEqual(remainingAcapixFallbacks({ isAcapix: false, ...allSet }), [])
 })
 
 test("validatePortfolioSlices: valid sum, normalization, and error cases", () => {
@@ -137,18 +102,6 @@ test("resolveDonutTotal = explicit ?? sum-of-explicit ?? AUM ?? null (legacy tot
   assert.equal(resolveDonutTotal(null, [{ value: null }], null), null) // → "—"
 })
 
-test("portfolioClearOfAcapix: clear only when each enabled view has config or is off", () => {
-  const slice = [{ label: "A", percent: 100 }]
-  // Both enabled, neither overridden → aCAPIX legacy still renders → not clear.
-  assert.equal(portfolioClearOfAcapix({ cardIndustry: true, cardExposure: true, portfolioIndustry: null, portfolioExposure: null }), false)
-  // Both overridden → clear.
-  assert.equal(portfolioClearOfAcapix({ cardIndustry: true, cardExposure: true, portfolioIndustry: slice, portfolioExposure: slice }), true)
-  // Disabled views need no data → clear.
-  assert.equal(portfolioClearOfAcapix({ cardIndustry: false, cardExposure: false, portfolioIndustry: null, portfolioExposure: null }), true)
-  // One overridden, one enabled+empty → not clear.
-  assert.equal(portfolioClearOfAcapix({ cardIndustry: true, cardExposure: true, portfolioIndustry: slice, portfolioExposure: null }), false)
-})
-
 test("parseDecimalInput: blank→null, decimals ok, exotic strings rejected", () => {
   assert.equal(parseDecimalInput(""), null)
   assert.equal(parseDecimalInput("0.5"), 0.5)
@@ -157,15 +110,4 @@ test("parseDecimalInput: blank→null, decimals ok, exotic strings rejected", ()
   assert.equal(parseDecimalInput("1e5"), "invalid")
   assert.equal(parseDecimalInput("0x64"), "invalid")
   assert.equal(parseDecimalInput("abc"), "invalid")
-})
-
-test("resolvePortfolioHeader hides aCAPIX header note/date once the disclaimer is off", () => {
-  const legacy = { updatedAt: "Jun 3, 2026 · 09:06 UTC", note: "…Midas Attestation Engine." }
-  // Disclaimer up (or aCAPIX) → legacy header renders (disclaimed / own content).
-  assert.deepEqual(resolvePortfolioHeader(true, legacy), legacy)
-  // Disclaimer off (fully-profiled non-aCAPIX) → neutral header, no aCAPIX text.
-  const neutral = resolvePortfolioHeader(false, legacy)
-  assert.notEqual(neutral.note, legacy.note)
-  assert.doesNotMatch(neutral.note, /Midas/)
-  assert.equal(neutral.updatedAt, "—")
 })

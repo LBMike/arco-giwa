@@ -9,8 +9,8 @@ import type { GiwaCatalogItem } from "./types"
 
 // The "Representative sample content — … aCAPIX examples …" disclaimer was removed from every
 // GIWA surface: the page-level note (About / Transparency / More Info) and the swap-card note.
-// An UNCONFIGURED non-aCAPIX vault is the worst case — it leans on aCAPIX fallbacks for About,
-// fees and portfolio, so the note used to render three times on the page plus once in the panel.
+// An UNCONFIGURED vault is the worst case: it used to borrow aCAPIX's About, fees and portfolio,
+// so the note rendered three times on the page plus once in the panel. It now borrows nothing.
 
 const unconfigured: GiwaCatalogItem = {
   productId: "abtc",
@@ -54,7 +54,14 @@ test("detail page renders NO representative-sample disclaimer, even for an uncon
 
 test("removing the disclaimer leaves the surrounding sections intact", () => {
   const html = renderDetail(unconfigured)
-  for (const section of ["About", "Performance", "Transparency", "More Info", "Smart Contracts"]) {
+  for (const section of ["Performance", "Transparency", "Fee structure", "More Info", "Smart Contracts"]) {
     assert.match(html, new RegExp(section), section)
   }
+})
+
+test("an unconfigured vault shows no other fund's About, fees or portfolio", () => {
+  const html = renderDetail(unconfigured)
+  assert.doesNotMatch(html, />About</) // no About copy configured → no About card
+  assert.doesNotMatch(html, />Portfolio</) // no breakdown configured → no Portfolio card
+  assert.doesNotMatch(html, /aCAPIX|Aksia|mTBILL|Midas/)
 })

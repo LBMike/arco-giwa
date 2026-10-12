@@ -70,6 +70,7 @@ export const ISSUERS: Record<string, { label: string; logo: string }> = {
   arco: { label: 'Arco', logo: '/logos/arco.png' },
   digift: { label: 'DigiFT', logo: '/logos/DigFT.png' },
   ubs: { label: 'UBS', logo: '/logos/umint.svg' },
+  nuva: { label: 'NUVA', logo: '/logos/nuva.svg' },
 }
 
 // Per-product token icon. Files that exist map here; the rest fall back to a

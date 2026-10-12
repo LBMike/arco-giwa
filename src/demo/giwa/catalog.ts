@@ -37,6 +37,15 @@ const VAULT_CONFIG_DEFAULTS: GiwaVaultConfig = {
   acceptAssets: null,
 }
 
+// Vaults no longer offered to investors. Their contracts stay live and the admin console still
+// manages them, but the investor app leaves them out everywhere: funds list, home, search, the
+// featured carousel and the product page.
+const RETIRED_PRODUCT_IDS = new Set(["acapix"])
+
+export function isRetiredProduct(product: Pick<GiwaCatalogItem, "productId">): boolean {
+  return RETIRED_PRODUCT_IDS.has(product.productId.toLowerCase())
+}
+
 // Config accessor with defaults for products whose catalog entry has no vaultConfig
 // (older server responses): visible, not pinned, all card views on.
 export function vaultConfigOf(product: Pick<GiwaCatalogItem, "vaultConfig">): GiwaVaultConfig {

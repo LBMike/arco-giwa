@@ -46,11 +46,11 @@ import { GIWA_PREPROD_ROUTE, giwaProductPath } from "./routes"
 import { GiwaProductSearch } from "./GiwaProductSearch"
 import { GiwaHeaderMenu } from "./GiwaHeaderMenu"
 import { BrandMark } from "../components/BrandMark"
-import { DigiFTReferenceRow } from "./DigiFTReferenceRow"
-import { RISK_LABEL, RiskTag, digiftAssetRisk, vaultCategoryRisk, type RiskLevel } from "./RiskTag"
-import type { DigiFTReferenceAsset } from "./digift-reference-assets"
-import { ASSET_MANAGERS, ISSUERS, ISSUER_OPTIONS, aumLabel, apyLabel, productById } from "../data/products"
-import { ACAPIX_INSTANT_FEES } from "../data/acapix-detail"
+import { ListedFundRow, RateCell } from "./ListedFundRow"
+import { RISK_LABEL, RiskTag, vaultCategoryRisk, type RiskLevel } from "./RiskTag"
+import { DEPLOYED_FUND_METRICS, metricCaption, type ListedFund } from "./listed-funds"
+import { CATEGORY_TITLES, categoryTitle } from "./fund-categories"
+import { ASSET_MANAGERS, ISSUERS, aumLabel, apyLabel, productById } from "../data/products"
 import { GiwaMultiSelect } from "./GiwaMultiSelect"
 import {
   AmountBlock,
@@ -109,25 +109,25 @@ const STRATEGIES: Array<{
 }> = [
   {
     category: "U.S Treasuries",
-    title: "U.S. Treasuries",
+    title: CATEGORY_TITLES["U.S Treasuries"],
     bg: "var(--color-strategy-treasuries)",
   },
   {
     category: "Prime Credit",
-    title: "Prime Credit",
+    title: CATEGORY_TITLES["Prime Credit"],
     bg: "var(--color-strategy-credit)",
   },
   {
     // Valid everywhere (admin dropdown, taxonomy) but hidden from the investor Strategies
     // section; operators hide the Arco Saving vaults themselves.
     category: "Arco Saving",
-    title: "Arco Saving",
+    title: CATEGORY_TITLES["Arco Saving"],
     bg: "var(--color-strategy-saving)",
     hidden: true,
   },
   {
     category: "Equity Exposure",
-    title: "Equity Exposure",
+    title: CATEGORY_TITLES["Equity Exposure"],
     bg: "var(--color-strategy-equity)",
   },
 ]
@@ -140,15 +140,8 @@ const INVESTOR_CATEGORIES: GiwaCategory[] = VISIBLE_STRATEGIES.map((strategy) =>
 // Strategies cards are named by risk tier; the sentence says which product types the tier covers.
 const RISK_CARD_BLURB: Record<RiskLevel, string> = {
   low: "U.S. Treasury and cash management funds.",
-  medium: "Prime credit, income strategies and commodities.",
-  high: "Equity exposure and alternative assets.",
-}
-
-// Display label for a taxonomy category, single-sourced from the strategy cards
-// (e.g. canonical "U.S Treasuries" → shown "U.S. Treasuries"). Unknown → as-is.
-const CATEGORY_TITLE = new Map(STRATEGIES.map((strategy) => [strategy.category, strategy.title]))
-function categoryTitle(category: string): string {
-  return CATEGORY_TITLE.get(category as GiwaCategory) ?? category
+  medium: "Investment-grade bonds and private credit.",
+  high: "Equity funds in the U.S., Japan and Taiwan.",
 }
 
 const TOKEN_ICONS: Record<string, string> = {
@@ -292,16 +285,21 @@ export function uniquePaymentAssets(products: GiwaCatalogItem[]) {
   return assets
 }
 
-// DigiFT reference rows under the shared filters. A strategy card selects a risk tier, so a selected
-// category keeps every reference product of the same tier. GIWA-only denomination, issuer and network
-// filters cannot be asserted for reference profiles, so any of them hides the reference rows.
-export function applyReferenceFilters(assets: readonly DigiFTReferenceAsset[], filters: GiwaFilters): DigiFTReferenceAsset[] {
-  const tiers = filters.category.map(vaultCategoryRisk).filter((tier): tier is RiskLevel => tier !== null)
-  return assets.filter((asset) => {
-    if (filters.category.length && !tiers.includes(digiftAssetRisk(asset))) return false
-    if (filters.denomination.length || filters.issuer.length || filters.network.length) return false
+// Listed funds under the shared filters, matched like the deployed vaults: category, USD
+// denomination (USDC base asset), issuer, and network (GIWA, where every catalog row is shown,
+// plus the chains the issuer lists for the token).
+export function applyListedFilters(funds: readonly ListedFund[], filters: GiwaFilters): ListedFund[] {
+  return funds.filter((fund) => {
+    if (filters.category.length && !filters.category.includes(fund.category)) return false
+    if (filters.denomination.length && !filters.denomination.includes("USD")) return false
+    if (filters.issuer.length && !filters.issuer.includes(fund.issuerKey)) return false
+    if (filters.network.length && !listedFundNetworks(fund).some((network) => filters.network.includes(network))) return false
     return true
   })
+}
+
+function listedFundNetworks(fund: ListedFund): string[] {
+  return ["Giwa", ...fund.token.networks]
 }
 
 export function applyGiwaFilters(products: GiwaCatalogItem[], filters: GiwaFilters) {
@@ -696,12 +694,12 @@ export function GiwaFeaturedCarousel({ cards, catalog }: { cards: GiwaFeaturedCa
 
 export function GiwaStrategyCards({
   products,
-  referenceAssets = [],
+  listedFunds = [],
   active,
   onToggle,
 }: {
   products: GiwaCatalogItem[]
-  referenceAssets?: readonly DigiFTReferenceAsset[]
+  listedFunds?: readonly ListedFund[]
   active: GiwaCategory[]
   onToggle: (category: GiwaCategory) => void
 }) {
@@ -715,7 +713,7 @@ export function GiwaStrategyCards({
           if (!risk) return null
           const count =
             products.filter((product) => productCategory(product) === strategy.category).length +
-            referenceAssets.filter((asset) => digiftAssetRisk(asset) === risk).length
+            listedFunds.filter((fund) => fund.category === strategy.category).length
           return (
             <button
               key={strategy.category}
@@ -761,27 +759,33 @@ const NETWORK_LOGOS: Record<string, string> = {
 // so every option actually filters and no row is left unfilterable. Issuer rows carry a logo.
 export function GiwaFilterBar({
   products,
+  listedFunds = [],
   filters,
   onChange,
 }: {
   products: GiwaCatalogItem[]
+  listedFunds?: readonly ListedFund[]
   filters: GiwaFilters
   onChange: (patch: Partial<GiwaFilters>) => void
 }) {
-  const categoryPresent = new Set(products.map(productCategory))
-  const denomPresent = new Set(products.map(denominationOf))
-  const issuerPresent = new Set(products.map((product) => legacyProfile(product).issuer).filter(Boolean) as string[])
-  const networkPresent = new Set(products.flatMap(networksOf))
+  const categoryPresent = new Set<string>([...products.map(productCategory), ...listedFunds.map((fund) => fund.category)])
+  const denomPresent = new Set([...products.map(denominationOf), ...(listedFunds.length > 0 ? ["USD"] : [])])
+  const issuerPresent = new Set([
+    ...(products.map((product) => legacyProfile(product).issuer).filter(Boolean) as string[]),
+    ...listedFunds.map((fund) => fund.issuerKey),
+  ])
+  const networkPresent = new Set([...products.flatMap(networksOf), ...listedFunds.flatMap(listedFundNetworks)])
 
   // Investor-visible categories only (Arco Saving excluded, matching the hidden Strategies card),
-  // and only those actually present in the visible vaults — so no empty/unfilterable option.
-  const categoryOptions = INVESTOR_CATEGORIES.filter((category) => categoryPresent.has(category)).map((category) => ({ value: category, label: category }))
-  const denominationOptions = GIWA_DENOMINATIONS.filter((denom) => denomPresent.has(denom)).map((denom) => ({ value: denom, label: denom }))
-  const issuerOptions = ISSUER_OPTIONS.filter((issuer) => issuerPresent.has(issuer.key)).map((issuer) => ({
-    value: issuer.key,
-    label: issuer.label,
-    icon: ISSUERS[issuer.key]?.logo,
+  // and only those present in the visible vaults or listed funds — so no empty/unfilterable option.
+  const categoryOptions = INVESTOR_CATEGORIES.filter((category) => categoryPresent.has(category)).map((category) => ({
+    value: category,
+    label: categoryTitle(category),
   }))
+  const denominationOptions = GIWA_DENOMINATIONS.filter((denom) => denomPresent.has(denom)).map((denom) => ({ value: denom, label: denom }))
+  const issuerOptions = Object.keys(ISSUERS)
+    .filter((key) => issuerPresent.has(key))
+    .map((key) => ({ value: key, label: ISSUERS[key].label, icon: ISSUERS[key].logo }))
   const networkOptions = NETWORK_ORDER.filter((network) => networkPresent.has(network)).map((network) => ({ value: network, label: network, icon: NETWORK_LOGOS[network] }))
 
   return (
@@ -1003,9 +1007,13 @@ function legacyProfile(product: GiwaCatalogItem): {
   return { assetManager: arcoSaving ? "arco" : null, issuer: arcoSaving ? "arco" : null, aum: null, apy: null }
 }
 
+type CatalogEntry =
+  | { kind: "deployed"; key: string; pinned: boolean; symbol: string; aum: number | null; rate: number | null; product: GiwaCatalogItem }
+  | { kind: "listed"; key: string; pinned: boolean; symbol: string; aum: number | null; rate: number | null; fund: ListedFund }
+
 export function GiwaCatalogTable({
   rows,
-  referenceRows = [],
+  listedRows = [],
   selectedProductId,
   sortKey,
   sortDir,
@@ -1015,7 +1023,7 @@ export function GiwaCatalogTable({
   impliedApyByProductId,
 }: {
   rows: GiwaCatalogItem[]
-  referenceRows?: readonly DigiFTReferenceAsset[]
+  listedRows?: readonly ListedFund[]
   selectedProductId: string
   sortKey: "aum" | "apy"
   sortDir: "asc" | "desc"
@@ -1024,22 +1032,43 @@ export function GiwaCatalogTable({
   apyByProductId?: Record<string, number | null>
   impliedApyByProductId?: Record<string, number | null>
 }) {
-  const sorted = useMemo(() => {
-    // Config-first numeric AUM (matches the displayed value), and the resolved list APY;
-    // null/"—" always sorts last (compareNullLast), in both directions.
+  const entries = useMemo(() => {
+    // Deployed vaults and listed funds sort together. Config-first numeric AUM (matches the
+    // displayed value) and the resolved headline rate; null/"—" always sorts last
+    // (compareNullLast), in both directions.
     const aumKey = (p: GiwaCatalogItem) => parseAumToNumber(vaultConfigOf(p).aum) ?? legacyProfile(p).aum ?? null
-    const apyKey = (p: GiwaCatalogItem) => {
+    const rateKey = (p: GiwaCatalogItem) => {
       const id = p.productId.toLowerCase()
-      return apyByProductId?.[id] ?? legacyProfile(p).apy ?? impliedApyByProductId?.[id] ?? null
+      return apyByProductId?.[id] ?? DEPLOYED_FUND_METRICS[id]?.rate ?? legacyProfile(p).apy ?? impliedApyByProductId?.[id] ?? null
     }
-    const key = sortKey === "aum" ? aumKey : apyKey
-    return [...rows].sort((a, b) => {
+    const all: CatalogEntry[] = [
+      ...rows.map((product): CatalogEntry => ({
+        kind: "deployed",
+        key: product.productId,
+        pinned: vaultConfigOf(product).pinned,
+        symbol: product.symbol,
+        aum: aumKey(product),
+        rate: rateKey(product),
+        product,
+      })),
+      ...listedRows.map((fund): CatalogEntry => ({
+        kind: "listed",
+        key: fund.id,
+        pinned: false,
+        symbol: fund.symbol,
+        aum: fund.aum.usd,
+        rate: fund.rate,
+        fund,
+      })),
+    ]
+    return all.sort((a, b) => {
       // Operator-pinned vaults stay on top regardless of the sort.
-      const pinned = Number(vaultConfigOf(b).pinned) - Number(vaultConfigOf(a).pinned)
+      const pinned = Number(b.pinned) - Number(a.pinned)
       if (pinned !== 0) return pinned
-      return compareNullLast(key(a), key(b), sortDir) || a.symbol.localeCompare(b.symbol)
+      const byKey = sortKey === "aum" ? compareNullLast(a.aum, b.aum, sortDir) : compareNullLast(a.rate, b.rate, sortDir)
+      return byKey || a.symbol.localeCompare(b.symbol)
     })
-  }, [rows, sortKey, sortDir, apyByProductId, impliedApyByProductId])
+  }, [rows, listedRows, sortKey, sortDir, apyByProductId, impliedApyByProductId])
 
   return (
     <div
@@ -1070,30 +1099,31 @@ export function GiwaCatalogTable({
         <span className={`${CATALOG_HEAD} text-center`}>Network</span>
       </div>
 
-      {sorted.length === 0 && referenceRows.length === 0 ? (
+      {entries.length === 0 ? (
         <div className="flex min-w-[1000px] flex-col items-center gap-3 border-b border-[var(--color-arco-border)] px-6 py-14 text-center">
           <p className="text-sm text-[var(--color-arco-muted)]">No products match your filters.</p>
         </div>
       ) : (
         <div className="flex min-w-[1000px] flex-col">
-          {sorted.map((product) => (
-            <GiwaCatalogRow
-              key={product.productId}
-              product={product}
-              apy={apyByProductId?.[product.productId.toLowerCase()] ?? null}
-              impliedApy={impliedApyByProductId?.[product.productId.toLowerCase()] ?? null}
-              selected={product.productId === selectedProductId}
-              onSelect={() => onSelect(product.productId)}
-            />
-          ))}
-          {referenceRows.map((asset) => (
-            <DigiFTReferenceRow
-              key={asset.id}
-              asset={asset}
-              gridColumnsClassName={CATALOG_COLS}
-              onSelect={() => onSelect(asset.id)}
-            />
-          ))}
+          {entries.map((entry) =>
+            entry.kind === "deployed" ? (
+              <GiwaCatalogRow
+                key={entry.key}
+                product={entry.product}
+                apy={apyByProductId?.[entry.product.productId.toLowerCase()] ?? null}
+                impliedApy={impliedApyByProductId?.[entry.product.productId.toLowerCase()] ?? null}
+                selected={entry.product.productId === selectedProductId}
+                onSelect={() => onSelect(entry.product.productId)}
+              />
+            ) : (
+              <ListedFundRow
+                key={entry.key}
+                fund={entry.fund}
+                gridColumnsClassName={CATALOG_COLS}
+                onSelect={() => onSelect(entry.fund.id)}
+              />
+            ),
+          )}
         </div>
       )}
     </div>
@@ -1136,16 +1166,19 @@ function GiwaCatalogRow({
   const issuerLabel = config.issuerName ?? iss?.label ?? null
   const issuerLogo = config.issuerImageUrl ?? iss?.logo
   const baseSymbol = baseAssetSymbol(product.paymentAssetSymbol)
-  // Published rate wins, then the legacy profile (built-ins stay byte-identical); implied
-  // APY only fills the gap for vaults with neither (e.g. newly-registered ones).
-  const apyText =
+  // Published rate wins, then the fund deck's latest figure (labelled and dated), then the legacy
+  // profile; implied APY only fills the gap for vaults with none of these (e.g. newly-registered ones).
+  const deck = DEPLOYED_FUND_METRICS[product.productId.toLowerCase()]
+  const rate: { value: string; caption: string | null } =
     apy != null
-      ? apyLabel(apy)
-      : profile.apy != null
-        ? apyLabel(profile.apy)
-        : impliedApy != null
-          ? apyLabel(impliedApy)
-          : "—"
+      ? { value: apyLabel(apy), caption: null }
+      : deck
+        ? { value: deck.metric.value, caption: metricCaption(deck.metric) }
+        : profile.apy != null
+          ? { value: apyLabel(profile.apy), caption: null }
+          : impliedApy != null
+            ? { value: apyLabel(impliedApy), caption: null }
+            : { value: "—", caption: null }
   // Config-first (matches the detail AUM stat): admin free-text AUM → legacy numeric → —.
   const aumText = config.aum ?? (profile.aum != null ? aumLabel(profile.aum) : "—")
 
@@ -1204,7 +1237,7 @@ function GiwaCatalogRow({
       </div>
 
       <div className="relative z-10 text-center tabular-nums text-sm text-[var(--color-arco-ink)]">{aumText}</div>
-      <div className="relative z-10 text-center tabular-nums text-sm text-[var(--color-arco-ink)]">{apyText}</div>
+      <RateCell value={rate.value} caption={rate.caption} />
       <div className="relative z-10 flex justify-center">
         <GiwaNetworkIcon size={20} />
       </div>
@@ -1212,17 +1245,12 @@ function GiwaCatalogRow({
   )
 }
 
-// Expandable Transaction Fees content (Instant Fees). Config-first per fee: a set bps
-// overrides the aCAPIX fallback; each is formatted with the shared percent rule.
+// Expandable Transaction Fees content (Instant Fees). Config-first per fee, formatted with the
+// shared percent rule; a fee the vault has not set shows "—".
 function GiwaFeeBreakdown({ mintingBps, redemptionBps }: { mintingBps: number | null; redemptionBps: number | null }) {
-  const fallbackMinting = ACAPIX_INSTANT_FEES.find((fee) => /mint/i.test(fee.label))?.pct ?? 0
-  const fallbackRedemption = ACAPIX_INSTANT_FEES.find((fee) => /redem/i.test(fee.label))?.pct ?? 0
   const rows = [
-    { label: "Instant Minting", value: mintingBps != null ? formatPercentFromBps(mintingBps) : apyLabel(fallbackMinting) },
-    {
-      label: "Instant Redemption",
-      value: redemptionBps != null ? formatPercentFromBps(redemptionBps) : apyLabel(fallbackRedemption),
-    },
+    { label: "Instant Minting", value: mintingBps != null ? formatPercentFromBps(mintingBps) : "—" },
+    { label: "Instant Redemption", value: redemptionBps != null ? formatPercentFromBps(redemptionBps) : "—" },
   ]
   return (
     <div>

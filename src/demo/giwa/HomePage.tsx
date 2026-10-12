@@ -7,6 +7,8 @@ import { vaultDisplayName, vaultImageFor } from "./catalog"
 import { apyLabel, productById } from "../data/products"
 import { GIWA_CHAIN_ID, GIWA_LIVE_REFETCH } from "./config"
 import { countLabel, fundsProductsOf, homeSavingsSummary } from "./home"
+import { FundMark } from "./FundMark"
+import { DEPLOYED_FUND_METRICS, listedFundsForCatalog } from "./listed-funds"
 import { GIWA_FUNDS_ROUTE, GIWA_SAVINGS_ROUTE } from "./routes"
 import { BrandMark } from "../components/BrandMark"
 import { StocksHomeList } from "./stocks-market/StocksHomeList"
@@ -25,6 +27,8 @@ export default function GiwaHomePage() {
     ...GIWA_LIVE_REFETCH,
   })
   const funds = useMemo(() => fundsProductsOf(catalogQuery.data ?? []), [catalogQuery.data])
+  // The funds Arco distributes that are not deployed yet; the Funds page lists them too.
+  const listedFunds = useMemo(() => listedFundsForCatalog(funds.map((product) => product.symbol)), [funds])
   const savings = useMemo(
     () => homeSavingsSummary(catalogQuery.data ?? [], marketQuery.data ?? []),
     [catalogQuery.data, marketQuery.data],
@@ -33,9 +37,12 @@ export default function GiwaHomePage() {
     const market = new Map((marketQuery.data ?? []).map(entry => [entry.productId.toLowerCase(), entry]))
     return new Map(funds.map(product => {
       const entry = market.get(product.productId.toLowerCase())
-      // Same precedence as the Funds table: published, legacy, then implied APY.
+      // Same precedence as the Funds table: published, the fund deck's rate (named by its own
+      // label), legacy, then implied APY.
+      const deck = entry?.apy == null ? DEPLOYED_FUND_METRICS[product.productId.toLowerCase()] : undefined
+      if (deck) return [product.productId, { value: deck.metric.value, label: deck.metric.label }]
       const rate = entry?.apy ?? productById(product.productId)?.apy ?? entry?.impliedApy ?? null
-      return [product.productId, rate == null ? "—" : apyLabel(rate)]
+      return [product.productId, { value: rate == null ? "—" : apyLabel(rate), label: "APY" }]
     }))
   }, [funds, marketQuery.data])
   // Counts remain available while the market query loads; unknown rates stay empty.
@@ -62,19 +69,39 @@ export default function GiwaHomePage() {
             {!status && savings.accounts.length > 0 && (
               <ul className="mt-3 flex flex-wrap gap-2">
                 {savings.accounts.map((account) => (
-                  <HomeProductChip key={account.key} name={account.symbol} image={account.icon ?? undefined} apy={account.apy} />
+                  <HomeProductChip
+                    key={account.key}
+                    name={account.symbol}
+                    icon={<BrandMark src={account.icon ?? undefined} label={account.symbol} size={20} />}
+                    apy={account.apy}
+                  />
                 ))}
               </ul>
             )}
           </HomeCard>
           <HomeCard to={GIWA_FUNDS_ROUTE} title="Funds" cta="Browse funds">
             <p className="text-sm text-[var(--color-arco-text-soft)]">
-              {status ?? countLabel(funds.length, "product", "products")}
+              {status ?? countLabel(funds.length + listedFunds.length, "product", "products")}
             </p>
-            {!status && funds.length > 0 && (
+            {!status && funds.length + listedFunds.length > 0 && (
               <ul className="mt-3 flex flex-wrap gap-2">
                 {funds.map(product => (
-                  <HomeProductChip key={product.productId} name={vaultDisplayName(product)} image={vaultImageFor(product)} apy={fundRates.get(product.productId) ?? "—"} />
+                  <HomeProductChip
+                    key={product.productId}
+                    name={vaultDisplayName(product)}
+                    icon={<BrandMark src={vaultImageFor(product)} label={vaultDisplayName(product)} size={20} />}
+                    apy={fundRates.get(product.productId)?.value ?? "—"}
+                    rateLabel={fundRates.get(product.productId)?.label}
+                  />
+                ))}
+                {listedFunds.map(fund => (
+                  <HomeProductChip
+                    key={fund.id}
+                    name={fund.symbol}
+                    icon={<FundMark fund={fund} size={20} />}
+                    apy={fund.metric.value}
+                    rateLabel={fund.metric.label}
+                  />
                 ))}
               </ul>
             )}
@@ -100,12 +127,12 @@ function HomeCard({ to, title, cta, children }: { to: string; title: string; cta
   )
 }
 
-function HomeProductChip({ name, image, apy }: { name: string; image?: string; apy: string }) {
+function HomeProductChip({ name, icon, apy, rateLabel = "APY" }: { name: string; icon: ReactNode; apy: string; rateLabel?: string }) {
   return <li className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-[var(--color-arco-chip)] py-1 pl-1 pr-2.5 text-xs text-[var(--color-arco-chip-ink)]">
-    <span aria-hidden="true" className="inline-flex shrink-0"><BrandMark src={image} label={name} size={20} /></span>
+    <span aria-hidden="true" className="inline-flex shrink-0">{icon}</span>
     <span className="min-w-0 break-words">{name}</span>
     <span className={`shrink-0 font-medium tabular-nums ${apy === "—" ? "text-[var(--color-arco-text-soft)]" : "text-[var(--color-arco-up-text)]"}`}>
-      {apy}<span className="sr-only"> APY</span>
+      {apy}<span className="sr-only"> {rateLabel}</span>
     </span>
   </li>
 }

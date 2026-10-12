@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { GiwaStrategyCards, GIWA_EMPTY_FILTERS } from "./components"
 import { vaultConfigOf } from "./catalog"
 import { VAULT_CATEGORIES } from "../../../shared/vault-taxonomy"
-import { DIGIFT_REFERENCE_ASSETS } from "./digift-reference-assets"
+import { LISTED_FUNDS } from "./listed-funds"
 import type { GiwaCatalogItem, GiwaVaultConfig } from "./types"
 
 // Taxonomy: "Equity Exposure" is a 4th valid category. The investor Strategies section HIDES the
@@ -36,8 +36,8 @@ test("Strategies section shows the three risk cards and HIDES Arco Saving", () =
     ">Medium Risk<",
     ">High Risk<",
     "U.S. Treasury and cash management funds.",
-    "Prime credit, income strategies and commodities.",
-    "Equity exposure and alternative assets.",
+    "Investment-grade bonds and private credit.",
+    "Equity funds in the U.S., Japan and Taiwan.",
   ]) {
     assert.ok(html.includes(text), text)
   }
@@ -48,23 +48,22 @@ test("Strategies section shows the three risk cards and HIDES Arco Saving", () =
   assert.doesNotMatch(html, /Arco Saving/)
 })
 
-test("risk cards read Low, Medium, High left to right and count DigiFT products of the same tier", () => {
+test("risk cards read Low, Medium, High left to right and count the listed funds of the same category", () => {
   const products = [
     vault("umint", "auMINT", "U.S Treasuries"),
     vault("ibenji", "aiBENJI", "U.S Treasuries"),
-    vault("acapix", "aCAPIX", "Prime Credit"),
     vault("beqty", "bEQTY", "Equity Exposure"),
   ]
   const html = renderToStaticMarkup(
-    <GiwaStrategyCards products={products} referenceAssets={DIGIFT_REFERENCE_ASSETS} active={[]} onToggle={() => undefined} />,
+    <GiwaStrategyCards products={products} listedFunds={LISTED_FUNDS} active={[]} onToggle={() => undefined} />,
   )
   const low = html.indexOf(">Low Risk<")
   const medium = html.indexOf(">Medium Risk<")
   const high = html.indexOf(">High Risk<")
   assert.ok(low >= 0 && medium > low && high > medium, "Low → Medium → High")
-  // 2 GIWA + CMBMINT, ULTRA, TKStable | aCAPIX + CMBBOND, GOLDX (Commodity) | bEQTY + JX, kTW50
-  assert.ok(html.slice(low, medium).includes(">5 Products<"), "Low Risk counts 5")
-  assert.ok(html.slice(medium, high).includes(">3 Products<"), "Medium Risk counts 3")
+  // auMINT, aiBENJI + RRDY | CMBBOND, HOME | bEQTY + JX, kTW50
+  assert.ok(html.slice(low, medium).includes(">3 Products<"), "Low Risk counts 3")
+  assert.ok(html.slice(medium, high).includes(">2 Products<"), "Medium Risk counts 2")
   assert.ok(html.slice(high).includes(">3 Products<"), "High Risk counts 3")
   assert.doesNotMatch(html, /Strategies ·|High Yield|Equity Income/)
 })

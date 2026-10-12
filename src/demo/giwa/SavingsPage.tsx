@@ -121,6 +121,7 @@ function SavingsDetail({ vault, acceptAssetIcon }: { vault: GiwaCatalogItem; acc
         enabledViews={detail.portfolioViews}
         aum={parseAumToNumber(detail.cfg.aum)}
         fee={detail.feeForCard}
+        feeHref={detail.feeHref}
         stacked
       />
       <MoreInfoSection addresses={detail.addresses} docLinks={detail.docLinks} hasDocs={detail.hasDocs} stacked />

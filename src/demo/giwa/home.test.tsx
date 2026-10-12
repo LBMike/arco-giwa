@@ -34,7 +34,7 @@ function accept(symbol: string, savingVaultId: string | null, isDummy: boolean):
 }
 
 const catalog: GiwaCatalogItem[] = [
-  vault("acapix", "aCAPIX", { kind: "product" }),
+  vault("acapix", "aCAPIX", { kind: "product" }), // retired: contracts stay, no longer offered
   vault("hiddenfund", "HIDDEN", { kind: "product", hidden: true }),
   vault("arcousd", "arcoUSD", {
     kind: "saving",
@@ -47,10 +47,10 @@ const market: GiwaMarketEntry[] = [
   { productId: "arcousd", navBase: null, baseUsd: null, navUsd: null, apy: 4.2, impliedApy: null },
 ]
 
-test("fundsProductsOf keeps the Funds page predicate: no hidden, no saving vaults", () => {
+test("fundsProductsOf keeps the Funds page predicate: no hidden, saving or retired vaults", () => {
   assert.deepEqual(
     fundsProductsOf(catalog).map((product) => product.productId),
-    ["acapix", "legacy"],
+    ["legacy"],
   )
   assert.deepEqual(fundsProductsOf([]), [])
 })
@@ -97,11 +97,15 @@ test("Home renders one h1, Savings/Funds cards with data counts, and the Stocks 
   assert.equal(linkText(html, "/savings"), "Savings 2 savings accounts · 1 coming soon ETH — APY USDC 4.2% APY Open Savings")
   // Brand marks are decorative next to the symbol text.
   assert.match(html, /<span aria-hidden="true"[^>]*><img src="\/logos\/usdc.png"/)
-  assert.equal(linkText(html, "/funds"), "Funds 2 products aCAPIX 10.53% APY L LEGACY — APY Browse funds")
+  // The deployed vaults first, then the listed funds with their own headline rate (sr-only label).
+  assert.equal(
+    linkText(html, "/funds"),
+    "Funds 6 products L LEGACY — APY RRDY 3.66% 7-day yield CMBBOND 5.97% Yield to maturity HOME 7% Target APY JX 39.66% 12-month return kTW50 55.72% 6-month return Browse funds",
+  )
   assert.equal(linkText(html, "/stocks"), "View all stocks")
   const invest = html.slice(html.indexOf('aria-labelledby="home-invest"'), html.indexOf('aria-labelledby="home-stocks"'))
   assert.match(invest, /text-\[var\(--color-arco-up-text\)\]/)
-  assert.doesNotMatch(invest, /HIDDEN|RLUSD/)
+  assert.doesNotMatch(invest, /HIDDEN|RLUSD|aCAPIX/)
 })
 
 test("Home shows Loading… before the catalog arrives and Registry unavailable on a catalog error", () => {
@@ -122,16 +126,27 @@ test("Home shows Loading… before the catalog arrives and Registry unavailable 
 
 test("Home fund chips use configured identities and published, legacy, implied rates including zero", () => {
   const products = [
-    vault("acapix", "aCAPIX", { kind: "product", displayName: "Credit Fund", vaultImageUrl: "/logos/credit.svg" }),
+    vault("credit", "cFUND", { kind: "product", displayName: "Credit Fund", vaultImageUrl: "/logos/credit.svg" }),
     vault("newfund", "New Fund", { kind: "product" }),
   ]
   const html = renderHome(client => {
     client.setQueryData(["giwa", "catalog"], products)
     client.setQueryData(["giwa", "market", GIWA_CHAIN_ID], [
-      { productId: "ACAPIX", apy: 0, impliedApy: 99 },
+      { productId: "CREDIT", apy: 0, impliedApy: 99 },
       { productId: "newfund", apy: null, impliedApy: 3.456 },
     ])
   })
-  assert.equal(linkText(html, "/funds"), "Funds 2 products Credit Fund 0% APY N New Fund 3.46% APY Browse funds")
+  assert.equal(
+    linkText(html, "/funds"),
+    "Funds 7 products Credit Fund 0% APY N New Fund 3.46% APY RRDY 3.66% 7-day yield CMBBOND 5.97% Yield to maturity HOME 7% Target APY JX 39.66% 12-month return kTW50 55.72% 6-month return Browse funds",
+  )
   assert.match(html, /src="\/logos\/credit.svg"/)
+})
+
+test("a deployed fund chip names the fund deck's rate when no rate is published", () => {
+  const html = renderHome(client => {
+    client.setQueryData(["giwa", "catalog"], [vault("umint", "auMINT", { kind: "product" })])
+    client.setQueryData(["giwa", "market", GIWA_CHAIN_ID], [{ productId: "umint", apy: null, impliedApy: 3.49 }])
+  })
+  assert.match(linkText(html, "/funds"), /^Funds 6 products (\S )?auMINT 3\.55% 7-day yield RRDY 3\.66% 7-day yield /)
 })

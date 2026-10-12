@@ -9,8 +9,10 @@ test("preview uses the unmodified deployed catalog, market, cards and each captu
   assert.deepEqual(deployedLegacyReply("GET", "/api/v1/evm/catalog/91342")?.body, snapshot.catalog)
   assert.deepEqual(deployedLegacyReply("GET", "/api/v1/evm/market/91342")?.body, snapshot.market)
   assert.deepEqual(deployedLegacyReply("GET", "/api/v1/evm/featured/91342")?.body, snapshot.featured)
+  // aCAPIX stays in the deployed catalog (its contracts are live) but is retired from the Funds list.
+  assert.ok(snapshot.catalog.some(p => p.productId === "acapix"))
   const funds = fundsProductsOf(normalizeCatalog(snapshot.catalog))
-  assert.deepEqual(funds.map(p => p.productId).sort(), ["acapix", "beqty", "ibenji", "umint"])
+  assert.deepEqual(funds.map(p => p.productId).sort(), ["beqty", "ibenji", "umint"])
   assert.ok(funds.every(p => !p.productId.startsWith("preview-")))
   for (const [id, body] of Object.entries(snapshot.history)) {
     assert.deepEqual(deployedLegacyReply("GET", `/api/v1/evm/market/91342/${id}/history`)?.body, body)

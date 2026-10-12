@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom"
 import { ArrowLeft } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { giwaApi } from "./api"
-import { vaultDisplayName } from "./catalog"
+import { isRetiredProduct, vaultDisplayName } from "./catalog"
 import { parseAumToNumber } from "./display-profile"
 import { GiwaInvestPanel, GiwaNetworkIcon } from "./components"
 import { GiwaInvestDock } from "./GiwaInvestDock"
@@ -16,20 +16,21 @@ import { BrandMark } from "../components/BrandMark"
 import { SectionNav } from "../components/SectionNav"
 import { MetricCard } from "../components/MetricCard"
 import { AboutCard } from "../components/AboutCard"
-import { digiftReferenceAssetById } from "./digift-reference-assets"
-import { DigiFTReferenceDetail } from "./DigiFTReferenceDetail"
+import { listedFundById } from "./listed-funds"
+import { ListedFundDetail } from "./ListedFundDetail"
 
 export default function GiwaProductDetailPage() {
   const { id } = useParams()
-  const referenceAsset = id ? digiftReferenceAssetById(id) : undefined
-  if (referenceAsset) return <DigiFTReferenceDetail asset={referenceAsset} />
+  const listedFund = id ? listedFundById(id) : undefined
+  if (listedFund) return <ListedFundDetail fund={listedFund} />
   return <DeployedProductDetailPage id={id} />
 }
 
 function DeployedProductDetailPage({ id }: { id: string | undefined }) {
   const catalogQuery = useQuery({ queryKey: ["giwa", "catalog"], queryFn: giwaApi.catalog })
   const products = catalogQuery.data ?? []
-  const product = products.find((candidate) => candidate.productId === id)
+  // A retired vault keeps its contracts but is no longer offered, so its page reads as not found.
+  const product = products.find((candidate) => candidate.productId === id && !isRetiredProduct(candidate))
 
   if (catalogQuery.isLoading) return <CenteredNote>Loading product…</CenteredNote>
   if (!product) {
@@ -87,13 +88,13 @@ export function ProductDetailView({ product }: { product: GiwaCatalogItem }) {
           <section id="overview" className="scroll-mt-[140px] space-y-5">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <MetricCard label="AUM" value={detail.cfg.aum ?? "—"} />
-              <MetricCard label="APY" value={detail.apyText} />
+              <MetricCard label={detail.rateCard.label} value={detail.rateCard.value} sub={detail.rateCard.sub} />
               <MetricCard label="Price" value={detail.priceText} sub="NAV / share (USD)" />
               <MetricCard label="Network">
                 <GiwaNetworkIcon size={22} />
               </MetricCard>
             </div>
-            <AboutCard paragraphs={detail.aboutParagraphs} />
+            {detail.aboutParagraphs.length > 0 && <AboutCard paragraphs={detail.aboutParagraphs} />}
           </section>
 
           <PerformanceSection market={detail.market} history={detail.history} isBuiltIn={detail.isBuiltIn} />
@@ -103,6 +104,7 @@ export function ProductDetailView({ product }: { product: GiwaCatalogItem }) {
             enabledViews={detail.portfolioViews}
             aum={parseAumToNumber(detail.cfg.aum)}
             fee={detail.feeForCard}
+            feeHref={detail.feeHref}
           />
 
           <MoreInfoSection addresses={detail.addresses} docLinks={detail.docLinks} hasDocs={detail.hasDocs} />

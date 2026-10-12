@@ -130,8 +130,8 @@ test("catalog rendering is registry-driven and shows one payment asset per produ
 })
 
 test("vault-list APY: implied APY fills the gap for registered vaults; built-ins keep their static/legacy rate", () => {
-  // A newly-registered vault (not one of the six built-ins) has no static/legacy APY.
-  const registered = { ...product, productId: "beqty", symbol: "bEQTY" }
+  // A newly-registered vault (not a built-in, no fund-deck rate) has no static/legacy APY.
+  const registered = { ...product, productId: "newvault", symbol: "nVAULT" }
   const renderTable = (
     rows: GiwaCatalogItem[],
     apyByProductId: Record<string, number | null>,
@@ -150,11 +150,11 @@ test("vault-list APY: implied APY fills the gap for registered vaults; built-ins
     )
 
   // ≥2 posts → implied APY (2%) shows for the registered vault.
-  const withImplied = renderTable([registered], {}, { beqty: 2 })
+  const withImplied = renderTable([registered], {}, { newvault: 2 })
   assert.match(withImplied, /2%/)
 
   // <2 posts (implied null, no static, no legacy) → "—", never a fabricated APY.
-  const noImplied = renderTable([registered], {}, { beqty: null })
+  const noImplied = renderTable([registered], {}, { newvault: null })
   assert.match(noImplied, /—/)
   assert.doesNotMatch(noImplied, /\d+%/)
 
@@ -183,9 +183,10 @@ test("vault-list row is config-first: registered vault shows configured image/ca
       <GiwaCatalogTable rows={rows} selectedProductId="" sortKey="aum" sortDir="desc" onSelect={() => undefined} />,
     )
 
-  // Registered vault → configured identity, not the legacy "Money Market Fund" fallback.
+  // Registered vault → configured identity, not the legacy "Money Market Fund" fallback. The
+  // category shows under its investor title (Prime Credit → Income Strategies).
   const configured = renderRow([registered])
-  assert.match(configured, /Prime Credit/)
+  assert.match(configured, /Income Strategies/)
   assert.doesNotMatch(configured, /Money Market Fund/)
   assert.match(configured, /Acme Capital/)
   assert.match(configured, /Acme Trust/)
@@ -197,7 +198,7 @@ test("vault-list row is config-first: registered vault shows configured image/ca
   // Built-in (aCAPIX, null config) → legacy values, byte-identical.
   const builtin = renderRow([product])
   assert.match(builtin, /Private Credit/) // legacy fund type (productType), not a taxonomy category
-  assert.doesNotMatch(builtin, /Prime Credit/)
+  assert.doesNotMatch(builtin, /Prime Credit|Income Strategies/)
   assert.match(builtin, /Aksia/) // legacy asset manager
   assert.match(builtin, /Arco/) // legacy issuer
   assert.match(builtin, /\$1\.15B/) // legacy numeric AUM (aumLabel), unchanged

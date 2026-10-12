@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import { AlertCircle } from "lucide-react"
 import { giwaApi } from "./api"
-import { vaultConfigOf } from "./catalog"
 import { GIWA_CHAIN_ID, GIWA_LIVE_REFETCH } from "./config"
 import {
   GIWA_EMPTY_FILTERS,
@@ -12,14 +11,15 @@ import {
   GiwaFilterBar,
   GiwaStrategyCards,
   applyGiwaFilters,
-  applyReferenceFilters,
+  applyListedFilters,
   type GiwaCategory,
   type GiwaFilters,
 } from "./components"
 import { giwaProductPath } from "./routes"
 import { nextSort } from "./sort"
 import { ProductsSkeleton } from "./GiwaSkeleton"
-import { referenceAssetsForList } from "./digift-reference-assets"
+import { fundsProductsOf } from "./home"
+import { listedFundsForCatalog } from "./listed-funds"
 
 export default function GiwaInvestorPage() {
   const navigate = useNavigate()
@@ -37,18 +37,14 @@ export default function GiwaInvestorPage() {
 
   // `hidden` is investor-UI declutter (keep WIP vaults out of the public list), NOT an
   // access-control boundary — the catalog endpoint still returns hidden vaults and the
-  // admin Vault Config page shows them.
-  // Excludes hidden vaults (investor declutter) AND saving vaults (kind="saving" → they live on
-  // the Savings page only, never in Products).
-  const products = useMemo(
-    () => (catalogQuery.data ?? []).filter((product) => !vaultConfigOf(product).hidden && vaultConfigOf(product).kind !== "saving"),
-    [catalogQuery.data],
-  )
+  // admin Vault Config page shows them. Excludes hidden vaults, saving vaults (kind="saving" →
+  // the Savings page only) and retired vaults (no longer offered).
+  const products = useMemo(() => fundsProductsOf(catalogQuery.data ?? []), [catalogQuery.data])
   const filteredProducts = useMemo(() => applyGiwaFilters(products, filters), [filters, products])
-  // Every DigiFT reference product not already deployed: the risk cards count these per tier.
-  const referenceAssets = useMemo(() => referenceAssetsForList(products.map((product) => product.symbol)), [products])
-  const referenceRows = useMemo(
-    () => applyReferenceFilters(referenceAssetsForList(products.map((product) => product.symbol), filters.search), filters),
+  // The funds Arco distributes that are not deployed yet: same cards, filters and table as the vaults.
+  const listedFunds = useMemo(() => listedFundsForCatalog(products.map((product) => product.symbol)), [products])
+  const listedRows = useMemo(
+    () => applyListedFilters(listedFundsForCatalog(products.map((product) => product.symbol), filters.search), filters),
     [products, filters],
   )
   // Real market APY per product (e.g. aCAPIX 11.58%); null for products without a published rate,
@@ -90,17 +86,17 @@ export default function GiwaInvestorPage() {
       </section>
 
       <GiwaFeaturedCarousel cards={featuredQuery.data ?? []} catalog={products} />
-      <GiwaStrategyCards products={products} referenceAssets={referenceAssets} active={filters.category} onToggle={toggleCategory} />
+      <GiwaStrategyCards products={products} listedFunds={listedFunds} active={filters.category} onToggle={toggleCategory} />
 
       {catalogQuery.isError && <ErrorBox title="Registry unavailable" message={catalogQuery.error.message} />}
 
       <section className="space-y-4">
         <h2 className="pl-1 text-lg font-medium text-[var(--color-arco-ink)]">All Funds</h2>
-        <GiwaFilterBar products={products} filters={filters} onChange={patchFilters} />
+        <GiwaFilterBar products={products} listedFunds={listedFunds} filters={filters} onChange={patchFilters} />
         <div className="pt-2">
           <GiwaCatalogTable
             rows={filteredProducts}
-            referenceRows={referenceRows}
+            listedRows={listedRows}
             selectedProductId=""
             sortKey={sort.key}
             sortDir={sort.dir}

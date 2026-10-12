@@ -1,53 +1,54 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
-import { GIWA_EMPTY_FILTERS, GiwaCatalogTable, applyReferenceFilters, type GiwaCategory } from "./components"
-import { DIGIFT_REFERENCE_ASSETS } from "./digift-reference-assets"
+import { GIWA_EMPTY_FILTERS, GiwaCatalogTable, applyListedFilters, type GiwaCategory, type GiwaFilters } from "./components"
+import { fundsProductsOf } from "./home"
+import { LISTED_FUNDS } from "./listed-funds"
 import snapshot from "./investor-shell/verification/deployed-giwa.snapshot.json"
 import type { GiwaCatalogItem } from "./types"
 
-// Every funds-list row shows a coloured risk tag on the left and the product type on the right.
-// The tier follows the product's category, so it matches that category's Strategies card.
+// Every funds-list row shows a coloured risk tag and then the product's category. The tier follows
+// the category, so it matches that category's Strategies card.
 
 const catalog = snapshot.catalog as unknown as GiwaCatalogItem[]
-const funds = catalog.filter((item) => item.vaultConfig?.kind === "product")
+const funds = fundsProductsOf(catalog)
 const arcoSaving = catalog.find((item) => item.productId === "arcousd")!
 
-function render(rows: GiwaCatalogItem[], withReferences = true) {
+function render(rows: GiwaCatalogItem[], withListed = true, apyByProductId?: Record<string, number | null>) {
   return renderToStaticMarkup(
     <GiwaCatalogTable
       rows={rows}
-      referenceRows={withReferences ? DIGIFT_REFERENCE_ASSETS : []}
+      listedRows={withListed ? LISTED_FUNDS : []}
       selectedProductId=""
       sortKey="aum"
       sortDir="desc"
       onSelect={() => undefined}
+      apyByProductId={apyByProductId}
     />,
   )
 }
 
-function pair(level: string, label: string, type: string): RegExp {
-  const escaped = type.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+function pair(level: string, label: string, category: string): RegExp {
+  const escaped = category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   return new RegExp(`data-risk="${level}"[^>]*>${label}</span><span[^>]*>${escaped}</span>`, "g")
 }
 
-test("GIWA fund rows: risk tag first, then the product type", () => {
-  assert.deepEqual(funds.map((item) => item.productId).sort(), ["acapix", "beqty", "ibenji", "umint"])
+test("deployed fund rows: aCAPIX is retired, the rest show tier and category", () => {
+  assert.deepEqual(funds.map((item) => item.productId).sort(), ["beqty", "ibenji", "umint"])
   const html = render(funds, false)
-  assert.equal((html.match(pair("low", "Low Risk", "U.S. Treasuries")) ?? []).length, 2) // auMINT, aiBENJI
-  assert.equal((html.match(pair("medium", "Medium Risk", "Prime Credit")) ?? []).length, 1) // aCAPIX
+  assert.equal((html.match(pair("low", "Low Risk", "Cash Management")) ?? []).length, 2) // auMINT, aiBENJI
   assert.equal((html.match(pair("high", "High Risk", "Equity Exposure")) ?? []).length, 1) // bEQTY
-  assert.equal((html.match(/data-risk=/g) ?? []).length, 4)
+  assert.equal((html.match(/data-risk=/g) ?? []).length, 3)
+  assert.doesNotMatch(html, /aCAPIX|U\.S\. Treasuries|Prime Credit/)
 })
 
-test("DigiFT rows: risk tag mapped from the category Arco shows", () => {
+test("listed fund rows: tier and category from the catalog taxonomy", () => {
   const html = render([], true)
-  assert.equal((html.match(pair("low", "Low Risk", "Cash Management")) ?? []).length, 3) // CMBMINT, ULTRA, TKStable
-  assert.equal((html.match(pair("medium", "Medium Risk", "Income Strategies")) ?? []).length, 1) // CMBBOND
-  assert.equal((html.match(pair("medium", "Medium Risk", "Commodity")) ?? []).length, 1) // GOLDX
+  assert.equal((html.match(/data-testid="listed-fund-row"/g) ?? []).length, 5)
+  assert.equal((html.match(pair("low", "Low Risk", "Cash Management")) ?? []).length, 1) // RRDY
+  assert.equal((html.match(pair("medium", "Medium Risk", "Income Strategies")) ?? []).length, 2) // CMBBOND, HOME
   assert.equal((html.match(pair("high", "High Risk", "Equity Exposure")) ?? []).length, 2) // JX, kTW50
-  assert.doesNotMatch(html, />Alternative Assets</) // GOLDX's DigiFT category is not shown
-  assert.equal((html.match(/data-risk=/g) ?? []).length, 7)
+  assert.equal((html.match(/data-risk=/g) ?? []).length, 5)
 })
 
 test("risk tags use the theme tokens, one tone per tier", () => {
@@ -63,15 +64,36 @@ test("an Arco Saving row gets no risk tag", () => {
   assert.doesNotMatch(html, /data-risk=/)
 })
 
-test("a selected risk card keeps the DigiFT products of the same tier", () => {
-  const symbols = (category: GiwaCategory[]) =>
-    applyReferenceFilters(DIGIFT_REFERENCE_ASSETS, { ...GIWA_EMPTY_FILTERS, category }).map((asset) => asset.symbol)
-  assert.equal(symbols([]).length, 7)
-  assert.deepEqual(symbols(["U.S Treasuries"]), ["CMBMINT", "ULTRA", "TKStable"])
-  assert.deepEqual(symbols(["Prime Credit"]), ["CMBBOND", "GOLDX"])
-  assert.deepEqual(symbols(["Equity Exposure"]), ["JX", "kTW50"])
-  assert.deepEqual(symbols(["U.S Treasuries", "Equity Exposure"]), ["CMBMINT", "ULTRA", "TKStable", "JX", "kTW50"])
-  assert.deepEqual(symbols(["Arco Saving"]), [])
-  // GIWA-only filters cannot be asserted for reference profiles.
-  assert.deepEqual(applyReferenceFilters(DIGIFT_REFERENCE_ASSETS, { ...GIWA_EMPTY_FILTERS, issuer: ["arco"] }), [])
+test("deployed and listed rows sort together by AUM", () => {
+  const html = render(funds, true)
+  const order = ["auMINT", "kTW50", "JX", "aiBENJI", "bEQTY", "CMBBOND", "RRDY", "HOME"].map((symbol) => html.indexOf(`>${symbol}<`))
+  assert.ok(order.every((at) => at >= 0), "every symbol renders")
+  assert.deepEqual([...order].sort((a, b) => a - b), order)
+})
+
+test("deployed rows show the fund deck's dated rate unless the operator published one", () => {
+  const html = render(funds, false)
+  // The date is kept on one line when a long caption wraps.
+  assert.match(html, />3\.55%<\/span><span[^>]*>7-day yield · <span class="whitespace-nowrap">9 Oct 2026<\/span>/) // auMINT
+  assert.match(html, />3\.73%<\/span><span[^>]*>7-day yield · <span class="whitespace-nowrap">30 Sep 2026<\/span>/) // aiBENJI
+  const published = render(funds, false, { beqty: 13.41 })
+  assert.match(published, />13\.41%<\/span>/)
+  assert.doesNotMatch(published, /8-month return/)
+})
+
+test("listed funds follow every filter the deployed vaults use", () => {
+  const symbols = (patch: Partial<GiwaFilters>) => applyListedFilters(LISTED_FUNDS, { ...GIWA_EMPTY_FILTERS, ...patch }).map((fund) => fund.symbol)
+  const category = (value: GiwaCategory[]) => symbols({ category: value })
+  assert.deepEqual(category([]), ["RRDY", "CMBBOND", "HOME", "JX", "kTW50"])
+  assert.deepEqual(category(["U.S Treasuries"]), ["RRDY"])
+  assert.deepEqual(category(["Prime Credit"]), ["CMBBOND", "HOME"])
+  assert.deepEqual(category(["Equity Exposure"]), ["JX", "kTW50"])
+  assert.deepEqual(category(["Arco Saving"]), [])
+  assert.deepEqual(symbols({ issuer: ["nuva"] }), ["HOME"])
+  assert.deepEqual(symbols({ issuer: ["arco"] }), [])
+  assert.deepEqual(symbols({ denomination: ["USD"] }).length, 5)
+  assert.deepEqual(symbols({ denomination: ["BTC"] }), [])
+  assert.deepEqual(symbols({ network: ["Ethereum"] }).length, 5) // every listed token is issued on Ethereum
+  assert.deepEqual(symbols({ network: ["Giwa"] }).length, 5)
+  assert.deepEqual(symbols({ network: ["XRPL"] }), [])
 })

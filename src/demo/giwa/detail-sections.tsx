@@ -32,21 +32,27 @@ export function TransparencySection({
   enabledViews,
   aum,
   fee,
+  feeHref = null,
   stacked,
 }: {
   portfolio: GiwaVaultDetail["portfolioForCard"]
   enabledViews: GiwaVaultDetail["portfolioViews"]
   aum: number | null
   fee: GiwaVaultDetail["feeForCard"]
+  feeHref?: string | null
   // Narrow-container callers (Savings 505px) force the stacked donut+table layout. Omitted on the
   // product page => PortfolioCard defaults to false => byte-identical.
   stacked?: boolean
 }) {
+  // The portfolio card shows only with at least one view that has a breakdown.
+  const hasPortfolio = enabledViews.snapshot || enabledViews.industry || enabledViews.exposure
   return (
     <section id="transparency" className="scroll-mt-[140px] space-y-4">
       <h2 className="text-lg font-semibold text-[var(--color-arco-ink)]">Transparency</h2>
-      <PortfolioCard portfolio={portfolio} enabledViews={enabledViews} aum={aum} percentLabel="% of AUM" stacked={stacked} />
-      <FeeStructureCard fee={fee} />
+      {hasPortfolio && (
+        <PortfolioCard portfolio={portfolio} enabledViews={enabledViews} aum={aum} percentLabel="% of AUM" stacked={stacked} />
+      )}
+      <FeeStructureCard fee={fee} href={feeHref} />
     </section>
   )
 }

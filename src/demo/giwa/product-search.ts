@@ -1,6 +1,8 @@
 import { productById } from "../data/products"
 import type { GiwaMarketEntry } from "./api"
-import { vaultConfigOf, vaultDisplayName, vaultImageFor } from "./catalog"
+import { isRetiredProduct, vaultConfigOf, vaultDisplayName, vaultImageFor } from "./catalog"
+import { fundMarkSrc } from "./FundMark"
+import { DEPLOYED_FUND_METRICS, listedFundsForCatalog } from "./listed-funds"
 import { fundsProductsOf } from "./home"
 import { marketApyText } from "./price-policy"
 import { giwaProductPath, giwaSavingsPath, GIWA_SAVINGS_ROUTE, GIWA_STOCKS_ROUTE } from "./routes"
@@ -17,7 +19,8 @@ export type SearchProduct = {
 }
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 })
 export function buildSearchProducts(catalog: GiwaCatalogItem[], market: GiwaMarketEntry[], stocks: Security[], quotes: Quote[] = []): SearchProduct[] {
-  const visible = catalog.filter(product => !vaultConfigOf(product).hidden)
+  const visible = catalog.filter(product => !vaultConfigOf(product).hidden && !isRetiredProduct(product))
+  const funds = fundsProductsOf(visible)
   const markets = new Map(market.map(entry => [entry.productId, entry]))
   const prices = new Map(quotes.map(quote => [quote.symbol, quote]))
   return [
@@ -28,11 +31,18 @@ export function buildSearchProducts(catalog: GiwaCatalogItem[], market: GiwaMark
       keywords: `${account.symbol} ${account.vault?.name ?? ""} savings 저축`,
       value: account.disabled ? "Coming soon" : `${account.apy} APY`,
     })),
-    ...fundsProductsOf(visible).map(product => ({
+    ...funds.map(product => ({
       id: `fund:${product.productId}`, category: "Funds" as const, symbol: vaultDisplayName(product),
       name: product.name, image: vaultImageFor(product), href: giwaProductPath(product.productId),
       keywords: `${product.productId} ${product.symbol} ${product.name} ${vaultDisplayName(product)} ${vaultConfigOf(product).assetManagerName ?? ""} funds 펀드`,
-      value: `${marketApyText({ apy: markets.get(product.productId)?.apy ?? productById(product.productId)?.apy ?? null, impliedApy: markets.get(product.productId)?.impliedApy ?? null })} APY`,
+      value: fundRateText(product.productId, markets.get(product.productId)),
+    })),
+    // Listed funds open their product page like the deployed ones.
+    ...listedFundsForCatalog(funds.map(product => product.symbol)).map(fund => ({
+      id: `fund:${fund.id}`, category: "Funds" as const, symbol: fund.symbol, name: fund.name,
+      image: fundMarkSrc(fund.symbol), href: giwaProductPath(fund.id),
+      keywords: `${fund.id} ${fund.symbol} ${fund.name} ${fund.manager.name} ${fund.issuer.name} ${fund.underlying} funds 펀드`,
+      value: `${fund.metric.value} ${fund.metric.label}`,
     })),
     ...stocks.map(stock => {
       const quote = prices.get(stock.symbol)
@@ -47,6 +57,13 @@ export function buildSearchProducts(catalog: GiwaCatalogItem[], market: GiwaMark
       }
     }),
   ]
+}
+// Same order as the Funds table: published, the fund deck's rate (named by its own label), legacy,
+// then implied APY.
+function fundRateText(productId: string, entry: GiwaMarketEntry | undefined): string {
+  const deck = entry?.apy == null ? DEPLOYED_FUND_METRICS[productId.toLowerCase()] : undefined
+  if (deck) return `${deck.metric.value} ${deck.metric.label}`
+  return `${marketApyText({ apy: entry?.apy ?? productById(productId)?.apy ?? null, impliedApy: entry?.impliedApy ?? null })} APY`
 }
 export function filterSearchProducts(products: SearchProduct[], query: string, category: SearchCategory): SearchProduct[] {
   const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
