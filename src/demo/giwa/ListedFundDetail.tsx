@@ -12,7 +12,8 @@ import { GiwaNetworkIcon } from "./components"
 import { FirmMark, FundMark } from "./FundMark"
 import { ListedFundInvestPanel } from "./ListedFundInvestPanel"
 import { listedFundPortfolio } from "./listed-fund-portfolio"
-import { formatAsOf, type ListedFund } from "./listed-funds"
+import { formatAsOf, metricCaption, type ListedFund } from "./listed-funds"
+import { rateLabel } from "./fund-categories"
 import { GIWA_FUNDS_ROUTE } from "./routes"
 
 const CARD = "rounded-[var(--radius-strategy)] bg-[var(--color-arco-surface)] p-5 shadow-[var(--shadow-control)]"
@@ -63,7 +64,7 @@ export function ListedFundDetail({ fund }: { fund: ListedFund }) {
           <section id="overview" className="scroll-mt-[140px] space-y-5">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <MetricCard label={fund.aum.label ?? "AUM"} value={fund.aum.value} sub={asOf(fund.aum.asOf)} />
-              <MetricCard label={fund.metric.label} value={fund.metric.value} sub={asOf(fund.metric.asOf)} />
+              <MetricCard label={rateLabel(fund.category)} value={fund.metric.value} sub={metricCaption(fund.metric)} />
               {fund.price ? (
                 <MetricCard label="Price" value={fund.price} sub="NAV / share (USD)" />
               ) : (
@@ -79,9 +80,9 @@ export function ListedFundDetail({ fund }: { fund: ListedFund }) {
           <section id="performance" className="scroll-mt-[140px] space-y-4">
             <h2 className="text-lg font-semibold text-[var(--color-arco-ink)]">Performance</h2>
             <div className={CARD}>
-              <p className="text-xs uppercase tracking-wide text-[var(--color-arco-muted)]">{fund.metric.label}</p>
+              <p className="text-xs uppercase tracking-wide text-[var(--color-arco-muted)]">{rateLabel(fund.category)}</p>
               <p className="mt-3 font-mono text-2xl font-medium text-[var(--color-arco-ink)] sm:text-3xl">{fund.metric.value}</p>
-              <p className="mt-2 text-xs text-[var(--color-arco-muted)]">{asOf(fund.metric.asOf)}</p>
+              <p className="mt-2 text-xs text-[var(--color-arco-muted)]">{metricCaption(fund.metric)}</p>
               <p className="mt-4 border-t border-[var(--color-arco-border)] pt-4 text-sm leading-6 text-[var(--color-arco-text-soft)]">{fund.metricNote}</p>
             </div>
           </section>

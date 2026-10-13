@@ -3,7 +3,10 @@ import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import GiwaProductDetailPage from "./ProductDetailPage"
+import GiwaProductDetailPage, { ProductDetailView } from "./ProductDetailPage"
+import { normalizeCatalog, type GiwaMarketEntry } from "./api"
+import { GIWA_CHAIN_ID } from "./config"
+import { GiwaWalletProvider } from "./wallet"
 import { categoryTitle } from "./fund-categories"
 import { breakdownRows, listedFundPortfolio } from "./listed-fund-portfolio"
 import { DEPLOYED_FUND_METRICS, LISTED_FUNDS, formatAsOf, listedFundById, listedFundsForCatalog, metricCaption, type FundBreakdown } from "./listed-funds"
@@ -29,6 +32,21 @@ function renderRoute(path: string): string {
           <Route path="/product/:id" element={<GiwaProductDetailPage />} />
         </Routes>
       </MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
+
+function renderDeployed(productId: string, market: GiwaMarketEntry[] = []): string {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client.setQueryData(["giwa", "market", GIWA_CHAIN_ID], market)
+  const product = normalizeCatalog(snapshot.catalog).find((item) => item.productId === productId)!
+  return renderToStaticMarkup(
+    <QueryClientProvider client={client}>
+      <GiwaWalletProvider>
+        <MemoryRouter>
+          <ProductDetailView product={product} />
+        </MemoryRouter>
+      </GiwaWalletProvider>
     </QueryClientProvider>,
   )
 }
@@ -152,4 +170,30 @@ test("the retired aCAPIX page reads Product not found", () => {
   const html = renderRoute("/product/acapix")
   assert.ok(html.includes("Product not found."))
   assert.doesNotMatch(html, /aCAPIX/)
+})
+
+test("product pages call a yield fund's rate APY and an equity fund's rate Return, with what it measures underneath", () => {
+  // Listed funds: the overview card and the performance card.
+  const rrdy = renderRoute("/product/digift-rrdy")
+  assert.equal((rrdy.match(/>APY<\/p><p[^>]*>3\.66%<\/p><p[^>]*>7-day yield · 30 Sep 2026<\/p>/g) ?? []).length, 2)
+  const cmbbond = renderRoute("/product/digift-cmbbond")
+  assert.match(cmbbond, />APY<\/p><p[^>]*>5\.97%<\/p><p[^>]*>Yield to maturity · 9 Oct 2026<\/p>/)
+  const home = renderRoute("/product/nuva-home")
+  assert.match(home, />APY<\/p><p[^>]*>7%<\/p><p[^>]*>Target APY · 12 Oct 2026<\/p>/)
+  const jx = renderRoute("/product/digift-jx")
+  assert.equal((jx.match(/>Return<\/p><p[^>]*>39\.66%<\/p><p[^>]*>12-month return · 31 Aug 2026<\/p>/g) ?? []).length, 2)
+  const ktw50 = renderRoute("/product/digift-ktw50")
+  assert.match(ktw50, />Return<\/p><p[^>]*>55\.72%<\/p><p[^>]*>6-month return · 1 Oct 2026<\/p>/)
+  for (const html of [rrdy, cmbbond, home, jx, ktw50]) {
+    assert.doesNotMatch(html, /uppercase[^"]*">(7-day yield|Yield to maturity|Target APY|\d+-month return)</i)
+  }
+
+  // Deployed vaults with no published rate show the fund deck's figure under the same labels.
+  assert.match(renderDeployed("umint"), />APY<\/p><p[^>]*>3\.55%<\/p><p[^>]*>7-day yield · 9 Oct 2026<\/p>/)
+  assert.match(renderDeployed("ibenji"), />APY<\/p><p[^>]*>3\.73%<\/p><p[^>]*>7-day yield · 30 Sep 2026<\/p>/)
+  assert.match(renderDeployed("beqty"), />Return<\/p><p[^>]*>21\.13%<\/p><p[^>]*>8-month return \(est\.\) · 31 Jul 2026<\/p>/)
+  // A rate the operator published keeps the label and needs no caption.
+  const published = renderDeployed("umint", [{ productId: "umint", navBase: null, baseUsd: null, navUsd: null, apy: 4.21, impliedApy: null }])
+  assert.match(published, />APY<\/p><p[^>]*>4\.21%<\/p><\/div>/)
+  assert.doesNotMatch(published, /7-day yield/)
 })

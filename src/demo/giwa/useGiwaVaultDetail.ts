@@ -7,7 +7,8 @@ import { useGiwaProductOperation } from "./useGiwaProductOperation"
 import { GIWA_CHAIN_ID, GIWA_LIVE_REFETCH } from "./config"
 import type { GiwaCatalogItem, HexAddress } from "./types"
 import { marketApyText, navSharePrice } from "./price-policy"
-import { DEPLOYED_FUND_METRICS, formatAsOf } from "./listed-funds"
+import { DEPLOYED_FUND_METRICS, metricCaption } from "./listed-funds"
+import { rateLabel } from "./fund-categories"
 import type { DocLink } from "../data/acapix-detail"
 import { productById, ASSET_MANAGERS, ISSUERS } from "../data/products"
 
@@ -44,12 +45,13 @@ export function useGiwaVaultDetail(product: GiwaCatalogItem) {
   // posted NAV/share, shown to up to 4 decimals so near-par movement is visible.
   const apyText = marketApyText(market)
   // Overview rate card: a rate the operator published wins; otherwise the issuer's latest figure
-  // from the fund deck (labelled and dated); otherwise the APY implied by posted prices. The
-  // Funds table reads the same order.
+  // from the fund deck, with what it measures and its date underneath; otherwise the APY implied
+  // by posted prices. The Funds table reads the same order. Equity funds call it a return.
   const deckMetric = market?.apy == null ? DEPLOYED_FUND_METRICS[product.productId.toLowerCase()]?.metric : undefined
+  const rateTitle = rateLabel(vaultConfigOf(product).category)
   const rateCard = deckMetric
-    ? { label: deckMetric.label, value: deckMetric.value, sub: `As of ${formatAsOf(deckMetric.asOf)}` }
-    : { label: "APY", value: apyText, sub: undefined }
+    ? { label: rateTitle, value: deckMetric.value, sub: metricCaption(deckMetric) }
+    : { label: rateTitle, value: apyText, sub: undefined }
   const priceText = market?.navUsd != null ? navSharePrice(market.navUsd) : "—"
   // Performance card: registered vaults (no built-in slot) show REAL posted share-price
   // history; the 6 built-ins keep the legacy series data (real >=3 points, else projected).
