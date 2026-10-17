@@ -158,13 +158,18 @@ export function buildFunctionPauseTransactions(
   productId: string,
   kind: FunctionPauseKind,
   paused: boolean,
+  /** Restrict to these selectors (live-state plan); defaults to both entry paths. */
+  onlySelectors?: readonly string[],
 ) {
   const product = productById(registry, productId)
   const mapping = FUNCTION_PAUSE_SELECTORS[kind]
   const vaultAddress = addressOrThrow(product[mapping.vault].proxy, `${product.symbol}.${mapping.vault}.proxy`)
   const action = paused ? "pauseFn" : "unpauseFn"
   const label = kind === "deposit" ? "deposits" : "withdrawals"
-  return mapping.selectors.map(({ name, selector }) =>
+  const selectors = onlySelectors
+    ? mapping.selectors.filter(({ selector }) => onlySelectors.includes(selector))
+    : mapping.selectors
+  return selectors.map(({ name, selector }) =>
     tx(
       registry.chainId,
       vaultAddress,

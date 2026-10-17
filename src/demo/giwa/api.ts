@@ -7,6 +7,7 @@ import type {
   GiwaAsset,
   GiwaCatalogItem,
   GiwaFeaturedCard,
+  GiwaPauseState,
   GiwaPortfolio,
   GiwaProduct,
   GiwaRedemption,
@@ -15,6 +16,20 @@ import type {
   HexAddress,
   UnsignedAdminTransaction,
 } from "./types"
+
+type GiwaVaultFeedSide = {
+  productPriceFeed: string
+  paymentPriceFeed: string
+  paymentEqualsProduct: boolean
+  productMatchesRegistry: boolean
+}
+
+export type GiwaVaultFeeds = {
+  registryPriceFeed: string | null
+  depositVault: GiwaVaultFeedSide
+  redemptionVault: GiwaVaultFeedSide
+  warnings: string[]
+}
 
 export type GiwaMarketEntry = {
   productId: string
@@ -207,6 +222,10 @@ export function hasDeploymentAddresses(product: GiwaCatalogItem) {
   )
 }
 
+function redemptionPath(productId: string, requestId: string, action: "payout" | "settle" | "release" | "fulfill") {
+  return `/api/v1/admin/products/${encodeURIComponent(productId)}/redemptions/${encodeURIComponent(requestId)}/${action}`
+}
+
 export const giwaApi = {
   registry: () => fetchJson<GiwaRegistry>(`/api/v1/evm/registry/${GIWA_CHAIN_ID}`),
   catalog: async () => normalizeCatalog(await fetchJson<unknown>(`/api/v1/evm/catalog/${GIWA_CHAIN_ID}`)),
@@ -281,8 +300,12 @@ export const giwaApi = {
       }),
     limits: (auth: AdminAuth, productId: string) =>
       adminJson<GiwaVaultLimits>(auth, `/api/v1/admin/products/${productId}/limits`),
-    fulfill: (auth: AdminAuth, requestId: string) =>
-      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, `/api/v1/admin/redemptions/${requestId}/fulfill`, {
+    // Both vaults' price-feed wiring + warnings (payment feed == product feed → quotes are 1:1).
+    feeds: (auth: AdminAuth, productId: string) =>
+      adminJson<GiwaVaultFeeds>(auth, `/api/v1/admin/products/${encodeURIComponent(productId)}/feeds`),
+    // Redemption actions are product-scoped: every redemption vault numbers requests from 1.
+    fulfill: (auth: AdminAuth, productId: string, requestId: string) =>
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, redemptionPath(productId, requestId, "fulfill"), {
         method: "POST",
         body: "{}",
       }),
@@ -291,20 +314,23 @@ export const giwaApi = {
         method: "POST",
         body: JSON.stringify({ to, amount }),
       }),
+    // Live (uncached) pause reads for every registry product; 503 when the RPC sweep fails.
+    pauseState: (auth: AdminAuth) =>
+      adminJson<{ readAt: string; pauseState: Record<string, GiwaPauseState> }>(auth, `/api/v1/admin/pause-state`),
     pendingRedemptions: (auth: AdminAuth) =>
       adminJson<{ redemptions: GiwaRedemption[] }>(auth, `/api/v1/admin/redemptions/pending`),
-    payout: (auth: AdminAuth, requestId: string, amount: string) =>
-      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, `/api/v1/admin/redemptions/${requestId}/payout`, {
+    payout: (auth: AdminAuth, productId: string, requestId: string, amount: string) =>
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, redemptionPath(productId, requestId, "payout"), {
         method: "POST",
         body: JSON.stringify({ amount }),
       }),
-    settle: (auth: AdminAuth, requestId: string, txHash: string) =>
-      adminJson<{ ok: boolean }>(auth, `/api/v1/admin/redemptions/${requestId}/settle`, {
+    settle: (auth: AdminAuth, productId: string, requestId: string, txHash: string) =>
+      adminJson<{ ok: boolean }>(auth, redemptionPath(productId, requestId, "settle"), {
         method: "POST",
         body: JSON.stringify({ txHash }),
       }),
-    release: (auth: AdminAuth, requestId: string) =>
-      adminJson<{ ok: boolean }>(auth, `/api/v1/admin/redemptions/${requestId}/release`, {
+    release: (auth: AdminAuth, productId: string, requestId: string) =>
+      adminJson<{ ok: boolean }>(auth, redemptionPath(productId, requestId, "release"), {
         method: "POST",
         body: "{}",
       }),
@@ -324,6 +350,7 @@ export const giwaApi = {
         symbol: string
         hidden: boolean
         unverified: string[]
+        warnings?: string[]
         proxyAdminOwner: string | null
       }>(auth, `/api/v1/admin/registry/register-product`, {
         method: "POST",

@@ -33,6 +33,13 @@ export type RegisterProbe = {
   implementations: Record<ProxySlot, string | null>
   implCodeHashes: Record<ProxySlot, string | null>
   proxyAdminOwner: string | null
+  /** productPriceFeed()/paymentPriceFeed() of both vaults. Optional: absent → "priceFeeds" unverified. */
+  feeds?: {
+    depositProduct: string | null
+    depositPayment: string | null
+    redemptionProduct: string | null
+    redemptionPayment: string | null
+  }
 }
 
 export type RegisterInput = {
@@ -48,6 +55,9 @@ export type RegisterResult = {
   // What was NOT verified on-chain against a recorded reference — surfaced so the
   // operator sees exactly what is being trusted. Must be empty before mainnet use.
   unverified: string[]
+  // Registered anyway, but the operator must act (e.g. payment feed == product feed means every
+  // quote is 1:1 regardless of NAV until the payment-feed repair runs).
+  warnings: string[]
   proxyAdminOwner: string | null
 }
 
@@ -168,6 +178,31 @@ export class EvmRegisterService {
     // owner() of the ProxyAdmin has no recorded reference — always surfaced for review.
     unverified.push("proxyAdminOwner")
 
+    // Price feeds: both vaults must quote NAV from the registry's product feed; a payment feed
+    // equal to the product feed (deploy-giwa.ts passes the same feed twice) prices every
+    // quote 1:1 — registered, but flagged for the payment-feed repair.
+    const warnings: string[] = []
+    if (probe.feeds) {
+      const expectedFeed = lower(product.priceFeed.proxy)
+      const vaultFeeds = [
+        ["depositVault", probe.feeds.depositProduct, probe.feeds.depositPayment],
+        ["redemptionVault", probe.feeds.redemptionProduct, probe.feeds.redemptionPayment],
+      ] as const
+      for (const [vault, productFeed, paymentFeed] of vaultFeeds) {
+        if (!productFeed || lower(productFeed) !== expectedFeed) {
+          throw new RegisterError(400, `${vault} productPriceFeed ${productFeed} does not match the registry priceFeed`)
+        }
+        if (!paymentFeed) throw new RegisterError(400, `${vault} paymentPriceFeed is unset`)
+        if (lower(paymentFeed) === lower(productFeed)) {
+          warnings.push(
+            `${vault} paymentPriceFeed equals productPriceFeed — quotes ignore NAV (1:1) until the payment-feed repair runs`,
+          )
+        }
+      }
+    } else {
+      unverified.push("priceFeeds")
+    }
+
     const syncInput = registryToSyncInput(registry)
     const syncProduct = syncInput.products.find((candidate) => candidate.productId === input.productId)
     if (!syncProduct) throw new RegisterError(409, `Product ${input.productId} could not be mapped for sync`)
@@ -181,6 +216,7 @@ export class EvmRegisterService {
       symbol: product.symbol,
       hidden: true,
       unverified,
+      warnings,
       proxyAdminOwner: probe.proxyAdminOwner,
     }
   }

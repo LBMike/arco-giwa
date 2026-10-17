@@ -3,13 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, CheckCircle2, Loader2, Send } from "lucide-react"
 import { giwaApi } from "./api"
 import type { AdminAuth } from "./api"
-import { pauseStateOf } from "./catalog"
+import { livePauseStateOf } from "./catalog"
 import { afterConfirmedReceipt, sendPreparedTransaction } from "./contracts"
 import { ActivityPanel } from "./components"
 import { AdminWriteGroup, useGiwaAdmin } from "./admin-context"
 import { useOnchainRole } from "./admin-roles"
 import { VaultOperationsPanel } from "./VaultAdmin"
-import type { GiwaCatalogItem, HexAddress, UiPhase, UnsignedAdminTransaction } from "./types"
+import type { GiwaCatalogItem, GiwaPauseState, HexAddress, UiPhase, UnsignedAdminTransaction } from "./types"
 import { explorerTx } from "./wallet"
 
 const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {}
@@ -85,7 +85,7 @@ export default function GiwaAdminOperationsPage() {
             ? await giwaApi.admin.pause(auth, selected.productId, vaultTarget)
             : kind === "unpause"
               ? await giwaApi.admin.unpause(auth, selected.productId, vaultTarget)
-              : { transactions: [await giwaApi.admin.fulfill(auth, requestId).then((r) => r.transaction)] }
+              : { transactions: [await giwaApi.admin.fulfill(auth, selected.productId, requestId).then((r) => r.transaction)] }
       setPrepared(result.transactions)
     } catch (err) {
       setPrepared([])
@@ -173,7 +173,7 @@ export default function GiwaAdminOperationsPage() {
               <input value={targetWallet} onChange={(event) => setTargetWallet(event.target.value)} className="mt-1 h-10 w-full rounded-md border border-[var(--color-arco-border)] px-3 text-sm" />
             </label>
             <label className="text-xs text-[var(--color-arco-muted)]">
-              Fulfill request ID
+              Fulfill request ID (selected product)
               <input value={requestId} onChange={(event) => setRequestId(event.target.value)} className="mt-1 h-10 w-full rounded-md border border-[var(--color-arco-border)] px-3 text-sm" />
             </label>
           </div>
@@ -264,8 +264,20 @@ export function VaultPauseSection({
   const [armed, setArmed] = useState<string | null>(null)
   const [phases, setPhases] = useState<Record<string, PauseActionPhase>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
+  // Live, uncached on-chain read. The catalog pauseState is cached ~30s server-side, too stale
+  // to drive a pause/unpause decision; it remains the fallback while this loads or fails.
+  const liveQuery = useQuery({
+    queryKey: ["giwa", "admin", "pause-state"],
+    queryFn: () => giwaApi.admin.pauseState(auth),
+    enabled: auth.ready,
+    refetchInterval: 30_000,
+    retry: 0,
+  })
+  const live = liveQuery.data?.pauseState ?? null
 
-  async function run(product: GiwaCatalogItem, kind: PauseKind, paused: boolean) {
+  // mode "fn": pauseFn/unpauseFn on the kind's entry paths. mode "vault": whole-contract
+  // unpause() of the kind's vault (the only way to lift a whole-vault pause).
+  async function run(product: GiwaCatalogItem, kind: PauseKind, paused: boolean, mode: "fn" | "vault" = "fn") {
     const key = `${product.productId}:${kind}`
     setArmed(null)
     setErrors((current) => ({ ...current, [key]: "" }))
@@ -273,16 +285,22 @@ export function VaultPauseSection({
       if (!auth.ready) throw new Error("Operator token must be entered at runtime")
       if (!walletAddress) throw new Error("Connect the PAUSER operator wallet first")
       setPhases((current) => ({ ...current, [key]: "preparing" }))
-      const { transactions } = await giwaApi.admin.functionPause(auth, product.productId, kind, paused)
+      const { transactions } =
+        mode === "vault"
+          ? await giwaApi.admin.unpause(auth, product.productId, kind === "deposit" ? "depositVault" : "redemptionVault")
+          : await giwaApi.admin.functionPause(auth, product.productId, kind, paused)
       for (const transaction of transactions) {
         setPhases((current) => ({ ...current, [key]: "signing" }))
         const hash = await sendPreparedTransaction(walletAddress, transaction)
         setPhases((current) => ({ ...current, [key]: "confirming" }))
         await afterConfirmedReceipt(hash, async () => undefined)
       }
-      // Re-reads BOTH selectors via the catalog pauseState — a half-completed sequence
-      // (2nd tx rejected) surfaces as "Partially paused — retry" on the row.
-      await queryClient.invalidateQueries({ queryKey: ["giwa", "catalog"] })
+      // Re-read live state — a half-completed sequence (2nd tx rejected) surfaces as
+      // "Partially paused — retry" on the row, and the retry signs only the missing selector.
+      await Promise.all([
+        liveQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["giwa", "catalog"] }),
+      ])
       setPhases((current) => ({ ...current, [key]: "done" }))
     } catch (error) {
       setPhases((current) => ({ ...current, [key]: "failed" }))
@@ -295,7 +313,7 @@ export function VaultPauseSection({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-[var(--color-arco-ink)]">Vault pause</h2>
         <span className="text-[11px] text-[var(--color-arco-muted)]">
-          Pausing one side signs TWO wallet transactions (one per entry path)
+          {live ? "Live on-chain read" : "Catalog snapshot (may lag ~30s)"} · pausing one side signs one wallet transaction per entry path
         </span>
       </div>
       {products.length === 0 ? (
@@ -323,6 +341,7 @@ export function VaultPauseSection({
                     <PauseKindCell
                       key={kind}
                       product={product}
+                      state={livePauseStateOf(product, live)}
                       kind={kind}
                       walletAddress={walletAddress}
                       phase={phases[`${product.productId}:${kind}`] ?? "idle"}
@@ -330,6 +349,7 @@ export function VaultPauseSection({
                       armed={armed === `${product.productId}:${kind}`}
                       onArm={() => setArmed(`${product.productId}:${kind}`)}
                       onRun={(paused) => void run(product, kind, paused)}
+                      onUnpauseVault={() => void run(product, kind, false, "vault")}
                     />
                   ))}
                 </tr>
@@ -344,6 +364,7 @@ export function VaultPauseSection({
 
 function PauseKindCell({
   product,
+  state,
   kind,
   walletAddress,
   phase,
@@ -351,8 +372,10 @@ function PauseKindCell({
   armed,
   onArm,
   onRun,
+  onUnpauseVault,
 }: {
   product: GiwaCatalogItem
+  state: GiwaPauseState
   kind: PauseKind
   walletAddress: HexAddress | null
   phase: PauseActionPhase
@@ -360,10 +383,13 @@ function PauseKindCell({
   armed: boolean
   onArm: () => void
   onRun: (paused: boolean) => void
+  onUnpauseVault: () => void
 }) {
-  const state = pauseStateOf(product)
   const paused = kind === "deposit" ? state.depositPaused : state.withdrawPaused
   const partial = kind === "deposit" ? state.depositPartial : state.withdrawPartial
+  // Whole-contract pause: blocks every function of the vault and unpauseFn cannot lift it.
+  const vaultPaused = kind === "deposit" ? state.depositVaultPaused : state.withdrawVaultPaused
+  const vaultLabel = kind === "deposit" ? "deposit vault" : "redemption vault"
   const label = kind === "deposit" ? "deposits" : "withdrawals"
   const busy = phase === "preparing" || phase === "signing" || phase === "confirming"
   // The vault checks PAUSER_ROLE on the signing wallet; say so before a signature is requested.
@@ -378,7 +404,14 @@ function PauseKindCell({
   return (
     <td className="py-2 pr-3">
       <div className="flex flex-wrap items-center gap-2">
-        {partial ? (
+        {vaultPaused ? (
+          <span
+            title={`pause() is set on the ${vaultLabel}: every function is blocked, not only ${label}`}
+            className="rounded-[var(--radius-pill)] bg-[var(--color-arco-surface-muted)] px-2.5 py-1 text-xs font-medium text-[var(--color-arco-down)]"
+          >
+            Vault paused
+          </span>
+        ) : partial ? (
           <span className="rounded-[var(--radius-pill)] bg-[var(--color-arco-surface-muted)] px-2.5 py-1 text-xs font-medium text-[var(--color-arco-down)]">
             Partially paused — retry
           </span>
@@ -391,7 +424,18 @@ function PauseKindCell({
             {paused ? "Paused" : "Active"}
           </span>
         )}
-        {paused && !partial ? (
+        {vaultPaused ? (
+          <button
+            type="button"
+            disabled={blocked}
+            onClick={onUnpauseVault}
+            title={`unpause() on the ${vaultLabel} — re-enables every function; entry-path pauses stay as they are`}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--color-arco-border)] px-2.5 text-xs font-medium text-[var(--color-arco-ink)] disabled:opacity-50"
+          >
+            {busy && <Loader2 className="size-3.5 animate-spin" />}
+            {busy ? phaseLabel(phase) : "Unpause vault"}
+          </button>
+        ) : paused && !partial ? (
           <button
             type="button"
             disabled={blocked}
