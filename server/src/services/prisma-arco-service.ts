@@ -82,6 +82,21 @@ function normalizeAddress(address: string): string {
   return address.toLowerCase()
 }
 
+/** Full identity of an indexed redemption request (matches the table's unique key). */
+export type RedemptionRequestKey = {
+  chainId: number
+  redemptionVaultAddress: string
+  requestId: string
+}
+
+function redemptionKeyWhere(key: RedemptionRequestKey) {
+  return {
+    chainId: key.chainId,
+    redemptionVaultAddress: normalizeAddress(key.redemptionVaultAddress),
+    requestId: key.requestId,
+  }
+}
+
 export type VaultConfigValues = {
   displayName: string | null
   category: string | null
@@ -374,11 +389,12 @@ export class PrismaArcoService {
         requestedAtBlock: toBigIntOrNull(input.requestedAtBlock),
         metadata: input.metadata ?? null,
       },
+      // Re-indexing (backfill, cursor reset) refreshes the event fields but NEVER the status: a
+      // SETTLING/SETTLED/FULFILLED row reset to REQUESTED would re-open it for a second payout.
       update: {
         walletAddress: normalizeAddress(input.walletAddress),
         sharesIn: input.sharesIn,
         lockedAssetsOut: input.lockedAssetsOut,
-        status: "REQUESTED",
         requestedTxHash: input.requestedTxHash,
         requestedAtBlock: toBigIntOrNull(input.requestedAtBlock),
         metadata: input.metadata ?? null,
@@ -443,11 +459,14 @@ export class PrismaArcoService {
   // Atomically claims a request for payout (REQUESTED -> SETTLING). Returns the number of
   // rows transitioned: 0 means the request was already settling/settled — the caller must
   // treat that as a conflict so the same request can never be paid twice.
-  async markRedemptionSettling(input: { chainId: number; requestId: string }) {
+  //
+  // Every redemption vault numbers its requests from 1, so a request is only identified by
+  // (chainId, redemptionVaultAddress, requestId) — the table's unique key. Never match on
+  // requestId alone: that would touch another product's request with the same number.
+  async markRedemptionSettling(input: RedemptionRequestKey) {
     return this.prisma.indexedRedemptionRequest.updateMany({
       where: {
-        chainId: input.chainId,
-        requestId: input.requestId,
+        ...redemptionKeyWhere(input),
         status: "REQUESTED",
       },
       data: {
@@ -458,11 +477,10 @@ export class PrismaArcoService {
 
   // Cancelled/failed payout recovery: SETTLING -> REQUESTED only. Never touches SETTLED rows,
   // so a request whose payout actually landed on-chain cannot be re-opened for double pay.
-  async markRedemptionReleased(input: { chainId: number; requestId: string }) {
+  async markRedemptionReleased(input: RedemptionRequestKey) {
     return this.prisma.indexedRedemptionRequest.updateMany({
       where: {
-        chainId: input.chainId,
-        requestId: input.requestId,
+        ...redemptionKeyWhere(input),
         status: "SETTLING",
       },
       data: {
@@ -473,11 +491,10 @@ export class PrismaArcoService {
 
   // Direct-transfer payout confirmed on-chain: SETTLING/REQUESTED -> SETTLED with the payout
   // tx hash. (REQUESTED is accepted so a settle after an out-of-band payout still lands.)
-  async markRedemptionSettled(input: { chainId: number; requestId: string; txHash: string; now?: Date }) {
+  async markRedemptionSettled(input: RedemptionRequestKey & { txHash: string; now?: Date }) {
     return this.prisma.indexedRedemptionRequest.updateMany({
       where: {
-        chainId: input.chainId,
-        requestId: input.requestId,
+        ...redemptionKeyWhere(input),
         status: { in: ["REQUESTED", "SETTLING"] },
       },
       data: {
@@ -659,13 +676,17 @@ export class PrismaArcoService {
     })
   }
 
-  async findRedemptionRequest(chainId: number, requestId: string) {
+  async findRedemptionRequest(input: RedemptionRequestKey) {
     return this.prisma.indexedRedemptionRequest.findFirst({
-      where: {
-        chainId,
-        requestId,
-      },
-      orderBy: { createdAt: "desc" },
+      where: redemptionKeyWhere(input),
+    })
+  }
+
+  // One payout transaction settles at most one redemption: settle refuses a hash that is
+  // already recorded on another row.
+  async findRedemptionBySettledTx(chainId: number, txHash: string) {
+    return this.prisma.indexedRedemptionRequest.findFirst({
+      where: { chainId, settledTxHash: txHash.toLowerCase() },
     })
   }
 

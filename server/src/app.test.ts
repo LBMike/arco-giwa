@@ -1,9 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { SiweMessage } from "siwe"
-import { decodeFunctionData, formatUnits, getAddress, parseAbi, parseUnits } from "viem"
+import { decodeFunctionData, encodeFunctionData, formatUnits, getAddress, parseAbi, parseUnits } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
-import { buildApp } from "./app.js"
+import { buildApp, type VaultPauseDetail } from "./app.js"
+import type { PayoutExpectation, PayoutVerifier } from "./evm/payout-verification.js"
 import { buildDryRunGiwaRegistry } from "./registry/generate.js"
 import { EvmMarketService } from "./services/evm-market-service.js"
 import { EvmMonitoringService } from "./services/evm-monitoring-service.js"
@@ -55,6 +56,7 @@ function matches(row: Row, where: Row | undefined): boolean {
     if (key === "productId" && row.productId !== value) return false
     if (key === "walletAddress" && row.walletAddress !== value) return false
     if (key === "redemptionVaultAddress" && row.redemptionVaultAddress !== value) return false
+    if (key === "settledTxHash" && row.settledTxHash !== value) return false
     if (key === "requestId" && row.requestId !== value) return false
     if (key === "domain" && row.domain !== value) return false
     if (key === "nonce" && row.nonce !== value) return false
@@ -267,6 +269,14 @@ function makeApp(options?: {
     minimumRedeem: string
     vaultRedeemAllowance: string
   } | null
+  /** Payout receipt check for settle. Defaults to an accept-all stub; `null` leaves it absent. */
+  verifyPayout?: PayoutVerifier | null
+  /** ADMIN_WITHDRAW_ALLOWLIST (lowercased). Defaults to none. */
+  withdrawAllowlist?: string[]
+  /** Live (uncached) pause reads for the admin pause routes. */
+  pauseDetails?: Record<string, VaultPauseDetail> | null
+  /** Vault feed reads for the admin feeds route; `null` simulates a failed read. */
+  vaultFeeds?: { depositProduct: string; depositPayment: string; redemptionProduct: string; redemptionPayment: string } | null
 }) {
   const prisma = makePrisma()
   const arco = new PrismaArcoService(prisma as PrismaLike)
@@ -301,6 +311,7 @@ function makeApp(options?: {
       authJwtSecret: "test-secret-test-secret-test-secret",
       adminOperatorToken: "operator-token",
       adminOperators: [{ wallet: TEST_OPERATOR_WALLET, operatorId: "test-operator", permissions: ["vault:read", "vault:write"] }],
+      adminWithdrawAllowlist: options?.withdrawAllowlist ?? [],
       registryPath: "unused",
     },
     {
@@ -313,11 +324,27 @@ function makeApp(options?: {
       monitoring,
       register: registerService,
       ...(options?.pauseStates
-        ? { readPauseState: async () => options.pauseStates ?? null }
+        ? {
+            readPauseState: async () =>
+              Object.fromEntries(
+                Object.entries(options.pauseStates ?? {}).map(([id, state]) => [
+                  id,
+                  { depositVaultPaused: false, withdrawVaultPaused: false, ...state },
+                ]),
+              ),
+          }
         : {}),
+      // `pauseDetails: undefined` leaves the live reader absent; `null` simulates a failed sweep.
+      ...(options && "pauseDetails" in options ? { readPauseDetail: async () => options.pauseDetails ?? null } : {}),
+      ...(options && "vaultFeeds" in options ? { readVaultFeeds: async () => options.vaultFeeds ?? null } : {}),
       // `vaultLimits: undefined` leaves the reader absent (→ 503); an explicit value (or null)
       // installs a stub returning it.
       ...("vaultLimits" in (options ?? {}) ? { readVaultLimits: async () => options!.vaultLimits ?? null } : {}),
+      ...(options && "verifyPayout" in options
+        ? options.verifyPayout
+          ? { verifyPayout: options.verifyPayout }
+          : {}
+        : { verifyPayout: async () => ({ ok: true as const }) }),
     },
   )
   return { app, prisma, registry: fullRegistry }
@@ -572,7 +599,7 @@ test("admin endpoints are gated and return unsigned transactions only", async ()
   })
   const fulfill = await app.inject({
     method: "POST",
-    url: "/api/v1/admin/redemptions/1/fulfill",
+    url: `/api/v1/admin/products/${registry.products[0].productId}/redemptions/1/fulfill`,
     headers: OPERATOR,
   })
 
@@ -590,8 +617,55 @@ test("admin endpoints are gated and return unsigned transactions only", async ()
   assert.equal("privateKey" in tx, false)
 })
 
+test("withdraw: recipient must be on ADMIN_WITHDRAW_ALLOWLIST or the product's admin deposit address; amount explicit and > 0", async () => {
+  const treasury = "0x00000000000000000000000000000000000000cc"
+  const productAdmin = "0x00000000000000000000000000000000000000dd"
+  const stranger = "0x00000000000000000000000000000000000000ee"
+  const url = "/api/v1/admin/products/acapix/withdraw"
+  const post = (app: any, payload: Record<string, unknown>) =>
+    app.inject({ method: "POST", url, headers: OPERATOR, payload })
+
+  // No env allowlist and no configured admin deposit address: every recipient is refused.
+  const { app: closed } = makeApp()
+  assert.equal((await post(closed, { to: TEST_OPERATOR_WALLET, amount: "1" })).statusCode, 403)
+
+  const { app } = makeApp({ withdrawAllowlist: [treasury] })
+  // Amount: explicit base-unit integer > 0 (no implicit full balance, no decimals).
+  for (const amount of [undefined, "", "0", "1.5", "-1", "1e6", " 1"]) {
+    const response = await post(app, { to: treasury, amount })
+    assert.equal(response.statusCode, 400, `amount ${JSON.stringify(amount)}`)
+  }
+  // Recipient: the operator's own wallet and arbitrary addresses are refused.
+  assert.equal((await post(app, { to: TEST_OPERATOR_WALLET, amount: "1000000" })).statusCode, 403)
+  assert.equal((await post(app, { to: stranger, amount: "1000000" })).statusCode, 403)
+  assert.equal((await post(app, { to: productAdmin, amount: "1000000" })).statusCode, 403)
+
+  // Env allowlist entry is accepted (case-insensitive) and encoded into withdrawTo.
+  const ok = await post(app, { to: getAddress(treasury), amount: "1000000" })
+  assert.equal(ok.statusCode, 200)
+  assert.ok(ok.json().transaction.data.toLowerCase().includes(treasury.slice(2)))
+
+  // A product's configured admin deposit address qualifies for THAT product only.
+  const put = await app.inject({
+    method: "PUT",
+    url: "/api/v1/admin/vault-config/91342/acapix",
+    headers: OPERATOR,
+    payload: { adminDepositAddress: productAdmin },
+  })
+  assert.equal(put.statusCode, 200)
+  assert.equal((await post(app, { to: productAdmin, amount: "1000000" })).statusCode, 200)
+  const other = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/products/ibenji/withdraw",
+    headers: OPERATOR,
+    payload: { to: productAdmin, amount: "1000000" },
+  })
+  assert.equal(other.statusCode, 403)
+})
+
 test("vault-management admin routes: withdraw, pending list, payout double-pay guard, settle", async () => {
-  const { app, prisma, registry } = makeApp()
+  const treasury = "0x00000000000000000000000000000000000000cc"
+  const { app, prisma, registry } = makeApp({ withdrawAllowlist: [treasury] })
   const acapix = registry.products.find((product: any) => product.productId === "acapix")!
   const requester = "0x00000000000000000000000000000000000000bb"
   prisma.indexedRedemptionRequest.rows.push({
@@ -620,7 +694,7 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
     method: "POST",
     url: "/api/v1/admin/products/acapix/withdraw",
     headers: OPERATOR,
-    payload: { to: requester, amount: "1000000" },
+    payload: { to: treasury, amount: "1000000" },
   })
   assert.equal(withdraw.statusCode, 200)
   assert.equal(withdraw.json().transaction.to.toLowerCase(), acapix.depositVault.proxy?.toLowerCase())
@@ -638,7 +712,7 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   // payout: builds the payment-asset transfer AND claims REQUESTED -> SETTLING
   const payout = await app.inject({
     method: "POST",
-    url: "/api/v1/admin/redemptions/7/payout",
+    url: "/api/v1/admin/products/acapix/redemptions/7/payout",
     headers: OPERATOR,
     payload: { amount: "5001000" },
   })
@@ -650,14 +724,14 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   // double-pay guards: second payout 409s; fulfill 409s while settling
   const payoutAgain = await app.inject({
     method: "POST",
-    url: "/api/v1/admin/redemptions/7/payout",
+    url: "/api/v1/admin/products/acapix/redemptions/7/payout",
     headers: OPERATOR,
     payload: { amount: "5001000" },
   })
   assert.equal(payoutAgain.statusCode, 409)
   const fulfillWhileSettling = await app.inject({
     method: "POST",
-    url: "/api/v1/admin/redemptions/7/fulfill",
+    url: "/api/v1/admin/products/acapix/redemptions/7/fulfill",
     headers: OPERATOR,
   })
   assert.equal(fulfillWhileSettling.statusCode, 409)
@@ -665,7 +739,7 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   // settle: bad hash 400; good hash persists SETTLED + tx hash; pending list drains
   const settleBadHash = await app.inject({
     method: "POST",
-    url: "/api/v1/admin/redemptions/7/settle",
+    url: "/api/v1/admin/products/acapix/redemptions/7/settle",
     headers: OPERATOR,
     payload: { txHash: "0x123" },
   })
@@ -673,7 +747,7 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   const payoutTxHash = `0x${"ab".repeat(32)}`
   const settle = await app.inject({
     method: "POST",
-    url: "/api/v1/admin/redemptions/7/settle",
+    url: "/api/v1/admin/products/acapix/redemptions/7/settle",
     headers: OPERATOR,
     payload: { txHash: payoutTxHash },
   })
@@ -690,14 +764,14 @@ test("vault-management admin routes: withdraw, pending list, payout double-pay g
   // post-settlement guards: settle and fulfill both 409
   const settleAgain = await app.inject({
     method: "POST",
-    url: "/api/v1/admin/redemptions/7/settle",
+    url: "/api/v1/admin/products/acapix/redemptions/7/settle",
     headers: OPERATOR,
     payload: { txHash: payoutTxHash },
   })
   assert.equal(settleAgain.statusCode, 409)
   const fulfillAfterSettle = await app.inject({
     method: "POST",
-    url: "/api/v1/admin/redemptions/7/fulfill",
+    url: "/api/v1/admin/products/acapix/redemptions/7/fulfill",
     headers: OPERATOR,
   })
   assert.equal(fulfillAfterSettle.statusCode, 409)
@@ -830,26 +904,26 @@ test("release recovers a cancelled payout (SETTLING -> REQUESTED) but never re-o
   const operator = OPERATOR
 
   // guards: 401 without token; 409 while still REQUESTED (nothing to release)
-  const releaseDenied = await app.inject({ method: "POST", url: "/api/v1/admin/redemptions/9/release" })
+  const releaseDenied = await app.inject({ method: "POST", url: "/api/v1/admin/products/acapix/redemptions/9/release" })
   assert.equal(releaseDenied.statusCode, 401)
-  const releaseRequested = await app.inject({ method: "POST", url: "/api/v1/admin/redemptions/9/release", headers: operator })
+  const releaseRequested = await app.inject({ method: "POST", url: "/api/v1/admin/products/acapix/redemptions/9/release", headers: operator })
   assert.equal(releaseRequested.statusCode, 409)
 
   // claim -> release -> the request is payable again
   const claim = await app.inject({
     method: "POST",
-    url: "/api/v1/admin/redemptions/9/payout",
+    url: "/api/v1/admin/products/acapix/redemptions/9/payout",
     headers: operator,
     payload: { amount: "1000200" },
   })
   assert.equal(claim.statusCode, 200)
   assert.equal(prisma.indexedRedemptionRequest.rows[0].status, "SETTLING")
-  const release = await app.inject({ method: "POST", url: "/api/v1/admin/redemptions/9/release", headers: operator })
+  const release = await app.inject({ method: "POST", url: "/api/v1/admin/products/acapix/redemptions/9/release", headers: operator })
   assert.equal(release.statusCode, 200)
   assert.equal(prisma.indexedRedemptionRequest.rows[0].status, "REQUESTED")
   const reclaim = await app.inject({
     method: "POST",
-    url: "/api/v1/admin/redemptions/9/payout",
+    url: "/api/v1/admin/products/acapix/redemptions/9/payout",
     headers: operator,
     payload: { amount: "1000200" },
   })
@@ -858,14 +932,191 @@ test("release recovers a cancelled payout (SETTLING -> REQUESTED) but never re-o
   // once settled, release must refuse — a landed payout can never be re-opened
   const settle = await app.inject({
     method: "POST",
-    url: "/api/v1/admin/redemptions/9/settle",
+    url: "/api/v1/admin/products/acapix/redemptions/9/settle",
     headers: operator,
     payload: { txHash: `0x${"cd".repeat(32)}` },
   })
   assert.equal(settle.statusCode, 200)
-  const releaseAfterSettle = await app.inject({ method: "POST", url: "/api/v1/admin/redemptions/9/release", headers: operator })
+  const releaseAfterSettle = await app.inject({ method: "POST", url: "/api/v1/admin/products/acapix/redemptions/9/release", headers: operator })
   assert.equal(releaseAfterSettle.statusCode, 409)
   assert.equal(prisma.indexedRedemptionRequest.rows[0].status, "SETTLED")
+})
+
+test("redemption actions are scoped by product: the same requestId in two vaults is never cross-touched", async () => {
+  const { app, prisma, registry } = makeApp()
+  const acapix = registry.products.find((product: any) => product.productId === "acapix")!
+  const ibenji = registry.products.find((product: any) => product.productId === "ibenji")!
+  const row = (product: any, wallet: string, locked: string) => ({
+    chainId: 91342,
+    requestId: "7",
+    walletAddress: wallet,
+    productId: product.productId,
+    redemptionVaultAddress: product.redemptionVault.proxy?.toLowerCase(),
+    sharesIn: "1000000000000000000",
+    lockedAssetsOut: locked,
+    status: "REQUESTED",
+    createdAt: new Date(),
+  })
+  // ibenji #7 is indexed AFTER acapix #7 — the old "latest row for requestId" lookup picked it.
+  prisma.indexedRedemptionRequest.rows.push(row(acapix, "0x00000000000000000000000000000000000000aa", "1000000"))
+  prisma.indexedRedemptionRequest.rows.push(row(ibenji, "0x00000000000000000000000000000000000000bb", "2000000"))
+  const [acapixRow, ibenjiRow] = prisma.indexedRedemptionRequest.rows
+
+  const payout = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/products/acapix/redemptions/7/payout",
+    headers: OPERATOR,
+    payload: { amount: "1000000" },
+  })
+  assert.equal(payout.statusCode, 200)
+  const transfer = decodeFunctionData({
+    abi: parseAbi(["function transfer(address to, uint256 amount)"]),
+    data: payout.json().transaction.data,
+  })
+  assert.equal(String(transfer.args[0]).toLowerCase(), "0x00000000000000000000000000000000000000aa")
+  assert.equal(transfer.args[1], 1000000n)
+  assert.equal(acapixRow.status, "SETTLING")
+  assert.equal(ibenjiRow.status, "REQUESTED")
+
+  const settle = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/products/acapix/redemptions/7/settle",
+    headers: OPERATOR,
+    payload: { txHash: `0x${"ef".repeat(32)}` },
+  })
+  assert.equal(settle.statusCode, 200)
+  assert.equal(acapixRow.status, "SETTLED")
+  assert.equal(ibenjiRow.status, "REQUESTED")
+
+  // fulfill for ibenji targets ibenji's redemption vault, not acapix's
+  const fulfill = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/products/ibenji/redemptions/7/fulfill",
+    headers: OPERATOR,
+  })
+  assert.equal(fulfill.statusCode, 200)
+  assert.equal(fulfill.json().transaction.to.toLowerCase(), ibenji.redemptionVault.proxy?.toLowerCase())
+
+  // product-less routes are retired; unknown product and malformed ids are rejected
+  const legacy = await app.inject({ method: "POST", url: "/api/v1/admin/redemptions/7/payout", headers: OPERATOR, payload: { amount: "1" } })
+  assert.equal(legacy.statusCode, 410)
+  const unknown = await app.inject({ method: "POST", url: "/api/v1/admin/products/nope/redemptions/7/release", headers: OPERATOR })
+  assert.equal(unknown.statusCode, 404)
+  const malformed = await app.inject({ method: "POST", url: "/api/v1/admin/products/acapix/redemptions/7x/release", headers: OPERATOR })
+  assert.equal(malformed.statusCode, 400)
+  assert.equal(ibenjiRow.status, "REQUESTED")
+})
+
+test("payout must equal the locked quote, pays the recorded recipient, and settle requires a verified receipt", async () => {
+  const seen: PayoutExpectation[] = []
+  let verdict: { ok: true } | { ok: false; reason: string } = { ok: false, reason: "no matching transfer" }
+  const verifyPayout: PayoutVerifier = async (expected) => {
+    seen.push(expected)
+    return verdict
+  }
+  const { app, prisma, registry } = makeApp({ verifyPayout })
+  const acapix = registry.products.find((product: any) => product.productId === "acapix")!
+  const paymentAsset = registry.assets.find((asset: any) => asset.symbol === acapix.paymentAssetSymbol)!
+  const sender = "0x00000000000000000000000000000000000000c1"
+  const recipient = "0x00000000000000000000000000000000000000c2"
+  prisma.indexedRedemptionRequest.rows.push({
+    chainId: 91342,
+    requestId: "3",
+    walletAddress: sender,
+    productId: "acapix",
+    redemptionVaultAddress: acapix.redemptionVault.proxy?.toLowerCase(),
+    sharesIn: "1000000000000000000",
+    lockedAssetsOut: "1020000",
+    status: "REQUESTED",
+    requestedAtBlock: 4242n,
+    metadata: { recipient },
+    createdAt: new Date(),
+  })
+  const target = prisma.indexedRedemptionRequest.rows[0]
+  const base = "/api/v1/admin/products/acapix/redemptions/3"
+
+  const wrongAmount = await app.inject({ method: "POST", url: `${base}/payout`, headers: OPERATOR, payload: { amount: "1000000" } })
+  assert.equal(wrongAmount.statusCode, 409)
+  assert.equal(target.status, "REQUESTED")
+
+  const payout = await app.inject({ method: "POST", url: `${base}/payout`, headers: OPERATOR, payload: { amount: "1020000" } })
+  assert.equal(payout.statusCode, 200)
+  const transfer = decodeFunctionData({
+    abi: parseAbi(["function transfer(address to, uint256 amount)"]),
+    data: payout.json().transaction.data,
+  })
+  assert.equal(String(transfer.args[0]).toLowerCase(), recipient)
+
+  const txHash = `0x${"12".repeat(32)}`
+  const rejected = await app.inject({ method: "POST", url: `${base}/settle`, headers: OPERATOR, payload: { txHash } })
+  assert.equal(rejected.statusCode, 409)
+  assert.equal(target.status, "SETTLING")
+  assert.equal(seen[0].recipient.toLowerCase(), recipient)
+  assert.equal(seen[0].amount, 1020000n)
+  assert.equal(seen[0].token.toLowerCase(), String(paymentAsset.contract.proxy).toLowerCase())
+  // Only a vault:write operator wallet may have signed it, and only after the request block.
+  assert.deepEqual(seen[0].allowedSenders, [TEST_OPERATOR_WALLET.toLowerCase()])
+  assert.equal(seen[0].afterBlock, 4242n)
+
+  verdict = { ok: true }
+  const settled = await app.inject({ method: "POST", url: `${base}/settle`, headers: OPERATOR, payload: { txHash } })
+  assert.equal(settled.statusCode, 200)
+  assert.equal(target.status, "SETTLED")
+  assert.equal(target.settledTxHash, txHash)
+
+  // the same payout tx cannot settle a second request
+  prisma.indexedRedemptionRequest.rows.push({ ...target, requestId: "4", status: "SETTLING", settledTxHash: undefined })
+  const reused = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/products/acapix/redemptions/4/settle",
+    headers: OPERATOR,
+    payload: { txHash },
+  })
+  assert.equal(reused.statusCode, 409)
+
+  // Re-indexing the original RedeemRequested event (backfill / cursor reset) must not re-open
+  // the settled request for a second payout.
+  await new PrismaArcoService(prisma as PrismaLike).upsertRedemptionRequest({
+    chainId: 91342,
+    requestId: "3",
+    walletAddress: sender,
+    productId: "acapix",
+    productTokenAddress: acapix.productToken.proxy,
+    redemptionVaultAddress: acapix.redemptionVault.proxy,
+    sharesIn: "1000000000000000000",
+    lockedAssetsOut: "1020000",
+    requestedTxHash: `0x${"34".repeat(32)}`,
+    requestedAtBlock: 4242n,
+    metadata: { recipient },
+  } as any)
+  // The fake upsert replaces the row object, so read the stored row again.
+  const reindexed = prisma.indexedRedemptionRequest.rows.find((row: any) => row.requestId === "3")!
+  assert.equal(reindexed.requestedTxHash, `0x${"34".repeat(32)}`) // the upsert did apply
+  assert.equal(reindexed.status, "SETTLED")
+  assert.equal(reindexed.settledTxHash, txHash)
+})
+
+test("settle refuses to record a payout when no verifier is configured", async () => {
+  const { app, prisma, registry } = makeApp({ verifyPayout: null })
+  const acapix = registry.products.find((product: any) => product.productId === "acapix")!
+  prisma.indexedRedemptionRequest.rows.push({
+    chainId: 91342,
+    requestId: "5",
+    walletAddress: "0x00000000000000000000000000000000000000d1",
+    productId: "acapix",
+    redemptionVaultAddress: acapix.redemptionVault.proxy?.toLowerCase(),
+    lockedAssetsOut: "1000000",
+    status: "SETTLING",
+    createdAt: new Date(),
+  })
+  const settle = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/products/acapix/redemptions/5/settle",
+    headers: OPERATOR,
+    payload: { txHash: `0x${"34".repeat(32)}` },
+  })
+  assert.equal(settle.statusCode, 503)
+  assert.equal(prisma.indexedRedemptionRequest.rows[0].status, "SETTLING")
 })
 
 test("market + history routes return nav/apy from indexed PriceUpdated (apy only for configured products)", async () => {
@@ -1471,7 +1722,6 @@ test("function-pause route emits pauseFn/unpauseFn calldata for the kind's selec
   })
   assert.equal(badKind.statusCode, 400)
 
-  const { encodeFunctionData } = await import("viem")
   const pauseDeposits = await app.inject({
     method: "POST",
     url: "/api/v1/admin/products/acapix/function-pause",
@@ -1512,6 +1762,79 @@ test("function-pause route emits pauseFn/unpauseFn calldata for the kind's selec
   assert.notEqual(withdrawTxs[0].to, depositTxs[0].to) // redemption vault, not deposit vault
 })
 
+test("pause routes use live state: whole-vault pause is told apart from function pause", async () => {
+  const fnAbi = parseAbi(["function pauseFn(bytes4 selector)", "function unpauseFn(bytes4 selector)"])
+  const vaultAbi = parseAbi(["function pause()", "function unpause()"])
+  const post = (app: any, url: string, payload: Record<string, unknown>) =>
+    app.inject({ method: "POST", url: `/api/v1/admin/products/acapix/${url}`, headers: OPERATOR, payload })
+  const running = { vaultPaused: false, fnPaused: [false, false] }
+
+  // Deposit vault paused as a whole; withdraw side has only requestRedeem function-paused.
+  const { app, registry } = makeApp({
+    pauseDetails: {
+      acapix: { deposit: { vaultPaused: true, fnPaused: [false, false] }, withdraw: { vaultPaused: false, fnPaused: [false, true] } },
+      ibenji: { deposit: running, withdraw: running },
+    },
+  })
+  const acapix = registry.products.find((product: any) => product.productId === "acapix")!
+
+  // GET /admin/pause-state: operator-only, uncached summary with the whole-vault flag.
+  assert.equal((await app.inject({ method: "GET", url: "/api/v1/admin/pause-state" })).statusCode, 401)
+  const state = await app.inject({ method: "GET", url: "/api/v1/admin/pause-state", headers: OPERATOR })
+  assert.equal(state.statusCode, 200)
+  assert.deepEqual(state.json().pauseState.acapix, {
+    depositPaused: true,
+    withdrawPaused: true,
+    depositPartial: false,
+    withdrawPartial: true,
+    depositVaultPaused: true,
+    withdrawVaultPaused: false,
+  })
+  assert.equal(state.json().pauseState.ibenji.depositPaused, false)
+
+  // unpauseFn cannot lift a whole-vault pause: refused with VAULT_PAUSED.
+  const unpauseDeposits = await post(app, "function-pause", { kind: "deposit", paused: false })
+  assert.equal(unpauseDeposits.statusCode, 409)
+  assert.equal(unpauseDeposits.json().code, "VAULT_PAUSED")
+
+  // The whole-vault unpause targets only the paused deposit vault (unpause() reverts on a running one).
+  const unpauseAll = await post(app, "unpause", { target: "allVaults" })
+  assert.equal(unpauseAll.statusCode, 200)
+  assert.equal(unpauseAll.json().transactions.length, 1)
+  assert.equal(unpauseAll.json().transactions[0].to.toLowerCase(), acapix.depositVault.proxy?.toLowerCase())
+  assert.equal(unpauseAll.json().transactions[0].data, encodeFunctionData({ abi: vaultAbi, functionName: "unpause" }))
+  // pause() on an already-paused vault would revert: skipped, and a pure no-op is 409 NO_CHANGE.
+  const pauseDeposit = await post(app, "pause", { target: "depositVault" })
+  assert.equal(pauseDeposit.statusCode, 409)
+  assert.equal(pauseDeposit.json().code, "NO_CHANGE")
+  const pauseAll = await post(app, "pause", {})
+  assert.equal(pauseAll.statusCode, 200)
+  assert.equal(pauseAll.json().transactions.length, 1)
+  assert.equal(pauseAll.json().transactions[0].to.toLowerCase(), acapix.redemptionVault.proxy?.toLowerCase())
+
+  // Retrying a half-completed withdraw pause signs only the missing selector (redeemInstant).
+  const retry = await post(app, "function-pause", { kind: "withdraw", paused: true })
+  assert.equal(retry.statusCode, 200)
+  assert.deepEqual(
+    retry.json().transactions.map((tx: any) => tx.data),
+    [encodeFunctionData({ abi: fnAbi, functionName: "pauseFn", args: ["0x8835e747"] })],
+  )
+  const unpauseWithdraw = await post(app, "function-pause", { kind: "withdraw", paused: false })
+  assert.deepEqual(
+    unpauseWithdraw.json().transactions.map((tx: any) => tx.data),
+    [encodeFunctionData({ abi: fnAbi, functionName: "unpauseFn", args: ["0xbff2bab5"] })],
+  )
+
+  // Live read failed: no tx is built from a guess.
+  const { app: blind } = makeApp({ pauseDetails: null })
+  assert.equal((await post(blind, "function-pause", { kind: "deposit", paused: true })).statusCode, 503)
+  assert.equal((await post(blind, "unpause", {})).statusCode, 503)
+  assert.equal((await blind.inject({ method: "GET", url: "/api/v1/admin/pause-state", headers: OPERATOR })).statusCode, 503)
+  // No reader wired at all: the pause-state route is unavailable.
+  const { app: noReader } = makeApp()
+  assert.equal((await noReader.inject({ method: "GET", url: "/api/v1/admin/pause-state", headers: OPERATOR })).statusCode, 503)
+})
+
 test("catalog carries nested pauseState from the reader (defaults false without one)", async () => {
   const withReader = makeApp({
     pauseStates: {
@@ -1541,6 +1864,8 @@ test("catalog carries nested pauseState from the reader (defaults false without 
       withdrawPaused: false,
       depositPartial: false,
       withdrawPartial: false,
+      depositVaultPaused: false,
+      withdrawVaultPaused: false,
     })
   }
 })
@@ -1664,6 +1989,101 @@ test("register-product enforces on-chain role wiring and custody references", as
   })
   assert.equal(hashResponse.statusCode, 400)
   assert.match(hashResponse.json().error, /bytecode hash does not match/)
+})
+
+test("register-product checks both vaults' price feeds: wrong product feed blocks, payment == product feed warns", async () => {
+  const extra = extraProduct()
+  const addresses = {
+    productToken: extra.productToken.proxy,
+    depositVault: extra.depositVault.proxy,
+    redemptionVault: extra.redemptionVault.proxy,
+    priceFeed: extra.priceFeed.proxy,
+  }
+  const constantFeed = "0x000000000000000000000000000000000000c0f1"
+  const register = (feeds: RegisterProbe["feeds"]) => {
+    const { app } = makeApp({
+      extraProducts: [extraProduct()],
+      registerProbe: (product, registry) => ({ ...matchingProbe(product, registry), feeds }),
+    })
+    return app.inject({
+      method: "POST",
+      url: "/api/v1/admin/registry/register-product",
+      headers: OPERATOR,
+      payload: { productId: "anew", addresses },
+    })
+  }
+
+  // The live-testnet wiring (deploy-giwa.ts passed the product feed twice): registered + warned.
+  const buggy = await register({
+    depositProduct: extra.priceFeed.proxy,
+    depositPayment: extra.priceFeed.proxy,
+    redemptionProduct: extra.priceFeed.proxy,
+    redemptionPayment: extra.priceFeed.proxy,
+  })
+  assert.equal(buggy.statusCode, 200)
+  assert.equal(buggy.json().warnings.length, 2)
+  assert.match(buggy.json().warnings[0], /depositVault paymentPriceFeed equals productPriceFeed/)
+  assert.ok(!buggy.json().unverified.includes("priceFeeds"))
+
+  // Repaired wiring: no warning.
+  const repaired = await register({
+    depositProduct: extra.priceFeed.proxy,
+    depositPayment: constantFeed,
+    redemptionProduct: extra.priceFeed.proxy,
+    redemptionPayment: constantFeed,
+  })
+  assert.equal(repaired.statusCode, 200)
+  assert.deepEqual(repaired.json().warnings, [])
+
+  // A vault quoting from some other product feed is refused.
+  const foreign = await register({
+    depositProduct: extra.priceFeed.proxy,
+    depositPayment: constantFeed,
+    redemptionProduct: constantFeed,
+    redemptionPayment: constantFeed,
+  })
+  assert.equal(foreign.statusCode, 400)
+  assert.match(foreign.json().error, /redemptionVault productPriceFeed .* does not match the registry priceFeed/)
+
+  // A probe without feed reads lists them as unverified instead of trusting them.
+  const unread = await register(undefined)
+  assert.equal(unread.statusCode, 200)
+  assert.ok(unread.json().unverified.includes("priceFeeds"))
+})
+
+test("admin feeds route shows both vaults' feeds and flags the 1:1 wiring", async () => {
+  const feed = "0x00000000000000000000000000000000000000f1"
+  const constantFeed = "0x000000000000000000000000000000000000c0f1"
+  const { app: noReader } = makeApp()
+  assert.equal(
+    (await noReader.inject({ method: "GET", url: "/api/v1/admin/products/acapix/feeds", headers: OPERATOR })).statusCode,
+    503,
+  )
+
+  const { app, registry } = makeApp({
+    vaultFeeds: { depositProduct: feed, depositPayment: feed, redemptionProduct: feed, redemptionPayment: constantFeed },
+  })
+  const acapix = registry.products.find((product: any) => product.productId === "acapix")!
+  assert.equal((await app.inject({ method: "GET", url: "/api/v1/admin/products/acapix/feeds" })).statusCode, 401)
+  assert.equal(
+    (await app.inject({ method: "GET", url: "/api/v1/admin/products/nope/feeds", headers: OPERATOR })).statusCode,
+    404,
+  )
+  const response = await app.inject({ method: "GET", url: "/api/v1/admin/products/acapix/feeds", headers: OPERATOR })
+  assert.equal(response.statusCode, 200)
+  const body = response.json()
+  assert.equal(body.registryPriceFeed, acapix.priceFeed.proxy)
+  assert.equal(body.depositVault.paymentEqualsProduct, true)
+  assert.equal(body.redemptionVault.paymentEqualsProduct, false)
+  assert.equal(body.depositVault.productMatchesRegistry, false) // fake feed address differs from the registry
+  assert.ok(body.warnings.some((warning: string) => /depositVault: payment feed equals product feed/.test(warning)))
+  assert.ok(!body.warnings.some((warning: string) => /redemptionVault: payment feed/.test(warning)))
+
+  const { app: failing } = makeApp({ vaultFeeds: null })
+  assert.equal(
+    (await failing.inject({ method: "GET", url: "/api/v1/admin/products/acapix/feeds", headers: OPERATOR })).statusCode,
+    502,
+  )
 })
 
 test("register-product success inserts the DB row + hidden config and surfaces unverified custody", async () => {

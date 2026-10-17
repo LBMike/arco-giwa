@@ -71,6 +71,7 @@ contract ArcoRedemptionVault is MidasAccessControl, FunctionPausable, Reentrancy
         address indexed recipient,
         uint256 assetsOut
     );
+    event PaymentPriceFeedSet(address indexed previousFeed, address indexed newFeed);
 
     function initialize(
         address productToken_,
@@ -221,6 +222,21 @@ contract ArcoRedemptionVault is MidasAccessControl, FunctionPausable, Reentrancy
             paymentToken.balanceOf(address(this)) >= reservedAssets + assetsOut,
             "ARV: liquidity"
         );
+    }
+
+    /// @notice Point the vault at a new payment-asset feed. Repairs vaults initialized with the
+    ///         product feed as both feeds, which priced every quote 1:1 regardless of NAV.
+    /// @dev Upgrade-safe: writes the existing paymentPriceFeed slot only (no new storage).
+    ///      Open requests keep the rates locked at request time. DEFAULT_ADMIN_ROLE only; on
+    ///      mainnet that is the multisig.
+    function setPaymentPriceFeed(
+        address paymentPriceFeed_
+    ) external onlyRole(MidasAccessControlRoles.DEFAULT_ADMIN_ROLE) {
+        require(paymentPriceFeed_ != address(0), "ARV: payment feed zero");
+        require(paymentPriceFeed_ != address(productPriceFeed), "ARV: same as product feed");
+        require(IDataFeed(paymentPriceFeed_).getDataInBase18() > 0, "ARV: payment feed answer zero");
+        emit PaymentPriceFeedSet(address(paymentPriceFeed), paymentPriceFeed_);
+        paymentPriceFeed = IDataFeed(paymentPriceFeed_);
     }
 
     function _requirePauseAdmin() internal view override {

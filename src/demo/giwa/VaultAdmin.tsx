@@ -13,6 +13,7 @@ import type { GiwaCatalogItem, GiwaRedemption, HexAddress, UnsignedAdminTransact
 import { BrandMark } from "../components/BrandMark"
 import { ISSUERS, ASSET_MANAGERS, productById } from "../data/products"
 import { explorerTx } from "./wallet"
+import { prepareWithdrawReview, type WithdrawReview } from "./withdraw-review"
 
 type RowPhase = "idle" | "preparing" | "signing" | "confirming" | "settling" | "completed" | "failed"
 type ActionPhase = "idle" | "preparing" | "signing" | "confirming" | "done" | "failed"
@@ -153,8 +154,8 @@ function VaultCard({
 }) {
   const paymentDecimals = product.paymentAsset?.decimals ?? 18
   const baseSymbol = baseSymbolOf(product.paymentAssetSymbol)
-  // Configured admin deposit address (Vault Config) is the preferred withdraw recipient;
-  // explicit input wins, connected wallet stays the final fallback.
+  // Configured admin deposit address (Vault Config) is the default withdraw recipient; explicit
+  // input wins. There is no wallet fallback: the server only accepts allowlisted recipients.
   const configuredAdminAddress = vaultConfigOf(product).adminDepositAddress
   const legacy = productById(product.productId.toLowerCase())
   const issuer = legacy ? ISSUERS[legacy.issuer] : ISSUERS.arco
@@ -194,6 +195,7 @@ function VaultCard({
   const [withdrawAmount, setWithdrawAmount] = useState("")
   const [withdrawTo, setWithdrawTo] = useState("")
   const [withdrawPhase, setWithdrawPhase] = useState<ActionPhase>("idle")
+  const [withdrawReview, setWithdrawReview] = useState<WithdrawReview | null>(null)
   const [fundAmount, setFundAmount] = useState("")
   const [fundPhase, setFundPhase] = useState<ActionPhase>("idle")
   const [actionError, setActionError] = useState<string | null>(null)
@@ -209,6 +211,15 @@ function VaultCard({
     refetchInterval: 60_000,
   })
   const cur = limitsQuery.data?.limits
+  // Price-feed wiring of both vaults (read-only). A payment feed equal to the product feed
+  // makes every quote 1:1 regardless of NAV — shown as a warning until the repair runs.
+  const feedsQuery = useQuery({
+    queryKey: ["giwa", "vault-feeds", product.productId],
+    queryFn: () => giwaApi.admin.feeds(auth, product.productId),
+    enabled: expanded && auth.ready && Boolean(product.depositVaultAddress && product.redemptionVaultAddress),
+    staleTime: 5 * 60_000,
+    retry: 0,
+  })
   const [depMin, setDepMin] = useState("")
   const [depCap, setDepCap] = useState("")
   const [depAllow, setDepAllow] = useState("")
@@ -253,8 +264,37 @@ function VaultCard({
     }
   }
 
-  function withdrawDefaultAmount() {
-    return withdrawAmount.trim() || (depositBalance !== "--" ? depositBalance : "0")
+  // Step 1 of the withdraw: validate the explicit amount + recipient and freeze them for review.
+  function reviewWithdraw() {
+    setActionError(null)
+    // Base units depend on the payment asset's decimals; never guess them for a money movement.
+    if (product.paymentAsset?.decimals == null) {
+      setWithdrawReview(null)
+      setActionError("Payment asset decimals are unknown for this vault; withdrawal is disabled")
+      return
+    }
+    const result = prepareWithdrawReview({
+      amount: withdrawAmount,
+      to: withdrawTo,
+      configuredAdminAddress,
+      decimals: product.paymentAsset.decimals,
+    })
+    if (!result.ok) {
+      setWithdrawReview(null)
+      setActionError(result.error)
+      return
+    }
+    setWithdrawPhase("idle")
+    setWithdrawReview(result.review)
+  }
+
+  // Step 2: send exactly the reviewed values (later input edits do not leak into the tx).
+  function confirmWithdraw(review: WithdrawReview) {
+    void runAction(
+      setWithdrawPhase,
+      () => giwaApi.admin.withdraw(auth, product.productId, review.to, review.amountBase.toString()),
+      () => depositBalanceQuery.refetch(),
+    ).finally(() => setWithdrawReview(null))
   }
 
   function payoutBaseAmount(row: GiwaRedemption): bigint {
@@ -293,7 +333,7 @@ function VaultCard({
       if (!walletAddress) throw new Error("Connect the operator wallet first")
       const amount = payoutBaseAmount(row)
       setRow(row.requestId, "preparing", "")
-      const { transaction } = await giwaApi.admin.payout(auth, row.requestId, amount.toString())
+      const { transaction } = await giwaApi.admin.payout(auth, product.productId, row.requestId, amount.toString())
       claimed = true // the request is now SETTLING server-side
       setRow(row.requestId, "signing")
       hash = await sendPreparedTransaction(walletAddress, transaction)
@@ -302,7 +342,7 @@ function VaultCard({
       // verified on-chain payout.
       await afterConfirmedReceipt(hash, async () => undefined)
       setRow(row.requestId, "settling")
-      await giwaApi.admin.settle(auth, row.requestId, hash)
+      await giwaApi.admin.settle(auth, product.productId, row.requestId, hash)
       setRow(row.requestId, "completed")
       onSettled()
     } catch (error) {
@@ -314,7 +354,7 @@ function VaultCard({
       const safeToRelease = claimed && (!hash || message.includes("reverted"))
       if (safeToRelease) {
         try {
-          await giwaApi.admin.release(auth, row.requestId)
+          await giwaApi.admin.release(auth, product.productId, row.requestId)
         } catch {
           // stays SETTLING; the manual Release button below recovers it
         }
@@ -323,15 +363,31 @@ function VaultCard({
       setRow(
         row.requestId,
         "failed",
-        safeToRelease ? message : `${message} — verify the tx on the explorer, then Release or settle manually.`,
+        safeToRelease
+          ? message
+          : `${message} — the transfer may have landed: use Retry settle, or verify on the explorer before Release.`,
       )
+    }
+  }
+
+  // Re-run settle for a payout this session already broadcast (e.g. the server's RPC had not
+  // seen the receipt yet). Never re-sends funds — it only re-verifies the same tx hash.
+  async function retrySettle(row: GiwaRedemption, hash: string) {
+    try {
+      if (!auth.ready) throw new Error("Operator token must be entered at runtime")
+      setRow(row.requestId, "settling", "")
+      await giwaApi.admin.settle(auth, product.productId, row.requestId, hash)
+      setRow(row.requestId, "completed")
+      onSettled()
+    } catch (error) {
+      setRow(row.requestId, "failed", error instanceof Error ? error.message : String(error))
     }
   }
 
   async function releaseRow(row: GiwaRedemption) {
     try {
       if (!auth.ready) throw new Error("Operator token must be entered at runtime")
-      await giwaApi.admin.release(auth, row.requestId)
+      await giwaApi.admin.release(auth, product.productId, row.requestId)
       setRow(row.requestId, "idle", "")
       onSettled()
     } catch (error) {
@@ -396,39 +452,65 @@ function VaultCard({
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <input
               value={withdrawAmount}
-              onChange={(event) => setWithdrawAmount(event.target.value)}
-              placeholder={depositBalance !== "--" ? depositBalance : "amount"}
+              onChange={(event) => {
+                setWithdrawAmount(event.target.value)
+                setWithdrawReview(null)
+              }}
+              placeholder="amount"
+              aria-label="Withdraw amount"
               className="h-9 w-32 rounded-md border border-[var(--color-arco-border)] px-2 tabular-nums text-sm"
             />
             <input
               value={withdrawTo}
-              onChange={(event) => setWithdrawTo(event.target.value)}
-              placeholder={configuredAdminAddress ?? walletAddress ?? "recipient (defaults to connected wallet)"}
+              onChange={(event) => {
+                setWithdrawTo(event.target.value)
+                setWithdrawReview(null)
+              }}
+              placeholder={configuredAdminAddress ?? "recipient (must be on the withdrawal allowlist)"}
+              aria-label="Withdraw recipient"
               className="h-9 min-w-[200px] flex-1 rounded-md border border-[var(--color-arco-border)] px-2 font-mono text-xs"
             />
             <button
               type="button"
-              disabled={busyAction(withdrawPhase)}
-              onClick={() =>
-                void runAction(
-                  setWithdrawPhase,
-                  () =>
-                    giwaApi.admin.withdraw(
-                      auth,
-                      product.productId,
-                      (withdrawTo.trim() || configuredAdminAddress || walletAddress || "") as string,
-                      toBaseUnits(withdrawDefaultAmount(), paymentDecimals).toString(),
-                    ),
-                  () => depositBalanceQuery.refetch(),
-                )
-              }
+              disabled={busyAction(withdrawPhase) || withdrawReview !== null}
+              onClick={reviewWithdraw}
               className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--color-arco-ink)] px-3 text-xs font-medium text-[var(--color-arco-on-dark)] disabled:opacity-50"
             >
-              {busyAction(withdrawPhase) && <Loader2 className="size-3.5 animate-spin" />}
-              Withdraw to admin
+              Review withdrawal
             </button>
             {withdrawPhase === "done" && <CheckCircle2 className="size-4 text-[var(--color-arco-up)]" />}
           </div>
+          {withdrawReview && (
+            <div className="mt-2 space-y-2 rounded-md border border-[var(--color-arco-border)] bg-[var(--color-arco-surface-muted)] p-2.5 text-xs text-[var(--color-arco-ink)]">
+              <p>
+                Withdraw <span className="font-semibold tabular-nums">{withdrawReview.amountHuman} {product.paymentAssetSymbol}</span>{" "}
+                from {shortAddr(product.depositVaultAddress)} to{" "}
+                <span className="break-all font-mono">{withdrawReview.to}</span>
+              </p>
+              <p className="text-[11px] text-[var(--color-arco-muted)]">
+                Balance now {depositBalance} {product.paymentAssetSymbol}. The server refuses recipients outside the withdrawal allowlist.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={busyAction(withdrawPhase)}
+                  onClick={() => confirmWithdraw(withdrawReview)}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--color-arco-ink)] px-3 text-xs font-medium text-[var(--color-arco-on-dark)] disabled:opacity-50"
+                >
+                  {busyAction(withdrawPhase) && <Loader2 className="size-3.5 animate-spin" />}
+                  Confirm withdraw
+                </button>
+                <button
+                  type="button"
+                  disabled={busyAction(withdrawPhase)}
+                  onClick={() => setWithdrawReview(null)}
+                  className="inline-flex h-8 items-center rounded-md border border-[var(--color-arco-border)] px-3 text-xs font-medium text-[var(--color-arco-ink)] disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Section B — redemption-vault liquidity (instant redeem only) */}
@@ -563,6 +645,42 @@ function VaultCard({
         )}
       </div>
 
+      {/* Price feeds — read-only wiring check (product feed = NAV; payment feed = payment asset rate). */}
+      <div className="rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3">
+        <h3 className="text-sm font-semibold text-[var(--color-arco-ink)]">Price feeds</h3>
+        {feedsQuery.data ? (
+          <div className="mt-2 space-y-1.5 text-xs">
+            {(
+              [
+                ["Deposit vault", feedsQuery.data.depositVault],
+                ["Redemption vault", feedsQuery.data.redemptionVault],
+              ] as const
+            ).map(([label, side]) => (
+              <div key={label} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[var(--color-arco-text-soft)]">
+                <span className="w-28 font-medium text-[var(--color-arco-ink)]">{label}</span>
+                <span>
+                  product <span className="font-mono">{shortAddr(side.productPriceFeed)}</span>
+                </span>
+                <span>
+                  payment <span className="font-mono">{shortAddr(side.paymentPriceFeed)}</span>
+                </span>
+              </div>
+            ))}
+            {feedsQuery.data.warnings.map((warning) => (
+              <p key={warning} className="flex items-start gap-1.5 text-[var(--color-arco-down)]">
+                <AlertCircle className="mt-0.5 size-3.5 shrink-0" /> {warning}
+              </p>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-[var(--color-arco-muted)]">
+            {feedsQuery.isError
+              ? `Could not read price feeds: ${feedsQuery.error instanceof Error ? feedsQuery.error.message : String(feedsQuery.error)}`
+              : "Loading price feeds…"}
+          </p>
+        )}
+      </div>
+
       {actionError && (
         <p className="flex items-start gap-1.5 text-xs text-[var(--color-arco-down)]">
           <AlertCircle className="mt-0.5 size-3.5 shrink-0" /> {actionError}
@@ -643,6 +761,16 @@ function VaultCard({
                                         ? "Settling elsewhere"
                                         : "Send TX"}
                             </button>
+                            {row.status === "SETTLING" && !busy && rowHashes[row.requestId] && (
+                              <button
+                                type="button"
+                                onClick={() => void retrySettle(row, rowHashes[row.requestId])}
+                                title="Re-verify the payout tx already sent from this console and record it — sends nothing"
+                                className="inline-flex h-8 items-center rounded-md border border-[var(--color-arco-border)] px-2.5 text-xs font-medium text-[var(--color-arco-ink)]"
+                              >
+                                Retry settle
+                              </button>
+                            )}
                             {row.status === "SETTLING" && !busy && (
                               <button
                                 type="button"

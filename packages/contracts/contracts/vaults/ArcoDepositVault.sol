@@ -70,6 +70,7 @@ contract ArcoDepositVault is MidasAccessControl, FunctionPausable, ReentrancyGua
         uint256 sharesOut
     );
     event VaultWithdrawal(address indexed to, uint256 amount);
+    event PaymentPriceFeedSet(address indexed previousFeed, address indexed newFeed);
 
     function initialize(
         address productToken_,
@@ -217,6 +218,21 @@ contract ArcoDepositVault is MidasAccessControl, FunctionPausable, ReentrancyGua
     function _validateMint(uint256 sharesOut) internal view {
         require(productToken.totalSupply() + sharesOut <= maxSupplyCap, "ADV: max supply");
         require(mintedByVault + sharesOut <= vaultMintAllowance, "ADV: vault allowance");
+    }
+
+    /// @notice Point the vault at a new payment-asset feed. Repairs vaults initialized with the
+    ///         product feed as both feeds, which priced every quote 1:1 regardless of NAV.
+    /// @dev Upgrade-safe: writes the existing paymentPriceFeed slot only (no new storage).
+    ///      Open requests keep the rates locked at request time. DEFAULT_ADMIN_ROLE only; on
+    ///      mainnet that is the multisig.
+    function setPaymentPriceFeed(
+        address paymentPriceFeed_
+    ) external onlyRole(MidasAccessControlRoles.DEFAULT_ADMIN_ROLE) {
+        require(paymentPriceFeed_ != address(0), "ADV: payment feed zero");
+        require(paymentPriceFeed_ != address(productPriceFeed), "ADV: same as product feed");
+        require(IDataFeed(paymentPriceFeed_).getDataInBase18() > 0, "ADV: payment feed answer zero");
+        emit PaymentPriceFeedSet(address(paymentPriceFeed), paymentPriceFeed_);
+        paymentPriceFeed = IDataFeed(paymentPriceFeed_);
     }
 
     function _requirePauseAdmin() internal view override {

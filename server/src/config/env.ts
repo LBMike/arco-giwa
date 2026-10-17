@@ -1,4 +1,5 @@
 import { parseAdminOperatorsEnv, type AdminOperator } from "../admin-auth/operators.js"
+import { parseAdminWithdrawAllowlist } from "../admin-auth/withdraw-allowlist.js"
 
 const SERVER_ONLY_KEYS = [
   "DATABASE_URL",
@@ -29,6 +30,8 @@ export type ServerEnv = {
   readonly adminLegacyTokenAuth: boolean
   /** ADMIN_OPERATORS: the Vault operator directory. Unset or [] denies every Vault admin route. */
   readonly adminOperators: readonly AdminOperator[]
+  /** ADMIN_WITHDRAW_ALLOWLIST (lowercased): extra withdrawTo recipients beyond each product's adminDepositAddress. */
+  readonly adminWithdrawAllowlist: readonly string[]
   readonly giwaChainId: number
   readonly indexerConfirmations: number
   readonly indexerMaxBlockRange: bigint
@@ -80,6 +83,9 @@ export function validateServerEnv(env: NodeJS.ProcessEnv): ServerEnv {
     )
   }
 
+  // Throws a fixed message (never the configured value) on a malformed list.
+  const adminWithdrawAllowlist = parseAdminWithdrawAllowlist(env.ADMIN_WITHDRAW_ALLOWLIST)
+
   const corsAllowedOrigins = parseCorsAllowedOrigins(env.CORS_ALLOWED_ORIGINS)
   assertNoWildcardCors(corsAllowedOrigins)
 
@@ -115,6 +121,7 @@ export function validateServerEnv(env: NodeJS.ProcessEnv): ServerEnv {
     adminOperatorToken: env.ADMIN_OPERATOR_TOKEN ?? "",
     adminLegacyTokenAuth,
     adminOperators,
+    adminWithdrawAllowlist,
     giwaChainId,
     indexerConfirmations,
     indexerMaxBlockRange,
