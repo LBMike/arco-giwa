@@ -191,7 +191,7 @@ function vaultImageFor(product: Pick<GiwaCatalogItem, "productId" | "vaultConfig
   return vaultConfigOf(product).vaultImageUrl ?? tokenIcon(product.productId)
 }
 
-function paymentAssetIcon(symbol: string) {
+export function paymentAssetIcon(symbol: string) {
   if (symbol === "tUSDC") return "/logos/usdc.svg"
   if (symbol === "tBTC") return "/logos/abtc.png"
   if (symbol === "tWETH") return "/logos/aeth.png"
@@ -1688,7 +1688,7 @@ function redemptionBadge(status: string): { label: string; tone: string } {
   return { label: status, tone: "text-[var(--color-arco-text-soft)]" }
 }
 
-function PendingRedemptionList({
+export function PendingRedemptionList({
   rows,
   product,
   price,

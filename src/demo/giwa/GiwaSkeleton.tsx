@@ -83,22 +83,16 @@ export function ProductsSkeleton() {
 // (invest-panel block + section blocks). Rendered inside the page's max-w column.
 export function SavingsSkeleton() {
   return (
-    <SkeletonRegion label="Loading savings accounts…" className="space-y-8">
-      {/* account selector: label + row of cards */}
-      <div className="w-full space-y-2">
-        <GiwaSkeleton className="h-3 w-28 rounded-full" />
-        <div className="flex gap-2 overflow-hidden">
-          {[0, 1, 2, 3].map((i) => (
-            <GiwaSkeleton key={i} className="h-[112px] w-[112px] shrink-0 rounded-[10px]" />
-          ))}
-        </div>
+    <SkeletonRegion label="Loading savings accounts…" className="space-y-3">
+      {/* account tabs */}
+      <div className="flex gap-2 overflow-hidden">
+        <GiwaSkeleton className="h-[52px] w-[220px] shrink-0 rounded-t-[22px]" />
+        <GiwaSkeleton className="h-[52px] w-[300px] shrink-0 rounded-t-[22px]" />
       </div>
-      {/* detail: invest panel + section blocks */}
-      <div className="space-y-10">
-        <GiwaSkeleton className="h-[460px] w-full rounded-[var(--radius-strategy)]" />
-        <GiwaSkeleton className="h-[240px] w-full rounded-[var(--radius-strategy)]" />
-        <GiwaSkeleton className="h-[300px] w-full rounded-[var(--radius-strategy)]" />
-      </div>
+      {/* savings card, figures, then the three sections */}
+      <GiwaSkeleton className="h-[291px] w-full rounded-[22px]" />
+      <GiwaSkeleton className="h-[90px] w-full rounded-[22px]" />
+      <GiwaSkeleton className="h-[204px] w-full rounded-[22px]" />
     </SkeletonRegion>
   )
 }

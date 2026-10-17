@@ -21,11 +21,11 @@ test("ProductsSkeleton echoes the Investor layout: static Products h1 + pulse bl
   assert.match(html, /h-\[189px\]/) // featured carousel echo
 })
 
-test("SavingsSkeleton: status region + selector-card + detail pulse blocks", () => {
+test("SavingsSkeleton: status region + tabs, savings card and section pulse blocks", () => {
   const html = renderToStaticMarkup(<SavingsSkeleton />)
   assert.match(html, /role="status"/)
   assert.match(html, /Loading savings/)
-  assert.match(html, /h-\[112px\] w-\[112px\]/) // selector card echo
+  assert.match(html, /h-\[291px\] w-full rounded-\[22px\]/) // savings card echo
   assert.match(html, /animate-pulse/)
   assert.doesNotMatch(html, /No savings accounts yet/) // loading is not the empty state
 })

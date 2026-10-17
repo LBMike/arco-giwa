@@ -60,6 +60,31 @@
   .arco-demo .arco-live-heartbeat { animation: none; }
 }
 
+/* Savings card: a soft light drifting across the dark card, and the "scroll on" chevrons. */
+.arco-demo .savings-hero-glow {
+  animation: savings-hero-glow 18s ease-in-out infinite alternate;
+}
+
+@keyframes savings-hero-glow {
+  0% { transform: translate(-12%, -10%) scale(1); }
+  50% { transform: translate(30%, 8%) scale(1.15); }
+  100% { transform: translate(62%, -6%) scale(1); }
+}
+
+.arco-demo .savings-chevron {
+  animation: savings-chevron 1.8s ease-in-out infinite;
+}
+
+@keyframes savings-chevron {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.85; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arco-demo .savings-hero-glow,
+  .arco-demo .savings-chevron { animation: none; }
+}
+
 /* ──────────────────────────────────────────────────────────────────────────
    Font: the /app demo (LP-portal surface) is unified on Geist. The global `*`
    rule in index.css forces Almarai for the landing; this more-specific rule
@@ -131,6 +156,12 @@
 
   /* savings page */
   --color-arco-savings-accent: #0bb538;  /* selected accept-asset card border (Figma #0BB538) */
+  --color-savings-on-hero-muted: rgba(255, 255, 255, 0.74); /* secondary text on the dark Savings card (>= 4.5:1 under the glow) */
+  --color-savings-on-hero-line: rgba(255, 255, 255, 0.16);  /* hairlines, outline button and grid on the dark card */
+  --color-savings-on-hero-fill: rgba(255, 255, 255, 0.08);  /* translucent panels on the dark card */
+  --color-savings-hero-glow: rgba(225, 224, 204, 0.2);      /* drifting cream light on the dark card */
+  --color-savings-tile-hatch: rgba(15, 23, 42, 0.05);       /* diagonal hatch on the Backing / Exposure tiles */
+  --color-savings-earn-area: rgba(23, 147, 134, 0.14);      /* simulation earnings area (arco-up @ 14%) */
 
   /* hero / carousel */
   --color-arco-hero: #000000;

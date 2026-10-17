@@ -9,6 +9,7 @@ Missing files fall back to an initial badge automatically (BrandMark.tsx).
 - aksia.png     — Aksia        (aCAPIX, aHedge asset manager)
 - ubs.png       — UBS          (uMINT asset manager + issuer)
 - franklin.png  — Franklin Templeton (iBENJI asset manager)
+- franklin-templeton.png — Franklin Templeton mark, 128×128 (Savings "Powered by" and Backing tiles)
 - digift.png    — DigiFT       (uMINT, iBENJI issuer)
 
 ## Product token icons
