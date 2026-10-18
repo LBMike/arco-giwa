@@ -24,6 +24,10 @@ import { EvmRegistryService } from "./services/evm-registry-service.js"
 import { PrismaArcoService } from "./services/prisma-arco-service.js"
 import { fetchUsdRates } from "./services/usd-rates.js"
 import { readRegistryFile } from "./registry/io.js"
+import { parseArcoUSDEnv } from "./arcousd/config.js"
+import { createArcoUSDChainReader } from "./arcousd/reader.js"
+import { readArcoUSDRegistry } from "./arcousd/registry.js"
+import { ArcoUSDService } from "./arcousd/service.js"
 
 export async function startServer(envSource: NodeJS.ProcessEnv = process.env, cliOwnsSignals = false, localCustomer = false) {
   if (localCustomer) {
@@ -62,6 +66,20 @@ async function composeServer(
   const registry = new EvmRegistryService(arco)
   const portfolio = new EvmPortfolioService(arco)
   const rpcClient = createPublicClient({ transport: http(env.indexerRpcUrl) })
+  // ArcoUSD reserve state + buy gate. Inert ("not-deployed") until the ArcoUSD deploy script has
+  // written deployments/91342/arcousd-giwa.json; the registry is re-read on each cache refresh.
+  // Never throws: an invalid ARCOUSD_* value falls back to its default, is logged here, and keeps
+  // the buy gate closed once ArcoUSD is deployed.
+  const arcoUSDEnv = parseArcoUSDEnv(envSource)
+  if (arcoUSDEnv.invalid.length) {
+    console.error(JSON.stringify({ service: "arco-giwa-api", arcousd: "config-invalid", invalid: arcoUSDEnv.invalid }))
+  }
+  const arcoUSD = new ArcoUSDService({
+    chainId: GIWA_CHAIN_ID,
+    env: arcoUSDEnv,
+    loadRegistry: () => readArcoUSDRegistry(arcoUSDEnv.registryPath),
+    read: createArcoUSDChainReader(rpcClient),
+  })
   const priceFeedReadAbi = parseAbi([
     "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)",
   ])
@@ -324,7 +342,7 @@ async function composeServer(
           registryPath: env.registryPath,
         },
         {
-          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits, stocksMarketData, stocksMarketClock,
+          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits, stocksMarketData, stocksMarketClock, arcoUSD,
           resolveStocksOperator: sessions?.resolveOperator,
           stocks: stocks ? {
             service: stocks.service,

@@ -1,4 +1,9 @@
 import { createPublicClient, http } from "viem"
+import { parseArcoUSDEnv } from "../arcousd/config.js"
+import { ArcoUSDIndexer } from "../arcousd/indexer.js"
+import { createArcoUSDChainReader } from "../arcousd/reader.js"
+import { readArcoUSDRegistry } from "../arcousd/registry.js"
+import { PrismaArcoUSDIndexerStore } from "../arcousd/store.js"
 import { validateServerEnv } from "../config/env.js"
 import { createPrismaClient } from "../db/prisma.js"
 import { readRegistryFile } from "../registry/io.js"
@@ -84,6 +89,23 @@ export async function runGiwaIndexer(envSource: NodeJS.ProcessEnv = process.env)
     cursorName: "giwa",
   })
 
+  // ArcoUSD runs in the same process with its own cursor and its own try/catch below: inert until
+  // deployments/91342/arcousd-giwa.json exists and is deployed, and its failures never back off
+  // or stop the core indexer (nor the reverse).
+  const arcoUSDEnv = parseArcoUSDEnv(envSource) // never throws; invalid values fall back to defaults
+  if (arcoUSDEnv.invalid.length) {
+    console.error(stringify({ service: "arco-arcousd-indexer", mode: "config-invalid", invalid: arcoUSDEnv.invalid }))
+  }
+  const arcoUSDIndexer = new ArcoUSDIndexer({
+    loadRegistry: () => readArcoUSDRegistry(arcoUSDEnv.registryPath),
+    rpc: createRpc(env.indexerRpcUrl),
+    store: new PrismaArcoUSDIndexerStore(prisma, arco),
+    readState: createArcoUSDChainReader(createPublicClient({ transport: http(env.indexerRpcUrl) })),
+    confirmations: env.indexerConfirmations,
+    maxBlockRange: env.indexerMaxBlockRange,
+    snapshotIntervalMs: arcoUSDEnv.snapshotIntervalMs,
+  })
+
   const backfillFrom = envSource.INDEXER_BACKFILL_FROM ? BigInt(envSource.INDEXER_BACKFILL_FROM) : null
   const backfillTo = envSource.INDEXER_BACKFILL_TO ? BigInt(envSource.INDEXER_BACKFILL_TO) : null
   if (backfillFrom !== null && backfillTo !== null) {
@@ -101,17 +123,34 @@ export async function runGiwaIndexer(envSource: NodeJS.ProcessEnv = process.env)
 
   let backoffMs = 1000
   while (!stopped) {
+    let coreError: unknown = null
     try {
       const result = await indexer.pollOnce()
       console.log(stringify({ service: "arco-giwa-indexer", mode: "poll", result }))
+    } catch (error) {
+      coreError = error
+    }
+    try {
+      const result = await arcoUSDIndexer.pollOnce()
+      if (result.mode === "poll") console.log(stringify({ service: "arco-arcousd-indexer", mode: "poll", result }))
+    } catch (error) {
+      console.error(
+        stringify({
+          service: "arco-arcousd-indexer",
+          mode: "error",
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      )
+    }
+    if (coreError === null) {
       backoffMs = 1000
       await sleep(env.indexerPollIntervalMs)
-    } catch (error) {
+    } else {
       console.error(
         stringify({
           service: "arco-giwa-indexer",
           mode: "error",
-          error: error instanceof Error ? error.message : String(error),
+          error: coreError instanceof Error ? coreError.message : String(coreError),
           retryInMs: backoffMs,
         }),
       )
