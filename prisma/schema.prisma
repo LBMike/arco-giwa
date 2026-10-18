@@ -161,6 +161,63 @@ model IndexedRedemptionRequest {
   @@schema("arco_evm")
 }
 
+// ArcoUSD Standard-queue redemptions (docs/specs/arcousd-v1.md §3), written by the ArcoUSD
+// indexer from ArcoUSDReserve events. Mirrors the on-chain request: QUEUED -> PAID |
+// PAYOUT_FAILED | CANCELLED, and PAYOUT_FAILED -> CANCELLED. PAID and CANCELLED are terminal;
+// the store only applies a transition from an allowed prior status, so re-indexing never
+// regresses a row. Amounts are base-unit integer strings (ArcoUSD 18 dec, asset native dec).
+model ArcoUSDRedeemRequest {
+  id              String    @id @default(cuid())
+  chainId         Int
+  reserveAddress  String
+  requestId       String
+  owner           String
+  recipient       String
+  asset           String
+  arcoUSDAmount   String
+  assetAmount     String
+  status          String
+  requestedAt     DateTime
+  queuedTxHash    String
+  queuedBlock     BigInt
+  paidTxHash      String?
+  paidAt          DateTime?
+  failedTxHash    String?
+  failedAt        DateTime?
+  cancelledTxHash String?
+  cancelledAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([chainId, reserveAddress, requestId])
+  @@index([owner, chainId, status])
+  // Explicit name: the default would exceed Postgres' 63-char identifier limit and drift.
+  @@index([chainId, reserveAddress, status, requestedAt], map: "ArcoUSDRedeemRequest_reserve_status_requestedAt_idx")
+  @@schema("arco_evm")
+}
+
+// Periodic ArcoUSD reserve snapshots (Lens.snapshot + pause state at one block) for the admin
+// monitoring trend and reconciliation history. `data` is the full mapped ReserveState.
+model ArcoUSDReserveSnapshot {
+  id               String   @id @default(cuid())
+  chainId          Int
+  reserveAddress   String
+  blockNumber      BigInt
+  takenAt          DateTime
+  totalBacking     String
+  totalLiabilities String
+  navOk            Boolean
+  mmfBps           Int
+  paused           Boolean
+  settlementPaused Boolean
+  data             Json
+  createdAt        DateTime @default(now())
+
+  @@unique([chainId, reserveAddress, blockNumber])
+  @@index([chainId, reserveAddress, takenAt])
+  @@schema("arco_evm")
+}
+
 // Off-chain per-vault display/config (admin-ia-plan §2): the on-chain registry is immutable
 // deploy output, so display metadata, portfolio-card toggles, pin/hide flags and the admin
 // deposit address live here and are merged into the public catalog. No row => defaults

@@ -9,6 +9,8 @@ import cors from "@fastify/cors"
 import { stocksPlugin, type StocksPluginOptions } from "./stocks/plugin.js"
 import { stocksSubmissionsPlugin, type StocksSubmissionsPluginOptions } from "./stocks-submissions/plugin.js"
 import { stocksMarketDataPlugin, type StocksMarketDataService } from "./stocks-market-data/index.js"
+import { arcoUSDPlugin } from "./arcousd/plugin.js"
+import type { ArcoUSDService } from "./arcousd/service.js"
 import type { StocksMarketDataPluginOptions } from "./stocks-market-data/index.js"
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify"
 import { generateNonce, SiweMessage } from "siwe"
@@ -117,6 +119,8 @@ export type ArcoAppServices = {
   readonly stocksExecution?: StocksExecutionPluginOptions
   readonly stocksSubmissions?: StocksSubmissionsPluginOptions
   readonly stocksMarketData?: StocksMarketDataService
+  /** ArcoUSD reserve state + buy gate (public, read-only). Absent → routes not registered. */
+  readonly arcoUSD?: ArcoUSDService
   readonly stocksMarketClock?: StocksMarketDataPluginOptions["marketClock"]
   readonly stocks?: StocksPluginOptions
   readonly arco: PrismaArcoService
@@ -1637,6 +1641,7 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     reply.code(400).send({ error: errorMessage(error) })
   })
 
+  if (services.arcoUSD) app.register(arcoUSDPlugin, { service: services.arcoUSD })
   if (services.stocks) app.register(stocksPlugin, services.stocks)
   if (services.stocksRuntimeStatus) {
     app.register(stocksRuntimeStatusPlugin, services.stocksRuntimeStatus)
