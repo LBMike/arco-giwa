@@ -28,6 +28,7 @@ import { fetchUsdRates } from "./services/usd-rates.js"
 import { readRegistryFile } from "./registry/io.js"
 import { parseArcoUSDEnv } from "./arcousd/config.js"
 import { createArcoUSDChainReader } from "./arcousd/reader.js"
+import { ArcoUSDRecalls, createRecallReader } from "./arcousd/recall.js"
 import { readArcoUSDRegistry } from "./arcousd/registry.js"
 import { ArcoUSDService } from "./arcousd/service.js"
 
@@ -81,6 +82,13 @@ async function composeServer(
     env: arcoUSDEnv,
     loadRegistry: () => readArcoUSDRegistry(arcoUSDEnv.registryPath),
     read: createArcoUSDChainReader(rpcClient),
+  })
+  // Reserve recalls in the redemption console: same registry. Recalls are recognised by the
+  // Reserve address even when the registry fails validation (then reported unavailable).
+  const arcoUSDRecalls = new ArcoUSDRecalls({
+    chainId: GIWA_CHAIN_ID,
+    loadRegistry: () => readArcoUSDRegistry(arcoUSDEnv.registryPath),
+    read: createRecallReader(rpcClient),
   })
   const priceFeedReadAbi = parseAbi([
     "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)",
@@ -376,7 +384,7 @@ async function composeServer(
           registryPath: env.registryPath,
         },
         {
-          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD,
+          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD, arcoUSDRecalls,
           resolveStocksOperator: sessions?.resolveOperator,
           stocks: stocks ? {
             service: stocks.service,

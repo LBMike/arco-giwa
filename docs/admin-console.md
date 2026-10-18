@@ -63,6 +63,24 @@ Vault 쓰기 작업의 상당수는 서버가 서명 전 트랜잭션을 만들�
   - settle은 트랜잭션 영수증을 읽어 다음을 모두 확인한 뒤에만 기록한다: 성공한 트랜잭션이고, 보낸 지갑이 `ADMIN_OPERATORS`의 `vault:write` 지갑이며, 상환 요청 블록 이후에 채굴됐고, 그 지갑에서 받는 주소로 결제 토큰이 잠긴 금액만큼 전송됐다. 그래서 같은 금액의 다른 전송(파우셋, 예전 claim, 사용자의 자기 전송)으로는 정산되지 않는다. 같은 트랜잭션으로 두 요청을 정산할 수 없고, 정산은 서버 안에서 한 번에 하나씩 처리한다. 영수증 검증기가 없으면 503이다.
   - 지갑이 확인한 직후에는 서버 RPC가 아직 영수증을 못 볼 수 있어 서버가 몇 번 다시 읽는다. 그래도 실패하면 행이 SETTLING으로 남고, 화면의 **Retry settle**이 같은 트랜잭션으로 다시 확인한다(돈을 다시 보내지 않는다). **Release**는 익스플로러에서 전송이 없었음을 확인한 뒤에만 쓴다.
   - 인덱서가 이벤트를 다시 읽어도(백필, 커서 초기화) 상환 요청의 상태는 바뀌지 않는다. 정산된 요청이 REQUESTED로 돌아가 두 번 지급되는 일을 막는다.
+- **ArcoUSD Reserve 회수**: Reserve가 MMF 상품을 되파는 `requestRecall`도 상품 상환 볼트에는 일반 상환 요청으로 들어온다.
+  - **보낸 주소**가 ArcoUSD 레지스트리의 Reserve인 요청이 회수다. 받는 주소는 누구나 Reserve로 지정할 수 있지만, 보낸 주소는 Reserve만 될 수 있다.
+  - 레지스트리가 검증에 실패해도 Reserve 주소만 읽히면 회수로 표시한다. 이때 회수 상태는 `unavailable`이 되고 모든 Reserve 동작을 막는다.
+  - **상환 대기 목록**(`GET /api/v1/admin/redemptions/pending`)은 각 행에 `kind`(`customer` | `arcousd-recall`)를 붙인다. 회수 행에는 `strategyId`도 붙는다. 화면에는 주소 옆에 **ArcoUSD Reserve** 표시가 붙는다.
+  - **직접 송금 지급**은 일반 상환과 같다. payout → settle 순서이고 받는 주소는 Reserve다. 다만 두 가지가 다르다.
+    - 회수 건의 settle은 결제 토큰을 직접 호출한 전송만 인정한다. 운영자가 우연히 같은 금액으로 `Reserve.deposit`을 해도 그 트랜잭션으로는 정산되지 않는다.
+    - 정산 뒤 Reserve는 그 금액을 여전히 회수 대기(`pendingRecall`)로 세므로 담보가 부풀려진다. 그래서 반드시 **Acknowledge**(`Reserve.acknowledgeRecallPaid`)를 해야 한다. `RESERVE_MANAGER_ROLE` 지갑이 서명하고, settle 응답에는 `next: "acknowledge-recall"`이 붙는다.
+  - **`POST .../redemptions/:requestId/acknowledge-recall`**은 아래 조건을 모두 만족할 때만 트랜잭션을 만든다. 지급 전에 acknowledge하면 담보가 줄어 보이므로 서버가 막는다.
+    - 지급이 검증된(SETTLED) 회수다.
+    - 그 전략의 상환 볼트가 요청의 볼트와 같다.
+    - Reserve가 세는 대기 금액이 요청에 잠긴 지급액과 정확히 같다.
+  - **`POST .../redemptions/:requestId/claim-recall`**은 fulfill 경로로 처리한 회수용이다. `Reserve.claimRecall`(누구나 호출 가능)로 볼트의 자금을 Reserve로 옮긴다. FULFILLED이고 볼트가 일치하며 Reserve에 열린 회수가 있을 때만 만든다.
+  - **`GET /api/v1/admin/arcousd/recalls`**는 회수별 상태와 다음 동작을 체인에서 읽어 돌려준다.
+    - 상태: 지급 전 / 지급 중 / 지급됨·확인 필요 / 수령 가능 / 완료 / 상태 확인 불가
+    - 응답 `status`는 `live`, `not-deployed`, `unavailable`(이유 포함) 중 하나다.
+    - 5초 캐시이고, 한 블록에서 최대 4건씩 읽는다. CLAIMED 건은 읽지 않는다.
+    - 회수 정산은 캐시를 비운다. 콘솔은 Reserve 트랜잭션이 확정된 직후 `?fresh=1`로 캐시 없이 다시 읽는다.
+  - **화면 표시**: 할 일이 있는 상품은 카드 머리에 **ArcoUSD recall: action needed**, 확인할 경고나 오류만 있으면 **ArcoUSD recall: check state**가 뜬다. 같은 회수를 직접 송금과 fulfill로 모두 지급하면, 수령(claim)하기 전까지 이중 지급 경고를 보여 준다. 수령이 끝난 건은 경고를 띄우지 않고, 이중 지급은 대사에서 확인한다.
 
 ### 레거시 공유 토큰 (`x-operator-token`)
 

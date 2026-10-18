@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { formatUnits } from "viem"
 import { AlertCircle, CheckCircle2, ChevronDown, Loader2, Send } from "lucide-react"
 import { giwaApi } from "./api"
@@ -9,7 +9,16 @@ import { GIWA_CHAIN_ID } from "./config"
 import { afterConfirmedReceipt, readTokenBalance, sendPreparedTransaction, toBaseUnits } from "./contracts"
 import { AdminWriteGroup, useGiwaAdmin } from "./admin-context"
 import { UNLIMITED_HUMAN, allowanceBelowCap, isPositiveHuman, resolveLimit, usdHint } from "./limits-helpers"
-import type { GiwaCatalogItem, GiwaRedemption, HexAddress, UnsignedAdminTransaction } from "./types"
+import type { GiwaCatalogItem, GiwaRedemption, GiwaReserveRecall, HexAddress, UnsignedAdminTransaction } from "./types"
+import {
+  isReserveRecall,
+  recallActionKey,
+  recallActionLabel,
+  recallBadge,
+  recallStateLabel,
+  recallsNeedingAttention,
+  recallsUnavailableReason,
+} from "./reserve-recall"
 import { BrandMark } from "../components/BrandMark"
 import { ISSUERS, ASSET_MANAGERS, productById } from "../data/products"
 import { explorerTx } from "./wallet"
@@ -81,6 +90,85 @@ export function VaultOperationsPanel() {
           />
         )
       })}
+    </div>
+  )
+}
+
+// ArcoUSD Reserve recalls of one vault that still need a Reserve step (or an operator's look):
+// Acknowledge after a direct-transfer payout, Claim after a fulfil. Renders nothing when none.
+export function ReserveRecallList({
+  recalls,
+  paymentDecimals,
+  baseSymbol,
+  phases,
+  errors,
+  onAction,
+}: {
+  recalls: GiwaReserveRecall[]
+  paymentDecimals: number
+  baseSymbol: string
+  phases: Record<string, ActionPhase>
+  errors: Record<string, string>
+  onAction: (recall: GiwaReserveRecall) => void
+}) {
+  if (recalls.length === 0) return null
+  const amountOf = (recall: GiwaReserveRecall) => {
+    try {
+      return `${trimAmount(formatUnits(BigInt(recall.lockedAssetsOut ?? "0"), paymentDecimals))} ${baseSymbol}`
+    } catch {
+      return "—"
+    }
+  }
+  return (
+    <div className="mt-3 w-full border-t border-[var(--color-arco-border)] pt-3">
+      <h4 className="text-xs font-semibold text-[var(--color-arco-ink)]">ArcoUSD Reserve recalls</h4>
+      <p className="mt-0.5 text-[11px] text-[var(--color-arco-muted)]">
+        Paid by direct transfer: Acknowledge, or the Reserve keeps counting the amount as pending and overstates its
+        backing. Fulfilled in the vault: Claim moves the funds into the Reserve. Acknowledge must be signed by a wallet
+        with RESERVE_MANAGER_ROLE on the Reserve; Claim by any wallet.
+      </p>
+      <ul className="mt-2 space-y-2">
+        {recalls.map((recall) => {
+          const key = recallActionKey(recall)
+          const phase = phases[key] ?? "idle"
+          const busy = phase === "preparing" || phase === "signing" || phase === "confirming"
+          const label = recallActionLabel(recall.action)
+          const notes = [recall.warning, recall.error, errors[key] || null].filter((note): note is string => Boolean(note))
+          return (
+            <li key={recall.requestId} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-[var(--color-arco-ink)]">ARCO-{recall.requestId}</span>
+                <span className="tabular-nums text-[var(--color-arco-ink)]">{amountOf(recall)}</span>
+                <span className="text-[var(--color-arco-text-soft)]">{recallStateLabel(recall)}</span>
+              </span>
+              {label && (
+                <button
+                  type="button"
+                  disabled={busy || phase === "done"}
+                  onClick={() => onAction(recall)}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--color-arco-ink)] px-2.5 text-xs font-medium text-[var(--color-arco-on-dark)] disabled:opacity-50"
+                >
+                  {busy && <Loader2 className="size-3.5 animate-spin" />}
+                  {phase === "preparing"
+                    ? "Preparing"
+                    : phase === "signing"
+                      ? "Signing"
+                      : phase === "confirming"
+                        ? "Confirming"
+                        : phase === "done"
+                          ? "Sent"
+                          : label}
+                </button>
+              )}
+              {notes.map((note) => (
+                <p key={note} className="flex w-full items-start gap-1.5 text-[11px] text-[var(--color-arco-down)]">
+                  <AlertCircle className="mt-0.5 size-3 shrink-0" /> {note}
+                </p>
+              ))}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }
@@ -169,6 +257,32 @@ function VaultCard({
   else if (pause.depositPaused) pauseBadges.push("Deposits paused")
   if (pause.withdrawPartial) pauseBadges.push("Withdrawals partially paused")
   else if (pause.withdrawPaused) pauseBadges.push("Withdrawals paused")
+
+  // ArcoUSD Reserve recalls of this product (one shared request for every card; also runs while
+  // collapsed so the header can flag a recall that still needs its Reserve step).
+  const recallsQueryKey = ["giwa", "admin-arcousd-recalls"]
+  const recallsQuery = useQuery({
+    queryKey: recallsQueryKey,
+    queryFn: () => giwaApi.admin.reserveRecalls(auth),
+    enabled: auth.ready,
+    refetchInterval: 30_000,
+  })
+  const queryClient = useQueryClient()
+  // After this console moved a recall forward: bypass the server's short cache so the list
+  // reflects the confirmed tx at once (falls back to a normal refetch).
+  async function refreshRecallsNow() {
+    try {
+      queryClient.setQueryData(recallsQueryKey, await giwaApi.admin.reserveRecalls(auth, { fresh: true }))
+    } catch {
+      await recallsQuery.refetch()
+    }
+  }
+  const recallAttention = recallsNeedingAttention(recallsQuery.data?.recalls ?? [], product.productId)
+  const recallHeaderBadge = recallBadge(recallAttention)
+  const headerBadges = recallHeaderBadge ? [...pauseBadges, recallHeaderBadge] : pauseBadges
+  const recallsUnavailable = recallsUnavailableReason(recallsQuery.data, recallsQuery.error)
+  const [recallPhases, setRecallPhases] = useState<Record<string, ActionPhase>>({})
+  const [recallErrors, setRecallErrors] = useState<Record<string, string>>({})
 
   // Collapsed by default (VaultConfigCard accordion precedent; each card toggles independently).
   // The body is hidden — NOT unmounted — while collapsed, so in-flight tx phases (useState) and
@@ -345,6 +459,8 @@ function VaultCard({
       await giwaApi.admin.settle(auth, product.productId, row.requestId, hash)
       setRow(row.requestId, "completed")
       onSettled()
+      // A settled Reserve recall now waits for its Acknowledge step (listed below the table).
+      if (isReserveRecall(row)) void refreshRecallsNow()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       // Auto-release only when no value can have moved: the signature was rejected (nothing
@@ -397,6 +513,31 @@ function VaultCard({
 
   const busyAction = (phase: ActionPhase) => phase === "preparing" || phase === "signing" || phase === "confirming"
 
+  // Reserve step of a paid recall: the server builds the tx only when it is safe (acknowledge
+  // after a verified payout; claim after a fulfil); the operator wallet signs it.
+  async function runRecallAction(recall: GiwaReserveRecall) {
+    const key = recallActionKey(recall)
+    const setPhase = (phase: ActionPhase) => setRecallPhases((current) => ({ ...current, [key]: phase }))
+    setRecallErrors((current) => ({ ...current, [key]: "" }))
+    try {
+      if (!auth.ready) throw new Error("Operator token must be entered at runtime")
+      if (!walletAddress) throw new Error("Connect the operator wallet first")
+      setPhase("preparing")
+      const { transaction } =
+        recall.action === "claim"
+          ? await giwaApi.admin.claimRecall(auth, recall.productId, recall.requestId)
+          : await giwaApi.admin.acknowledgeRecall(auth, recall.productId, recall.requestId)
+      setPhase("signing")
+      const hash = await sendPreparedTransaction(walletAddress, transaction)
+      setPhase("confirming")
+      await afterConfirmedReceipt(hash, refreshRecallsNow)
+      setPhase("done")
+    } catch (error) {
+      setPhase("failed")
+      setRecallErrors((current) => ({ ...current, [key]: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+
   return (
     <section className="space-y-4 rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-4 shadow-[var(--shadow-control)]">
       {/* Collapsible header (whole row toggles; VaultConfigCard accordion pattern). */}
@@ -411,7 +552,7 @@ function VaultCard({
           <span className="rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-2 py-0.5 text-[11px] text-[var(--color-arco-text-soft)]">
             {product.paymentAssetSymbol}
           </span>
-          {pauseBadges.map((badge) => (
+          {headerBadges.map((badge) => (
             <span
               key={badge}
               className="rounded-[var(--radius-pill)] bg-[var(--color-arco-surface-muted)] px-2 py-0.5 text-[11px] font-medium text-[var(--color-arco-down)]"
@@ -715,6 +856,14 @@ function VaultCard({
                     <tr key={row.requestId} className="border-t border-[var(--color-arco-border)]">
                       <td className="py-2 pr-3 font-mono text-[var(--color-arco-ink)]" title={row.walletAddress}>
                         {shortAddr(row.walletAddress)}
+                        {isReserveRecall(row) && (
+                          <span
+                            title="The ArcoUSD Reserve recalling its MMF position. Paid by Send TX: Acknowledge it below afterwards. Fulfilled in the vault: Claim it below."
+                            className="ml-1.5 rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-1.5 py-0.5 font-sans text-[10px] font-medium text-[var(--color-arco-chip-ink)]"
+                          >
+                            ArcoUSD Reserve
+                          </span>
+                        )}
                       </td>
                       <td className="py-2 pr-3 font-mono text-[var(--color-arco-ink)]">ARCO-{row.requestId}</td>
                       <td className="py-2 pr-3 text-[var(--color-arco-text-soft)]">{whenLabel(row.createdAt)}</td>
@@ -796,6 +945,19 @@ function VaultCard({
             </table>
           </div>
         )}
+        {recallsUnavailable && (
+          <p className="mt-2 flex items-start gap-1.5 text-[11px] text-[var(--color-arco-down)]">
+            <AlertCircle className="mt-0.5 size-3 shrink-0" /> {recallsUnavailable}
+          </p>
+        )}
+        <ReserveRecallList
+          recalls={recallAttention}
+          paymentDecimals={paymentDecimals}
+          baseSymbol={baseSymbol}
+          phases={recallPhases}
+          errors={recallErrors}
+          onAction={(recall) => void runRecallAction(recall)}
+        />
       </div>
         </AdminWriteGroup>
       )}

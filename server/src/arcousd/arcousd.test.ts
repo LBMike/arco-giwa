@@ -5,7 +5,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import Fastify from "fastify"
-import { toEventSignature, type AbiEvent, type AbiFunction } from "viem"
+import { toEventSignature, toFunctionSignature, type AbiEvent, type AbiFunction } from "viem"
+import { reserveRecallAbi } from "./recall.js"
 import { ARCOUSD_BURN_SELECTOR, lensAbi, reserveEventsAbi, SETTLE_FOR_SELECTOR } from "./abi.js"
 import { parseArcoUSDEnv } from "./config.js"
 import { arcoUSDPlugin } from "./plugin.js"
@@ -249,6 +250,22 @@ test("inline ABIs match the compiled ArcoUSD artifacts (no drift)", () => {
   const compiledSnapshot = artifact("ArcoUSDReserveLens").find(
     (item): item is AbiFunction => item.type === "function" && item.name === "snapshot",
   )!
+  // Recall functions used by the redemption console must exist on the Reserve exactly as declared,
+  // including struct field names/types of their outputs (getStrategy's Strategy is decoded by name).
+  const outputsShape = (fn: AbiFunction) =>
+    JSON.stringify(
+      fn.outputs.map((output) => ({ type: output.type, components: "components" in output ? output.components : undefined })),
+      ["type", "components", "name"],
+    )
+  const compiledReserve = artifact("ArcoUSDReserve").filter((item): item is AbiFunction => item.type === "function")
+  for (const item of reserveRecallAbi) {
+    if (item.type !== "function") continue
+    const fn = item as AbiFunction
+    const compiled = compiledReserve.find((candidate) => toFunctionSignature(candidate) === toFunctionSignature(fn))
+    assert.ok(compiled, `ArcoUSDReserve has no ${toFunctionSignature(fn)}`)
+    assert.equal(outputsShape(fn), outputsShape(compiled), `${fn.name} outputs differ`)
+  }
+
   const inlineSnapshot = lensAbi.find((item) => item.type === "function" && item.name === "snapshot") as AbiFunction
   // Struct field names drive decoding (object keys) and must match; the single top-level return
   // name ("snap" in Solidity) is ignored by viem, so it is left out of the comparison.

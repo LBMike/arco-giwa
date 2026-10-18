@@ -18,6 +18,12 @@ export type PayoutExpectation = {
   readonly allowedSenders: readonly string[]
   /** The payout must be mined strictly after this block (the requestRedeem block), when known. */
   readonly afterBlock?: bigint | null
+  /**
+   * The transaction must call the payment token itself (a plain transfer, as the console builds
+   * it). Used for ArcoUSD Reserve recalls: an operator's own Reserve.deposit of the same amount
+   * also emits operator → Reserve, but is not a payment of the recall.
+   */
+  readonly requireDirectTransfer?: boolean
 }
 
 export type PayoutVerification = { readonly ok: true } | { readonly ok: false; readonly reason: string }
@@ -28,6 +34,8 @@ export type PayoutVerifier = (expected: PayoutExpectation) => Promise<PayoutVeri
 export type PayoutReceipt = {
   readonly status: "success" | "reverted"
   readonly from: string
+  /** Contract the transaction called (null for a contract creation). */
+  readonly to?: string | null
   readonly blockNumber: bigint
   readonly logs: readonly { readonly address: string; readonly topics: readonly (Hex | null | undefined)[]; readonly data: Hex }[]
 }
@@ -55,6 +63,9 @@ export function matchPayoutReceipt(receipt: PayoutReceipt, expected: PayoutExpec
   }
   if (expected.afterBlock != null && receipt.blockNumber <= expected.afterBlock) {
     return { ok: false, reason: "payout transaction predates the redemption request" }
+  }
+  if (expected.requireDirectTransfer && !(receipt.to && sameAddress(receipt.to, expected.token))) {
+    return { ok: false, reason: "payout must be a direct payment-token transfer (the transaction did not call the token)" }
   }
   for (const log of receipt.logs) {
     if (!sameAddress(log.address, expected.token)) continue

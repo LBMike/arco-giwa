@@ -68,6 +68,11 @@ function productById(registry: GiwaDeploymentRegistry, productId: string): Regis
   return product
 }
 
+/** Same unsigned shape for admin transactions built outside this module (e.g. ArcoUSD recalls). */
+export function unsignedAdminTransaction(chainId: number, to: Address, data: Hex, description: string): UnsignedAdminTransaction {
+  return tx(chainId, to, data, description)
+}
+
 function tx(chainId: number, to: Address, data: Hex, description: string): UnsignedAdminTransaction {
   return {
     chainId,
