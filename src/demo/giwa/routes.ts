@@ -7,6 +7,7 @@ export const GIWA_ADMIN_CONFIG_ROUTE = "/admin/config"
 export const GIWA_ADMIN_FEATURED_ROUTE = "/admin/featured"
 export const GIWA_ADMIN_OPERATIONS_ROUTE = "/admin/operations"
 export const GIWA_ADMIN_MONITORING_ROUTE = "/admin/monitoring"
+export const GIWA_ADMIN_ARCOUSD_ROUTE = "/admin/arcousd"
 export const GIWA_PORTFOLIO_ROUTE = "/portfolio"
 export const GIWA_PRODUCT_ROUTE = "/product/:id"
 

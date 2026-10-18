@@ -15,6 +15,7 @@ const PricesPage = lazy(() => import("../demo/giwa/AdminPrices"))
 const ConfigPage = lazy(() => import("../demo/giwa/AdminConfig"))
 const FeaturedPage = lazy(() => import("../demo/giwa/AdminFeatured"))
 const MonitoringPage = lazy(() => import("../demo/giwa/AdminMonitoring"))
+const ArcoUSDPage = lazy(() => import("../demo/giwa/AdminArcoUSD"))
 
 const router = createBrowserRouter([
   {
@@ -31,6 +32,7 @@ const router = createBrowserRouter([
           { path: "config", element: <ConfigPage /> },
           { path: "featured", element: <FeaturedPage /> },
           { path: "monitoring", element: <MonitoringPage /> },
+          { path: "arcousd", element: <ArcoUSDPage /> },
         ],
       },
       { path: "stocks", element: <Navigate to="/stocks/limits" replace /> },

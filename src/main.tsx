@@ -23,6 +23,7 @@ const GiwaAdminConfigPage = /* @__PURE__ */ lazy(() => import('./demo/giwa/Admin
 const GiwaAdminFeaturedPage = /* @__PURE__ */ lazy(() => import('./demo/giwa/AdminFeatured'))
 const GiwaAdminOperationsPage = /* @__PURE__ */ lazy(() => import('./demo/giwa/AdminOperations'))
 const GiwaAdminMonitoringPage = /* @__PURE__ */ lazy(() => import('./demo/giwa/AdminMonitoring'))
+const GiwaAdminArcoUSDPage = /* @__PURE__ */ lazy(() => import('./demo/giwa/AdminArcoUSD'))
 const GiwaPortfolioPage = lazy(() => import('./demo/giwa/PortfolioPage'))
 const GiwaProductDetailPage = lazy(() => import('./demo/giwa/ProductDetailPage'))
 const GiwaSavingsPage = lazy(() => import('./demo/giwa/SavingsPage'))
@@ -59,6 +60,7 @@ const adminRoute: RouteObject = GIWA_ADMIN_CONSOLE_URL
             { path: 'featured', element: giwaRoute(<GiwaAdminFeaturedPage />) },
             { path: 'operations', element: giwaRoute(<GiwaAdminOperationsPage />) },
             { path: 'monitoring', element: giwaRoute(<GiwaAdminMonitoringPage />) },
+            { path: 'arcousd', element: giwaRoute(<GiwaAdminArcoUSDPage />) },
             { path: 'vaults', element: <Navigate to={GIWA_ADMIN_OPERATIONS_ROUTE} replace /> },
           ],
         },

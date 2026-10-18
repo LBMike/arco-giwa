@@ -84,7 +84,13 @@ Vault 쓰기 작업의 상당수는 서버가 서명 전 트랜잭션을 만들�
 
 ### ArcoUSD 관리자 API
 
-인덱서가 쌓은 테이블만 읽고, 체인에 보내는 것은 없다. 모두 `requireOperator`(조회 `vault:read`, 트랜잭션 생성 `vault:write`). 응답 `status`는 `live`, `not-deployed`, `unavailable`(이유 포함) 중 하나다. 콘솔 화면은 아직 없다(UI 기획 뒤에 붙인다).
+인덱서가 쌓은 테이블만 읽고, 체인에 보내는 것은 없다. 모두 `requireOperator`(조회 `vault:read`, 트랜잭션 생성 `vault:write`). 응답 `status`는 `live`, `not-deployed`, `unavailable`(이유 포함) 중 하나다.
+
+콘솔 화면은 **Vaults → ArcoUSD**(`/vaults/arcousd`, 레거시 `/admin/arcousd`)이고 탭이 셋이다(`?tab=queue`, `?tab=flows`로 바로 열린다).
+
+- **Overview**: 총 담보, ArcoUSD 발행량, 잉여, MMF 비율(목표·하한)을 보여 준다. 펀드 매수 게이트는 상태와 사유, 정산 버퍼, 기준 금액, 발행 상한까지 남은 양을 함께 보여 준다. 이 밖에 매수·정산 경로의 일시정지 7가지, 자산별·MMF 전략별 표, 담보·발행량 추이(7·30·90일), 컨트랙트 주소가 있다. 공개 리저브 조회로 그리므로 추이 외에는 세션 없이도 보인다.
+- **Queue**: 자산별 카드(대기 건수·금액, 가장 오래된 요청, T+2 초과, 지급 실패, 다음 지급 요청)를 보여 준다. 다음 요청을 지금 낼 수 있는지는 Reserve **잔고** 기준으로 판단한다. 카드마다 `processQueue` 실행 칸이 있다: 건수(1~50)를 넣고 **Preview**(서버 eth_call 미리보기)를 누른 뒤 **Sign & send**(운영자 지갑 서명)를 누른다. `vault:write`가 없으면 잠긴다. 아래에는 상태 필터가 달린 요청 목록이 있다.
+- **Flows**: 기간(7·30·90일) 합계, 일별 입금·출금 막대, 일별 수수료, 자산별 표, 결제 자산별 Router 매수, 최근 이벤트를 보여 준다. 항목이 겹친다는 안내가 화면에 있다.
 
 - **`GET /api/v1/admin/arcousd/snapshots?days=30`**: 담보·부채·잉여·MMF 비율·일시정지 추이. 지금부터 `days`×24시간 구간의 스냅샷을 최대 360개 지점으로 줄여 준다(구간마다 마지막 스냅샷, 최신은 항상 포함). 3만 행을 넘으면 오래된 쪽을 버리고 `truncated: true`. `days`는 1~90, 잘못된 값은 30.
 - **`GET /api/v1/admin/arcousd/queue?status=open`**: Standard 대기열.
