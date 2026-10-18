@@ -86,3 +86,18 @@ test("RPC read-after-write lag: a receipt that appears on a later attempt settle
   assert.deepEqual(await verify(expected), { ok: true })
   assert.equal(calls, 3)
 })
+
+test("requireDirectTransfer: only a transaction that called the payment token itself counts", () => {
+  const direct = { ...expected, requireDirectTransfer: true }
+  const log = [transfer(TOKEN, RECIPIENT, 1020000n)]
+  assert.deepEqual(matchPayoutReceipt(receipt(log, { to: TOKEN.toLowerCase() }), direct), { ok: true })
+  // Same Transfer log, but emitted inside a call to another contract (e.g. the operator's own
+  // Reserve.deposit pulling the same amount): not a payout.
+  const viaContract = matchPayoutReceipt(receipt(log, { to: RECIPIENT }), direct)
+  assert.equal(viaContract.ok, false)
+  assert.match(viaContract.ok ? "" : viaContract.reason, /direct payment-token transfer/)
+  assert.equal(matchPayoutReceipt(receipt(log, { to: null }), direct).ok, false)
+  assert.equal(matchPayoutReceipt(receipt(log), direct).ok, false) // `to` unknown
+  // Without the flag (customer payouts) the call target is not checked, as before.
+  assert.deepEqual(matchPayoutReceipt(receipt(log, { to: RECIPIENT }), expected), { ok: true })
+})

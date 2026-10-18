@@ -4,6 +4,8 @@ import { SiweMessage } from "siwe"
 import { decodeFunctionData, encodeFunctionData, formatUnits, getAddress, parseAbi, parseUnits } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { buildApp, type VaultPauseDetail } from "./app.js"
+import { ArcoUSDRecalls, reserveRecallAbi, type RecallChainState, type RecallReader } from "./arcousd/recall.js"
+import type { ArcoUSDRegistryFile } from "./arcousd/registry.js"
 import type { PayoutExpectation, PayoutVerifier } from "./evm/payout-verification.js"
 import { buildDryRunGiwaRegistry } from "./registry/generate.js"
 import { EvmMarketService } from "./services/evm-market-service.js"
@@ -277,6 +279,8 @@ function makeApp(options?: {
   pauseDetails?: Record<string, VaultPauseDetail> | null
   /** Vault feed reads for the admin feeds route; `null` simulates a failed read. */
   vaultFeeds?: { depositProduct: string; depositPayment: string; redemptionProduct: string; redemptionPayment: string } | null
+  /** ArcoUSD Reserve recall support; absent leaves the service out (as before ArcoUSD). */
+  arcoUSDRecalls?: ArcoUSDRecalls
 }) {
   const prisma = makePrisma()
   const arco = new PrismaArcoService(prisma as PrismaLike)
@@ -345,6 +349,7 @@ function makeApp(options?: {
           ? { verifyPayout: options.verifyPayout }
           : {}
         : { verifyPayout: async () => ({ ok: true as const }) }),
+      ...(options?.arcoUSDRecalls ? { arcoUSDRecalls: options.arcoUSDRecalls } : {}),
     },
   )
   return { app, prisma, registry: fullRegistry }
@@ -1094,6 +1099,161 @@ test("payout must equal the locked quote, pays the recorded recipient, and settl
   assert.equal(reindexed.requestedTxHash, `0x${"34".repeat(32)}`) // the upsert did apply
   assert.equal(reindexed.status, "SETTLED")
   assert.equal(reindexed.settledTxHash, txHash)
+})
+
+test("ArcoUSD Reserve recalls: labelled in the pending list, acknowledged only after a verified direct payout, claimed only when fulfilled", async () => {
+  const reserve = "0x00000000000000000000000000000000000000e5"
+  const chain = new Map<string, RecallChainState>()
+  const verified: PayoutExpectation[] = []
+  let registryFile: ArcoUSDRegistryFile | null = null
+  const reader: RecallReader = {
+    blockNumber: async () => 900n,
+    request: async (_deployment, strategyId, vaultRequestId) => chain.get(`${strategyId}:${vaultRequestId}`) ?? { pending: 0n, open: false },
+    strategyVault: async (_deployment, strategyId) => strategyVaults[strategyId],
+  }
+  const recalls = new ArcoUSDRecalls({ chainId: 91342, loadRegistry: () => registryFile, read: reader, now: () => clock })
+  let clock = 0
+  const { app, prisma, registry } = makeApp({
+    arcoUSDRecalls: recalls,
+    verifyPayout: async (expected) => {
+      verified.push(expected)
+      return { ok: true }
+    },
+  })
+  const acapix = registry.products.find((product: any) => product.productId === "acapix")!
+  const other = registry.products.find((product: any) => product.productId !== "acapix")!
+  const strategyVaults: Record<number, string> = { 1: String(acapix.redemptionVault.proxy) }
+  const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}`
+  registryFile = {
+    schemaVersion: 1,
+    chainId: 91342,
+    network: "giwa-sepolia",
+    deployed: true,
+    deploymentBlock: 5,
+    arcoUSD: { proxy: addr(0xe1), implementation: addr(0xe2), bytecodeHash: null },
+    reserve: { proxy: getAddress(reserve), implementation: addr(0xe3), bytecodeHash: null },
+    lens: { address: addr(0xe4), bytecodeHash: null },
+    testAssets: [],
+    reserveAssets: [],
+    strategies: [{ productId: "acapix", strategyId: 1, maxAllocation: "1" }],
+    params: { mintCap: "1", mmfTargetBps: 5000, bufferFloorBps: 3000, queueMinDelay: 600 },
+  } as ArcoUSDRegistryFile
+  const row = (requestId: string, walletAddress: string, status: string, product: any = acapix) => ({
+    chainId: 91342,
+    requestId,
+    walletAddress,
+    productId: product.productId,
+    redemptionVaultAddress: product.redemptionVault.proxy?.toLowerCase(),
+    sharesIn: "5000000000000000000",
+    lockedAssetsOut: "5000000",
+    status,
+    requestedAtBlock: 100n,
+    metadata: { recipient: walletAddress },
+    createdAt: new Date(),
+  })
+  const customer = "0x00000000000000000000000000000000000000c1"
+  prisma.indexedRedemptionRequest.rows.push(row("1", customer, "REQUESTED"), row("2", reserve, "REQUESTED"))
+  chain.set("1:2", { pending: 5_000_000n, open: true })
+  const base = "/api/v1/admin/products/acapix/redemptions"
+  const post = (url: string, payload?: unknown) => app.inject({ method: "POST", url, headers: OPERATOR, ...(payload ? { payload } : {}) })
+  const recallsNow = async () => {
+    clock += 10_000 // past the 5s snapshot cache
+    return (await app.inject({ method: "GET", url: "/api/v1/admin/arcousd/recalls", headers: OPERATOR })).json()
+  }
+
+  const pending = (await app.inject({ method: "GET", url: "/api/v1/admin/redemptions/pending", headers: OPERATOR })).json()
+  assert.deepEqual(
+    pending.redemptions.map((item: any) => [item.requestId, item.kind, item.strategyId]),
+    [["1", "customer", undefined], ["2", "arcousd-recall", 1]],
+  )
+
+  // Not paid yet: acknowledging now would understate backing. Customers are never recalls.
+  const early = await post(`${base}/2/acknowledge-recall`)
+  assert.equal(early.statusCode, 409)
+  assert.match(early.json().error, /settled/)
+  assert.equal((await post(`${base}/1/acknowledge-recall`)).statusCode, 409)
+  assert.equal((await app.inject({ method: "POST", url: `${base}/2/acknowledge-recall` })).statusCode, 401)
+
+  // A customer payout settles as before: no extra requirement, no next step.
+  await post(`${base}/1/payout`, { amount: "5000000" })
+  const customerSettle = await post(`${base}/1/settle`, { txHash: `0x${"cd".repeat(32)}` })
+  assert.equal(customerSettle.statusCode, 200)
+  assert.equal("next" in customerSettle.json(), false)
+  assert.equal(verified[0].requireDirectTransfer, undefined)
+
+  // The recall is paid like any redemption (to the Reserve), but only a direct token transfer counts.
+  const payout = await post(`${base}/2/payout`, { amount: "5000000" })
+  const transfer = decodeFunctionData({ abi: parseAbi(["function transfer(address to, uint256 amount)"]), data: payout.json().transaction.data })
+  assert.equal(String(transfer.args[0]).toLowerCase(), reserve)
+  // Prime the 5s snapshot cache while the recall is still in flight…
+  const inFlight = (await app.inject({ method: "GET", url: "/api/v1/admin/arcousd/recalls", headers: OPERATOR })).json()
+  assert.equal(inFlight.recalls[0].state, "settling")
+  const settle = await post(`${base}/2/settle`, { txHash: `0x${"ab".repeat(32)}` })
+  assert.equal(settle.statusCode, 200)
+  assert.equal(settle.json().next, "acknowledge-recall")
+  assert.equal(verified[1].requireDirectTransfer, true)
+  // …settling it invalidates the cache: the very next read (same clock) shows the next step.
+  const afterSettle = (await app.inject({ method: "GET", url: "/api/v1/admin/arcousd/recalls", headers: OPERATOR })).json()
+  assert.equal(afterSettle.recalls[0].state, "awaiting-acknowledgement")
+
+  const awaiting = await recallsNow()
+  assert.equal(awaiting.status, "live")
+  assert.deepEqual(
+    awaiting.recalls.map((item: any) => [item.requestId, item.state, item.action, item.pending]),
+    [["2", "awaiting-acknowledgement", "acknowledge", "5000000"]],
+  )
+
+  const acknowledge = await post(`${base}/2/acknowledge-recall`)
+  assert.equal(acknowledge.statusCode, 200)
+  const { transaction } = acknowledge.json()
+  assert.equal(transaction.to.toLowerCase(), reserve)
+  const call = decodeFunctionData({ abi: reserveRecallAbi, data: transaction.data })
+  assert.equal(call.functionName, "acknowledgeRecallPaid")
+  assert.deepEqual(call.args, [1n, 2n])
+  assert.equal((await post(`${base}/2/claim-recall`)).statusCode, 409) // claim is for fulfilled recalls
+
+  // The same requestId under another product is a different request: never this recall.
+  prisma.indexedRedemptionRequest.rows.push(row("2", customer, "SETTLED", other))
+  const crossProduct = await post(`/api/v1/admin/products/${other.productId}/redemptions/2/acknowledge-recall`)
+  assert.equal(crossProduct.statusCode, 409)
+  assert.match(crossProduct.json().error, /Not an ArcoUSD Reserve recall/)
+
+  // Once the Reserve no longer counts it, a second acknowledgement is refused, and a fresh read
+  // (the console's refresh after the tx confirmed) shows it done without waiting for the cache.
+  chain.set("1:2", { pending: 0n, open: true })
+  assert.equal((await post(`${base}/2/acknowledge-recall`)).statusCode, 409)
+  const fresh = (await app.inject({ method: "GET", url: "/api/v1/admin/arcousd/recalls?fresh=1", headers: OPERATOR })).json()
+  assert.equal(fresh.recalls[0].state, "done")
+
+  // A recall fulfilled through the vault is claimed into the Reserve.
+  prisma.indexedRedemptionRequest.rows.push(row("3", reserve, "FULFILLED"))
+  chain.set("1:3", { pending: 5_000_000n, open: true })
+  const claim = await post(`${base}/3/claim-recall`)
+  assert.equal(claim.statusCode, 200)
+  assert.deepEqual(decodeFunctionData({ abi: reserveRecallAbi, data: claim.json().transaction.data }).args, [1n, 3n])
+
+  // A registry that fails validation still labels recalls, reports itself unavailable, and builds nothing.
+  registryFile = { ...registryFile!, lens: { address: null, bytecodeHash: null } }
+  prisma.indexedRedemptionRequest.rows.push(row("4", reserve, "REQUESTED"))
+  const invalidPending = (await app.inject({ method: "GET", url: "/api/v1/admin/redemptions/pending", headers: OPERATOR })).json()
+  const unpaidRecall = invalidPending.redemptions.find((item: any) => item.requestId === "4")
+  assert.deepEqual([unpaidRecall?.kind, unpaidRecall?.strategyId], ["arcousd-recall", 1])
+  const invalid = await recallsNow()
+  assert.equal(invalid.status, "unavailable")
+  assert.match(invalid.error, /lens.address/)
+  assert.ok(invalid.recalls.every((item: any) => item.action === null))
+  const blocked = await post(`${base}/3/claim-recall`)
+  assert.equal(blocked.statusCode, 503)
+  assert.match(blocked.json().error, /registry is invalid/)
+
+  // Without ArcoUSD, rows are plain customer redemptions and there are no recalls.
+  const plain = makeApp()
+  plain.prisma.indexedRedemptionRequest.rows.push(row("2", reserve, "REQUESTED"))
+  const plainPending = (await plain.app.inject({ method: "GET", url: "/api/v1/admin/redemptions/pending", headers: OPERATOR })).json()
+  assert.equal(plainPending.redemptions[0].kind, "customer")
+  const plainRecalls = (await plain.app.inject({ method: "GET", url: "/api/v1/admin/arcousd/recalls", headers: OPERATOR })).json()
+  assert.deepEqual(plainRecalls, { status: "not-deployed", recalls: [] })
+  assert.equal((await plain.app.inject({ method: "POST", url: `${base}/2/acknowledge-recall`, headers: OPERATOR })).statusCode, 503)
 })
 
 test("settle refuses to record a payout when no verifier is configured", async () => {

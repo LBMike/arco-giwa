@@ -11,6 +11,7 @@ import { stocksSubmissionsPlugin, type StocksSubmissionsPluginOptions } from "./
 import { stocksMarketDataPlugin, type StocksMarketDataService } from "./stocks-market-data/index.js"
 import { arcoUSDPlugin } from "./arcousd/plugin.js"
 import type { ArcoUSDService } from "./arcousd/service.js"
+import type { ArcoUSDRecalls, RecallRow } from "./arcousd/recall.js"
 import type { StocksMarketDataPluginOptions } from "./stocks-market-data/index.js"
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify"
 import { generateNonce, SiweMessage } from "siwe"
@@ -121,6 +122,8 @@ export type ArcoAppServices = {
   readonly stocksMarketData?: StocksMarketDataService
   /** ArcoUSD reserve state + buy gate (public, read-only). Absent → routes not registered. */
   readonly arcoUSD?: ArcoUSDService
+  /** ArcoUSD Reserve recalls in the redemption console (labels, acknowledge/claim builders). */
+  readonly arcoUSDRecalls?: ArcoUSDRecalls
   readonly stocksMarketClock?: StocksMarketDataPluginOptions["marketClock"]
   readonly stocks?: StocksPluginOptions
   readonly arco: PrismaArcoService
@@ -946,9 +949,28 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
   )
 
   // Unsettled redemptions (REQUESTED + in-flight SETTLING) for the vault-management console.
-  app.get("/api/v1/admin/redemptions/pending", { preHandler: requireOperator }, async () => ({
-    redemptions: await services.arco.pendingRedemptions(GIWA_CHAIN_ID),
-  }))
+  // Each row carries `kind`: "arcousd-recall" marks the ArcoUSD Reserve's own MMF recalls
+  // (with their strategyId), which need an extra Reserve step once paid.
+  app.get("/api/v1/admin/redemptions/pending", { preHandler: requireOperator }, async () => {
+    const rows = (await services.arco.pendingRedemptions(GIWA_CHAIN_ID)) as RecallRow[]
+    return {
+      redemptions: services.arcoUSDRecalls
+        ? services.arcoUSDRecalls.annotate(rows)
+        : rows.map((row) => ({ ...row, kind: "customer" as const })),
+    }
+  })
+
+  // Every ArcoUSD Reserve recall with its on-chain state and the next Reserve action
+  // (acknowledge a direct-transfer payout, or claim a fulfilled one).
+  // status: live | not-deployed | unavailable (invalid registry or failed read, with `error`).
+  // `?fresh=1` skips the 5s cache: the console's refresh right after it sent a Reserve tx.
+  app.get<{ Querystring: { fresh?: string } }>("/api/v1/admin/arcousd/recalls", { preHandler: requireOperator }, async (request) => {
+    if (!services.arcoUSDRecalls) return { status: "not-deployed" as const, recalls: [] }
+    return services.arcoUSDRecalls.snapshot(
+      async (reserve) => (await services.arco.redemptionsForWallet(reserve, GIWA_CHAIN_ID)) as RecallRow[],
+      { fresh: request.query?.fresh === "1" },
+    )
+  })
 
   // Read-only monitoring dashboard aggregates (see EvmMonitoringService for the v1
   // timestamp caveats). Operator-guarded like the other admin console reads.
@@ -1567,6 +1589,9 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
         if (!services.verifyPayout || !target.paymentToken) {
           return reply.code(503).send({ error: "Payout verification is unavailable; settlement was not recorded" })
         }
+        // A Reserve recall paid this way stays counted as pendingRecall until acknowledged, and
+        // settling it unlocks the acknowledgement — so only a direct token transfer counts.
+        const isRecall = services.arcoUSDRecalls?.strategyIdOf(redemption as RecallRow) !== undefined
         const verification = await services.verifyPayout({
           txHash,
           token: target.paymentToken,
@@ -1574,6 +1599,7 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
           amount: lockedPayout(redemption),
           allowedSenders: payoutSenders,
           afterBlock: requestBlock(redemption),
+          ...(isRecall ? { requireDirectTransfer: true } : {}),
         })
         if (!verification.ok) {
           return reply.code(409).send({ error: `Payout transaction does not match this redemption: ${verification.reason}` })
@@ -1582,7 +1608,15 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
         if (settled.count === 0) {
           return reply.code(409).send({ error: "Redemption request not found or already settled" })
         }
-        return { ok: true, productId: target.product.productId, requestId: request.params.requestId, status: "SETTLED" }
+        // The recall now waits for its acknowledgement: the next recall read must show it.
+        if (isRecall) services.arcoUSDRecalls?.invalidate()
+        return {
+          ok: true,
+          productId: target.product.productId,
+          requestId: request.params.requestId,
+          status: "SETTLED",
+          ...(isRecall ? { next: "acknowledge-recall" as const } : {}),
+        }
       })
     },
   )
@@ -1600,6 +1634,36 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
         return reply.code(409).send({ error: "Redemption request is not in SETTLING" })
       }
       return { ok: true, productId: target.product.productId, requestId: request.params.requestId, status: "REQUESTED" }
+    },
+  )
+
+  // ArcoUSD Reserve recall, paid by direct transfer: unsigned Reserve.acknowledgeRecallPaid so the
+  // Reserve stops counting the paid amount as pending. Refused unless the payout is SETTLED
+  // (verified) and the Reserve still counts it — acknowledging early would understate backing.
+  app.post<RedemptionParams>(
+    "/api/v1/admin/products/:productId/redemptions/:requestId/acknowledge-recall",
+    { preHandler: requireOperator },
+    async (request, reply) => {
+      const target = resolveRedemptionTarget(request.params.productId, request.params.requestId)
+      if (!target.ok) return reply.code(target.status).send({ error: target.message })
+      if (!services.arcoUSDRecalls) return reply.code(503).send({ error: "ArcoUSD recalls are unavailable" })
+      const row = (await services.arco.findRedemptionRequest(target.key)) as RecallRow | null
+      const result = await services.arcoUSDRecalls.acknowledgeTransaction(row)
+      return result.ok ? { transaction: result.transaction } : reply.code(result.status).send({ error: result.error })
+    },
+  )
+
+  // ArcoUSD Reserve recall, fulfilled in the vault: unsigned Reserve.claimRecall (permissionless).
+  app.post<RedemptionParams>(
+    "/api/v1/admin/products/:productId/redemptions/:requestId/claim-recall",
+    { preHandler: requireOperator },
+    async (request, reply) => {
+      const target = resolveRedemptionTarget(request.params.productId, request.params.requestId)
+      if (!target.ok) return reply.code(target.status).send({ error: target.message })
+      if (!services.arcoUSDRecalls) return reply.code(503).send({ error: "ArcoUSD recalls are unavailable" })
+      const row = (await services.arco.findRedemptionRequest(target.key)) as RecallRow | null
+      const result = await services.arcoUSDRecalls.claimTransaction(row)
+      return result.ok ? { transaction: result.transaction } : reply.code(result.status).send({ error: result.error })
     },
   )
 

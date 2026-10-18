@@ -114,7 +114,11 @@ Instant는 대기열 미지급액을 뺀 유동성만 쓴다. 나중에 온 요�
 | `claimRecall(id, requestId)` | 누구나. 상환 볼트가 `fulfillRedeem` 한 뒤 `claimRedeem`으로 받고 회수 대기 금액을 지운다 |
 | `acknowledgeRecallPaid(id, requestId)` | 운영자. 회수가 직접 전송으로 지급됐을 때 회수 대기 금액만 지운다. 평가액을 줄이는 방향이라 과대 계상 위험이 없다. 요청은 계속 `claimRecall` 할 수 있게 남겨, 볼트가 나중에 fulfill 해도 돈이 볼트에 묶이지 않는다 |
 
-운영 규칙: Reserve의 회수 요청은 어드민 콘솔의 "직접 전송 지급"으로 처리하지 않고 `fulfillRedeem` → `claimRecall` 경로를 쓴다. 서버의 상환 대기 목록은 받는 주소가 Reserve인 요청을 따로 표시한다(1단계 서버 작업).
+운영 규칙: Reserve의 회수 요청은 두 경로 모두 쓸 수 있다. 서버의 상환 대기 목록은 **보낸 주소**가 Reserve인 요청을 회수로 따로 표시한다. 받는 주소는 누구나 Reserve로 지정할 수 있지만 보낸 주소는 Reserve 자신만 될 수 있다.
+- 직접 전송: 어드민 콘솔의 Send TX(payout → settle). 회수 건은 결제 토큰을 직접 호출한 전송만 정산으로 인정한다. 정산 뒤 반드시 `acknowledgeRecallPaid`를 서명한다. 하지 않으면 회수 대기 금액이 현금과 함께 이중 계산된다.
+- 볼트 경로: `fulfillRedeem` → `claimRecall`.
+- 같은 회수를 두 경로로 모두 지급하면(정산 뒤 fulfill) 이중 지급이므로 콘솔이 경고한다.
+- 절차와 서버 가드는 `docs/admin-console.md`의 "자금 이동 안전장치".
 
 ### 3.8 회계 조회 (view)
 
@@ -208,9 +212,10 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 - **인덱서**: 코어 인덱서와 같은 프로세스에서 별도 커서(`arcousd`)로 Reserve 이벤트만 읽는다. 모든 이벤트는 `EvmIndexedEvent`에 남기되 `walletAddress`를 넣지 않아 포트폴리오 활동 내역에는 아직 나오지 않는다. 대기열 요청은 `ArcoUSDRedeemRequest`에 기록하고, 상태는 컨트랙트와 같은 방향으로만 바뀐다(QUEUED → PAID·PAYOUT_FAILED·CANCELLED, PAYOUT_FAILED → CANCELLED). 재인덱싱해도 되돌아가지 않는다. 5분마다 Lens 스냅샷을 `ArcoUSDReserveSnapshot`에 남긴다.
 - **서버 API**: `GET /api/v1/arcousd/reserve`(리저브 상태, 15초 캐시), `GET /api/v1/arcousd/gate`(매수 게이트). 게이트는 미배포면 `inactive`, 배포 뒤에는 실패 시 닫힘이다. 읽기 실패, Reserve 또는 `settleFor` 일시정지, ArcoUSD 또는 `burn` 일시정지(`settleFor`가 소각하므로), 자산 없음, 게이트 설정 오류, 정산 가능 잔액이 기준(기본 tUSDC 1,000달러) 미만이면 `closed`. ArcoUSD 환경변수가 잘못돼도 API·인덱서는 그대로 뜬다.
 
+- **상환 목록의 Reserve 회수**: Reserve의 `requestRecall`은 상품 볼트에 일반 상환 요청으로 들어오므로 관리자 상환 목록에서 따로 표시한다. 직접 송금으로 정산한 회수는 `acknowledgeRecallPaid`, fulfill로 처리한 회수는 `claimRecall`이 뒤따라야 한다. 서버는 이 둘을 안전할 때만 만들어 준다(지급 검증 뒤에만 acknowledge, fulfill 뒤에만 claim). 절차는 `docs/admin-console.md`의 "자금 이동 안전장치".
+
 아직 하지 않는 것:
 
-- 상환 목록에서 Reserve의 MMF 회수 요청 구분(관리자 정산이 Reserve 회수를 일반 고객 상환처럼 처리하지 않게). 0단계 PR #2의 상환 경로와 겹치므로 그 PR이 머지된 뒤에 한다.
 - 매수 버튼 차단 UI, Router·견적, 관리자 화면(2단계). 키퍼·대사·알림(3단계).
 
 ## 6. 신뢰 가정

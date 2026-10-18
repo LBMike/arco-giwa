@@ -12,6 +12,7 @@ import type {
   GiwaProduct,
   GiwaRedemption,
   GiwaRegistry,
+  GiwaReserveRecall,
   GiwaVaultConfig,
   HexAddress,
   UnsignedAdminTransaction,
@@ -222,7 +223,11 @@ export function hasDeploymentAddresses(product: GiwaCatalogItem) {
   )
 }
 
-function redemptionPath(productId: string, requestId: string, action: "payout" | "settle" | "release" | "fulfill") {
+function redemptionPath(
+  productId: string,
+  requestId: string,
+  action: "payout" | "settle" | "release" | "fulfill" | "acknowledge-recall" | "claim-recall",
+) {
   return `/api/v1/admin/products/${encodeURIComponent(productId)}/redemptions/${encodeURIComponent(requestId)}/${action}`
 }
 
@@ -331,6 +336,23 @@ export const giwaApi = {
       }),
     release: (auth: AdminAuth, productId: string, requestId: string) =>
       adminJson<{ ok: boolean }>(auth, redemptionPath(productId, requestId, "release"), {
+        method: "POST",
+        body: "{}",
+      }),
+    // ArcoUSD Reserve recalls: state per recall, and the Reserve step after it is paid.
+    // `fresh` skips the server's 5s cache (the refresh right after a Reserve tx confirmed).
+    reserveRecalls: (auth: AdminAuth, options: { fresh?: boolean } = {}) =>
+      adminJson<{ status: "live" | "not-deployed" | "unavailable"; error?: string; recalls: GiwaReserveRecall[] }>(
+        auth,
+        `/api/v1/admin/arcousd/recalls${options.fresh ? "?fresh=1" : ""}`,
+      ),
+    acknowledgeRecall: (auth: AdminAuth, productId: string, requestId: string) =>
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, redemptionPath(productId, requestId, "acknowledge-recall"), {
+        method: "POST",
+        body: "{}",
+      }),
+    claimRecall: (auth: AdminAuth, productId: string, requestId: string) =>
+      adminJson<{ transaction: UnsignedAdminTransaction }>(auth, redemptionPath(productId, requestId, "claim-recall"), {
         method: "POST",
         body: "{}",
       }),

@@ -186,6 +186,28 @@ export type GiwaRedemption = {
   settledAt?: string | null
   /** Part B payout ERC20 transfer tx; the Activity "Transaction" link for a settled redemption. */
   settledTxHash?: string | null
+  /** Admin pending list only: "arcousd-recall" = the ArcoUSD Reserve recalling its MMF position. */
+  kind?: "customer" | "arcousd-recall"
+  /** Admin pending list only: the Reserve strategy of an ArcoUSD recall (null when unmapped). */
+  strategyId?: number | null
+}
+
+/** ArcoUSD Reserve recall with its on-chain state (GET /api/v1/admin/arcousd/recalls). */
+export type GiwaReserveRecall = {
+  productId: string
+  requestId: string
+  strategyId: number | null
+  status: string
+  state: "requested" | "settling" | "awaiting-acknowledgement" | "claimable" | "done" | "unknown"
+  action: "acknowledge" | "claim" | null
+  /** Asset base units the Reserve still counts as pending; null when unread. */
+  pending: string | null
+  open: boolean | null
+  lockedAssetsOut: string | null
+  settledTxHash: string | null
+  createdAt: string | null
+  warning: string | null
+  error: string | null
 }
 
 export type FaucetStatus = {
