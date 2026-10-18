@@ -235,11 +235,13 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 
 - **관리자 API(2b)**: `GET /api/v1/admin/arcousd/{snapshots,queue,flows}`와 `POST /api/v1/admin/arcousd/process-queue`(서명할 `processQueue`와 eth_call 미리보기). 인덱서 테이블만 읽는다. 대기열은 T+2(48시간) 초과를 표시한다. 자세한 내용은 `docs/admin-console.md`의 "ArcoUSD 관리자 API".
 
+- **고객 화면(2c)**: Router가 살 수 있는 펀드(`contracts.routerProducts`)의 매수 패널에서 "You pay" 칸이 드롭다운이 된다. USDC(펀드 자체 결제 자산)가 기본이고 USDT·RLUSD·ArcoUSD 순으로 고를 수 있다. 고른 자산을 Router에 승인하고 `buy` 한 번으로 산다. 스왑 수수료 줄과 수수료를 뺀 받을 지분을 보여 준다. 매수 게이트가 `closed`면(서버가 리저브를 못 읽은 `unavailable` 포함) 매수 버튼을 막고 "Purchases are temporarily paused while the reserve refills."를 띄운다. 첫 응답 전에는 펀드 매수 버튼이 "Loading…"으로 잠긴다. Savings, Router가 없는 상태, Router 대상이 아닌 펀드는 기존 볼트 직접 매수 그대로다. API 자체가 응답하지 못하면 Router 주소를 알 수 없으므로 직접 매수로 남는다(리저브를 거치지 않는다). 게이트는 결제 자산과 관계없이 펀드 매수 전체를 막는다(ArcoUSD로 내는 매수 포함). 테스트 자산 받기는 tUSDT·tRLUSD 잔고도 보여 준다(`dripAll`이 이미 지급).
+
 - **상환 목록의 Reserve 회수**: Reserve의 `requestRecall`은 상품 볼트에 일반 상환 요청으로 들어오므로 관리자 상환 목록에서 따로 표시한다. 직접 송금으로 정산한 회수는 `acknowledgeRecallPaid`, fulfill로 처리한 회수는 `claimRecall`이 뒤따라야 한다. 서버는 이 둘을 안전할 때만 만들어 준다(지급 검증 뒤에만 acknowledge, fulfill 뒤에만 claim). 절차는 `docs/admin-console.md`의 "자금 이동 안전장치".
 
 아직 하지 않는 것:
 
-- 관리자 ArcoUSD 화면(2b의 API 위에, UI 기획 뒤), 매수 버튼 차단 UI와 Router 매수·결제 자산 선택(2c). 키퍼·대사·알림(3단계).
+- 관리자 ArcoUSD 화면(2b의 API 위에, UI 기획 뒤). 키퍼·대사·알림(3단계).
 
 ## 6. 신뢰 가정
 
