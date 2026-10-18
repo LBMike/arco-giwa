@@ -496,7 +496,12 @@ export function RegisterVaultCard({ auth }: { auth: AdminAuth }) {
   })
   const [phase, setPhase] = useState<"idle" | "registering" | "done" | "failed">("idle")
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<{ symbol: string; unverified: string[]; proxyAdminOwner: string | null } | null>(null)
+  const [result, setResult] = useState<{
+    symbol: string
+    unverified: string[]
+    warnings: string[]
+    proxyAdminOwner: string | null
+  } | null>(null)
 
   const complete = productId.trim() && REGISTER_SLOTS.every(({ key }) => addresses[key].trim())
 
@@ -512,7 +517,12 @@ export function RegisterVaultCard({ auth }: { auth: AdminAuth }) {
         priceFeed: addresses.priceFeed.trim(),
       })
       await queryClient.invalidateQueries({ queryKey: ["giwa", "catalog"] })
-      setResult({ symbol: response.symbol, unverified: response.unverified, proxyAdminOwner: response.proxyAdminOwner })
+      setResult({
+        symbol: response.symbol,
+        unverified: response.unverified,
+        warnings: response.warnings ?? [],
+        proxyAdminOwner: response.proxyAdminOwner,
+      })
       setPhase("done")
     } catch (err) {
       setPhase("failed")
@@ -588,6 +598,21 @@ export function RegisterVaultCard({ auth }: { auth: AdminAuth }) {
               </span>
             </div>
           </div>
+          {result.warnings.length > 0 && (
+            <div className="flex items-start gap-2 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3 text-xs text-[var(--color-arco-down)]">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <div className="flex flex-col gap-0.5">
+                {result.warnings.map((warning) => (
+                  <span key={warning} className="font-medium">
+                    {warning}
+                  </span>
+                ))}
+                <span className="text-[var(--color-arco-text-soft)]">
+                  Run the payment-feed repair before un-hiding (docs/operations/payment-feed-repair.md).
+                </span>
+              </div>
+            </div>
+          )}
           {result.unverified.length > 0 && (
             <div className="flex items-start gap-2 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3 text-xs text-[var(--color-arco-down)]">
               <AlertCircle className="mt-0.5 size-4 shrink-0" />

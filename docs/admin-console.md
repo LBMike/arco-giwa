@@ -52,6 +52,18 @@ Limits는 종목·방향(매수/매도)마다 새 주문을 받을지와 하루 
 
 Vault 쓰기 작업의 상당수는 서버가 서명 전 트랜잭션을 만들어 주고 운영자 지갑이 직접 서명해 보낸다. 가격 피드 일부는 처음부터 지갑이 직접 서명한다. 컨트랙트는 서명한 지갑의 역할(예: `FEED_ADMIN_ROLE`)을 따로 검사하므로, `ADMIN_OPERATORS` 권한과 별개로 해당 지갑에 온체인 역할이 있어야 한다. 가격 피드 화면은 연결된 지갑의 역할을 읽어 없으면 이유를 보여 준다.
 
+### 자금 이동 안전장치
+
+서버가 만들어 주는 자금 이동 트랜잭션은 운영자 권한과 별개로 아래 조건을 다시 검사한다.
+
+- **입금 볼트 출금(`POST /api/v1/admin/products/:productId/withdraw`)**: 받는 주소는 `ADMIN_WITHDRAW_ALLOWLIST`에 있거나 그 상품 Vault Config의 `adminDepositAddress`여야 한다. 둘 다 아니면 403이다. 운영자 자신의 지갑도 목록에 없으면 거부한다. 금액은 0보다 큰 기본 단위 정수 문자열만 받는다. 화면은 금액을 비워 두면 전액을 보내던 동작이 없어졌고, 금액과 받는 주소를 한 번 더 보여 준 뒤 확인을 눌러야 서명 단계로 간다.
+- `adminDepositAddress`는 `vault:write` 운영자가 바꿀 수 있는 값이다(변경은 감사 로그에 남는다). 메인넷에서는 상품별 값 대신 `ADMIN_WITHDRAW_ALLOWLIST`의 멀티시그만 쓰는 것을 권장한다.
+- **상환 지급(`POST /api/v1/admin/products/:productId/redemptions/:requestId/{payout,settle,release,fulfill}`)**: 상환 요청은 (체인, 상환 볼트, requestId)로 찾는다. 상품이 다르면 requestId가 같아도 다른 요청이다. 예전 경로 `/api/v1/admin/redemptions/:requestId/:action`은 410을 돌려준다.
+  - payout 금액은 `requestRedeem` 때 잠긴 금액과 정확히 같아야 하고, 받는 주소는 요청의 `metadata.recipient`(없으면 요청 지갑)다.
+  - settle은 트랜잭션 영수증을 읽어 다음을 모두 확인한 뒤에만 기록한다: 성공한 트랜잭션이고, 보낸 지갑이 `ADMIN_OPERATORS`의 `vault:write` 지갑이며, 상환 요청 블록 이후에 채굴됐고, 그 지갑에서 받는 주소로 결제 토큰이 잠긴 금액만큼 전송됐다. 그래서 같은 금액의 다른 전송(파우셋, 예전 claim, 사용자의 자기 전송)으로는 정산되지 않는다. 같은 트랜잭션으로 두 요청을 정산할 수 없고, 정산은 서버 안에서 한 번에 하나씩 처리한다. 영수증 검증기가 없으면 503이다.
+  - 지갑이 확인한 직후에는 서버 RPC가 아직 영수증을 못 볼 수 있어 서버가 몇 번 다시 읽는다. 그래도 실패하면 행이 SETTLING으로 남고, 화면의 **Retry settle**이 같은 트랜잭션으로 다시 확인한다(돈을 다시 보내지 않는다). **Release**는 익스플로러에서 전송이 없었음을 확인한 뒤에만 쓴다.
+  - 인덱서가 이벤트를 다시 읽어도(백필, 커서 초기화) 상환 요청의 상태는 바뀌지 않는다. 정산된 요청이 REQUESTED로 돌아가 두 번 지급되는 일을 막는다.
+
 ### 레거시 공유 토큰 (`x-operator-token`)
 
 - 기본 거부한다(401).
@@ -88,6 +100,7 @@ Vault 쓰기 작업의 상당수는 서버가 서명 전 트랜잭션을 만들�
 | `ADMIN_OPERATORS` | `[{"wallet":"0x…","operatorId":"ops-mike","permissions":["vault:read","vault:write"]}]` | 새로 추가. Vault 어드민 운영자 목록 |
 | `CORS_ALLOWED_ORIGINS` | `https://app.arco.financial,https://admin.arco.financial` | 기존 값에 콘솔 오리진을 추가한다(스킴 포함, 끝 `/` 없이). SIWE 도메인 허용 목록도 이 값이다 |
 | `ADMIN_LEGACY_TOKEN_AUTH` | `0` | 새로 추가. 기본 0. 전환 기간에만 1 |
+| `ADMIN_WITHDRAW_ALLOWLIST` | `0xTreasury…,0xMultisig…` | 새로 추가. 입금 볼트 출금을 받을 수 있는 주소(쉼표 구분). 상품별 `adminDepositAddress`와 합쳐서 본다. 비우면 `adminDepositAddress`만 허용. 형식이 틀리면 서버가 시작하지 않는다 |
 | `ADMIN_OPERATOR_TOKEN` | (비밀값) | 기존. `ADMIN_LEGACY_TOKEN_AUTH=1`일 때만 필요. 종료 후 삭제 |
 | `AUTH_JWT_SECRET` | (비밀값) | 기존. 세션 서명. 변경 없음 |
 | `STOCKS_CONFIG_PATH` | | 기존. Stocks 운영자는 이 JSON의 `operators`에 그대로 둔다 |

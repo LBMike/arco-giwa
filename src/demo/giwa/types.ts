@@ -105,17 +105,22 @@ export type GiwaProduct = {
   activationFlags?: Record<string, boolean>
   deploymentBlock?: string | number | null
   vaultConfig?: GiwaVaultConfig | null
-  pauseState?: GiwaPauseState | null
+  // Partial: older servers omit the whole-vault fields; read it through pauseStateOf().
+  pauseState?: Partial<GiwaPauseState> | null
 }
 
-// Function-pause snapshot attached by the catalog (server-side RPC read, no wallet
-// needed). `*Paused` includes the whole-contract pause; `*Partial` = the two entry-path
-// selectors of one kind disagree (a half-completed pause sequence — admin should retry).
+// Pause snapshot attached by the catalog (server-side RPC read, no wallet needed, cached
+// ~30s) and returned live by GET /api/v1/admin/pause-state. `*Paused` includes the
+// whole-contract pause; `*VaultPaused` is that whole-contract pause alone (unpauseFn cannot
+// lift it); `*Partial` = the two entry-path selectors of one kind disagree (a half-completed
+// pause sequence — admin should retry).
 export type GiwaPauseState = {
   depositPaused: boolean
   withdrawPaused: boolean
   depositPartial: boolean
   withdrawPartial: boolean
+  depositVaultPaused: boolean
+  withdrawVaultPaused: boolean
 }
 
 export type GiwaCatalogItem = GiwaProduct & {

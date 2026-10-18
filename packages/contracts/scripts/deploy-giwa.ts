@@ -31,7 +31,13 @@ import {
   type ResumableRegistry,
 } from "./deploy-registry"
 
-import { parseExtraProducts, resolvedInit, type DeployParamsInit, type DeployParamsProduct } from "./deploy-params"
+import {
+  parseExtraProducts,
+  priceFeedInitializerArgs,
+  resolvedInit,
+  type DeployParamsInit,
+  type DeployParamsProduct,
+} from "./deploy-params"
 
 const TX_TIMEOUT_MS = 180_000
 // Post-deploy proxy readback resilience against transient GIWA RPC read-after-write lag.
@@ -411,14 +417,16 @@ function proxyInitializerArgs(step: ProxyStep, registry: ResumableRegistry, admi
     // launch values verbatim.
     const override = step.productId ? INIT_OVERRIDES.get(step.productId) : undefined
     if (override) {
+      const [decimals, initial, healthyDiff, minAnswer, maxAnswer, maxDeviationBps, feedAdmin] =
+        priceFeedInitializerArgs(override, admin)
       return [
-        8,
-        BigNumber.from(override.feedInitialAnswer),
-        override.feedHealthyDiffSeconds,
-        1,
-        BigNumber.from(override.feedMaxAnswer),
-        BigNumber.from(override.feedMinAnswer),
-        admin,
+        decimals,
+        BigNumber.from(initial),
+        healthyDiff,
+        BigNumber.from(minAnswer),
+        BigNumber.from(maxAnswer),
+        maxDeviationBps,
+        feedAdmin,
       ]
     }
     return [
