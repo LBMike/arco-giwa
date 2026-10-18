@@ -52,6 +52,8 @@ import { DEPLOYED_FUND_METRICS, metricCaption, type ListedFund } from "./listed-
 import { CATEGORY_TITLES, categoryTitle } from "./fund-categories"
 import { ASSET_MANAGERS, ISSUERS, aumLabel, apyLabel, productById } from "../data/products"
 import { GiwaMultiSelect } from "./GiwaMultiSelect"
+import { PayAssetSelect } from "./PayAssetSelect"
+import { amountAfterSwapFee, swapFeeText, type PayAssetOption } from "./arcousd-buy"
 import {
   AmountBlock,
   AmountField,
@@ -196,6 +198,7 @@ export function paymentAssetIcon(symbol: string) {
   if (symbol === "tBTC") return "/logos/abtc.png"
   if (symbol === "tWETH") return "/logos/aeth.png"
   if (symbol === "tXRP") return "/logos/XRP.png"
+  if (symbol === "ArcoUSD") return "/logos/arco.png"
   return undefined
 }
 
@@ -283,6 +286,19 @@ export function uniquePaymentAssets(products: GiwaCatalogItem[]) {
     })
   }
   return assets
+}
+
+/** Adds the Reserve's stablecoins that no product pays with (same faucet as the product assets). */
+export function withReserveTestAssets(
+  assets: ReturnType<typeof uniquePaymentAssets>,
+  reserveAssets: readonly { symbol: string; address: string; decimals: number }[],
+): ReturnType<typeof uniquePaymentAssets> {
+  const faucet = assets.find((asset) => asset.faucet)?.faucet ?? null
+  const seen = new Set(assets.map((asset) => asset.address.toLowerCase()))
+  const extra = reserveAssets
+    .filter((asset) => /^0x[0-9a-fA-F]{40}$/.test(asset.address) && !seen.has(asset.address.toLowerCase()))
+    .map((asset) => ({ symbol: asset.symbol, name: asset.symbol, decimals: asset.decimals, address: asset.address as HexAddress, faucet }))
+  return [...assets, ...extra]
 }
 
 // Listed funds under the shared filters, matched like the deployed vaults: category, USD
@@ -477,7 +493,14 @@ export function TestFundsButton({ admin = false }: { admin?: boolean }) {
   const wallet = useGiwaWallet()
   const queryClient = useQueryClient()
   const catalogQuery = useQuery({ queryKey: ["giwa", "catalog"], queryFn: giwaApi.catalog, enabled: !admin })
-  const assets = useMemo(() => uniquePaymentAssets(catalogQuery.data ?? []), [catalogQuery.data])
+  // ArcoUSD test stablecoins (tUSDT, tRLUSD) are not any product's payment asset; the Reserve
+  // lists them. dripAll already mints every configured faucet asset — this only lists their
+  // balances and covers the per-asset fallback.
+  const reserveQuery = useQuery({ queryKey: ["giwa", "arcousd", "reserve"], queryFn: () => giwaApi.arcousd.reserve(), enabled: !admin })
+  const assets = useMemo(
+    () => withReserveTestAssets(uniquePaymentAssets(catalogQuery.data ?? []), reserveQuery.data?.reserve?.assets ?? []),
+    [catalogQuery.data, reserveQuery.data],
+  )
   const faucet = assets.find((asset) => asset.faucet)?.faucet ?? null
   const [phase, setPhase] = useState<UiPhase>("ready")
   const [message, setMessage] = useState<string | null>(null)
@@ -1300,7 +1323,7 @@ function exceedsBalance(amount: string, balance: string, decimals: number): bool
 
 // Phases where the shown balance isn't actionable (unknown or the button has its own
 // prerequisite label), so "Insufficient Balance" must not pre-empt them.
-const BALANCE_BLIND_PHASES = ["disconnected", "wrong-network", "missing-gas", "missing-payment-token"]
+const BALANCE_BLIND_PHASES = ["disconnected", "wrong-network", "missing-gas", "missing-payment-token", "loading-registry"]
 
 function primaryActionLabel(
   phase: UiPhase,
@@ -1312,6 +1335,8 @@ function primaryActionLabel(
   if (phase === "wrong-network") return "Switch GIWA"
   if (phase === "missing-gas") return "Get GIWA ETH"
   if (phase === "missing-payment-token") return "Payment token missing"
+  // A fund's buy route (ArcoUSD Router or direct) is not known yet.
+  if (phase === "loading-registry") return "Loading…"
   // Can't act without the balance. Outranks the operation label AND the redeem
   // request-redemption fallback (both arrive via operationLabel), and also Approve — the button
   // is disabled here, so its label has to say why rather than offer a pointless approval.
@@ -1338,6 +1363,11 @@ export function GiwaInvestPanel({
   baseUsd,
   savings,
   variant = "sidebar",
+  routed = false,
+  payAssets = [],
+  payAsset = null,
+  payBalance,
+  onPayAssetChange,
   onOperationChange,
   onAmountChange,
   onApprove,
@@ -1380,6 +1410,14 @@ export function GiwaInvestPanel({
   // panel flows with the page — "sheet" inside the mobile bottom sheet, "flow" in a
   // single-column layout (e.g. Savings) where a sticky panel would block scroll to the footer.
   variant?: "sidebar" | "sheet" | "flow"
+  // ArcoRouter fund buys (useGiwaProductOperation): the invest side pays with the selected Reserve
+  // stablecoin or ArcoUSD instead of the fund's payment asset. Absent / not routed => the panel
+  // renders exactly as before.
+  routed?: boolean
+  payAssets?: readonly PayAssetOption[]
+  payAsset?: PayAssetOption | null
+  payBalance?: string
+  onPayAssetChange?: (key: string) => void
   onOperationChange: (operation: "deposit" | "requestDeposit" | "redeemInstant" | "requestRedeem" | "claimRedeem") => void
   onAmountChange: (amount: string) => void
   onRequestIdChange: (requestId: string) => void
@@ -1399,14 +1437,22 @@ export function GiwaInvestPanel({
   const tab = operation === "deposit" || operation === "requestDeposit" ? "invest" : operation === "claimRedeem" ? "pending" : "redeem"
   const cfg = vaultConfigOf(product)
   const busy = ["approving", "simulating", "submitting", "confirming"].includes(phase)
-  const paySymbol = tab === "redeem" ? product.symbol : assetLabel(product.paymentAssetSymbol)
+  // Router fund buy with a chosen pay asset (invest side only; redeem always pays the fund's asset).
+  const routedPay = routed && tab === "invest" && payAsset ? payAsset : null
+  const paySymbol = tab === "redeem" ? product.symbol : routedPay ? routedPay.label : assetLabel(product.paymentAssetSymbol)
   const receiveSymbol = tab === "redeem" ? assetLabel(product.paymentAssetSymbol) : product.symbol
   const side: "invest" | "redeem" = tab === "redeem" ? "redeem" : "invest"
-  const quote = typeof price === "number" ? computeQuote({ payAmount: Number(amount), price, side }) : null
-  // "~$" assumes a USD-pegged payment asset (tUSDC). For tBTC/tWETH/tXRP we show the value in the
-  // payment-asset symbol instead — a real USD figure would need an FX oracle (out of scope).
-  const isUsd = product.paymentAssetSymbol === "tUSDC"
-  const topBalance = tab === "redeem" ? productBalance : paymentBalance
+  // A non-base stablecoin loses its swap fee before it buys shares.
+  const quotedPay = routedPay ? amountAfterSwapFee(Number(amount), routedPay.swapFeeBps) : Number(amount)
+  const quote = typeof price === "number" ? computeQuote({ payAmount: quotedPay, price, side }) : null
+  // "~$" assumes a USD-pegged payment asset (tUSDC, or any Router pay asset: USDC, USDT, RLUSD,
+  // ArcoUSD). For tBTC/tWETH/tXRP we show the value in the payment-asset symbol instead — a real
+  // USD figure would need an FX oracle (out of scope).
+  const isUsd = routedPay !== null || product.paymentAssetSymbol === "tUSDC"
+  const payIconFor = (option: PayAssetOption) => (
+    <GiwaBrandMark src={paymentAssetIcon(option.symbol)} label={option.label} size={18} />
+  )
+  const topBalance = tab === "redeem" ? productBalance : routedPay ? (payBalance ?? "--") : paymentBalance
   const receiveBalance = tab === "redeem" ? paymentBalance : productBalance
   const canMax = topBalance !== "--" && Number.isFinite(Number(topBalance)) && Number(topBalance) > 0
   const tradeValue = side === "invest" ? Number(amount) : (quote ?? Number.NaN)
@@ -1437,7 +1483,7 @@ export function GiwaInvestPanel({
   const redeemPrimaryLabel = liquidityShort ? "Request redemption" : "Redeem instant"
   // The paying token is the payment asset on invest, the product token (shares) on redeem —
   // exactly the balance shown above the field and behind MAX.
-  const payDecimals = side === "redeem" ? PRODUCT_TOKEN_DECIMALS : (product.paymentAsset?.decimals ?? 18)
+  const payDecimals = side === "redeem" ? PRODUCT_TOKEN_DECIMALS : routedPay ? routedPay.decimals : (product.paymentAsset?.decimals ?? 18)
   const insufficientBalance =
     tab !== "pending" && !BALANCE_BLIND_PHASES.includes(phase) && exceedsBalance(amount, topBalance, payDecimals)
   const actionLabel = primaryActionLabel(
@@ -1473,7 +1519,7 @@ export function GiwaInvestPanel({
 
   // What the modal shows while it runs: the amounts, symbols and marks exactly as the panel shows them at the press.
   function review(next: FlowOperation): OperationReview {
-    const payIcon = tab === "redeem" ? vaultImageFor(product) : paymentAssetIcon(product.paymentAssetSymbol)
+    const payIcon = tab === "redeem" ? vaultImageFor(product) : paymentAssetIcon(routedPay ? routedPay.symbol : product.paymentAssetSymbol)
     const receiveIcon = tab === "redeem" ? paymentAssetIcon(product.paymentAssetSymbol) : vaultImageFor(product)
     return {
       kind: savings ? "savings" : "funds",
@@ -1528,7 +1574,24 @@ export function GiwaInvestPanel({
                 icon={
                   tab === "redeem"
                     ? <GiwaBrandMark src={vaultImageFor(product)} label={product.symbol} size={18} />
-                    : <GiwaBrandMark src={paymentAssetIcon(product.paymentAssetSymbol)} label={assetLabel(product.paymentAssetSymbol)} size={18} />
+                    : routedPay
+                      ? payIconFor(routedPay)
+                      : <GiwaBrandMark src={paymentAssetIcon(product.paymentAssetSymbol)} label={assetLabel(product.paymentAssetSymbol)} size={18} />
+                }
+                symbolControl={
+                  routedPay && payAssets.length > 1 && onPayAssetChange ? (
+                    <PayAssetSelect
+                      options={payAssets.map((option) => ({
+                        key: option.key,
+                        label: option.label,
+                        icon: payIconFor(option),
+                        note: option.swapFeeBps > 0 ? `${swapFeeText(option.swapFeeBps)} fee` : "No fee",
+                      }))}
+                      selected={routedPay.key}
+                      onSelect={onPayAssetChange}
+                      disabled={busy}
+                    />
+                  ) : undefined
                 }
                 value={amount}
                 onChange={onAmountChange}
@@ -1580,6 +1643,8 @@ export function GiwaInvestPanel({
                       value={instantLiquidityUsd != null ? aumLabel(instantLiquidityUsd) : "—"}
                     />
                   )}
+                  {/* Router buy: the Reserve's swap fee for a non-base stablecoin (USDT, RLUSD). */}
+                  {routedPay && <InfoRow label="Swap fee" value={swapFeeText(routedPay.swapFeeBps)} />}
                   {/* Redeem tab: same redemption-vault liquidity, shown in the payment asset to match
                       the request-fallback notice ("Instant liquidity is <X> tUSDC"). */}
                   {tab === "redeem" && (
@@ -1616,7 +1681,7 @@ export function GiwaInvestPanel({
             )}
             <button
               type="button"
-              disabled={busy || phase === "missing-payment-token" || Boolean(pausedNotice) || insufficientBalance}
+              disabled={busy || phase === "missing-payment-token" || phase === "loading-registry" || Boolean(pausedNotice) || insufficientBalance}
               onClick={runPrimary}
               className={`${INVEST_CTA} ${busy ? INVEST_CTA_BUSY : INVEST_CTA_READY}`}
             >

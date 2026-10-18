@@ -36,6 +36,10 @@ const depositVaultAbi = parseAbi([
   "function deposit(uint256 paymentAssets, uint256 minSharesOut, address recipient) returns (uint256)",
   "function requestDeposit(uint256 paymentAssets, uint256 minSharesOut, address recipient) returns (uint256)",
 ])
+// ArcoRouter (docs/specs/arcousd-v1.md §3.12): a fund buy paid in any Reserve stablecoin or ArcoUSD.
+const arcoRouterAbi = parseAbi([
+  "function buy(address payAsset, uint256 payAmount, address depositVault, uint256 minSharesOut, address recipient, bool request) returns (uint256 result)",
+])
 const redemptionVaultAbi = parseAbi([
   "function redeemInstant(uint256 sharesIn, uint256 minAssetsOut, address recipient) returns (uint256)",
   "function requestRedeem(uint256 sharesIn, uint256 minAssetsOut, address recipient) returns (uint256)",
@@ -501,6 +505,37 @@ export async function submitProductOperation(args: {
     abi: redemptionVaultAbi,
     functionName: args.operation,
     args: [args.amount, TESTNET_ZERO_SLIPPAGE_FLOOR, args.account],
+  })
+}
+
+/**
+ * Buy `depositVault`'s product through the ArcoRouter with `amount` of `payAsset` (the Router must
+ * hold the allowance). `request` files a deposit request instead of an instant deposit. Shares go
+ * to the buyer. Same testnet zero slippage floor as the direct vault deposit.
+ */
+export async function submitRouterBuy(args: {
+  account: HexAddress
+  router: HexAddress
+  payAsset: HexAddress
+  amount: bigint
+  depositVault: HexAddress
+  request: boolean
+}) {
+  return simulateAndWrite({
+    account: args.account,
+    address: args.router,
+    abi: arcoRouterAbi,
+    functionName: "buy",
+    args: [args.payAsset, args.amount, args.depositVault, TESTNET_ZERO_SLIPPAGE_FLOOR, args.account, args.request],
+  })
+}
+
+/** Calldata of submitRouterBuy (tests and transaction previews). */
+export function encodedRouterBuy(args: { payAsset: HexAddress; amount: bigint; depositVault: HexAddress; recipient: HexAddress; request: boolean }): Hex {
+  return encodeFunctionData({
+    abi: arcoRouterAbi,
+    functionName: "buy",
+    args: [args.payAsset, args.amount, args.depositVault, TESTNET_ZERO_SLIPPAGE_FLOOR, args.recipient, args.request],
   })
 }
 

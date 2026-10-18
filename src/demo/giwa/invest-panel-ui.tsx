@@ -63,6 +63,8 @@ export type AmountFieldProps = {
   tone?: InvestPanelTone
   /** Shown after the symbol inside the token chip (e.g. a test-value marker). */
   symbolNote?: ReactNode
+  /** Replaces the token chip (icon, symbol, note, copy button) — e.g. a pay-asset dropdown. */
+  symbolControl?: ReactNode
   /** Extra classes for the field root (e.g. a focus-within ring). */
   className?: string
   /** Extra classes for the MAX button (e.g. a focus ring). */
@@ -90,6 +92,7 @@ export function AmountField({
   balanceLabel = "Balance",
   tone = "muted",
   symbolNote,
+  symbolControl,
   className,
   maxClassName,
   inputRef,
@@ -125,20 +128,22 @@ export function AmountField({
         )}
       </div>
       <div className="mt-1 flex items-center justify-between gap-2">
-        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-[var(--color-arco-ink)]">
-          {icon}
-          {symbol}
-          {symbolNote}
-          {copyButton && (
-            <button
-              type="button"
-              aria-label={`Copy ${symbol} address`}
-              className={`inline-flex ${secondary}`}
-            >
-              <Copy className="size-3.5" />
-            </button>
-          )}
-        </span>
+        {symbolControl ?? (
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-[var(--color-arco-ink)]">
+            {icon}
+            {symbol}
+            {symbolNote}
+            {copyButton && (
+              <button
+                type="button"
+                aria-label={`Copy ${symbol} address`}
+                className={`inline-flex ${secondary}`}
+              >
+                <Copy className="size-3.5" />
+              </button>
+            )}
+          </span>
+        )}
         {display ? (
           <p id={id} aria-label={ariaLabel} className="min-w-0 text-right tabular-nums text-lg text-[var(--color-arco-ink)] [overflow-wrap:anywhere]">
             {value}

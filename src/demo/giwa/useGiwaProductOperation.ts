@@ -12,10 +12,13 @@ import {
   readTokenBalance,
   receivedTokenAmount,
   submitProductOperation,
+  submitRouterBuy,
   toBaseUnits,
   waitForSuccessfulReceipt,
 } from "./contracts"
 import { pauseStateOf } from "./catalog"
+import { fundBuyRoute, isFundProduct, RESERVE_REFILL_NOTICE, selectedPayAsset } from "./arcousd-buy"
+import { GIWA_LIVE_REFETCH } from "./config"
 import { vaultAddressForOperation, type ProductOperation } from "./operation-routing"
 import {
   displayAmount,
@@ -53,6 +56,11 @@ function confirmLabel(operation: ProductOperation): string {
 
 const BUSY_PHASES: readonly UiPhase[] = ["approving", "simulating", "submitting", "confirming"]
 
+function requiredAddress(value: HexAddress | null | undefined, label: string): HexAddress {
+  if (!value) throw new Error(`${label} address is missing`)
+  return value
+}
+
 // Container hook for the invest/redeem panel: every per-product read, the operation state, and the
 // approve/submit/claim handlers, returning exactly the props GiwaInvestPanel needs. A press of the
 // primary action opens the transaction modal (`flow`, rendered once per page by GiwaOperationModal),
@@ -72,9 +80,32 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
   const flowSeq = useRef(0)
   // The flow the user closed while it was running: what it already sent may finish, but it asks the wallet for nothing more.
   const closedFlow = useRef<number | null>(null)
+  // The pay asset a running (or failed) flow was started with (Router buys).
+  const flowPayKey = useRef<string | null>(null)
 
   const walletEnabled = Boolean(wallet.address)
   const paymentDecimals = product.paymentAsset?.decimals ?? 18
+
+  // ArcoUSD: a fund the ArcoRouter may buy is paid with any Reserve stablecoin or ArcoUSD, through
+  // the Router (which then holds the allowance), and is blocked while the buy gate is closed. Any
+  // other product — or no Router yet, or this read failing — keeps the direct vault deposit.
+  const reserveQuery = useQuery({
+    queryKey: ["giwa", "arcousd", "reserve"],
+    queryFn: () => giwaApi.arcousd.reserve(),
+    ...GIWA_LIVE_REFETCH,
+  })
+  const route = useMemo(() => fundBuyRoute(product, reserveQuery.data), [product, reserveQuery.data])
+  // Until the first answer a fund's route is unknown: its buy waits ("Loading…") instead of
+  // assuming the direct path. If the API cannot answer at all there is no Router address to use,
+  // so the fund keeps the direct vault deposit (which never touches the Reserve).
+  const routeUnknown = isFundProduct(product) && reserveQuery.isPending
+  const [payAssetKey, setPayAssetKey] = useState<string | null>(null)
+  const payAsset = selectedPayAsset(route, payAssetKey)
+  const routed = route.kind === "router"
+  // What the invest side pays with and who must be allowed to pull it.
+  const payToken: HexAddress | null = (routed ? payAsset?.address : product.paymentAssetAddress) ?? null
+  const payDecimals = routed ? (payAsset?.decimals ?? 18) : paymentDecimals
+  const spender: HexAddress | null = (route.kind === "router" ? route.router : product.depositVaultAddress) ?? null
 
   const redemptionsQuery = useQuery({
     queryKey: ["giwa", "redemptions", wallet.address],
@@ -91,6 +122,13 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     queryFn: () => readTokenBalance(product.paymentAssetAddress!, wallet.address!, paymentDecimals),
     enabled: Boolean(wallet.address && product.paymentAssetAddress),
   })
+  // The selected Router pay asset's balance (the fund's own payment-asset balance above still backs
+  // the redeem side, which always pays out in it).
+  const payBalanceQuery = useQuery({
+    queryKey: ["giwa", "payment-balance-one", wallet.address, payToken],
+    queryFn: () => readTokenBalance(payToken!, wallet.address!, payDecimals),
+    enabled: Boolean(routed && wallet.address && payToken),
+  })
   const productBalanceQuery = useQuery({
     queryKey: ["giwa", "product-balance", wallet.address, product.productTokenAddress],
     queryFn: () => readTokenBalance(product.productTokenAddress!, wallet.address!, 18),
@@ -98,11 +136,11 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
   })
   // Shared between the query and the post-approve setQueryData — MUST stay identical, or the
   // cache write after approval is silently ignored and the stale-read guard stops working.
-  const allowanceQueryKey = ["giwa", "allowance", wallet.address, product.paymentAssetAddress, product.depositVaultAddress]
+  const allowanceQueryKey = ["giwa", "allowance", wallet.address, payToken, spender]
   const allowanceQuery = useQuery({
     queryKey: allowanceQueryKey,
-    queryFn: () => readAllowance(product.paymentAssetAddress!, wallet.address!, product.depositVaultAddress!, paymentDecimals),
-    enabled: Boolean(wallet.address && product.paymentAssetAddress && product.depositVaultAddress),
+    queryFn: () => readAllowance(payToken!, wallet.address!, spender!, payDecimals),
+    enabled: Boolean(wallet.address && payToken && spender),
   })
   const greenlistEnforcedQuery = useQuery({
     queryKey: ["giwa", "greenlist-enforced", product.productTokenAddress],
@@ -118,18 +156,21 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
   const sharePrice = priceFeedQuery.data ? fromAnswer(priceFeedQuery.data.answer) : null
 
   const usesPaymentAmount = operation === "deposit" || operation === "requestDeposit"
-  const amountDecimals = usesPaymentAmount ? paymentDecimals : 18
+  const amountDecimals = usesPaymentAmount ? payDecimals : 18
   const amountBase = useMemo(() => toBaseUnits(amount, amountDecimals), [amount, amountDecimals])
   const activeVault = vaultAddressForOperation(product, operation)
-  const allowanceRequired = Boolean(
-    usesPaymentAmount && allowanceQuery.data && product.depositVaultAddress && allowanceQuery.data.raw < amountBase,
-  )
+  const allowanceRequired = Boolean(usesPaymentAmount && allowanceQuery.data && spender && allowanceQuery.data.raw < amountBase)
+  // Not read yet (e.g. right after switching the pay asset): the flow approves rather than skip a
+  // step the buy may need.
+  const allowanceUnknown = Boolean(usesPaymentAmount && wallet.address && payToken && spender && allowanceQuery.data === undefined)
 
   const phase: UiPhase =
     wallet.phase === "disconnected" || wallet.phase === "wrong-network" || wallet.phase === "missing-gas"
       ? wallet.phase
       : !product.paymentAssetAddress || !product.paymentAsset
         ? "missing-payment-token"
+        : usesPaymentAmount && routeUnknown && operationPhase === "ready"
+          ? "loading-registry"
         : operationPhase !== "ready"
           ? operationPhase
           : allowanceRequired
@@ -139,19 +180,24 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
   // Per-vault function pause (catalog pauseState): deposit entry paths and redeem entry
   // paths are paused as pairs; claimRedeem is never blocked so requested redemptions
   // stay claimable.
+  // A Router fund also stops buying while the ArcoUSD buy gate is closed (reserve buffer short,
+  // a pause on the buy path, or the reserve unreadable).
   const pause = pauseStateOf(product)
   const pausedNotice =
     (operation === "deposit" || operation === "requestDeposit") && pause.depositPaused
       ? "Deposits are temporarily paused"
-      : (operation === "redeemInstant" || operation === "requestRedeem") && pause.withdrawPaused
-        ? "Withdrawals are temporarily paused"
-        : null
+      : (operation === "deposit" || operation === "requestDeposit") && route.kind === "router" && route.gateClosed
+        ? RESERVE_REFILL_NOTICE
+        : (operation === "redeemInstant" || operation === "requestRedeem") && pause.withdrawPaused
+          ? "Withdrawals are temporarily paused"
+          : null
 
   async function refreshReads() {
     await wallet.refreshBalance()
     await Promise.all([
       allowanceQuery.refetch(),
       paymentBalanceQuery.refetch(),
+      ...(routed ? [payBalanceQuery.refetch()] : []),
       productBalanceQuery.refetch(),
       redemptionsQuery.refetch(),
       faucetQuery.refetch(),
@@ -173,7 +219,7 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
   // (bounded: ~8 tries x 750ms, then proceed without a cache write).
   async function waitForAllowanceAtLeast(minimum: bigint) {
     for (let attempt = 0; attempt < 8; attempt++) {
-      const allowance = await readAllowance(product.paymentAssetAddress!, wallet.address!, product.depositVaultAddress!, paymentDecimals)
+      const allowance = await readAllowance(payToken!, wallet.address!, spender!, payDecimals)
       if (allowance.raw >= minimum) return allowance
       await sleep(750)
     }
@@ -187,13 +233,14 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     setSuccessLabel(null)
     setTxHashes([])
     try {
-      if (!product.paymentAssetAddress || !product.depositVaultAddress) throw new Error("Registry address is missing")
+      if (!payToken || !spender) throw new Error("Registry address is missing")
       setOperationPhase("approving")
-      // Unlimited approval: one approve covers every future deposit into this vault.
+      // Unlimited approval: one approve covers every future deposit into this vault (or, for a
+      // Router fund, every buy paid in this asset).
       const hash = await approveVault({
         account: wallet.address,
-        token: product.paymentAssetAddress,
-        vault: product.depositVaultAddress,
+        token: payToken,
+        vault: spender,
         amount: maxUint256,
       })
       setTxHashes([hash])
@@ -221,13 +268,24 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     setTxHashes([])
     try {
       setOperationPhase("simulating")
-      const hash = await submitProductOperation({
-        account,
-        product,
-        operation: nextOperation,
-        amount: amountBase,
-        requestId: BigInt(nextRequestId || "0"),
-      })
+      const buying = nextOperation === "deposit" || nextOperation === "requestDeposit"
+      const hash =
+        buying && route.kind === "router"
+          ? await submitRouterBuy({
+              account,
+              router: route.router,
+              payAsset: requiredAddress(payAsset?.address, "Pay asset"),
+              amount: amountBase,
+              depositVault: requiredAddress(product.depositVaultAddress, "Deposit vault"),
+              request: nextOperation === "requestDeposit",
+            })
+          : await submitProductOperation({
+              account,
+              product,
+              operation: nextOperation,
+              amount: amountBase,
+              requestId: BigInt(nextRequestId || "0"),
+            })
       setTxHashes([hash])
       onSent?.()
       const receipt = await waitForReceipts([hash])
@@ -260,10 +318,14 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
   // yet), then the operation, one wallet request at a time.
   function startFlow(review: OperationReview) {
     if (!wallet.address || BUSY_PHASES.includes(operationPhase)) return
+    const buying = review.operation === "deposit" || review.operation === "requestDeposit"
+    // Never start a buy the panel would refuse (closed gate, paused vault, route unknown).
+    if (buying && (pausedNotice || routeUnknown)) return
     const id = flowSeq.current + 1
     flowSeq.current = id
     closedFlow.current = null
-    const withApproval = allowanceRequired && (review.operation === "deposit" || review.operation === "requestDeposit")
+    flowPayKey.current = payAsset?.key ?? null
+    const withApproval = (allowanceRequired || allowanceUnknown) && buying
     setFlow({ id, review, steps: initialOperationSteps(withApproval), outcome: null, open: true })
     void runOperationFlow({
       approve: withApproval ? (onSent) => approveDepositVault(onSent) : null,
@@ -289,8 +351,16 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     }
   }
 
+  // Retry repeats the same buy only if nothing it depends on changed meanwhile: a gate that closed
+  // or a pay asset that is no longer the one the modal names closes the modal instead, so the
+  // panel (with its notice or the current asset) is what the user acts on next.
   function retryFlow() {
     if (flow === null || flow.outcome?.kind !== "failed") return
+    const buying = flow.review.operation === "deposit" || flow.review.operation === "requestDeposit"
+    if (buying && (pausedNotice || routeUnknown || (payAsset?.key ?? null) !== flowPayKey.current)) {
+      setFlow(null)
+      return
+    }
     startFlow(flow.review)
   }
 
@@ -318,6 +388,18 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     txHashes,
     successLabel,
     pendingRedemptions: redemptionsQuery.data ?? [],
+    // ArcoRouter fund buys: the pay-asset choices (empty when not routed), the selected one and
+    // its balance.
+    routed,
+    payAssets: route.kind === "router" ? route.payAssets : [],
+    payAsset,
+    payBalance: routed ? (payBalanceQuery.data ?? "--") : undefined,
+    onPayAssetChange: (key: string) => {
+      setPayAssetKey(key)
+      setOperationError(null)
+      setSuccessLabel(null)
+      if (!BUSY_PHASES.includes(operationPhase)) setOperationPhase("ready")
+    },
     flow,
     onStart: startFlow,
     onFlowClose: closeFlow,
