@@ -82,6 +82,22 @@ Vault 쓰기 작업의 상당수는 서버가 서명 전 트랜잭션을 만들�
     - 회수 정산은 캐시를 비운다. 콘솔은 Reserve 트랜잭션이 확정된 직후 `?fresh=1`로 캐시 없이 다시 읽는다.
   - **화면 표시**: 할 일이 있는 상품은 카드 머리에 **ArcoUSD recall: action needed**, 확인할 경고나 오류만 있으면 **ArcoUSD recall: check state**가 뜬다. 같은 회수를 직접 송금과 fulfill로 모두 지급하면, 수령(claim)하기 전까지 이중 지급 경고를 보여 준다. 수령이 끝난 건은 경고를 띄우지 않고, 이중 지급은 대사에서 확인한다.
 
+### ArcoUSD 관리자 API
+
+인덱서가 쌓은 테이블만 읽고, 체인에 보내는 것은 없다. 모두 `requireOperator`(조회 `vault:read`, 트랜잭션 생성 `vault:write`). 응답 `status`는 `live`, `not-deployed`, `unavailable`(이유 포함) 중 하나다. 콘솔 화면은 아직 없다(UI 기획 뒤에 붙인다).
+
+- **`GET /api/v1/admin/arcousd/snapshots?days=30`**: 담보·부채·잉여·MMF 비율·일시정지 추이. 지금부터 `days`×24시간 구간의 스냅샷을 최대 360개 지점으로 줄여 준다(구간마다 마지막 스냅샷, 최신은 항상 포함). 3만 행을 넘으면 오래된 쪽을 버리고 `truncated: true`. `days`는 1~90, 잘못된 값은 30.
+- **`GET /api/v1/admin/arcousd/queue?status=open`**: Standard 대기열.
+  - `status`: `open`(기본, QUEUED + PAYOUT_FAILED, 오래된 순), `all`(최신 순), 또는 `QUEUED`·`PAID`·`PAYOUT_FAILED`·`CANCELLED`. 최대 500건.
+  - 순서는 Reserve 대기열과 같은 요청 번호 순이다.
+  - 행마다 순지급액, 남는 스왑 수수료, 지급 가능 시각(`requestedAt + queueMinDelay`), 대기 시간, T+2(48시간) 초과 여부. `queueMinDelay`는 체인의 현재 값(`queueMinDelaySource: "chain"`)을 쓰고, 읽지 못하면 레지스트리의 배포 당시 값(`registry`)을 쓴다.
+  - 자산별 요약은 500건 목록과 따로 읽는다(상태별 최대 1만 건, 넘으면 `summaryTruncated`): 대기 건수·금액, 초과·지급 실패 건수, 다음에 지급될 요청(`head`). 지금 낼 수 있는지는 `process-queue`의 `preview.paid`로 확인한다. `processQueue`는 Reserve **잔고**(`balance`)로 맨 앞 요청을 내므로, `available`(잔고 − 대기 합계)이 0이어도 지급될 수 있다.
+- **`GET /api/v1/admin/arcousd/flows?days=30`**: Reserve·Router 이벤트로 본 자금 흐름(USD). 구간은 UTC 달력 기준 오늘을 포함한 `days`일이다(스냅샷의 24시간 단위와 다르다).
+  - 일별·자산별: 입금(수수료 포함 총액), Instant 출금(소각한 ArcoUSD), 대기 요청(맡긴 총액), 대기 지급(지급한 순액), 상품 결제(`settleFor`), Router 매수(결제 자산별), 수수료(입금 수수료 + Instant 수수료 + 대기 지급 때 남는 스왑 수수료).
+  - 항목끼리 겹친다. 스테이블코인으로 산 Router 매수 하나가 입금, 상품 결제, Router 매수에 모두 잡힌다(수수료는 한 번만). 항목을 더해 총량을 만들지 않는다.
+  - 최근 이벤트 50건(최신 순). 취소·지급 실패·MMF 이동은 목록에만 나오고 합계에는 들어가지 않는다. 2만 행을 넘으면 최신 2만 행만 보고 `truncated: true`.
+- **`POST /api/v1/admin/arcousd/process-queue`** `{ asset, maxCount }`: 서명할 `Reserve.processQueue(asset, maxCount)`. `asset`은 레지스트리의 심볼이나 주소, `maxCount`는 1~50(기본 20). 같은 호출을 eth_call로 돌려 `preview.paid`(지금 지급될 건수)를 함께 준다. 시뮬레이션이 되돌려지면(일시정지 등) 트랜잭션은 그대로 주고 `preview.error`에 이유를 담는다. `processQueue`는 누구나 부를 수 있으므로 서버는 만들기만 한다. 3단계 키퍼 전까지의 수동 경로다.
+
 ### 레거시 공유 토큰 (`x-operator-token`)
 
 - 기본 거부한다(401).

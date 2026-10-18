@@ -233,11 +233,13 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 - **인덱서**: 코어 인덱서와 같은 프로세스에서 별도 커서(`arcousd`)로 Reserve와 Router 이벤트를 읽는다(주소마다 그 컨트랙트의 ABI로 해석). 모든 이벤트는 `EvmIndexedEvent`에 남기되 `walletAddress`를 넣지 않아 포트폴리오 활동 내역에는 아직 나오지 않는다. Router 매수는 상품 입금 볼트의 `ProductDeposit`으로 활동 내역에 나온다: 코어 인덱서가 입금 이벤트를 `recipient`(지분을 받은 지갑)에게 붙인다(Router 매수는 보낸 주소가 Router다). 상환 이벤트는 그대로 `sender`. 대기열 요청은 `ArcoUSDRedeemRequest`에 기록하고, 상태는 컨트랙트와 같은 방향으로만 바뀐다(QUEUED → PAID·PAYOUT_FAILED·CANCELLED, PAYOUT_FAILED → CANCELLED). 재인덱싱해도 되돌아가지 않는다. 5분마다 Lens 스냅샷을 `ArcoUSDReserveSnapshot`에 남긴다.
 - **서버 API**: `GET /api/v1/arcousd/reserve`(리저브 상태, 15초 캐시. 자산별 Instant·스왑 수수료, `contracts.router`와 Router로 살 수 있는 상품 `contracts.routerProducts` 포함), `GET /api/v1/arcousd/gate`(매수 게이트). 게이트는 미배포면 `inactive`, 배포 뒤에는 실패 시 닫힘이다. 읽기 실패, Reserve 또는 `settleFor` 일시정지, ArcoUSD 또는 `burn` 일시정지(`settleFor`가 소각하므로), Router·Reserve `deposit`·ArcoUSD `mint` 일시정지(`buy-paused`), `mintCap`까지 남은 양이 기준 금액 미만(`mint-cap`), 자산 없음, 게이트 설정 오류, 정산 가능 잔액이 기준(기본 tUSDC 1,000달러) 미만이면 `closed`. ArcoUSD 환경변수가 잘못돼도 API·인덱서는 그대로 뜬다.
 
+- **관리자 API(2b)**: `GET /api/v1/admin/arcousd/{snapshots,queue,flows}`와 `POST /api/v1/admin/arcousd/process-queue`(서명할 `processQueue`와 eth_call 미리보기). 인덱서 테이블만 읽는다. 대기열은 T+2(48시간) 초과를 표시한다. 자세한 내용은 `docs/admin-console.md`의 "ArcoUSD 관리자 API".
+
 - **상환 목록의 Reserve 회수**: Reserve의 `requestRecall`은 상품 볼트에 일반 상환 요청으로 들어오므로 관리자 상환 목록에서 따로 표시한다. 직접 송금으로 정산한 회수는 `acknowledgeRecallPaid`, fulfill로 처리한 회수는 `claimRecall`이 뒤따라야 한다. 서버는 이 둘을 안전할 때만 만들어 준다(지급 검증 뒤에만 acknowledge, fulfill 뒤에만 claim). 절차는 `docs/admin-console.md`의 "자금 이동 안전장치".
 
 아직 하지 않는 것:
 
-- 관리자 ArcoUSD 화면(2b), 매수 버튼 차단 UI와 Router 매수·결제 자산 선택(2c). 키퍼·대사·알림(3단계).
+- 관리자 ArcoUSD 화면(2b의 API 위에, UI 기획 뒤), 매수 버튼 차단 UI와 Router 매수·결제 자산 선택(2c). 키퍼·대사·알림(3단계).
 
 ## 6. 신뢰 가정
 

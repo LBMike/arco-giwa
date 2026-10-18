@@ -12,6 +12,7 @@ import { stocksMarketDataPlugin, type StocksMarketDataService } from "./stocks-m
 import { arcoUSDPlugin } from "./arcousd/plugin.js"
 import type { ArcoUSDService } from "./arcousd/service.js"
 import type { ArcoUSDRecalls, RecallRow } from "./arcousd/recall.js"
+import { inertArcoUSDAdmin, type ArcoUSDAdmin } from "./arcousd/admin.js"
 import type { StocksMarketDataPluginOptions } from "./stocks-market-data/index.js"
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify"
 import { generateNonce, SiweMessage } from "siwe"
@@ -124,6 +125,8 @@ export type ArcoAppServices = {
   readonly arcoUSD?: ArcoUSDService
   /** ArcoUSD Reserve recalls in the redemption console (labels, acknowledge/claim builders). */
   readonly arcoUSDRecalls?: ArcoUSDRecalls
+  /** ArcoUSD admin reads (snapshots, queue, flows) and the processQueue builder. */
+  readonly arcoUSDAdmin?: ArcoUSDAdmin
   readonly stocksMarketClock?: StocksMarketDataPluginOptions["marketClock"]
   readonly stocks?: StocksPluginOptions
   readonly arco: PrismaArcoService
@@ -971,6 +974,39 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
       { fresh: request.query?.fresh === "1" },
     )
   })
+
+  // ArcoUSD admin console: reserve history, the Standard queue and reserve flows, read from what
+  // the ArcoUSD indexer records (docs/specs/arcousd-v1.md §5). Each answers
+  // status: live | not-deployed | unavailable (with `error`), like the recalls view.
+  // Without the service (older setups, tests) every view still answers its full not-deployed shape.
+  const arcoUSDAdmin = () => services.arcoUSDAdmin ?? inertArcoUSDAdmin(GIWA_CHAIN_ID)
+
+  app.get<{ Querystring: { days?: string } }>("/api/v1/admin/arcousd/snapshots", { preHandler: requireOperator }, async (request) =>
+    arcoUSDAdmin().snapshots(request.query?.days),
+  )
+
+  app.get<{ Querystring: { status?: string } }>("/api/v1/admin/arcousd/queue", { preHandler: requireOperator }, async (request, reply) => {
+    const result = await arcoUSDAdmin().queue(request.query?.status)
+    return typeof result.status === "number" ? reply.code(result.status).send({ error: result.error }) : result
+  })
+
+  app.get<{ Querystring: { days?: string } }>("/api/v1/admin/arcousd/flows", { preHandler: requireOperator }, async (request) =>
+    arcoUSDAdmin().flows(request.query?.days),
+  )
+
+  // Unsigned Reserve.processQueue(asset, maxCount) for the operator's wallet — the manual path
+  // until the phase-3 keeper runs it. processQueue is permissionless on-chain; this only builds
+  // the call and dry-runs it (preview.paid = requests it would pay now).
+  app.post<{ Body: { asset?: unknown; maxCount?: unknown } }>(
+    "/api/v1/admin/arcousd/process-queue",
+    { preHandler: requireOperator },
+    async (request, reply) => {
+      const body = request.body && typeof request.body === "object" ? request.body : {}
+      const result = await arcoUSDAdmin().processQueueTransaction({ asset: body.asset, maxCount: body.maxCount })
+      if (!result.ok) return reply.code(result.status).send({ error: result.error })
+      return { transaction: result.transaction, symbol: result.symbol, maxCount: result.maxCount, preview: result.preview }
+    },
+  )
 
   // Read-only monitoring dashboard aggregates (see EvmMonitoringService for the v1
   // timestamp caveats). Operator-guarded like the other admin console reads.

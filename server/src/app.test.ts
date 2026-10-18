@@ -6,6 +6,7 @@ import { privateKeyToAccount } from "viem/accounts"
 import { buildApp, type VaultPauseDetail } from "./app.js"
 import { ArcoUSDRecalls, reserveRecallAbi, type RecallChainState, type RecallReader } from "./arcousd/recall.js"
 import type { ArcoUSDRegistryFile } from "./arcousd/registry.js"
+import { ArcoUSDAdmin, processQueueAbi } from "./arcousd/admin.js"
 import type { PayoutExpectation, PayoutVerifier } from "./evm/payout-verification.js"
 import { buildDryRunGiwaRegistry } from "./registry/generate.js"
 import { EvmMarketService } from "./services/evm-market-service.js"
@@ -281,6 +282,8 @@ function makeApp(options?: {
   vaultFeeds?: { depositProduct: string; depositPayment: string; redemptionProduct: string; redemptionPayment: string } | null
   /** ArcoUSD Reserve recall support; absent leaves the service out (as before ArcoUSD). */
   arcoUSDRecalls?: ArcoUSDRecalls
+  /** ArcoUSD admin reads + processQueue builder; absent leaves the service out. */
+  arcoUSDAdmin?: ArcoUSDAdmin
 }) {
   const prisma = makePrisma()
   const arco = new PrismaArcoService(prisma as PrismaLike)
@@ -350,6 +353,7 @@ function makeApp(options?: {
           : {}
         : { verifyPayout: async () => ({ ok: true as const }) }),
       ...(options?.arcoUSDRecalls ? { arcoUSDRecalls: options.arcoUSDRecalls } : {}),
+      ...(options?.arcoUSDAdmin ? { arcoUSDAdmin: options.arcoUSDAdmin } : {}),
     },
   )
   return { app, prisma, registry: fullRegistry }
@@ -2737,4 +2741,74 @@ test("vault-config PUT validates the More-info show toggles as booleans, default
   assert.equal(saved.json().docsShown, false)
   assert.equal(saved.json().legalShown, true) // untouched key keeps its default
   assert.equal(saved.json().risksShown, false)
+})
+
+test("ArcoUSD admin routes: operator-only reads with their status, the queue filter, and the processQueue builder", async () => {
+  const reserve = "0x00000000000000000000000000000000000000e5"
+  const usdc = "0x00000000000000000000000000000000000000c1"
+  const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}`
+  let registryFile: ArcoUSDRegistryFile | null = null
+  const store = {
+    snapshots: async () => [
+      { takenAt: new Date(Date.now() - 60_000), blockNumber: 9n, totalBacking: "2000000000000000000", totalLiabilities: "1000000000000000000", navOk: true, mmfBps: 0, paused: false, settlementPaused: false },
+    ],
+    redeemRequests: async () => [
+      { requestId: "1", owner: addr(0xa1), recipient: addr(0xa1), asset: usdc, arcoUSDAmount: "5000000000000000000", assetAmount: "5000000", status: "QUEUED", requestedAt: new Date(Date.now() - 60_000), queuedTxHash: "0x01" },
+    ],
+    events: async () => [],
+  }
+  const arcoUSDAdmin = new ArcoUSDAdmin({
+    chainId: 91342,
+    loadRegistry: () => registryFile,
+    store,
+    simulateProcessQueue: async () => ({ paid: 1n, blockNumber: 50n }),
+  })
+  const { app } = makeApp({ arcoUSDAdmin })
+  const get = (url: string, headers: Record<string, string> = OPERATOR) => app.inject({ method: "GET", url, headers })
+  const post = (payload: unknown) => app.inject({ method: "POST", url: "/api/v1/admin/arcousd/process-queue", headers: OPERATOR, payload: payload as object })
+
+  assert.equal((await get("/api/v1/admin/arcousd/queue", {})).statusCode, 401)
+  assert.equal((await get("/api/v1/admin/arcousd/snapshots")).json().status, "not-deployed")
+  assert.equal((await post({ asset: "tUSDC" })).statusCode, 409)
+
+  registryFile = {
+    schemaVersion: 1,
+    chainId: 91342,
+    network: "giwa-sepolia",
+    deployed: true,
+    deploymentBlock: 5,
+    arcoUSD: { proxy: addr(0xe1), implementation: addr(0xe2), bytecodeHash: null },
+    reserve: { proxy: reserve, implementation: addr(0xe3), bytecodeHash: null },
+    lens: { address: addr(0xe4), bytecodeHash: null },
+    testAssets: [],
+    reserveAssets: [{ symbol: "tUSDC", address: usdc, decimals: 6, minQueued: "1", instantFeeBps: 0, swapFeeBps: 0 }],
+    strategies: [],
+    params: { mintCap: "1", mmfTargetBps: 5000, bufferFloorBps: 3000, queueMinDelay: 600 },
+  } as ArcoUSDRegistryFile
+  const snapshots = (await get("/api/v1/admin/arcousd/snapshots?days=7")).json()
+  assert.deepEqual([snapshots.status, snapshots.days, snapshots.points[0].surplusUsd], ["live", 7, "1"])
+  const queue = (await get("/api/v1/admin/arcousd/queue")).json()
+  assert.deepEqual([queue.status, queue.requests[0].requestId, queue.assets[0].queuedAmountHuman], ["live", "1", "5"])
+  assert.equal((await get("/api/v1/admin/arcousd/queue?status=nope")).statusCode, 400)
+  const flows = (await get("/api/v1/admin/arcousd/flows?days=3")).json()
+  assert.deepEqual([flows.status, flows.daily.length], ["live", 3])
+
+  const built = await post({ asset: "tUSDC", maxCount: 5 })
+  assert.equal(built.statusCode, 200)
+  const body = built.json()
+  assert.deepEqual([body.symbol, body.maxCount, body.preview], ["tUSDC", 5, { paid: 1, blockNumber: "50" }])
+  assert.equal(body.transaction.to.toLowerCase(), reserve)
+  const decoded = decodeFunctionData({ abi: processQueueAbi, data: body.transaction.data })
+  assert.deepEqual([decoded.functionName, decoded.args[1]], ["processQueue", 5n])
+  assert.equal((await post({ asset: "tUSDC", maxCount: 500 })).statusCode, 400)
+  assert.equal((await post({})).statusCode, 400)
+
+  // Built without the service: every view still answers its full not-deployed shape.
+  const bare = makeApp().app
+  const bareFlows = (await bare.inject({ method: "GET", url: "/api/v1/admin/arcousd/flows", headers: OPERATOR })).json()
+  assert.deepEqual([bareFlows.status, bareFlows.totals.depositsUsd, bareFlows.days], ["not-deployed", "0", 30])
+  const bareQueue = (await bare.inject({ method: "GET", url: "/api/v1/admin/arcousd/queue", headers: OPERATOR })).json()
+  assert.deepEqual([bareQueue.status, bareQueue.filter, bareQueue.truncated], ["not-deployed", "open", false])
+  const bareTx = await bare.inject({ method: "POST", url: "/api/v1/admin/arcousd/process-queue", headers: OPERATOR, payload: { asset: "tUSDC" } })
+  assert.equal(bareTx.statusCode, 409)
 })

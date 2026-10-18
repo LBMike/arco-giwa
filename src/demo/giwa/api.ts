@@ -3,6 +3,12 @@ import { assertRequiredPaymentAsset } from "./catalog"
 import { ARCO_API_BASE, GIWA_CHAIN_ID } from "./config"
 import type {
   FaucetStatus,
+  GiwaArcoUSDFlows,
+  GiwaArcoUSDProcessQueue,
+  GiwaArcoUSDQueue,
+  GiwaArcoUSDQueueFilter,
+  GiwaArcoUSDReserve,
+  GiwaArcoUSDSnapshots,
   GiwaActivity,
   GiwaAsset,
   GiwaCatalogItem,
@@ -244,6 +250,11 @@ export const giwaApi = {
   market: (chainId: number) => fetchJson<GiwaMarketEntry[]>(`/api/v1/evm/market/${chainId}`),
   priceHistory: (chainId: number, productId: string) =>
     fetchJson<GiwaPriceHistory>(`/api/v1/evm/market/${chainId}/${productId}/history`),
+  // ArcoUSD reserve state and the fund buy gate (public, no credentials).
+  arcousd: {
+    reserve: () => fetchJson<GiwaArcoUSDReserve>(`/api/v1/arcousd/reserve`),
+    gate: () => fetchJson<GiwaArcoUSDReserve["gate"]>(`/api/v1/arcousd/gate`),
+  },
   monitoring: {
     overview: (auth: AdminAuth, chainId: number) =>
       adminJson<GiwaMonitoringOverview>(auth, `/api/v1/admin/monitoring/${chainId}/overview`),
@@ -346,6 +357,19 @@ export const giwaApi = {
         auth,
         `/api/v1/admin/arcousd/recalls${options.fresh ? "?fresh=1" : ""}`,
       ),
+    // ArcoUSD admin console: reserve history, the Standard queue, reserve flows, and the
+    // unsigned processQueue (the operator signs it).
+    arcousdSnapshots: (auth: AdminAuth, days?: number) =>
+      adminJson<GiwaArcoUSDSnapshots>(auth, `/api/v1/admin/arcousd/snapshots${days ? `?days=${days}` : ""}`),
+    arcousdQueue: (auth: AdminAuth, filter: GiwaArcoUSDQueueFilter = "open") =>
+      adminJson<GiwaArcoUSDQueue>(auth, `/api/v1/admin/arcousd/queue?status=${encodeURIComponent(filter)}`),
+    arcousdFlows: (auth: AdminAuth, days?: number) =>
+      adminJson<GiwaArcoUSDFlows>(auth, `/api/v1/admin/arcousd/flows${days ? `?days=${days}` : ""}`),
+    arcousdProcessQueue: (auth: AdminAuth, asset: string, maxCount?: number) =>
+      adminJson<GiwaArcoUSDProcessQueue>(auth, `/api/v1/admin/arcousd/process-queue`, {
+        method: "POST",
+        body: JSON.stringify(maxCount === undefined ? { asset } : { asset, maxCount }),
+      }),
     acknowledgeRecall: (auth: AdminAuth, productId: string, requestId: string) =>
       adminJson<{ transaction: UnsignedAdminTransaction }>(auth, redemptionPath(productId, requestId, "acknowledge-recall"), {
         method: "POST",
