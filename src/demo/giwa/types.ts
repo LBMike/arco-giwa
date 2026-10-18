@@ -210,6 +210,219 @@ export type GiwaReserveRecall = {
   error: string | null
 }
 
+// ── ArcoUSD (docs/specs/arcousd-v1.md §5) ─────────────────────────────────────────────
+// Amounts: base units as decimal strings; `*Human` / `*Usd` are formatUnits strings (no rounding).
+
+export type GiwaArcoUSDStatus = "not-deployed" | "live" | "unavailable"
+
+export type GiwaArcoUSDAssetState = {
+  symbol: string
+  address: string
+  decimals: number
+  depositEnabled: boolean
+  redeemEnabled: boolean
+  instantFeeBps: number
+  swapFeeBps: number
+  balance: string
+  queued: string
+  available: string
+  balanceHuman: string
+  queuedHuman: string
+  availableHuman: string
+  queueLength: number
+  queueHead: number
+  queueBacklog: number
+}
+
+export type GiwaArcoUSDStrategyState = {
+  strategyId: number
+  productId: string | null
+  asset: string
+  productToken: string
+  enabled: boolean
+  shares: string
+  value: string
+  valueUsd: string
+  navOk: boolean
+  pendingRecall: string
+  maxAllocation: string
+}
+
+export type GiwaArcoUSDBuyGate = {
+  status: "inactive" | "open" | "closed"
+  reason:
+    | null
+    | "not-deployed"
+    | "read-failed"
+    | "settlement-paused"
+    | "buy-paused"
+    | "mint-cap"
+    | "insufficient-buffer"
+    | "asset-missing"
+    | "config-invalid"
+  asset: string
+  available: string | null
+  threshold: string
+  checkedAt: string
+}
+
+/** GET /api/v1/arcousd/reserve (public). */
+export type GiwaArcoUSDReserve = {
+  status: "not-deployed" | "live" | "unavailable"
+  chainId: number
+  contracts: null | { arcoUSD: string; reserve: string; lens: string; router: string | null; routerProducts: string[] }
+  readAt: string
+  reserve: null | {
+    blockNumber: string
+    totalBacking: string
+    totalLiabilities: string
+    totalBackingUsd: string
+    totalLiabilitiesUsd: string
+    surplus: string
+    navOk: boolean
+    mmfBps: number
+    mmfTargetBps: number
+    bufferFloorBps: number
+    queueMinDelay: number
+    mintCap: string
+    reservePaused: boolean
+    settlementPaused: boolean
+    arcoUSDPaused: boolean
+    arcoUSDBurnPaused: boolean
+    depositPaused: boolean
+    arcoUSDMintPaused: boolean
+    routerPaused: boolean
+    assets: GiwaArcoUSDAssetState[]
+    strategies: GiwaArcoUSDStrategyState[]
+  }
+  gate: GiwaArcoUSDBuyGate
+}
+
+/** GET /api/v1/admin/arcousd/snapshots */
+export type GiwaArcoUSDSnapshots = {
+  status: GiwaArcoUSDStatus
+  error?: string
+  days: number
+  total: number
+  sampled: boolean
+  /** The read stopped at 30,000 rows: the oldest part of the window is missing (latest kept). */
+  truncated: boolean
+  points: {
+    takenAt: string
+    blockNumber: string
+    totalBackingUsd: string
+    totalLiabilitiesUsd: string
+    surplusUsd: string
+    mmfBps: number
+    navOk: boolean
+    paused: boolean
+    settlementPaused: boolean
+  }[]
+}
+
+export type GiwaArcoUSDQueueRow = {
+  requestId: string
+  owner: string
+  recipient: string
+  asset: string
+  symbol: string
+  decimals: number | null
+  status: "QUEUED" | "PAID" | "PAYOUT_FAILED" | "CANCELLED" | string
+  arcoUSDAmount: string
+  arcoUSDAmountHuman: string
+  /** Net payout (after the swap fee). */
+  assetAmount: string
+  assetAmountHuman: string | null
+  feeUsd: string | null
+  requestedAt: string
+  eligibleAt: string
+  waitSeconds: number
+  /** QUEUED past the T+2 target. */
+  overdue: boolean
+  queuedTxHash: string
+  closedTxHash: string | null
+  closedAt: string | null
+}
+
+export type GiwaArcoUSDQueueFilter = "open" | "all" | "QUEUED" | "PAID" | "PAYOUT_FAILED" | "CANCELLED"
+
+/** GET /api/v1/admin/arcousd/queue */
+export type GiwaArcoUSDQueue = {
+  status: GiwaArcoUSDStatus
+  error?: string
+  filter: GiwaArcoUSDQueueFilter
+  targetSeconds: number
+  queueMinDelay: number
+  /** chain: the live Reserve value; registry: the deploy-time value (live read unavailable). */
+  queueMinDelaySource: "chain" | "registry"
+  assets: {
+    symbol: string
+    asset: string
+    decimals: number
+    queuedCount: number
+    queuedAmount: string
+    queuedAmountHuman: string
+    overdueCount: number
+    failedCount: number
+    oldestRequestedAt: string | null
+    head: { requestId: string; assetAmount: string; assetAmountHuman: string; eligibleAt: string } | null
+  }[]
+  requests: GiwaArcoUSDQueueRow[]
+  truncated: boolean
+  summaryTruncated: boolean
+}
+
+export type GiwaArcoUSDFlowTotals = {
+  depositsUsd: string
+  instantRedemptionsUsd: string
+  queuedRedemptionsUsd: string
+  queuedPaidUsd: string
+  settlementsUsd: string
+  routerBuysUsd: string
+  feesUsd: string
+  deposits: number
+  instantRedemptions: number
+  queuedRedemptions: number
+  queuedPaid: number
+  settlements: number
+  routerBuys: number
+}
+
+/** GET /api/v1/admin/arcousd/flows */
+export type GiwaArcoUSDFlows = {
+  status: GiwaArcoUSDStatus
+  error?: string
+  days: number
+  since: string
+  totals: GiwaArcoUSDFlowTotals
+  daily: (GiwaArcoUSDFlowTotals & { day: string })[]
+  byAsset: (GiwaArcoUSDFlowTotals & { symbol: string; asset: string })[]
+  routerBuysByPayAsset: { symbol: string; count: number; volumeUsd: string }[]
+  recent: {
+    eventName: string
+    contract: "reserve" | "router"
+    txHash: string
+    blockNumber: string
+    logIndex: number
+    at: string | null
+    symbol: string | null
+    account: string | null
+    amountUsd: string | null
+    feeUsd: string | null
+  }[]
+  truncated: boolean
+  unknownAssetEvents: number
+}
+
+/** POST /api/v1/admin/arcousd/process-queue */
+export type GiwaArcoUSDProcessQueue = {
+  transaction: UnsignedAdminTransaction
+  symbol: string
+  maxCount: number
+  /** Dry run of the same call: requests it would pay now, or why it could not be read. */
+  preview: { paid: number; blockNumber: string } | { error: string }
+}
+
 export type FaucetStatus = {
   walletAddress: string
   chainId: number

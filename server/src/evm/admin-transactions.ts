@@ -52,7 +52,8 @@ export type UnsignedAdminTransaction = {
   readonly data: Hex
   readonly description: string
   readonly simulation: {
-    readonly status: "not-run"
+    /** not-run: the client wallet simulates. simulated / failed: the server ran an eth_call. */
+    readonly status: "not-run" | "simulated" | "failed"
     readonly reason: string
   }
 }

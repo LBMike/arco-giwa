@@ -29,6 +29,7 @@ import { readRegistryFile } from "./registry/io.js"
 import { parseArcoUSDEnv } from "./arcousd/config.js"
 import { createArcoUSDChainReader } from "./arcousd/reader.js"
 import { ArcoUSDRecalls, createRecallReader } from "./arcousd/recall.js"
+import { ArcoUSDAdmin, createProcessQueueSimulator, PrismaArcoUSDAdminStore } from "./arcousd/admin.js"
 import { readArcoUSDRegistry } from "./arcousd/registry.js"
 import { ArcoUSDService } from "./arcousd/service.js"
 
@@ -89,6 +90,15 @@ async function composeServer(
     chainId: GIWA_CHAIN_ID,
     loadRegistry: () => readArcoUSDRegistry(arcoUSDEnv.registryPath),
     read: createRecallReader(rpcClient),
+  })
+  // ArcoUSD admin console: reads the indexer's tables; builds (never sends) processQueue.
+  const arcoUSDAdmin = new ArcoUSDAdmin({
+    chainId: GIWA_CHAIN_ID,
+    loadRegistry: () => readArcoUSDRegistry(arcoUSDEnv.registryPath),
+    store: new PrismaArcoUSDAdminStore(prisma),
+    simulateProcessQueue: createProcessQueueSimulator(rpcClient),
+    // Live delay from the cached reserve read (setParams can change it after deploy).
+    liveQueueMinDelay: async () => (await arcoUSD.reserveState()).reserve?.queueMinDelay ?? null,
   })
   const priceFeedReadAbi = parseAbi([
     "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)",
@@ -384,7 +394,7 @@ async function composeServer(
           registryPath: env.registryPath,
         },
         {
-          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD, arcoUSDRecalls,
+          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD, arcoUSDRecalls, arcoUSDAdmin,
           resolveStocksOperator: sessions?.resolveOperator,
           stocks: stocks ? {
             service: stocks.service,
