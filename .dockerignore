@@ -24,6 +24,7 @@
 !deployments/
 !deployments/91342/
 !deployments/91342/arco-giwa-preprod.json
+!deployments/91342/arcousd-giwa.json
 # Keep these exclusions last, including within allowed source directories.
 **/.env
 **/.env.*

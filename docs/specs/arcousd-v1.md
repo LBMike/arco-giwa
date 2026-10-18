@@ -199,12 +199,19 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 | 집계 조회는 Lens로 분리 | Reserve를 24KB 한도 아래(23.3KB)로 유지하고, 조회 로직은 재배포로 바로 고칠 수 있게 |
 | 토큰 전체 실패는 멈추고, 개인 실패만 `PayoutFailed` | 토큰 일시정지 한 번으로 모든 대기 요청이 순서를 잃지 않게 |
 
-## 5. 1단계에서 아직 하지 않는 것 (승인 필요)
+## 5. 1단계 백엔드
 
-- 배포 스크립트(드라이런 기본, 사람이 브로드캐스트): tUSDT·tRLUSD, ArcoUSD, Reserve 배포, 역할 부여, 자산·전략 등록, 파우셋 등록, 상품 토큰 그린리스트에 Reserve 추가.
-- 레지스트리 v2: `deployments/91342`에 ArcoUSD 섹션 추가(스키마 변경).
-- 인덱서 테이블(Prisma): 입금·출금·대기열·결제·배분 이벤트, 리저브 스냅샷.
-- 서버: 리저브 스냅샷 API, 매수 차단 게이트(`availableForSettlement`), 상환 목록에서 Reserve 회수 요청 구분.
+배포 절차는 `docs/operations/arcousd-deploy.md`.
+
+- **배포 스크립트** `packages/contracts/scripts/deploy-arcousd-giwa.ts`: 드라이런이 기본이고 브로드캐스트는 사람이 한다. tUSDT·tRLUSD, ArcoUSD, Reserve, Lens 배포, 민트·소각 역할 부여, 자산·전략 등록, 파우셋 등록, 상품 토큰 그린리스트에 Reserve 추가까지. 입력값은 첫 트랜잭션 전에 모두 검사한다. 단계마다 기록하고(배포는 보내자마자 `pending`으로) 재실행하면 이어서 하며, 중단된 배포는 영수증으로 정리해 두 번 배포하지 않는다. MMF 배분은 하지 않는다.
+- **레지스트리**: 코어 레지스트리를 바꾸지 않고 별도 파일 `deployments/91342/arcousd-giwa.json`을 둔다. 코어 레지스트리를 다시 쓰는 다른 운영 스크립트가 모르는 섹션을 지우는 일을 막기 위해서다. 스크립트만 쓴다.
+- **인덱서**: 코어 인덱서와 같은 프로세스에서 별도 커서(`arcousd`)로 Reserve 이벤트만 읽는다. 모든 이벤트는 `EvmIndexedEvent`에 남기되 `walletAddress`를 넣지 않아 포트폴리오 활동 내역에는 아직 나오지 않는다. 대기열 요청은 `ArcoUSDRedeemRequest`에 기록하고, 상태는 컨트랙트와 같은 방향으로만 바뀐다(QUEUED → PAID·PAYOUT_FAILED·CANCELLED, PAYOUT_FAILED → CANCELLED). 재인덱싱해도 되돌아가지 않는다. 5분마다 Lens 스냅샷을 `ArcoUSDReserveSnapshot`에 남긴다.
+- **서버 API**: `GET /api/v1/arcousd/reserve`(리저브 상태, 15초 캐시), `GET /api/v1/arcousd/gate`(매수 게이트). 게이트는 미배포면 `inactive`, 배포 뒤에는 실패 시 닫힘이다. 읽기 실패, Reserve 또는 `settleFor` 일시정지, ArcoUSD 또는 `burn` 일시정지(`settleFor`가 소각하므로), 자산 없음, 게이트 설정 오류, 정산 가능 잔액이 기준(기본 tUSDC 1,000달러) 미만이면 `closed`. ArcoUSD 환경변수가 잘못돼도 API·인덱서는 그대로 뜬다.
+
+아직 하지 않는 것:
+
+- 상환 목록에서 Reserve의 MMF 회수 요청 구분(관리자 정산이 Reserve 회수를 일반 고객 상환처럼 처리하지 않게). 0단계 PR #2의 상환 경로와 겹치므로 그 PR이 머지된 뒤에 한다.
+- 매수 버튼 차단 UI, Router·견적, 관리자 화면(2단계). 키퍼·대사·알림(3단계).
 
 ## 6. 신뢰 가정
 
