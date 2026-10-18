@@ -11,12 +11,14 @@
 | 단계 키 | 내용 |
 |---|---|
 | `deploy:tUSDT`, `deploy:tRLUSD` | 테스트 자산 (TestAssetToken 프록시, 6 / 18 decimals) |
-| `deploy:ArcoUSD`, `deploy:ArcoUSDReserve`, `deploy:ArcoUSDReserveLens` | 본 컨트랙트 (Reserve·ArcoUSD는 트랜스페어런트 프록시, Lens는 일반 배포) |
+| `deploy:ArcoUSD`, `deploy:ArcoUSDReserve`, `deploy:ArcoUSDReserveLens`, `deploy:ArcoRouter` | 본 컨트랙트 (Reserve·ArcoUSD·Router는 트랜스페어런트 프록시, Lens는 일반 배포) |
 | `grant:MINTER_ROLE`, `grant:BURNER_ROLE` | ArcoUSD 민트·소각 권한을 Reserve에 부여 (이미 있으면 건너뜀) |
-| `asset:tUSDC` · `asset:tUSDT` · `asset:tRLUSD` | Reserve 자산 등록: 수수료 0, 한도 없음, `minQueued` 1달러 |
+| `grant:SETTLER_ROLE` | Reserve `settleFor` 권한을 Router에 부여 (이미 있으면 건너뜀) |
+| `asset:tUSDC` · `asset:tUSDT` · `asset:tRLUSD` | Reserve 자산 등록: Instant 수수료 0, 스왑 수수료 tUSDC 0 · tUSDT·tRLUSD 10bps(0.1%), 한도 없음, `minQueued` 1달러 |
 | `strategy:umint`, `strategy:ibenji` | MMF 전략 등록 (한도 1,000,000 USD). 체인에서 기존 ID를 먼저 찾으므로 중복 등록 안 됨 |
 | `faucet:tUSDT`, `faucet:tRLUSD` | 파우셋에 MINTER 부여, 드립 1,000 · 일 한도 10,000 · 전체 한도 1,000,000,000 · 쿨다운 24h |
 | `greenlist:umint`, `greenlist:ibenji` | 상품 토큰이 그린리스트를 강제하면 Reserve 추가 |
+| `router:umint`, `router:ibenji`, `router:beqty` | Router가 살 수 있는 펀드 입금 볼트 등록(`setVault`). 체인의 `allowedVault`를 먼저 보고, 결제 토큰이 Reserve 자산이 아니면 보내지 않고 멈춘다 |
 | `finalize` | `deployed: true`, `deploymentBlock` 기록 |
 
 파라미터 기본값(레지스트리 `params`): `mintCap` 10,000,000 ArcoUSD · `mmfTargetBps` 5000 ·
@@ -30,9 +32,11 @@
 - 배포자 = `EXPECTED_GIWA_DEPLOYER` (키스토어). `DEPLOYER_PRIVATE_KEY`가 설정돼 있으면 거부된다.
 - 배포자가 파우셋 `FAUCET_ADMIN_ROLE`, 전략 상품 토큰의 `GREENLIST_OPERATOR_ROLE`을 가진다
   (드라이런 `preflight`에서 확인).
+- Router 볼트 상품(uMINT·iBENJI·bEQTY)의 결제 토큰이 tUSDC다 (`preflight`의
+  `routerVaultPaysReserveAsset:*`).
 - 배포자 잔액이 충분하다 (드라이런에 `deployerBalanceEth` 표시).
-- 깨끗한 git 트리. 사전 테스트(`arcousd-token`, `arcousd-reserve`, `arcousd-deploy`,
-  `storage-layout`)는 브로드캐스트 직전에 로컬 hardhat에서 자동으로 돈다.
+- 깨끗한 git 트리. 사전 테스트(`arcousd-token`, `arcousd-reserve`, `arcousd-router`,
+  `arcousd-deploy`, `storage-layout`)는 브로드캐스트 직전에 로컬 hardhat에서 자동으로 돈다.
 
 ## 2. 드라이런 (기본, 트랜잭션 없음)
 
@@ -42,7 +46,8 @@ corepack yarn hardhat run scripts/deploy-arcousd-giwa.ts --network giwaSepolia
 ```
 
 출력의 `preflight.checks`가 모두 `true`인지, `pendingSteps`가 위 표와 맞는지,
-`strategies`의 볼트 주소가 코어 레지스트리의 uMINT·iBENJI와 같은지 확인한다.
+`strategies`의 볼트 주소가 코어 레지스트리의 uMINT·iBENJI와 같은지, `reserveAssets`의
+`swapFeeBps`(tUSDC 0, tUSDT·tRLUSD 10)와 `routerVaults`의 입금 볼트 주소를 확인한다.
 파일은 쓰지 않는다.
 
 ## 3. 브로드캐스트 (사람)
@@ -60,7 +65,8 @@ CONFIRM_GIWA_BROADCAST=I_UNDERSTAND_THIS_BROADCASTS_TO_GIWA \
 - 컨트랙트 배포는 트랜잭션을 보내자마자 주소와 tx 해시를 `pending: true`로 먼저 기록한 뒤
   확정을 기다린다. 확정 직후 읽기(구현 주소, 바이트코드 해시, 전략 ID)는 GIWA RPC 지연에 대비해
   재시도한다.
-- 입력값(파라미터 범위, 자산 decimals, 금액 문자열, 상품 존재)은 첫 트랜잭션 전에 모두 검사한다.
+- 입력값(파라미터 범위, 자산 decimals, 수수료 범위, 금액 문자열, 전략·Router 볼트 상품 존재)은
+  첫 트랜잭션 전에 모두 검사한다.
   드라이런에서도 같은 검사가 돈다.
 
 ## 4. 중단됐을 때 재개
@@ -70,7 +76,10 @@ CONFIRM_GIWA_BROADCAST=I_UNDERSTAND_THIS_BROADCASTS_TO_GIWA \
    - `deployments/91342/arcousd-giwa.json` (진행 기록)
    - `packages/contracts/.openzeppelin/unknown-91342.json` (프록시 배포 시 OpenZeppelin이 갱신)
 3. 같은 명령을 다시 실행한다.
-   - 확정된 단계는 건너뛴다. 역할은 `hasRole`, 전략은 체인 조회로 다시 확인한다.
+   - 확정된 단계는 건너뛴다. 역할은 `hasRole`, 전략과 Router 볼트는 체인 조회로 다시 확인한다.
+   - Router가 생기기 전에 쓰인 레지스트리 파일도 읽는다. Router 단계만 남은 것으로 보고, 이미
+     등록된 자산은 체인에 스왑 수수료가 없으므로 `swapFeeBps: 0`으로 읽는다(아직 등록 전인 자산만
+     기본값). 1단계는 GIWA에 브로드캐스트된 적이 없어 실제로는 해당 없다.
    - `pending` 배포는 다시 배포하지 않고 영수증으로 정리한다. 성공했으면 그대로 기록하고,
      아직 멤풀에 있으면 최대 3분 기다린다(그래도 대기 중이면 아무것도 하지 않고 멈춘다).
      되돌려졌거나(revert) 노드가 모르는 tx이고 그 주소에 코드가 없을 때만 새로 배포한다.
@@ -92,10 +101,11 @@ CONFIRM_GIWA_BROADCAST=I_UNDERSTAND_THIS_BROADCASTS_TO_GIWA \
    - **반드시 확인:** 재배포 뒤 `/reserve`가 `not-deployed`면 서버가 파일을 못 찾는 것이다
      (`ARCOUSD_REGISTRY_PATH`, 작업 디렉터리, 이미지 내용 확인). 이때 게이트는 막지 않는다.
    - 인덱서: 로그에 `service: "arco-arcousd-indexer"`가 보인다. 커서 이름 `arcousd`,
-     `deploymentBlock`부터 Reserve 이벤트만 읽고 5분마다 스냅샷을 남긴다.
+     `deploymentBlock`부터 Reserve와 Router 이벤트를 읽고 5분마다 스냅샷을 남긴다.
      ArcoUSD 쪽 오류는 코어 인덱서를 멈추거나 백오프시키지 않는다.
-4. 확인: 파우셋에서 tUSDT를 받아 `deposit` → ArcoUSD 수령 → 소액 `redeem`(Instant) →
-   `/api/v1/arcousd/reserve`의 `totalBacking`과 `totalLiabilities`가 같은지.
+4. 확인: 파우셋에서 tUSDT를 받아 `deposit` → ArcoUSD 수령(0.1% 적게) → 소액 `redeem`(Instant) →
+   `/api/v1/arcousd/reserve`의 `totalBacking`이 `totalLiabilities`보다 스왑 수수료만큼 큰지.
+   `contracts.router`가 Router 주소, `contracts.routerProducts`가 `["umint","ibenji","beqty"]`인지.
 
 ## 6. 서버 환경변수 (모두 선택)
 
@@ -114,14 +124,18 @@ CONFIRM_GIWA_BROADCAST=I_UNDERSTAND_THIS_BROADCASTS_TO_GIWA \
 - 읽기 실패, 레지스트리 오류
 - Reserve `paused()` 또는 `settleFor` 일시정지
 - ArcoUSD `paused()` 또는 `burn` 일시정지 (`settleFor`가 ArcoUSD를 소각하므로)
+- Router `paused()` 또는 `buy` 일시정지, Reserve `deposit`·ArcoUSD `mint` 일시정지 (사유 `buy-paused`.
+  스테이블코인 매수는 입금·발행을 먼저 거친다)
+- `mintCap`까지 남은 양이 `ARCOUSD_BUY_GATE_MIN` 미만 (사유 `mint-cap`. 관리자가 `mintCap`을 올린다)
 - 게이트 자산 없음, 정산 가능 잔액 부족, 게이트 설정 오류
 
-UI 연동(모든 매수 버튼 차단)은 2단계에서 붙인다.
+UI 연동(펀드 매수 버튼 차단)은 2c에서 붙인다.
 
 ## 7. 되돌리기
 
 컨트랙트는 되돌리지 않는다. 문제가 있으면 Reserve를 `pause()`하고(출금 취소 `cancelRedeem`은
-일시정지와 무관하게 열려 있다) 원인을 고친 뒤 `unpause()`한다.
+일시정지와 무관하게 열려 있다) 원인을 고친 뒤 `unpause()`한다. 매수만 막으려면 Router의
+`pauseFn(buy)`, 특정 상품만 막으려면 `setVault(볼트, false)`를 쓴다.
 
 서버만 끄려면 레지스트리 파일을 되돌린 커밋을 배포한다. 배포 뒤 최대 15초(캐시) 안에
 `not-deployed`/`inactive`가 된다. `inactive`는 "막음"이 아니라 "ArcoUSD를 거치지 않는 기존
@@ -134,3 +148,9 @@ UI 연동(모든 매수 버튼 차단)은 2단계에서 붙인다.
   같은 한계다. 대사(3단계)에서 체인의 `getRequest`와 비교해 바로잡는다.
 - 인덱서 커서(`arcousd`)는 Reserve 주소에 묶여 있지 않다. Reserve를 새로 배포하는 일은 없으므로
   (재배포 금지) 문제가 되지 않지만, 만약 바꾸면 커서도 함께 초기화해야 한다.
+- 수수료 없는 tUSDC는 넣고 빼는 비용이 가스뿐이라 누구나 `mintCap`을 채워 스테이블코인 매수를 막을
+  수 있다(게이트는 `mint-cap`으로 닫힌다). 그러면 `setParams`로 `mintCap`을 올린다.
+- Router는 나머지와 함께 배포되므로 `deploymentBlock`부터 읽으면 빠지는 이벤트가 없다. 이미
+  인덱싱 중인 배포에 Router를 나중에 붙이면, 커서가 지나간 블록의 Router 이벤트(`Bought` 등 기록용)는
+  다시 읽지 않는다. 매수 자체는 Reserve(`Deposited`·`SettledFor`)와 상품 볼트(`ProductDeposit`)
+  이벤트로 남는다.

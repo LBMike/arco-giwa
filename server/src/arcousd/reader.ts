@@ -1,5 +1,13 @@
 import { formatUnits, type PublicClient } from "viem"
-import { ARCOUSD_BURN_SELECTOR, lensAbi, reservePauseAbi, SETTLE_FOR_SELECTOR } from "./abi.js"
+import {
+  ARCOUSD_BURN_SELECTOR,
+  ARCOUSD_MINT_SELECTOR,
+  DEPOSIT_SELECTOR,
+  lensAbi,
+  reservePauseAbi,
+  ROUTER_BUY_SELECTOR,
+  SETTLE_FOR_SELECTOR,
+} from "./abi.js"
 import type { DeployedArcoUSD } from "./registry.js"
 
 // One read of the Reserve through the Lens, serialized for JSON (base units as decimal
@@ -11,6 +19,10 @@ export type AssetState = {
   readonly decimals: number
   readonly depositEnabled: boolean
   readonly redeemEnabled: boolean
+  /** Instant redemptions only (bps). */
+  readonly instantFeeBps: number
+  /** Swap fee on deposits and all redemptions (bps); 0 for the base asset. */
+  readonly swapFeeBps: number
   readonly balance: string
   readonly queued: string
   readonly available: string
@@ -59,6 +71,12 @@ export type ReserveState = {
   readonly arcoUSDPaused: boolean
   /** ArcoUSD.fnPaused(burn) — settleFor and queue payouts burn ArcoUSD. */
   readonly arcoUSDBurnPaused: boolean
+  /** Reserve.fnPaused(deposit) — a stablecoin-paid Router buy deposits first. */
+  readonly depositPaused: boolean
+  /** ArcoUSD.fnPaused(mint) — that deposit mints ArcoUSD. */
+  readonly arcoUSDMintPaused: boolean
+  /** ArcoRouter.paused() or fnPaused(buy); false while no Router is deployed. */
+  readonly routerPaused: boolean
   readonly assets: readonly AssetState[]
   readonly strategies: readonly StrategyState[]
 }
@@ -72,7 +90,8 @@ export function createArcoUSDChainReader(client: Pick<PublicClient, "readContrac
       client.readContract({ address, abi: reservePauseAbi, functionName: "paused", blockNumber })
     const fnPausedAt = (address: `0x${string}`, selector: `0x${string}`) =>
       client.readContract({ address, abi: reservePauseAbi, functionName: "fnPaused", args: [selector], blockNumber })
-    const [snap, reservePaused, settlementPaused, arcoUSDPaused, arcoUSDBurnPaused] = await Promise.all([
+    const router = deployment.routerAddress
+    const [snap, reservePaused, settlementPaused, arcoUSDPaused, arcoUSDBurnPaused, depositPaused, arcoUSDMintPaused, routerPaused, routerBuyPaused] = await Promise.all([
       client.readContract({
         address: deployment.lensAddress,
         abi: lensAbi,
@@ -84,19 +103,37 @@ export function createArcoUSDChainReader(client: Pick<PublicClient, "readContrac
       fnPausedAt(deployment.reserveAddress, SETTLE_FOR_SELECTOR),
       pausedAt(deployment.arcoUSDAddress),
       fnPausedAt(deployment.arcoUSDAddress, ARCOUSD_BURN_SELECTOR),
+      fnPausedAt(deployment.reserveAddress, DEPOSIT_SELECTOR),
+      fnPausedAt(deployment.arcoUSDAddress, ARCOUSD_MINT_SELECTOR),
+      router ? pausedAt(router) : false,
+      router ? fnPausedAt(router, ROUTER_BUY_SELECTOR) : false,
     ])
     return toReserveState(deployment, blockNumber, snap, {
       reservePaused: Boolean(reservePaused),
       settlementPaused: Boolean(settlementPaused),
       arcoUSDPaused: Boolean(arcoUSDPaused),
       arcoUSDBurnPaused: Boolean(arcoUSDBurnPaused),
+      depositPaused: Boolean(depositPaused),
+      arcoUSDMintPaused: Boolean(arcoUSDMintPaused),
+      routerPaused: Boolean(routerPaused) || Boolean(routerBuyPaused),
     })
   }
 }
 
-export type PauseFlags = Pick<ReserveState, "reservePaused" | "settlementPaused" | "arcoUSDPaused" | "arcoUSDBurnPaused">
+export type PauseFlags = Pick<
+  ReserveState,
+  "reservePaused" | "settlementPaused" | "arcoUSDPaused" | "arcoUSDBurnPaused" | "depositPaused" | "arcoUSDMintPaused" | "routerPaused"
+>
 
-export const NO_PAUSES: PauseFlags = { reservePaused: false, settlementPaused: false, arcoUSDPaused: false, arcoUSDBurnPaused: false }
+export const NO_PAUSES: PauseFlags = {
+  reservePaused: false,
+  settlementPaused: false,
+  arcoUSDPaused: false,
+  arcoUSDBurnPaused: false,
+  depositPaused: false,
+  arcoUSDMintPaused: false,
+  routerPaused: false,
+}
 
 type LensSnapshot = {
   totalBacking: bigint
@@ -112,6 +149,8 @@ type LensSnapshot = {
     decimals: number
     depositEnabled: boolean
     redeemEnabled: boolean
+    instantFeeBps: number
+    swapFeeBps: number
     balance: bigint
     queued: bigint
     available: bigint
@@ -161,6 +200,8 @@ export function toReserveState(
       decimals: Number(asset.decimals),
       depositEnabled: asset.depositEnabled,
       redeemEnabled: asset.redeemEnabled,
+      instantFeeBps: Number(asset.instantFeeBps),
+      swapFeeBps: Number(asset.swapFeeBps),
       balance: asset.balance.toString(),
       queued: asset.queued.toString(),
       available: asset.available.toString(),

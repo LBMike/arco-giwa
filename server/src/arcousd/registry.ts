@@ -33,6 +33,8 @@ export type ArcoUSDRegistryFile = {
     readonly decimals: number
     readonly minQueued: string
     readonly instantFeeBps: number
+    /** Deposits and all redemptions (non-base stablecoins). Absent in files written before it existed. */
+    readonly swapFeeBps?: number
   }[]
   readonly strategies: readonly { readonly productId: string; readonly strategyId: number | null; readonly maxAllocation: string }[]
   readonly params: {
@@ -41,6 +43,10 @@ export type ArcoUSDRegistryFile = {
     readonly bufferFloorBps: number
     readonly queueMinDelay: number
   }
+  /** ArcoRouter (product buys with any Reserve stablecoin). Absent in files written before it existed. */
+  readonly router?: ArcoUSDContractRef
+  /** Products whose deposit vault the Router may buy into (`configured` once setVault confirmed). */
+  readonly routerVaults?: readonly { readonly productId: string; readonly configured: boolean }[]
 }
 
 /** A registry the server can act on: deployed, with every address it reads. */
@@ -48,6 +54,10 @@ export type DeployedArcoUSD = ArcoUSDRegistryFile & {
   readonly arcoUSDAddress: `0x${string}`
   readonly reserveAddress: `0x${string}`
   readonly lensAddress: `0x${string}`
+  /** null until the Router is deployed. */
+  readonly routerAddress: `0x${string}` | null
+  /** Products the Router can buy (setVault confirmed); empty without a Router. */
+  readonly routerProducts: readonly string[]
   readonly deploymentBlock: number
 }
 
@@ -65,10 +75,14 @@ export function validateArcoUSDRegistry(registry: ArcoUSDRegistryFile, chainId: 
   need(registry.reserve?.proxy, "reserve.proxy")
   need(registry.lens?.address, "lens.address")
   if (typeof registry.deploymentBlock !== "number") errors.push("deploymentBlock is required when deployed")
+  if (registry.router?.proxy != null) need(registry.router.proxy, "router.proxy")
   for (const asset of registry.reserveAssets ?? []) {
     need(asset.address, `reserveAssets.${asset.symbol}.address`)
     if (!Number.isInteger(asset.decimals) || asset.decimals < 0 || asset.decimals > 18) {
       errors.push(`reserveAssets.${asset.symbol}.decimals must be 0..18`)
+    }
+    if (asset.swapFeeBps !== undefined && (!Number.isInteger(asset.swapFeeBps) || asset.swapFeeBps < 0 || asset.swapFeeBps > 100)) {
+      errors.push(`reserveAssets.${asset.symbol}.swapFeeBps must be 0..100`)
     }
   }
   for (const strategy of registry.strategies ?? []) {
@@ -94,6 +108,10 @@ export function deployedArcoUSD(registry: ArcoUSDRegistryFile | null, chainId: n
     arcoUSDAddress: registry.arcoUSD.proxy!,
     reserveAddress: registry.reserve.proxy!,
     lensAddress: registry.lens.address!,
+    routerAddress: registry.router?.proxy ?? null,
+    routerProducts: registry.router?.proxy
+      ? (registry.routerVaults ?? []).filter((vault) => vault.configured).map((vault) => vault.productId)
+      : [],
     deploymentBlock: registry.deploymentBlock!,
   }
 }

@@ -12,7 +12,7 @@ interface IArcoUSD is IERC20Upgradeable {
     function isBlacklisted(address account) external view returns (bool);
 }
 
-/// @notice The subset of ArcoDepositVault an MMF strategy uses.
+/// @notice The subset of ArcoDepositVault an MMF strategy and the ArcoRouter use.
 interface IArcoDepositVaultLike {
     function deposit(
         uint256 paymentAssets,
@@ -20,11 +20,26 @@ interface IArcoDepositVaultLike {
         address recipient
     ) external returns (uint256 sharesOut);
 
+    function requestDeposit(
+        uint256 paymentAssets,
+        uint256 minSharesOut,
+        address recipient
+    ) external returns (uint256 requestId);
+
+    function quoteDeposit(uint256 paymentAssets) external view returns (uint256 sharesOut);
+
     function paymentToken() external view returns (address);
 
     function productToken() external view returns (address);
 
     function productPriceFeed() external view returns (address);
+}
+
+/// @notice The ProductToken greenlist surface the ArcoRouter checks before a deposit request.
+interface IGreenlistLike {
+    function greenlistEnforced() external view returns (bool);
+
+    function isGreenlisted(address account) external view returns (bool);
 }
 
 /// @notice The subset of ArcoRedemptionVault an MMF strategy uses.

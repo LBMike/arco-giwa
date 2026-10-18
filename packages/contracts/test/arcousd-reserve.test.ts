@@ -18,6 +18,7 @@ const assetParams = (overrides: Partial<Record<string, unknown>> = {}) => ({
   depositEnabled: true,
   redeemEnabled: true,
   instantFeeBps: 0,
+  swapFeeBps: 0,
   depositCap: MAX,
   priceFeed: ethers.constants.AddressZero,
   maxDepegBps: 0,
@@ -131,6 +132,105 @@ describe("ArcoUSDReserve deposits", () => {
     await expectRevert(reserve.connect(investor).deposit(usdt.address, usd6("1"), investor.address), "Depeg")
     await feed.setRoundDataSafe(BigNumber.from("100300000"))
     await reserve.connect(investor).deposit(usdt.address, usd6("1"), investor.address)
+  })
+})
+
+describe("ArcoUSDReserve swap fee (non-base stablecoins)", () => {
+  // USDC is the base asset (fee 0); USDT and RLUSD pay 10 bps on the way in and on the way out.
+  async function swapFixture(options: { instantFeeBps?: number; minQueued?: BigNumber } = {}) {
+    const fixture = await reserveFixture()
+    const { reserve, usdt, rlusd } = fixture
+    const instantFeeBps = options.instantFeeBps ?? 0
+    await reserve.setAsset(fixture.usdc.address, assetParams({ instantFeeBps }))
+    await reserve.setAsset(usdt.address, assetParams({ instantFeeBps, swapFeeBps: 10, minQueued: options.minQueued ?? 0 }))
+    await reserve.setAsset(rlusd.address, assetParams({ instantFeeBps, swapFeeBps: 10 }))
+    return fixture
+  }
+  const surplus = async (reserve: Contract) => {
+    const { backing, liabilities } = await backingAndLiabilities(reserve)
+    return str(backing.sub(liabilities))
+  }
+
+  it("deposits: USDC is fee-free, USDT/RLUSD pay the swap fee, which stays as surplus", async () => {
+    const { reserve, arco, usdc, usdt, rlusd, investor } = await swapFixture()
+    await reserve.connect(investor).deposit(usdc.address, usd6("1000"), investor.address)
+    expect(str(await arco.balanceOf(investor.address))).to.equal(str(usd18("1000")))
+    const receipt = await (await reserve.connect(investor).deposit(usdt.address, usd6("1000"), investor.address)).wait()
+    const deposited = receipt.events.find((entry: any) => entry.event === "Deposited")
+    expect(str(deposited.args.arcoUSDOut)).to.equal(str(usd18("999")))
+    expect(str(deposited.args.fee)).to.equal(str(usd18("1")))
+    await reserve.connect(investor).deposit(rlusd.address, usd18("100"), investor.address)
+    expect(str(await arco.balanceOf(investor.address))).to.equal(str(usd18("2098.9")))
+    expect(await surplus(reserve)).to.equal(str(usd18("1.1")))
+  })
+
+  it("Instant redemption to a non-base asset pays the swap fee (plus any Instant fee); USDC only the Instant fee", async () => {
+    const { reserve, arco, usdc, usdt, investor, recipient } = await swapFixture({ instantFeeBps: 10 })
+    await reserve.connect(investor).deposit(usdc.address, usd6("1000"), investor.address)
+    await reserve.connect(investor).deposit(usdt.address, usd6("1000"), investor.address)
+    const usdtBefore = await usdt.balanceOf(recipient.address)
+    const receipt = await (await reserve.connect(investor).redeem(usdt.address, usd18("100"), recipient.address, 0)).wait()
+    const paid = receipt.events.find((entry: any) => entry.event === "RedeemedInstant")
+    expect(str((await usdt.balanceOf(recipient.address)).sub(usdtBefore))).to.equal(str(usd6("99.8")))
+    expect(str(paid.args.fee)).to.equal(str(usd6("0.2")))
+    const usdcBefore = await usdc.balanceOf(recipient.address)
+    await reserve.connect(investor).redeem(usdc.address, usd18("100"), recipient.address, 0)
+    expect(str((await usdc.balanceOf(recipient.address)).sub(usdcBefore))).to.equal(str(usd6("99.9")))
+    expect(str(await arco.balanceOf(investor.address))).to.equal(str(usd18("1799")))
+  })
+
+  it("queued redemptions pay the swap fee too: full ArcoUSD escrowed, net paid, a cancel returns everything", async () => {
+    const { reserve, arco, usdc, usdt, investor, recipient, other } = await swapFixture({ instantFeeBps: 50 })
+    await reserve.connect(investor).deposit(usdc.address, usd6("1000"), investor.address) // no USDT buffer
+    const id = await queuedId(reserve.connect(investor).redeem(usdt.address, usd18("100"), recipient.address, usd6("99.9")))
+    const request = await reserve.getRequest(id!)
+    expect(str(request.arcoUSDAmount)).to.equal(str(usd18("100")))
+    expect(str(request.assetAmount)).to.equal(str(usd6("99.9"))) // swap fee only, no Instant fee
+    expect(str(await reserve.queuedAssets(usdt.address))).to.equal(str(usd6("99.9")))
+
+    await reserve.connect(other).deposit(usdt.address, usd6("200"), other.address) // USDT arrives
+    const before = await usdt.balanceOf(recipient.address)
+    await reserve.processQueue(usdt.address, 10)
+    expect(str((await usdt.balanceOf(recipient.address)).sub(before))).to.equal(str(usd6("99.9")))
+    expect(str(await arco.balanceOf(reserve.address))).to.equal("0") // escrow burned in full
+
+    // 100.1 USDT is free now: a 500 USDT request pays that part Instant and queues 399.9 gross.
+    const cancelled = await queuedId(reserve.connect(investor).redeem(usdt.address, usd18("500"), recipient.address, 0))
+    expect(str((await reserve.getRequest(cancelled!)).arcoUSDAmount)).to.equal(str(usd18("399.9")))
+    const held = await arco.balanceOf(investor.address)
+    await reserve.connect(investor).cancelRedeem(cancelled!)
+    // The whole escrow comes back: no swap fee on a cancelled request.
+    expect(str((await arco.balanceOf(investor.address)).sub(held))).to.equal(str(usd18("399.9")))
+    expect(str(await reserve.queuedAssets(usdt.address))).to.equal("0")
+  })
+
+  it("a partly Instant, partly queued redemption charges each part once and checks minAssetOut on net", async () => {
+    const { reserve, usdc, usdt, investor, recipient, other } = await swapFixture()
+    await reserve.connect(other).deposit(usdt.address, usd6("40"), other.address) // 40 USDT of buffer
+    await reserve.connect(investor).deposit(usdc.address, usd6("1000"), investor.address)
+    // 100 USDT out: 39.96 now (40 gross) + 59.94 queued (60 gross) = 99.9 net.
+    await expectRevert(reserve.connect(investor).redeem(usdt.address, usd18("100"), recipient.address, usd6("99.91")), "MinOut")
+    const before = await usdt.balanceOf(recipient.address)
+    const id = await queuedId(reserve.connect(investor).redeem(usdt.address, usd18("100"), recipient.address, usd6("99.9")))
+    expect(str((await usdt.balanceOf(recipient.address)).sub(before))).to.equal(str(usd6("39.96")))
+    expect(str((await reserve.getRequest(id!)).assetAmount)).to.equal(str(usd6("59.94")))
+  })
+
+  it("the queue minimum applies to the net payout; settlement stays fee-free; fees are bounded and reported", async () => {
+    const { reserve, arco, usdc, usdt, investor, recipient, settler } = await swapFixture({ minQueued: usd6("1") })
+    await reserve.connect(investor).deposit(usdc.address, usd6("1000"), investor.address)
+    // 1.0005 USDT gross → 0.999 net after 10 bps: below the 1 USDT minimum.
+    await expectRevert(reserve.connect(investor).redeem(usdt.address, usd18("1.0005"), recipient.address, 0), "BelowQueueMinimum")
+    await reserve.connect(investor).deposit(usdt.address, usd6("100"), investor.address)
+    await arco.connect(investor).transfer(settler.address, usd18("50"))
+    const before = await usdt.balanceOf(recipient.address)
+    await reserve.connect(settler).settleFor(usdt.address, usd18("50"), recipient.address)
+    expect(str((await usdt.balanceOf(recipient.address)).sub(before))).to.equal(str(usd6("50"))) // product settlement: no fee
+    await expectRevert(reserve.setAsset(usdt.address, assetParams({ swapFeeBps: 101 })), "InvalidParams")
+    const snap = await currentLens.snapshot(reserve.address)
+    const usdtSnap = snap.assets.find((entry: any) => entry.asset === usdt.address)
+    expect([usdtSnap.swapFeeBps, usdtSnap.instantFeeBps]).to.deep.equal([10, 0])
+    expect((await reserve.getAssetConfig(usdc.address)).swapFeeBps).to.equal(0)
   })
 })
 

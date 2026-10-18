@@ -14,9 +14,11 @@ import {
 import { planArcoUSDDeployment, runArcoUSDDeployment, type CoreRefs } from "./arcousd/deploy-steps"
 
 // Deploys ArcoUSD v1 on GIWA Sepolia (docs/specs/arcousd-v1.md, docs/operations/arcousd-deploy.md):
-// tUSDT + tRLUSD test assets, ArcoUSD, ArcoUSDReserve, ArcoUSDReserveLens; Reserve mint/burn
-// roles; reserve assets (tUSDC/tUSDT/tRLUSD, with minQueued); uMINT and iBENJI as MMF strategies;
-// faucet drips for the new test assets; product-token greenlisting of the Reserve when enforced.
+// tUSDT + tRLUSD test assets, ArcoUSD, ArcoUSDReserve, ArcoUSDReserveLens, ArcoRouter; Reserve
+// mint/burn roles and the Router's SETTLER_ROLE; reserve assets (tUSDC/tUSDT/tRLUSD, with swap fees
+// and minQueued); uMINT and iBENJI as MMF strategies; faucet drips for the new test assets;
+// product-token greenlisting of the Reserve when enforced; the fund deposit vaults the Router may
+// buy into.
 // It does NOT allocate to MMF (operator step, after the B5 payment-feed repair) and never touches
 // existing contracts beyond those grants/configs.
 //
@@ -30,9 +32,11 @@ const TX_TIMEOUT_MS = 180_000
 const forbiddenGiwaEvmVersion = "pra" + "gue"
 const ROLE = (name: string) => utils.keccak256(utils.toUtf8Bytes(name))
 const ACCESS_ABI = ["function hasRole(bytes32 role, address account) view returns (bool)"]
+const DEPOSIT_VAULT_ABI = ["function paymentToken() view returns (address)"]
 const PRE_DEPLOY_TESTS = [
   "test/arcousd-token.test.ts",
   "test/arcousd-reserve.test.ts",
+  "test/arcousd-router.test.ts",
   "test/arcousd-deploy.test.ts",
   "test/storage-layout.test.ts",
 ]
@@ -96,13 +100,19 @@ function coreRefs(): CoreRefs {
   }
 }
 
-async function preflight(core: CoreRefs, strategyProducts: string[]) {
+async function preflight(core: CoreRefs, strategyProducts: string[], routerProducts: string[]) {
   const checks: Record<string, boolean> = {}
   const faucet = new Contract(core.faucet, ACCESS_ABI, ethers.provider)
   checks.deployerIsFaucetAdmin = await faucet.hasRole(ROLE("FAUCET_ADMIN_ROLE"), EXPECTED_GIWA_DEPLOYER)
   for (const productId of strategyProducts) {
     const token = new Contract(core.products[productId].productToken, ACCESS_ABI, ethers.provider)
     checks[`deployerIsGreenlistOperator:${productId}`] = await token.hasRole(ROLE("GREENLIST_OPERATOR_ROLE"), EXPECTED_GIWA_DEPLOYER)
+  }
+  // The Router can only buy into vaults paid in a Reserve asset (core tUSDC on GIWA).
+  const reserveAssets = new Set(Object.values(core.assets).map((asset) => asset.address.toLowerCase()))
+  for (const productId of routerProducts) {
+    const vault = new Contract(core.products[productId].depositVault, DEPOSIT_VAULT_ABI, ethers.provider)
+    checks[`routerVaultPaysReserveAsset:${productId}`] = reserveAssets.has(String(await vault.paymentToken()).toLowerCase())
   }
   const balance = await ethers.provider.getBalance(EXPECTED_GIWA_DEPLOYER)
   return { checks, deployerBalanceEth: utils.formatEther(balance) }
@@ -123,7 +133,11 @@ async function main() {
     defaultArcoUSDRegistry(91342, "giwa-sepolia", gitCommit(repoRoot())),
   )
   const plan = planArcoUSDDeployment(registry, core)
-  const checks = await preflight(core, registry.strategies.map((strategy) => strategy.productId))
+  const checks = await preflight(
+    core,
+    registry.strategies.map((strategy) => strategy.productId),
+    registry.routerVaults.map((vault) => vault.productId),
+  )
 
   if (!broadcast) {
     console.log(
@@ -135,8 +149,19 @@ async function main() {
           deployer: EXPECTED_GIWA_DEPLOYER,
           registryFile: filePath,
           params: registry.params,
-          reserveAssets: registry.reserveAssets.map(({ symbol, decimals, minQueued, instantFeeBps }) => ({ symbol, decimals, minQueued, instantFeeBps })),
+          reserveAssets: registry.reserveAssets.map(({ symbol, decimals, minQueued, instantFeeBps, swapFeeBps }) => ({
+            symbol,
+            decimals,
+            minQueued,
+            instantFeeBps,
+            swapFeeBps,
+          })),
           strategies: registry.strategies.map(({ productId, maxAllocation }) => ({ productId, maxAllocation, ...core.products[productId] })),
+          routerVaults: registry.routerVaults.map(({ productId, configured }) => ({
+            productId,
+            configured,
+            depositVault: core.products[productId].depositVault,
+          })),
           preflight: checks,
           pendingSteps: plan,
           note: "No transactions sent. MMF allocation is NOT part of this script and must wait for the B5 payment-feed repair. Set CONFIRM_GIWA_BROADCAST=I_UNDERSTAND_THIS_BROADCASTS_TO_GIWA (with the keystore) to broadcast.",
@@ -175,6 +200,8 @@ async function main() {
         arcoUSD: result.arcoUSD.proxy,
         reserve: result.reserve.proxy,
         lens: result.lens.address,
+        router: result.router.proxy,
+        routerVaults: result.routerVaults,
         testAssets: result.testAssets.map((asset) => ({ symbol: asset.symbol, proxy: asset.contract.proxy })),
         strategies: result.strategies,
         deploymentBlock: result.deploymentBlock,
