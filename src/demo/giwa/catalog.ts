@@ -69,11 +69,22 @@ const PAUSE_STATE_DEFAULTS: GiwaPauseState = {
   withdrawPaused: false,
   depositPartial: false,
   withdrawPartial: false,
+  depositVaultPaused: false,
+  withdrawVaultPaused: false,
 }
 
 // Pause accessor with unpaused defaults for older server responses.
 export function pauseStateOf(product: Pick<GiwaCatalogItem, "pauseState">): GiwaPauseState {
   return { ...PAUSE_STATE_DEFAULTS, ...(product.pauseState ?? {}) }
+}
+
+// Admin view: the live read (GET /api/v1/admin/pause-state) wins over the cached catalog snapshot.
+export function livePauseStateOf(
+  product: Pick<GiwaCatalogItem, "productId" | "pauseState">,
+  live: Record<string, Partial<GiwaPauseState>> | null | undefined,
+): GiwaPauseState {
+  const fresh = live?.[product.productId]
+  return fresh ? { ...PAUSE_STATE_DEFAULTS, ...fresh } : pauseStateOf(product)
 }
 
 export type GiwaProductId =

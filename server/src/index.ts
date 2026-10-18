@@ -10,7 +10,9 @@ import { configuredStocksMarketClock, configuredStocksMarketData, stocksMarketPr
 import { createSqlProfileStore, prismaProfileStoreSql } from "./stocks-market-data/profile-store.js"
 import type { StocksMarketDataService } from "./stocks-market-data/index.js"
 import { createPublicClient, http, keccak256, parseAbi, toBytes, type Hex } from "viem"
-import { buildApp, type PauseStateVaultRef, type VaultPauseState } from "./app.js"
+import { createPayoutVerifier } from "./evm/payout-verification.js"
+import { buildApp, type PauseStateVaultRef, type VaultPauseDetail, type VaultPauseState } from "./app.js"
+import { summarizePauseDetail } from "./evm/pause-state.js"
 import { FUNCTION_PAUSE_SELECTORS } from "./evm/admin-transactions.js"
 import { EvmRegisterService, PROXY_SLOTS, type RegisterProbe } from "./services/evm-register-service.js"
 import { validateServerEnv } from "./config/env.js"
@@ -140,16 +142,15 @@ async function composeServer(
       }
     },
   })
-  // Wallet-less pause snapshot for the public catalog. ~30s cache keeps the catalog from
-  // issuing 36 eth_calls per request; a failed sweep returns null so the handler falls
-  // back to unpaused defaults instead of failing the catalog.
+  // Wallet-less pause reads. readPauseDetail is uncached (admin console + pause routes);
+  // readPauseState is the ~30s-cached catalog summary, which keeps the catalog from issuing
+  // 36 eth_calls per request. A failed sweep returns null: the catalog falls back to unpaused
+  // defaults, the admin routes answer 503.
   const pausableReadAbi = parseAbi([
     "function fnPaused(bytes4 selector) view returns (bool)",
     "function paused() view returns (bool)",
   ])
-  let pauseStateCache: { at: number; value: Record<string, VaultPauseState> } | null = null
-  const readPauseState = async (vaults: PauseStateVaultRef[]) => {
-    if (pauseStateCache && Date.now() - pauseStateCache.at < 30_000) return pauseStateCache.value
+  const readPauseDetail = async (vaults: PauseStateVaultRef[]): Promise<Record<string, VaultPauseDetail> | null> => {
     try {
       const readBool = (address: string, functionName: "fnPaused" | "paused", args?: readonly [Hex]) =>
         rpcClient.readContract({
@@ -158,38 +159,39 @@ async function composeServer(
           functionName,
           ...(args ? { args } : {}),
         }) as Promise<boolean>
-      const kindState = async (vault: string | null, kind: "deposit" | "withdraw") => {
-        if (!vault) return { paused: false, partial: false }
-        const [a, b] = FUNCTION_PAUSE_SELECTORS[kind].selectors
-        const [global, first, second] = await Promise.all([
+      const side = async (vault: string | null, kind: "deposit" | "withdraw") => {
+        if (!vault) return null
+        const selectors = FUNCTION_PAUSE_SELECTORS[kind].selectors
+        const [vaultPaused, ...fnPaused] = await Promise.all([
           readBool(vault, "paused"),
-          readBool(vault, "fnPaused", [a.selector as Hex]),
-          readBool(vault, "fnPaused", [b.selector as Hex]),
+          ...selectors.map(({ selector }) => readBool(vault, "fnPaused", [selector as Hex])),
         ])
-        return { paused: global || first || second, partial: first !== second }
+        return { vaultPaused, fnPaused }
       }
       const entries = await Promise.all(
         vaults.map(async (vault) => {
           const [deposit, withdraw] = await Promise.all([
-            kindState(vault.depositVault, "deposit"),
-            kindState(vault.redemptionVault, "withdraw"),
+            side(vault.depositVault, "deposit"),
+            side(vault.redemptionVault, "withdraw"),
           ])
-          return [
-            vault.productId,
-            {
-              depositPaused: deposit.paused,
-              depositPartial: deposit.partial,
-              withdrawPaused: withdraw.paused,
-              withdrawPartial: withdraw.partial,
-            },
-          ] as const
+          return [vault.productId, { deposit, withdraw }] as const
         }),
       )
-      pauseStateCache = { at: Date.now(), value: Object.fromEntries(entries) }
-      return pauseStateCache.value
+      return Object.fromEntries(entries)
     } catch {
       return null
     }
+  }
+  let pauseStateCache: { at: number; value: Record<string, VaultPauseState> } | null = null
+  const readPauseState = async (vaults: PauseStateVaultRef[]) => {
+    if (pauseStateCache && Date.now() - pauseStateCache.at < 30_000) return pauseStateCache.value
+    const details = await readPauseDetail(vaults)
+    if (!details) return null
+    const value = Object.fromEntries(
+      Object.entries(details).map(([productId, detail]) => [productId, summarizePauseDetail(detail)]),
+    )
+    pauseStateCache = { at: Date.now(), value }
+    return value
   }
   // Current per-vault limits, read straight from the auto-getters (on-chain is the source of
   // truth — limits aren't persisted in the registry). Returns RAW base units as strings; the
@@ -201,6 +203,9 @@ async function composeServer(
     "function minimumRedeem() view returns (uint256)",
     "function vaultRedeemAllowance() view returns (uint256)",
   ])
+  // Settle confirms a direct-transfer payout against its receipt before recording SETTLED.
+  const verifyPayout = createPayoutVerifier((hash) => rpcClient.getTransactionReceipt({ hash }))
+
   const readVaultLimits = async (refs: { depositVault: string; redemptionVault: string }) => {
     const readLimit = (address: string, functionName: "minimumDeposit" | "maxSupplyCap" | "vaultMintAllowance" | "minimumRedeem" | "vaultRedeemAllowance") =>
       rpcClient.readContract({ address: address as `0x${string}`, abi: vaultLimitsReadAbi, functionName }) as Promise<bigint>
@@ -223,6 +228,25 @@ async function composeServer(
       return null
     }
   }
+  const vaultFeedsReadAbi = parseAbi([
+    "function productPriceFeed() view returns (address)",
+    "function paymentPriceFeed() view returns (address)",
+  ])
+  const readVaultFeeds = async (refs: { depositVault: string; redemptionVault: string }) => {
+    const readFeed = (address: string, functionName: "productPriceFeed" | "paymentPriceFeed") =>
+      rpcClient.readContract({ address: address as `0x${string}`, abi: vaultFeedsReadAbi, functionName }) as Promise<string>
+    try {
+      const [depositProduct, depositPayment, redemptionProduct, redemptionPayment] = await Promise.all([
+        readFeed(refs.depositVault, "productPriceFeed"),
+        readFeed(refs.depositVault, "paymentPriceFeed"),
+        readFeed(refs.redemptionVault, "productPriceFeed"),
+        readFeed(refs.redemptionVault, "paymentPriceFeed"),
+      ])
+      return { depositProduct, depositPayment, redemptionProduct, redemptionPayment }
+    } catch {
+      return null
+    }
+  }
   // On-chain probe for 2c "register deployed vault". Read-only. Custody note: ProxyAdmin
   // ownership & impl-bytecode equivalence MUST be verified before any mainnet use.
   const EIP1967_IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc" as Hex
@@ -234,6 +258,8 @@ async function composeServer(
     "function paymentToken() view returns (address)",
     "function hasRole(bytes32 role, address account) view returns (bool)",
     "function owner() view returns (address)",
+    "function productPriceFeed() view returns (address)",
+    "function paymentPriceFeed() view returns (address)",
   ])
   const role = (name: string) => keccak256(toBytes(name))
   const slotAddress = (word: Hex | undefined): string | null => {
@@ -289,6 +315,12 @@ async function composeServer(
             read<boolean>(address("productToken"), "hasRole", [role("MINTER_ROLE"), address("depositVault")]),
             read<boolean>(address("productToken"), "hasRole", [role("BURNER_ROLE"), address("redemptionVault")]),
           ])
+        const [depositProduct, depositPayment, redemptionProduct, redemptionPayment] = await Promise.all([
+          read<string>(address("depositVault"), "productPriceFeed"),
+          read<string>(address("depositVault"), "paymentPriceFeed"),
+          read<string>(address("redemptionVault"), "productPriceFeed"),
+          read<string>(address("redemptionVault"), "paymentPriceFeed"),
+        ])
         const proxyAdminOwner = registry.proxyAdmin?.proxy
           ? await read<string>(registry.proxyAdmin.proxy as `0x${string}`, "owner").catch(() => null)
           : null
@@ -311,6 +343,7 @@ async function composeServer(
           implementations,
           implCodeHashes,
           proxyAdminOwner,
+          feeds: { depositProduct, depositPayment, redemptionProduct, redemptionPayment },
         }
       } catch {
         return null
@@ -339,10 +372,11 @@ async function composeServer(
           adminOperators: env.adminOperators,
           adminOperatorToken: env.adminOperatorToken,
           adminLegacyTokenAuth: env.adminLegacyTokenAuth,
+          adminWithdrawAllowlist: env.adminWithdrawAllowlist,
           registryPath: env.registryPath,
         },
         {
-          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readVaultLimits, stocksMarketData, stocksMarketClock, arcoUSD,
+          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD,
           resolveStocksOperator: sessions?.resolveOperator,
           stocks: stocks ? {
             service: stocks.service,

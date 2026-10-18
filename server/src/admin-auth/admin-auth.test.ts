@@ -32,7 +32,7 @@ const expired = (wallet: string) => ({ authorization: `Bearer ${jwt({ sub: walle
 const legacy = (token = LEGACY) => ({ 'x-operator-token': token });
 
 const READ = { method: 'GET', url: '/api/v1/admin/redemptions/pending' } as const;
-const WRITE = { method: 'POST', url: '/api/v1/admin/redemptions/7/release' } as const;
+const WRITE = { method: 'POST', url: '/api/v1/admin/products/acapix/redemptions/7/release' } as const;
 const DELETE = { method: 'DELETE', url: '/api/v1/admin/featured/91342/card-1' } as const;
 const SESSION = { method: 'GET', url: '/api/v1/admin/session' } as const;
 const STOCKS_READ = { method: 'GET', url: '/api/v1/admin/stocks/trading-control' } as const;
@@ -70,6 +70,8 @@ function fixture(options: { legacy?: boolean; stocks?: boolean } = {}) {
   const stocks = stocksSessionResolvers(SECRET, [ADMIN_DOMAIN, APP_DOMAIN], STOCKS_OPERATORS);
   const services = {
     arco, registry: { listNetworks: async () => [] }, portfolio: {}, readiness: { check: async () => ({ ok: true, checks: {} }) },
+    // Product-scoped redemption routes resolve the redemption vault from the registry.
+    loadRegistry: () => ({ chainId: 91342, assets: [], products: [{ productId: 'acapix', paymentAssetSymbol: 'tUSDC', redemptionVault: { proxy: '0x00000000000000000000000000000000000000a1' } }] }),
     adminAudit: (entry: AdminAuditEntry) => { audit.push(entry); },
     ...(options.stocks === false ? {} : {
       resolveStocksOperator: stocks.resolveOperator,
@@ -190,14 +192,14 @@ test('every admin write attempt is audited with operator identity and never with
   await f.call(STOCKS_WRITE, session(W.full));
   const summary = f.audit.map(({ scope, method, route, statusCode, operatorId, wallet, via }) => ({ scope, method, route, statusCode, operatorId, wallet, via }));
   assert.deepEqual(summary, [
-    { scope: 'vault', method: 'POST', route: '/api/v1/admin/redemptions/:requestId/release', statusCode: 200, operatorId: 'vault-writer', wallet: W.writer, via: 'session' },
-    { scope: 'vault', method: 'POST', route: '/api/v1/admin/redemptions/:requestId/release', statusCode: 403, operatorId: null, wallet: W.stranger, via: 'session' },
-    { scope: 'vault', method: 'POST', route: '/api/v1/admin/redemptions/:requestId/release', statusCode: 401, operatorId: null, wallet: null, via: null },
+    { scope: 'vault', method: 'POST', route: '/api/v1/admin/products/:productId/redemptions/:requestId/release', statusCode: 200, operatorId: 'vault-writer', wallet: W.writer, via: 'session' },
+    { scope: 'vault', method: 'POST', route: '/api/v1/admin/products/:productId/redemptions/:requestId/release', statusCode: 403, operatorId: null, wallet: W.stranger, via: 'session' },
+    { scope: 'vault', method: 'POST', route: '/api/v1/admin/products/:productId/redemptions/:requestId/release', statusCode: 401, operatorId: null, wallet: null, via: null },
     { scope: 'vault', method: 'DELETE', route: '/api/v1/admin/featured/:chainId/:id', statusCode: 200, operatorId: 'legacy-operator-token', wallet: null, via: 'legacy-token' },
     { scope: 'stocks', method: 'POST', route: '/api/v1/admin/stocks/trading-control', statusCode: 200, operatorId: 'stocks-controller', wallet: W.stocks, via: 'session' },
     { scope: 'stocks', method: 'POST', route: '/api/v1/admin/stocks/trading-control', statusCode: 403, operatorId: null, wallet: W.full, via: 'session' },
   ]);
-  assert.deepEqual(f.audit[0].params, { requestId: '7' });
+  assert.deepEqual(f.audit[0].params, { productId: 'acapix', requestId: '7' });
   for (const entry of f.audit) {
     assert.equal(entry.service, 'arco-giwa-api');
     assert.equal(entry.event, 'admin.write');

@@ -14,7 +14,8 @@ import type { ArcoUSDService } from "./arcousd/service.js"
 import type { StocksMarketDataPluginOptions } from "./stocks-market-data/index.js"
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify"
 import { generateNonce, SiweMessage } from "siwe"
-import { formatUnits, getAddress, isAddress, type Address } from "viem"
+import { formatUnits, getAddress, isAddress, type Address, type Hex } from "viem"
+import type { PayoutVerifier } from "./evm/payout-verification.js"
 import { auditParams, consoleAdminAudit, type AdminAuditSink } from "./admin-auth/audit.js"
 import {
   createAdminAuthority,
@@ -23,6 +24,15 @@ import {
   type AdminPrincipal,
 } from "./admin-auth/authority.js"
 import type { AdminOperator } from "./admin-auth/operators.js"
+import { allowedWithdrawRecipients } from "./admin-auth/withdraw-allowlist.js"
+import {
+  DEFAULT_PAUSE_STATE,
+  planFunctionPause,
+  planVaultPause,
+  summarizePauseDetail,
+  type VaultPauseDetail,
+  type VaultPauseState,
+} from "./evm/pause-state.js"
 import { siweSessionWallet } from "./admin-auth/session.js"
 import type { Operator } from "./stocks/contracts.js"
 import {
@@ -68,17 +78,14 @@ export type AppEnv = {
   readonly adminOperatorToken: string
   /** ADMIN_LEGACY_TOKEN_AUTH=1. Off by default; never applies to the Stocks routes. */
   readonly adminLegacyTokenAuth?: boolean
+  /** ADMIN_WITHDRAW_ALLOWLIST (lowercased). withdrawTo also accepts the product's adminDepositAddress; nothing else. */
+  readonly adminWithdrawAllowlist?: readonly string[]
 }
 
-// Per-vault function-pause snapshot for the public catalog. `*Paused` OR-includes the
-// whole-contract pause; `*Partial` flags a selector disagreement within one kind (e.g.
-// the second pauseFn tx was rejected) so the admin UI can prompt a retry.
-export type VaultPauseState = {
-  readonly depositPaused: boolean
-  readonly withdrawPaused: boolean
-  readonly depositPartial: boolean
-  readonly withdrawPartial: boolean
-}
+// Per-vault pause snapshot for the public catalog (see evm/pause-state.ts): `*Paused` OR-includes
+// the whole-contract pause, `*VaultPaused` is that whole-contract pause alone, and `*Partial`
+// flags a selector disagreement within one kind so the admin UI can prompt a retry.
+export type { VaultPauseState, VaultPauseDetail } from "./evm/pause-state.js"
 
 export type PauseStateVaultRef = {
   readonly productId: string
@@ -88,6 +95,14 @@ export type PauseStateVaultRef = {
 
 // Raw (base-unit, as decimal strings) current limits from readVaultLimits; the GET route
 // de-scales these to human units per the registry decimals.
+// On-chain feed wiring of one product's vaults (addresses as read).
+export type VaultFeedsRaw = {
+  readonly depositProduct: string
+  readonly depositPayment: string
+  readonly redemptionProduct: string
+  readonly redemptionPayment: string
+}
+
 export type VaultLimitsRaw = {
   readonly minimumDeposit: string
   readonly maxSupplyCap: string
@@ -116,7 +131,15 @@ export type ArcoAppServices = {
   readonly monitoring?: EvmMonitoringService
   readonly register?: EvmRegisterService
   readonly readPauseState?: (vaults: PauseStateVaultRef[]) => Promise<Record<string, VaultPauseState> | null>
+  /** Uncached raw pause reads for the admin routes (null when the RPC sweep fails). When absent,
+   *  the pause routes build every tx without live-state filtering. */
+  readonly readPauseDetail?: (vaults: PauseStateVaultRef[]) => Promise<Record<string, VaultPauseDetail> | null>
   readonly readVaultLimits?: (refs: { depositVault: string; redemptionVault: string }) => Promise<VaultLimitsRaw | null>
+  /** productPriceFeed()/paymentPriceFeed() of both vaults (null when the read fails). */
+  readonly readVaultFeeds?: (refs: { depositVault: string; redemptionVault: string }) => Promise<VaultFeedsRaw | null>
+  /** Confirms a direct-transfer payout on-chain before a redemption is marked SETTLED. When
+   *  absent, settle answers 503 instead of recording an unverified payout. */
+  readonly verifyPayout?: PayoutVerifier
   readonly loadRegistry?: () => GiwaDeploymentRegistry
   /** Stocks operator lookup (the Stocks session resolver) for GET /api/v1/admin/session and the
    *  admin audit log. Absent when the Stocks runtime is off. */
@@ -150,12 +173,7 @@ function routeGuard(route: { onRequest?: unknown; preValidation?: unknown; preHa
   return null
 }
 
-export const DEFAULT_PAUSE_STATE: VaultPauseState = {
-  depositPaused: false,
-  withdrawPaused: false,
-  depositPartial: false,
-  withdrawPartial: false,
-}
+export { DEFAULT_PAUSE_STATE }
 
 type JwtPayload = {
   readonly sub: string
@@ -458,7 +476,7 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
       return products.map((product) => ({
         ...product,
         vaultConfig: configs.get(String(product.productId)) ?? withVaultConfigDefaults(),
-        pauseState: pauseStates[String(product.productId)] ?? DEFAULT_PAUSE_STATE,
+        pauseState: { ...DEFAULT_PAUSE_STATE, ...pauseStates[String(product.productId)] },
       }))
     }
     const fileRegistry = loadRegistry()
@@ -474,7 +492,7 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
       ...product,
       paymentAsset: fileRegistry.assets.find((asset) => asset.symbol === product.paymentAssetSymbol) ?? null,
       vaultConfig: configs.get(product.productId) ?? withVaultConfigDefaults(),
-      pauseState: pauseStates[product.productId] ?? DEFAULT_PAUSE_STATE,
+      pauseState: { ...DEFAULT_PAUSE_STATE, ...pauseStates[product.productId] },
     }))
   })
 
@@ -686,6 +704,48 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
 
   // Current on-chain limits, de-scaled to HUMAN units with the SAME registry decimals the builder
   // scales up with (exact round-trip). Operator-guarded like the other admin reads.
+  // Both vaults' price-feed wiring. A payment feed equal to the product feed (how deploy-giwa.ts
+  // initialized the testnet vaults) prices every quote 1:1 regardless of NAV — flagged here so
+  // the console shows it until the payment-feed repair (docs/operations/payment-feed-repair.md).
+  app.get<{ Params: { productId: string } }>(
+    "/api/v1/admin/products/:productId/feeds",
+    { preHandler: requireOperator },
+    async (request, reply) => {
+      if (!services.readVaultFeeds) return reply.code(503).send({ error: "Feed reader unavailable" })
+      const registry = loadRegistry()
+      const product = registry.products.find((candidate) => candidate.productId === request.params.productId)
+      if (!product) return reply.code(404).send({ error: `Unknown productId ${request.params.productId}` })
+      const depositVault = product.depositVault.proxy
+      const redemptionVault = product.redemptionVault.proxy
+      if (!depositVault || !redemptionVault || !isAddress(depositVault) || !isAddress(redemptionVault)) {
+        return reply.code(409).send({ error: "Vault is not deployed" })
+      }
+      const raw = await services.readVaultFeeds({ depositVault, redemptionVault })
+      if (!raw) return reply.code(502).send({ error: "Failed to read on-chain price feeds" })
+      const same = (a: string | null | undefined, b: string | null | undefined) =>
+        Boolean(a && b && a.toLowerCase() === b.toLowerCase())
+      const registryPriceFeed = product.priceFeed.proxy ?? null
+      const side = (productFeed: string, paymentFeed: string) => ({
+        productPriceFeed: productFeed,
+        paymentPriceFeed: paymentFeed,
+        paymentEqualsProduct: same(productFeed, paymentFeed),
+        productMatchesRegistry: same(productFeed, registryPriceFeed),
+      })
+      const vaults = {
+        depositVault: side(raw.depositProduct, raw.depositPayment),
+        redemptionVault: side(raw.redemptionProduct, raw.redemptionPayment),
+      }
+      const warnings: string[] = []
+      for (const [name, vault] of Object.entries(vaults)) {
+        if (vault.paymentEqualsProduct) {
+          warnings.push(`${name}: payment feed equals product feed — quotes ignore NAV (1:1)`)
+        }
+        if (!vault.productMatchesRegistry) warnings.push(`${name}: product feed differs from the registry priceFeed`)
+      }
+      return { registryPriceFeed, ...vaults, warnings }
+    },
+  )
+
   app.get<{ Params: { productId: string } }>(
     "/api/v1/admin/products/:productId/limits",
     { preHandler: requireOperator },
@@ -734,6 +794,47 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     },
   )
 
+  // Live (uncached) pause reads for the admin console and the pause routes. The catalog's
+  // pauseState is cached ~30s server-side, which is too stale to drive a pause/unpause decision.
+  const pauseRefs = (registry: GiwaDeploymentRegistry, productId?: string): PauseStateVaultRef[] =>
+    registry.products
+      .filter((product) => productId === undefined || product.productId === productId)
+      .map((product) => ({
+        productId: product.productId,
+        depositVault: product.depositVault.proxy,
+        redemptionVault: product.redemptionVault.proxy,
+      }))
+
+  type LivePause = { ok: true; detail: VaultPauseDetail | null } | { ok: false }
+  async function livePauseDetail(registry: GiwaDeploymentRegistry, productId: string): Promise<LivePause> {
+    if (!services.readPauseDetail) return { ok: true, detail: null } // no reader: unfiltered builders
+    try {
+      const details = await services.readPauseDetail(pauseRefs(registry, productId))
+      if (!details) return { ok: false }
+      return { ok: true, detail: details[productId] ?? null }
+    } catch {
+      return { ok: false }
+    }
+  }
+
+  app.get("/api/v1/admin/pause-state", { preHandler: requireOperator }, async (_request, reply) => {
+    if (!services.readPauseDetail) return reply.code(503).send({ error: "pause reader unavailable" })
+    const registry = loadRegistry()
+    let details: Record<string, VaultPauseDetail> | null = null
+    try {
+      details = await services.readPauseDetail(pauseRefs(registry))
+    } catch {
+      details = null
+    }
+    if (!details) return reply.code(503).send({ error: "pause state read failed" })
+    const pauseState: Record<string, VaultPauseState> = {}
+    for (const [productId, detail] of Object.entries(details)) pauseState[productId] = summarizePauseDetail(detail)
+    return { readAt: new Date().toISOString(), pauseState }
+  })
+
+  // Whole-contract pause/unpause (OZ Pausable). With a live reader, vaults already in the
+  // requested state are skipped (pause() / unpause() revert on a no-op) and an all-no-op
+  // request answers 409 NO_CHANGE instead of a tx that would revert.
   for (const action of ["pause", "unpause"] as const) {
     app.post<{ Params: { productId: string } }>(
       `/api/v1/admin/products/:productId/${action}`,
@@ -741,8 +842,17 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
       async (request, reply) => {
         const body = asObject(request.body)
         const target = body.target === "depositVault" || body.target === "redemptionVault" ? body.target : "allVaults"
+        const registry = loadRegistry()
+        const live = await livePauseDetail(registry, request.params.productId)
+        if (!live.ok) return reply.code(503).send({ error: "pause state read failed; retry" })
+        const plan = planVaultPause(live.detail, action, target)
+        if (!plan.ok) return reply.code(409).send({ error: plan.message, code: plan.code })
         try {
-          return { transactions: buildPauseTransactions(loadRegistry(), request.params.productId, action, target) }
+          return {
+            transactions: plan.value.flatMap((vault) =>
+              buildPauseTransactions(registry, request.params.productId, action, vault),
+            ),
+          }
         } catch (error) {
           return reply.code(409).send({ error: errorMessage(error) })
         }
@@ -750,9 +860,11 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     )
   }
 
-  // Per-kind function-level pause: builds the two pauseFn/unpauseFn txs for the kind's
-  // entry-path selectors (see FUNCTION_PAUSE_SELECTORS). Signing happens client-side
-  // with the connected PAUSER_ROLE wallet, same prepare->sign flow as the other utils.
+  // Per-kind function-level pause: pauseFn/unpauseFn txs for the kind's entry-path selectors
+  // (see FUNCTION_PAUSE_SELECTORS). With a live reader only the selectors not yet in the
+  // requested state are sent, and unpausing while the whole vault is paused answers 409
+  // VAULT_PAUSED (unpauseFn cannot lift it — the console offers the whole-vault unpause).
+  // Signing happens client-side with the connected PAUSER_ROLE wallet.
   app.post<{ Params: { productId: string } }>(
     "/api/v1/admin/products/:productId/function-pause",
     { preHandler: requireOperator },
@@ -761,9 +873,15 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
       const kind = body.kind === "deposit" || body.kind === "withdraw" ? body.kind : null
       if (!kind) return reply.code(400).send({ error: "kind must be 'deposit' or 'withdraw'" })
       if (typeof body.paused !== "boolean") return reply.code(400).send({ error: "paused boolean is required" })
+      const registry = loadRegistry()
+      const live = await livePauseDetail(registry, request.params.productId)
+      if (!live.ok) return reply.code(503).send({ error: "pause state read failed; retry" })
+      const side = live.detail ? (kind === "deposit" ? live.detail.deposit : live.detail.withdraw) : null
+      const plan = planFunctionPause(side, kind, body.paused)
+      if (!plan.ok) return reply.code(409).send({ error: plan.message, code: plan.code })
       try {
         return {
-          transactions: buildFunctionPauseTransactions(loadRegistry(), request.params.productId, kind, body.paused),
+          transactions: buildFunctionPauseTransactions(registry, request.params.productId, kind, body.paused, plan.value),
         }
       } catch (error) {
         return reply.code(409).send({ error: errorMessage(error) })
@@ -785,23 +903,42 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     },
   )
 
-  // Admin withdrawal of pooled deposits (deposit vault -> `to`). `to` is client-supplied
-  // (console defaults it to the connected operator wallet); the signer is the trust boundary.
-  // MAINNET: constrain `to` to a configured treasury/multisig allowlist before building.
+  // Admin withdrawal of pooled deposits (deposit vault -> `to`). `to` must be on the recipient
+  // allowlist: ADMIN_WITHDRAW_ALLOWLIST plus this product's configured adminDepositAddress
+  // (Vault Config). Anything else — including the operator's own wallet — is refused. NOTE:
+  // adminDepositAddress is editable by any vault:write session (audited), so only the env list
+  // is out of a hijacked session's reach; mainnet should rely on ADMIN_WITHDRAW_ALLOWLIST only.
+  // The amount is explicit base units > 0; there is no implicit full-balance withdrawal.
   app.post<{ Params: { productId: string } }>(
     "/api/v1/admin/products/:productId/withdraw",
     { preHandler: requireOperator },
     async (request, reply) => {
       const body = asObject(request.body)
-      if (typeof body.amount !== "string") return reply.code(400).send({ error: "amount string is required" })
+      if (typeof body.amount !== "string" || !/^\d+$/.test(body.amount)) {
+        return reply.code(400).send({ error: "amount must be a base-unit integer string" })
+      }
+      const amount = BigInt(body.amount)
+      if (amount <= 0n) return reply.code(400).send({ error: "amount must be greater than zero" })
       let to: Address
       try {
         to = parseAddress(body.to, "to")
       } catch {
         return reply.code(400).send({ error: "to must be a valid EVM address" })
       }
+      const registry = loadRegistry()
+      let adminDepositAddress: string | null
       try {
-        return { transaction: buildWithdrawTransaction(loadRegistry(), request.params.productId, to, BigInt(body.amount)) }
+        adminDepositAddress = (await vaultConfigByProduct(registry.chainId)).get(request.params.productId)?.adminDepositAddress ?? null
+      } catch {
+        return reply.code(503).send({ error: "vault config unavailable; cannot check the withdrawal recipient" })
+      }
+      if (!allowedWithdrawRecipients(env.adminWithdrawAllowlist, adminDepositAddress).has(to.toLowerCase())) {
+        return reply.code(403).send({
+          error: "to is not an allowed withdrawal recipient (set the product's admin deposit address or ADMIN_WITHDRAW_ALLOWLIST)",
+        })
+      }
+      try {
+        return { transaction: buildWithdrawTransaction(registry, request.params.productId, to, amount) }
       } catch (error) {
         return reply.code(409).send({ error: errorMessage(error) })
       }
@@ -1295,36 +1432,106 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     },
   )
 
-  // Direct-transfer payout: unsigned ERC20 transfer (payment token -> requester). Atomically
-  // claims REQUESTED -> SETTLING so a second payout for the same request 409s while one is
-  // in flight or after settlement (double-pay guard).
-  app.post<{ Params: { requestId: string } }>(
-    "/api/v1/admin/redemptions/:requestId/payout",
+  // Redemption admin actions are scoped by product: every redemption vault numbers its
+  // requests from 1, so a bare requestId is ambiguous across products. The product's
+  // registry entry supplies the redemption vault, and (chainId, vault, requestId) — the
+  // table's unique key — selects exactly one indexed request.
+  type RedemptionParams = { Params: { productId: string; requestId: string } }
+  type IndexedRedemptionRow = {
+    productId?: string
+    walletAddress?: string
+    lockedAssetsOut?: string
+    status?: string
+    requestedAtBlock?: bigint | number | string | null
+    metadata?: unknown
+  }
+  // Wallets that may sign a payout: the vault:write operator directory (ADMIN_OPERATORS).
+  const payoutSenders = (env.adminOperators ?? [])
+    .filter((operator) => operator.permissions.includes("vault:write"))
+    .map((operator) => operator.wallet.toLowerCase())
+  const requestBlock = (row: IndexedRedemptionRow): bigint | null => {
+    try {
+      return row.requestedAtBlock == null ? null : BigInt(row.requestedAtBlock)
+    } catch {
+      return null
+    }
+  }
+  // Settles run one at a time in this process, so the "tx already settles another request"
+  // check and the SETTLED write cannot interleave for two requests (no DB unique index on
+  // settledTxHash yet — schema change pending approval).
+  let settleQueue: Promise<unknown> = Promise.resolve()
+  const withSettleLock = <T,>(fn: () => Promise<T>): Promise<T> => {
+    const run = settleQueue.then(fn, fn)
+    settleQueue = run.catch(() => undefined)
+    return run
+  }
+  const resolveRedemptionTarget = (productId: string, requestId: string) => {
+    if (!/^\d+$/.test(requestId)) {
+      return { ok: false as const, status: 400, message: "requestId must be a decimal integer" }
+    }
+    const registry = loadRegistry()
+    const product = registry.products.find((candidate) => candidate.productId === productId)
+    const vault = product?.redemptionVault?.proxy
+    if (!product || !vault || !isAddress(vault)) {
+      return { ok: false as const, status: 404, message: `Unknown productId ${productId}` }
+    }
+    const paymentAsset = registry.assets.find((asset) => asset.symbol === product.paymentAssetSymbol)
+    const paymentToken = paymentAsset?.contract?.proxy
+    return {
+      ok: true as const,
+      registry,
+      product,
+      paymentToken: paymentToken && isAddress(paymentToken) ? getAddress(paymentToken) : null,
+      key: { chainId: GIWA_CHAIN_ID, redemptionVaultAddress: getAddress(vault), requestId },
+    }
+  }
+  // The vault pays a redemption to the recipient recorded at requestRedeem (claimRedeem
+  // enforces it), which can differ from the sender (e.g. a router). Direct payouts follow it.
+  const redemptionRecipient = (row: IndexedRedemptionRow): Address | null => {
+    const metadata = row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>) : {}
+    const recipient = typeof metadata.recipient === "string" ? metadata.recipient : row.walletAddress
+    return recipient && isAddress(recipient) ? getAddress(recipient) : null
+  }
+  const lockedPayout = (row: IndexedRedemptionRow): bigint => {
+    try {
+      return /^\d+$/.test(row.lockedAssetsOut ?? "") ? BigInt(row.lockedAssetsOut as string) : 0n
+    } catch {
+      return 0n
+    }
+  }
+
+  // Direct-transfer payout: unsigned ERC20 transfer (payment token -> recipient) for exactly
+  // the quote locked at requestRedeem. Atomically claims REQUESTED -> SETTLING so a second
+  // payout for the same request 409s while one is in flight or after settlement.
+  app.post<RedemptionParams>(
+    "/api/v1/admin/products/:productId/redemptions/:requestId/payout",
     { preHandler: requireOperator },
     async (request, reply) => {
+      const target = resolveRedemptionTarget(request.params.productId, request.params.requestId)
+      if (!target.ok) return reply.code(target.status).send({ error: target.message })
       const body = asObject(request.body)
-      if (typeof body.amount !== "string") return reply.code(400).send({ error: "amount string is required" })
-      const redemption = (await services.arco.findRedemptionRequest(GIWA_CHAIN_ID, request.params.requestId)) as
-        | { productId?: string; walletAddress?: string; status?: string }
-        | null
-      if (!redemption?.productId || !redemption.walletAddress || !isAddress(redemption.walletAddress)) {
-        return reply.code(404).send({ error: "Redemption request not found" })
+      if (typeof body.amount !== "string" || !/^\d+$/.test(body.amount)) {
+        return reply.code(400).send({ error: "amount (decimal integer string) is required" })
+      }
+      const redemption = (await services.arco.findRedemptionRequest(target.key)) as IndexedRedemptionRow | null
+      const recipient = redemption ? redemptionRecipient(redemption) : null
+      if (!redemption || !recipient) return reply.code(404).send({ error: "Redemption request not found" })
+      const locked = lockedPayout(redemption)
+      if (locked <= 0n) {
+        return reply.code(409).send({ error: "Redemption has no locked payout quote; pay it through fulfill instead" })
+      }
+      if (BigInt(body.amount) !== locked) {
+        return reply
+          .code(409)
+          .send({ error: `Payout amount must equal the locked quote (${locked.toString()} base units)` })
       }
       let transaction
       try {
-        transaction = buildPayoutTransaction(
-          loadRegistry(),
-          redemption.productId,
-          getAddress(redemption.walletAddress),
-          BigInt(body.amount),
-        )
+        transaction = buildPayoutTransaction(target.registry, target.product.productId, recipient, locked)
       } catch (error) {
         return reply.code(409).send({ error: errorMessage(error) })
       }
-      const claimed = await services.arco.markRedemptionSettling({
-        chainId: GIWA_CHAIN_ID,
-        requestId: request.params.requestId,
-      })
+      const claimed = await services.arco.markRedemptionSettling(target.key)
       if (claimed.count === 0) {
         return reply.code(409).send({ error: "Redemption is already settling or settled" })
       }
@@ -1332,55 +1539,78 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     },
   )
 
-  // Persist the confirmed payout: SETTLING/REQUESTED -> SETTLED + payout tx hash. This is the
-  // status the investor Pending tab renders as "Completed".
-  app.post<{ Params: { requestId: string } }>(
-    "/api/v1/admin/redemptions/:requestId/settle",
+  // Persist a payout only after the chain confirms it: the receipt must be a successful
+  // payment-token transfer of the locked amount, signed by an operator wallet out of its own
+  // balance after the request block, to the redemption's recipient — and the tx must not
+  // already settle another request. Then SETTLING/REQUESTED -> SETTLED.
+  app.post<RedemptionParams>(
+    "/api/v1/admin/products/:productId/redemptions/:requestId/settle",
     { preHandler: requireOperator },
     async (request, reply) => {
+      const target = resolveRedemptionTarget(request.params.productId, request.params.requestId)
+      if (!target.ok) return reply.code(target.status).send({ error: target.message })
       const body = asObject(request.body)
       if (typeof body.txHash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(body.txHash)) {
         return reply.code(400).send({ error: "txHash (0x + 64 hex chars) is required" })
       }
-      const settled = await services.arco.markRedemptionSettled({
-        chainId: GIWA_CHAIN_ID,
-        requestId: request.params.requestId,
-        txHash: body.txHash,
+      const txHash = body.txHash.toLowerCase() as Hex
+      return withSettleLock(async () => {
+        const redemption = (await services.arco.findRedemptionRequest(target.key)) as IndexedRedemptionRow | null
+        const recipient = redemption ? redemptionRecipient(redemption) : null
+        if (!redemption || !recipient) return reply.code(404).send({ error: "Redemption request not found" })
+        if (redemption.status !== "REQUESTED" && redemption.status !== "SETTLING") {
+          return reply.code(409).send({ error: `Redemption is ${redemption.status ?? "unknown"}; nothing to settle` })
+        }
+        if (await services.arco.findRedemptionBySettledTx(GIWA_CHAIN_ID, txHash)) {
+          return reply.code(409).send({ error: "This transaction already settles another redemption" })
+        }
+        if (!services.verifyPayout || !target.paymentToken) {
+          return reply.code(503).send({ error: "Payout verification is unavailable; settlement was not recorded" })
+        }
+        const verification = await services.verifyPayout({
+          txHash,
+          token: target.paymentToken,
+          recipient,
+          amount: lockedPayout(redemption),
+          allowedSenders: payoutSenders,
+          afterBlock: requestBlock(redemption),
+        })
+        if (!verification.ok) {
+          return reply.code(409).send({ error: `Payout transaction does not match this redemption: ${verification.reason}` })
+        }
+        const settled = await services.arco.markRedemptionSettled({ ...target.key, txHash })
+        if (settled.count === 0) {
+          return reply.code(409).send({ error: "Redemption request not found or already settled" })
+        }
+        return { ok: true, productId: target.product.productId, requestId: request.params.requestId, status: "SETTLED" }
       })
-      if (settled.count === 0) {
-        return reply.code(409).send({ error: "Redemption request not found or already settled" })
-      }
-      return { ok: true, requestId: request.params.requestId, status: "SETTLED" }
     },
   )
 
   // Cancelled/failed payout recovery: SETTLING -> REQUESTED only, so the request can be paid
   // again. SETTLED rows are untouchable here — a landed payout can never be re-opened.
-  app.post<{ Params: { requestId: string } }>(
-    "/api/v1/admin/redemptions/:requestId/release",
+  app.post<RedemptionParams>(
+    "/api/v1/admin/products/:productId/redemptions/:requestId/release",
     { preHandler: requireOperator },
     async (request, reply) => {
-      const released = await services.arco.markRedemptionReleased({
-        chainId: GIWA_CHAIN_ID,
-        requestId: request.params.requestId,
-      })
+      const target = resolveRedemptionTarget(request.params.productId, request.params.requestId)
+      if (!target.ok) return reply.code(target.status).send({ error: target.message })
+      const released = await services.arco.markRedemptionReleased(target.key)
       if (released.count === 0) {
         return reply.code(409).send({ error: "Redemption request is not in SETTLING" })
       }
-      return { ok: true, requestId: request.params.requestId, status: "REQUESTED" }
+      return { ok: true, productId: target.product.productId, requestId: request.params.requestId, status: "REQUESTED" }
     },
   )
 
-  app.post<{ Params: { requestId: string } }>(
-    "/api/v1/admin/redemptions/:requestId/fulfill",
+  app.post<RedemptionParams>(
+    "/api/v1/admin/products/:productId/redemptions/:requestId/fulfill",
     { preHandler: requireOperator },
     async (request, reply) => {
-      const redemption = (await services.arco.findRedemptionRequest(GIWA_CHAIN_ID, request.params.requestId)) as
-        | { redemptionVaultAddress?: string; status?: string }
-        | null
-      if (!redemption?.redemptionVaultAddress || !isAddress(redemption.redemptionVaultAddress)) {
-        return reply.code(404).send({ error: "Redemption request not found" })
-      }
+      const target = resolveRedemptionTarget(request.params.productId, request.params.requestId)
+      if (!target.ok) return reply.code(target.status).send({ error: target.message })
+      const redemption = (await services.arco.findRedemptionRequest(target.key)) as IndexedRedemptionRow | null
+      if (!redemption) return reply.code(404).send({ error: "Redemption request not found" })
       // Direct-transfer double-pay guard: a settled (or in-flight settling) request must
       // never ALSO be fulfilled on-chain — the vault would pay the requester a second time.
       if (redemption.status === "SETTLED" || redemption.status === "SETTLING") {
@@ -1388,12 +1618,23 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
       }
       return {
         transaction: buildFulfillRedeemTransaction(
-          loadRegistry(),
-          getAddress(redemption.redemptionVaultAddress),
+          target.registry,
+          target.key.redemptionVaultAddress,
           BigInt(request.params.requestId),
         ),
       }
     },
+  )
+
+  // Retired product-less routes: a bare requestId cannot identify a redemption. Answer 410 so
+  // an old console build fails loudly instead of acting on another product's request.
+  app.post<{ Params: { requestId: string; action: string } }>(
+    "/api/v1/admin/redemptions/:requestId/:action",
+    { preHandler: requireOperator },
+    async (_request, reply) =>
+      reply.code(410).send({
+        error: "Redemption actions now require a product: use /api/v1/admin/products/:productId/redemptions/:requestId/:action",
+      }),
   )
 
   app.setErrorHandler((error, _request, reply) => {

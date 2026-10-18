@@ -176,3 +176,20 @@ export function parseExtraProducts(
 export function resolvedInit(product: DeployParamsProduct): Required<DeployParamsInit> {
   return { ...DEPLOY_PARAMS_DEFAULTS, ...(product.init ?? {}) }
 }
+
+// ProductPriceFeed.initialize(feedDecimals, initialAnswer, healthyDiff, minExpectedAnswer,
+// maxExpectedAnswer, maxDeviationBps, admin). Kept here (pure, string answers) so the order is
+// unit-tested: deploy-giwa.ts once passed (…, healthyDiff, 1, feedMaxAnswer, feedMinAnswer, …),
+// which pinned minExpectedAnswer to 1 and turned feedMinAnswer into maxDeviationBps.
+// Deviation stays disabled (0), like the built-in feeds.
+export function priceFeedInitializerArgs(init: Required<DeployParamsInit>, admin: string) {
+  return [
+    8,
+    init.feedInitialAnswer,
+    init.feedHealthyDiffSeconds,
+    init.feedMinAnswer,
+    init.feedMaxAnswer,
+    0,
+    admin,
+  ] as const
+}
