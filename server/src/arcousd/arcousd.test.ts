@@ -7,7 +7,16 @@ import test from "node:test"
 import Fastify from "fastify"
 import { toEventSignature, toFunctionSignature, type AbiEvent, type AbiFunction } from "viem"
 import { reserveRecallAbi } from "./recall.js"
-import { ARCOUSD_BURN_SELECTOR, lensAbi, reserveEventsAbi, SETTLE_FOR_SELECTOR } from "./abi.js"
+import {
+  ARCOUSD_BURN_SELECTOR,
+  ARCOUSD_MINT_SELECTOR,
+  DEPOSIT_SELECTOR,
+  lensAbi,
+  reserveEventsAbi,
+  ROUTER_BUY_SELECTOR,
+  routerEventsAbi,
+  SETTLE_FOR_SELECTOR,
+} from "./abi.js"
 import { parseArcoUSDEnv } from "./config.js"
 import { arcoUSDPlugin } from "./plugin.js"
 import { createArcoUSDChainReader, NO_PAUSES, toReserveState, type ReserveState } from "./reader.js"
@@ -30,8 +39,8 @@ function registry(overrides: Partial<ArcoUSDRegistryFile> = {}): ArcoUSDRegistry
     lens: { address: A(5), bytecodeHash: "0x03" },
     testAssets: [],
     reserveAssets: [
-      { symbol: "tUSDC", address: USDC, decimals: 6, minQueued: "1000000", instantFeeBps: 0 },
-      { symbol: "tUSDT", address: USDT, decimals: 6, minQueued: "1000000", instantFeeBps: 0 },
+      { symbol: "tUSDC", address: USDC, decimals: 6, minQueued: "1000000", instantFeeBps: 0, swapFeeBps: 0 },
+      { symbol: "tUSDT", address: USDT, decimals: 6, minQueued: "1000000", instantFeeBps: 0, swapFeeBps: 10 },
     ],
     strategies: [{ productId: "umint", strategyId: 0, maxAllocation: "1" }],
     params: { mintCap: "1", mmfTargetBps: 5000, bufferFloorBps: 3000, queueMinDelay: 600 },
@@ -54,8 +63,8 @@ function state(usdcAvailable: bigint, extra: Partial<ReserveState> = {}): Reserv
       queueMinDelay: 600n,
       mintCap: 10n ** 25n,
       assets: [
-        { asset: USDC, decimals: 6, depositEnabled: true, redeemEnabled: true, balance: usdcAvailable + 5_000_000n, queued: 5_000_000n, available: usdcAvailable, queueLength: 3n, queueHead: 1n },
-        { asset: USDT, decimals: 6, depositEnabled: true, redeemEnabled: true, balance: 0n, queued: 0n, available: 0n, queueLength: 0n, queueHead: 0n },
+        { asset: USDC, decimals: 6, depositEnabled: true, redeemEnabled: true, instantFeeBps: 0, swapFeeBps: 0, balance: usdcAvailable + 5_000_000n, queued: 5_000_000n, available: usdcAvailable, queueLength: 3n, queueHead: 1n },
+        { asset: USDT, decimals: 6, depositEnabled: true, redeemEnabled: true, instantFeeBps: 20, swapFeeBps: 10, balance: 0n, queued: 0n, available: 0n, queueLength: 0n, queueHead: 0n },
       ],
       strategies: [
         { strategyId: 0n, asset: USDC, productToken: A(9), enabled: true, shares: 10n ** 18n, value: 2n * 10n ** 18n, navOk: true, pendingRecall: 0n, maxAllocation: 10n ** 24n },
@@ -100,6 +109,24 @@ test("registry: missing file is null; deployed registries must carry every addre
   // Not deployed: inert, addresses not required.
   assert.equal(deployedArcoUSD(registry({ deployed: false, lens: { address: null, bytecodeHash: null } }), 91342), null)
   assert.throws(() => deployedArcoUSD(registry({ chainId: 1 }), 91342))
+
+  // Router: optional (files written before it), exposed with the products it can buy.
+  const legacy = deployedArcoUSD(registry(), 91342)!
+  assert.deepEqual([legacy.routerAddress, legacy.routerProducts], [null, []])
+  const withRouter = deployedArcoUSD(
+    registry({
+      router: { proxy: A(6), implementation: A(7), bytecodeHash: null },
+      routerVaults: [
+        { productId: "umint", configured: true },
+        { productId: "beqty", configured: false },
+      ],
+    }),
+    91342,
+  )!
+  assert.deepEqual([withRouter.routerAddress, withRouter.routerProducts], [A(6), ["umint"]])
+  assert.match(validateArcoUSDRegistry(registry({ router: { proxy: "0x12" as `0x${string}`, implementation: null, bytecodeHash: null } }), 91342).join(), /router.proxy/)
+  const badFee = registry({ reserveAssets: [{ symbol: "tUSDT", address: USDT, decimals: 6, minQueued: "1", instantFeeBps: 0, swapFeeBps: 101 }] })
+  assert.match(validateArcoUSDRegistry(badFee, 91342).join(), /swapFeeBps/)
 })
 
 test("reader mapping: symbols, products, human amounts, backlog and surplus", () => {
@@ -111,9 +138,10 @@ test("reader mapping: symbols, products, human amounts, backlog and surplus", ()
   assert.equal(s.strategies[0].valueUsd, "2")
   assert.equal(s.surplus, (10n ** 18n).toString())
   assert.equal(s.totalBackingUsd, "2000")
+  assert.deepEqual([s.assets[1].swapFeeBps, s.assets[1].instantFeeBps, s.assets[0].swapFeeBps], [10, 20, 0])
 })
 
-test("chain reader: one block for every read, and both ArcoUSD pauses are read from the token", async () => {
+test("chain reader: one block for every read, and every pause on the buy path is read", async () => {
   const calls: { address: string; functionName: string; args?: readonly unknown[]; blockNumber?: bigint }[] = []
   const snap = {
     totalBacking: 0n, totalLiabilities: 0n, navOk: true, mmfBps: 0n, mmfTargetBps: 5000n, bufferFloorBps: 3000n,
@@ -131,20 +159,39 @@ test("chain reader: one block for every read, and both ArcoUSD pauses are read f
   const read = createArcoUSDChainReader(client as never)
   const result = await read(deployedArcoUSD(registry(), 91342)!)
   assert.ok(calls.every((call) => call.blockNumber === 777n))
-  assert.deepEqual(
-    calls.map((call) => `${call.address}:${call.functionName}:${call.args?.[0] ?? ""}`).sort(),
-    [
-      `${A(1)}:fnPaused:${ARCOUSD_BURN_SELECTOR}`,
-      `${A(1)}:paused:`,
-      `${A(3)}:fnPaused:${SETTLE_FOR_SELECTOR}`,
-      `${A(3)}:paused:`,
-      `${A(5)}:snapshot:${A(3)}`,
-    ].sort(),
-  )
+  const reads = [
+    `${A(1)}:fnPaused:${ARCOUSD_BURN_SELECTOR}`,
+    `${A(1)}:fnPaused:${ARCOUSD_MINT_SELECTOR}`,
+    `${A(1)}:paused:`,
+    `${A(3)}:fnPaused:${SETTLE_FOR_SELECTOR}`,
+    `${A(3)}:fnPaused:${DEPOSIT_SELECTOR}`,
+    `${A(3)}:paused:`,
+    `${A(5)}:snapshot:${A(3)}`,
+  ]
+  const seen = () => calls.map((call) => `${call.address}:${call.functionName}:${call.args?.[0] ?? ""}`).sort()
+  assert.deepEqual(seen(), [...reads].sort()) // no Router yet: nothing read from it
   assert.deepEqual(
     [result.reservePaused, result.settlementPaused, result.arcoUSDPaused, result.arcoUSDBurnPaused],
     [false, false, false, true],
   )
+  assert.deepEqual([result.depositPaused, result.arcoUSDMintPaused, result.routerPaused], [false, false, false])
+
+  // With a Router: its global pause and fnPaused(buy) are read too.
+  calls.length = 0
+  const routerClient = {
+    getBlockNumber: async () => 778n,
+    readContract: async (args: { address: string; functionName: string; args?: readonly unknown[]; blockNumber?: bigint }) => {
+      calls.push(args)
+      if (args.functionName === "snapshot") return snap
+      return args.functionName === "fnPaused" && args.address === A(6) && args.args?.[0] === ROUTER_BUY_SELECTOR
+    },
+  }
+  const withRouter = await createArcoUSDChainReader(routerClient as never)(
+    deployedArcoUSD(registry({ router: { proxy: A(6), implementation: A(7), bytecodeHash: null } }), 91342)!,
+  )
+  assert.deepEqual(seen(), [...reads, `${A(6)}:fnPaused:${ROUTER_BUY_SELECTOR}`, `${A(6)}:paused:`].sort())
+  assert.ok(calls.every((call) => call.blockNumber === 778n))
+  assert.deepEqual([withRouter.routerPaused, withRouter.arcoUSDBurnPaused], [true, false])
 })
 
 test("buy gate: inactive until deployed, open above the threshold, closed below, paused or unreadable", async () => {
@@ -167,6 +214,18 @@ test("buy gate: inactive until deployed, open above the threshold, closed below,
     const paused = await svc(async () => state(10n ** 12n, { [flag]: true })).gate()
     assert.deepEqual([paused.status, paused.reason], ["closed", "settlement-paused"], flag)
   }
+
+  // The Router's pause and the deposit/mint a stablecoin-paid buy runs first also close it.
+  for (const flag of ["routerPaused", "depositPaused", "arcoUSDMintPaused"] as const) {
+    const paused = await svc(async () => state(10n ** 12n, { [flag]: true })).gate()
+    assert.deepEqual([paused.status, paused.reason], ["closed", "buy-paused"], flag)
+  }
+
+  // Less than one threshold-sized buy (1,000 ArcoUSD) left under the mint cap: closed.
+  const capped = (liabilities: bigint) => state(10n ** 12n, { mintCap: (10_000n * 10n ** 18n).toString(), totalLiabilities: liabilities.toString() })
+  const full = await svc(async () => capped(9_000n * 10n ** 18n + 1n)).gate()
+  assert.deepEqual([full.status, full.reason], ["closed", "mint-cap"])
+  assert.equal((await svc(async () => capped(9_000n * 10n ** 18n)).gate()).status, "open")
 
   // An invalid gate setting keeps the gate closed once deployed (and is irrelevant before).
   const badEnv = parseArcoUSDEnv({ ARCOUSD_BUY_GATE_MIN: "1,000" })
@@ -229,6 +288,7 @@ test("routes are public, no-store, and never 500 on a failed read", async () => 
   assert.equal(reserve.headers["cache-control"], "no-store")
   assert.equal(reserve.json().status, "unavailable")
   assert.equal(reserve.json().contracts.reserve, A(3))
+  assert.deepEqual([reserve.json().contracts.router, reserve.json().contracts.routerProducts], [null, []])
   const gate = await app.inject({ method: "GET", url: "/api/v1/arcousd/gate" })
   assert.equal(gate.statusCode, 200)
   assert.equal(gate.json().status, "closed")
@@ -246,6 +306,18 @@ test("inline ABIs match the compiled ArcoUSD artifacts (no drift)", () => {
     .sort()
   const inlineEvents = reserveEventsAbi.map((event) => toEventSignature(event as AbiEvent)).sort()
   assert.deepEqual(inlineEvents, compiledEvents)
+  const compiledRouterEvents = artifact("ArcoRouter")
+    .filter((item): item is AbiEvent => item.type === "event")
+    .map((event) => toEventSignature(event))
+    .sort()
+  assert.deepEqual(routerEventsAbi.map((event) => toEventSignature(event as AbiEvent)).sort(), compiledRouterEvents)
+  // Field names drive the decoded args (Bought.payer/recipient/result…), so compare them too.
+  const named = (events: readonly AbiEvent[]) =>
+    JSON.stringify([...events].sort((a, b) => a.name.localeCompare(b.name)).map((event) => [event.name, event.inputs.map((input) => [input.name, input.indexed ?? false])]))
+  assert.equal(
+    named(routerEventsAbi as readonly AbiEvent[]),
+    named(artifact("ArcoRouter").filter((item): item is AbiEvent => item.type === "event")),
+  )
 
   const compiledSnapshot = artifact("ArcoUSDReserveLens").find(
     (item): item is AbiFunction => item.type === "function" && item.name === "snapshot",

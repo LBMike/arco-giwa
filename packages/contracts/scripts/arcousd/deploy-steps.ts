@@ -37,6 +37,8 @@ export type PlannedStep = { key: string; label: string }
 const ROLE = (name: string) => utils.keccak256(utils.toUtf8Bytes(name))
 const MINTER_ROLE = ROLE("MINTER_ROLE")
 const BURNER_ROLE = ROLE("BURNER_ROLE")
+const SETTLER_ROLE = ROLE("SETTLER_ROLE")
+const SETTLER_GRANT_KEY = "Reserve:SETTLER_ROLE:router"
 const FAUCET_DRIP: Record<string, string> = { tUSDT: "1000", tRLUSD: "1000" }
 const FAUCET_COOLDOWN = 24 * 60 * 60
 
@@ -48,6 +50,7 @@ const FAUCET_ABI = [
   "function assetConfigs(address token) view returns (uint256 dripAmount, uint256 dailyCap, uint256 globalCap, uint256 cooldown, bool enabled)",
   "function configureAsset(address token,uint256 dripAmount,uint256 dailyCap,uint256 globalCap,uint256 cooldown,bool enabled)",
 ]
+const DEPOSIT_VAULT_ABI = ["function paymentToken() view returns (address)"]
 const PRODUCT_TOKEN_ABI = [
   "function greenlistEnforced() view returns (bool)",
   "function isGreenlisted(address account) view returns (bool)",
@@ -99,6 +102,7 @@ export function validateArcoUSDInputs(registry: ArcoUSDRegistry, core: CoreRefs)
     if (decimals === undefined) errors.push(`Reserve asset ${asset.symbol} is not in the core registry`)
     else if (decimals !== asset.decimals) errors.push(`${asset.symbol} decimals ${decimals} != registry ${asset.decimals}`)
     intIn(asset.instantFeeBps, 0, MAX_INSTANT_FEE_BPS, `reserveAssets.${asset.symbol}.instantFeeBps`)
+    intIn(asset.swapFeeBps, 0, MAX_INSTANT_FEE_BPS, `reserveAssets.${asset.symbol}.swapFeeBps`)
     if (asset.depositCap !== "max") uint(asset.depositCap, `reserveAssets.${asset.symbol}.depositCap`)
     uint(asset.minQueued, `reserveAssets.${asset.symbol}.minQueued`)
   }
@@ -106,6 +110,12 @@ export function validateArcoUSDInputs(registry: ArcoUSDRegistry, core: CoreRefs)
   for (const strategy of registry.strategies) {
     if (!core.products[strategy.productId]) errors.push(`Strategy product ${strategy.productId} is not in the core registry`)
     uint(strategy.maxAllocation, `strategies.${strategy.productId}.maxAllocation`)
+  }
+  const routerProducts = new Set<string>()
+  for (const vault of registry.routerVaults) {
+    if (!core.products[vault.productId]) errors.push(`Router vault product ${vault.productId} is not in the core registry`)
+    if (routerProducts.has(vault.productId)) errors.push(`Router vault product ${vault.productId} is listed twice`)
+    routerProducts.add(vault.productId)
   }
   if (errors.length) throw new Error(`ArcoUSD deploy inputs invalid: ${errors.join("; ")}`)
 }
@@ -129,13 +139,21 @@ export function planArcoUSDDeployment(registry: ArcoUSDRegistry, core: CoreRefs)
   if (!registry.lens.address || registry.lens.pending) {
     steps.push({ key: "deploy:ArcoUSDReserveLens", label: `deploy ArcoUSDReserveLens${resume(registry.lens.pending)}` })
   }
+  if (!registry.router.proxy || registry.router.pending) {
+    steps.push({ key: "deploy:ArcoRouter", label: `deploy ArcoRouter proxy${resume(registry.router.pending)}` })
+  }
   for (const role of ["MINTER_ROLE", "BURNER_ROLE"]) {
     if (!registry.roleGrants.some((grant) => grant.key === `ArcoUSD:${role}:reserve`)) {
       steps.push({ key: `grant:${role}`, label: `ArcoUSD.grantRole(${role}, Reserve)` })
     }
   }
+  if (!registry.roleGrants.some((grant) => grant.key === SETTLER_GRANT_KEY)) {
+    steps.push({ key: "grant:SETTLER_ROLE", label: "Reserve.grantRole(SETTLER_ROLE, ArcoRouter)" })
+  }
   for (const asset of registry.reserveAssets) {
-    if (!asset.configured) steps.push({ key: `asset:${asset.symbol}`, label: `Reserve.setAsset(${asset.symbol}, minQueued ${asset.minQueued})` })
+    if (!asset.configured) {
+      steps.push({ key: `asset:${asset.symbol}`, label: `Reserve.setAsset(${asset.symbol}, swapFee ${asset.swapFeeBps} bps, minQueued ${asset.minQueued})` })
+    }
   }
   for (const strategy of registry.strategies) {
     if (strategy.strategyId === null) {
@@ -149,6 +167,9 @@ export function planArcoUSDDeployment(registry: ArcoUSDRegistry, core: CoreRefs)
     if (!registry.greenlisted.includes(strategy.productId)) {
       steps.push({ key: `greenlist:${strategy.productId}`, label: `${strategy.productId} product token: greenlist Reserve if enforced` })
     }
+  }
+  for (const vault of registry.routerVaults) {
+    if (!vault.configured) steps.push({ key: `router:${vault.productId}`, label: `ArcoRouter.setVault(${vault.productId} deposit vault, true)` })
   }
   if (!registry.deployed) steps.push({ key: "finalize", label: "mark registry deployed" })
   return steps
@@ -165,7 +186,7 @@ export async function runArcoUSDDeployment(ctx: DeployContext): Promise<ArcoUSDR
   registry.admin = signer.address as Address
   const tracked = { confirm, log }
 
-  // 1-4. Test assets (tUSDT, tRLUSD), ArcoUSD, Reserve, Lens. Each deploy is recorded as pending
+  // 1-4. Test assets (tUSDT, tRLUSD), ArcoUSD, Reserve, Lens, Router. Each deploy is recorded as pending
   // (address + tx hash) BEFORE waiting, so a timeout or crash is settled by receipt on re-run.
   const proxyDeploy = (current: ArcoUSDContract, label: string, contractName: string, args: () => unknown[], assign: (next: ArcoUSDContract) => void) =>
     ensureDeployed(
@@ -229,17 +250,25 @@ export async function runArcoUSDDeployment(ctx: DeployContext): Promise<ArcoUSDR
       tracked,
     )
   }
+  if (!registry.router.proxy || registry.router.pending) {
+    await proxyDeploy(registry.router, "ArcoRouter", "ArcoRouter", () => [registry.reserve.proxy, signer.address], (next) => (registry.router = next))
+  }
   const arcoUSD = new Contract(registry.arcoUSD.proxy!, ACCESS_ABI, signer)
   const reserve = await ethers.getContractAt("ArcoUSDReserve", registry.reserve.proxy!, signer)
+  const router = await ethers.getContractAt("ArcoRouter", registry.router.proxy!, signer)
 
-  // 5. Mint/burn for the Reserve only.
-  for (const [name, role] of [["MINTER_ROLE", MINTER_ROLE], ["BURNER_ROLE", BURNER_ROLE]] as const) {
-    const key = `ArcoUSD:${name}:reserve`
+  // 5. Mint/burn on ArcoUSD for the Reserve only; settleFor on the Reserve for the Router only.
+  const grants = [
+    { key: "ArcoUSD:MINTER_ROLE:reserve", target: arcoUSD, role: MINTER_ROLE, account: reserve.address },
+    { key: "ArcoUSD:BURNER_ROLE:reserve", target: arcoUSD, role: BURNER_ROLE, account: reserve.address },
+    { key: SETTLER_GRANT_KEY, target: reserve as Contract, role: SETTLER_ROLE, account: router.address },
+  ]
+  for (const { key, target, role, account } of grants) {
     if (registry.roleGrants.some((grant) => grant.key === key)) continue
-    if (await arcoUSD.hasRole(role, reserve.address)) {
+    if (await target.hasRole(role, account)) {
       registry.roleGrants.push({ key, txHash: null, status: "already-present" })
     } else {
-      const tx = (await arcoUSD.grantRole(role, reserve.address, await overrides("call"))) as ContractTransaction
+      const tx = (await target.grantRole(role, account, await overrides("call"))) as ContractTransaction
       await confirm(tx, key)
       registry.roleGrants.push({ key, txHash: tx.hash as `0x${string}`, status: "confirmed" })
     }
@@ -254,6 +283,7 @@ export async function runArcoUSDDeployment(ctx: DeployContext): Promise<ArcoUSDR
       depositEnabled: true,
       redeemEnabled: true,
       instantFeeBps: asset.instantFeeBps,
+      swapFeeBps: asset.swapFeeBps,
       depositCap: asset.depositCap === "max" ? constants.MaxUint256 : BigNumber.from(asset.depositCap),
       priceFeed: constants.AddressZero,
       maxDepegBps: 0,
@@ -312,6 +342,23 @@ export async function runArcoUSDDeployment(ctx: DeployContext): Promise<ArcoUSDR
       await confirm(await token.greenlist(reserve.address, await overrides("call")), `${strategy.productId} greenlist Reserve`)
     }
     registry.greenlisted.push(strategy.productId)
+    save()
+  }
+
+  // 10. Product deposit vaults the Router may buy into. setVault reverts unless the vault's payment
+  // token is a supported Reserve asset, so that is checked first (a fixed gas limit skips estimation).
+  for (const vault of registry.routerVaults) {
+    if (vault.configured) continue
+    const depositVault = core.products[vault.productId].depositVault
+    if (!(await router.allowedVault(depositVault))) {
+      const paymentToken = await new Contract(depositVault, DEPOSIT_VAULT_ABI, signer).paymentToken()
+      if (!(await reserve.getAssetConfig(paymentToken)).supported) {
+        throw new Error(`Router vault ${vault.productId}: payment token ${paymentToken} is not a Reserve asset`)
+      }
+      log(`ArcoRouter.setVault ${vault.productId}`)
+      await confirm(await router.setVault(depositVault, true, await overrides("call")), `router setVault ${vault.productId}`)
+    }
+    vault.configured = true
     save()
   }
 

@@ -31,7 +31,8 @@ export type ArcoUSDReserveAsset = {
   symbol: string
   address: Address | null // resolved from the core registry (tUSDC) or testAssets
   decimals: number
-  instantFeeBps: number
+  instantFeeBps: number // Instant redemptions only
+  swapFeeBps: number // deposits and all redemptions; 0 for the base asset (tUSDC)
   depositCap: string // base units; "max" = no cap
   minQueued: string // base units
   configured: boolean
@@ -60,6 +61,10 @@ export type ArcoUSDRegistry = {
   params: { mintCap: string; mmfTargetBps: number; bufferFloorBps: number; queueMinDelay: number }
   roleGrants: { key: string; txHash: `0x${string}` | null; status: "confirmed" | "already-present" }[]
   greenlisted: string[] // productIds whose product token greenlists the Reserve (when enforced)
+  /** ArcoRouter (product buys with any Reserve stablecoin); holds SETTLER_ROLE on the Reserve. */
+  router: ArcoUSDContract
+  /** Products whose deposit vault the Router may buy into (setVault). */
+  routerVaults: { productId: string; configured: boolean }[]
 }
 
 export function arcoUSDRegistryPath(repoRoot: string) {
@@ -85,14 +90,16 @@ export function defaultArcoUSDRegistry(chainId: number, network: string, gitComm
       { symbol: "tUSDT", name: "Test USDT", decimals: 6, contract: emptyContract(), faucetConfigured: false },
       { symbol: "tRLUSD", name: "Test RLUSD", decimals: 18, contract: emptyContract(), faucetConfigured: false },
     ],
+    // tUSDC is the base asset (no swap fee); tUSDT and tRLUSD pay 0.1% in and out.
     reserveAssets: [
-      { symbol: "tUSDC", address: null, decimals: 6, instantFeeBps: 0, depositCap: "max", minQueued: "1000000", configured: false },
-      { symbol: "tUSDT", address: null, decimals: 6, instantFeeBps: 0, depositCap: "max", minQueued: "1000000", configured: false },
+      { symbol: "tUSDC", address: null, decimals: 6, instantFeeBps: 0, swapFeeBps: 0, depositCap: "max", minQueued: "1000000", configured: false },
+      { symbol: "tUSDT", address: null, decimals: 6, instantFeeBps: 0, swapFeeBps: 10, depositCap: "max", minQueued: "1000000", configured: false },
       {
         symbol: "tRLUSD",
         address: null,
         decimals: 18,
         instantFeeBps: 0,
+        swapFeeBps: 10,
         depositCap: "max",
         minQueued: "1000000000000000000",
         configured: false,
@@ -105,6 +112,13 @@ export function defaultArcoUSDRegistry(chainId: number, network: string, gitComm
     params: { mintCap: "10000000000000000000000000", mmfTargetBps: 5000, bufferFloorBps: 3000, queueMinDelay: 600 },
     roleGrants: [],
     greenlisted: [],
+    router: emptyContract(),
+    // Funds paid in tUSDC (acapix is retired; the old Savings `arcousd` moves to sArcoUSD in phase 4).
+    routerVaults: [
+      { productId: "umint", configured: false },
+      { productId: "ibenji", configured: false },
+      { productId: "beqty", configured: false },
+    ],
   }
 }
 
@@ -115,6 +129,15 @@ export function loadArcoUSDRegistry(
   if (!existsSync(filePath)) return fallback()
   const raw = JSON.parse(readFileSync(filePath, "utf8")) as ArcoUSDRegistry
   if (raw.schemaVersion !== 1) throw new Error(`Unsupported ArcoUSD registry schemaVersion ${raw.schemaVersion}`)
+  // Files written before the Router and swap fees existed resume with the Router steps still to
+  // do. An asset already configured then has no swap fee on chain (the field was zero before the
+  // upgrade), so the file records 0 for it; unconfigured assets take the default.
+  const defaults = fallback()
+  raw.router ??= defaults.router
+  raw.routerVaults ??= defaults.routerVaults
+  for (const asset of raw.reserveAssets) {
+    asset.swapFeeBps ??= asset.configured ? 0 : (defaults.reserveAssets.find((item) => item.symbol === asset.symbol)?.swapFeeBps ?? 0)
+  }
   return raw
 }
 
@@ -130,6 +153,7 @@ export function earliestBlock(registry: ArcoUSDRegistry): number | null {
     registry.arcoUSD.blockNumber,
     registry.reserve.blockNumber,
     registry.lens.blockNumber,
+    registry.router?.blockNumber,
     ...registry.testAssets.map((asset) => asset.contract.blockNumber),
   ].filter((block): block is number => typeof block === "number")
   return blocks.length ? Math.min(...blocks) : null

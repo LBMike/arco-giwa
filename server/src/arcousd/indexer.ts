@@ -2,14 +2,15 @@ import { decodeEventLog } from "viem"
 import type { RawEvmLog } from "../indexer/event-decoder.js"
 import type { GiwaIndexerCursor, GiwaIndexerRpc } from "../indexer/giwa-indexer.js"
 import type { IndexedEventInput, JsonObject } from "../services/types.js"
-import { reserveEventsAbi } from "./abi.js"
+import { reserveEventsAbi, routerEventsAbi } from "./abi.js"
 import type { ArcoUSDChainReader, ReserveState } from "./reader.js"
 import { deployedArcoUSD, type ArcoUSDRegistryFile, type DeployedArcoUSD } from "./registry.js"
 
 // ArcoUSD indexer (docs/specs/arcousd-v1.md §5). Runs beside the core GIWA indexer with its own
 // cursor ("arcousd") so neither can stall the other:
-//   • every ArcoUSDReserve event → EvmIndexedEvent (audit trail; no walletAddress, so nothing
-//     shows up in the portfolio Activity feed until the UI integration decides how to render it);
+//   • every ArcoUSDReserve and ArcoRouter event → EvmIndexedEvent (audit trail; no walletAddress,
+//     so nothing shows up in the portfolio Activity feed — a Router buy reaches the buyer's feed
+//     through the deposit vault's ProductDeposit, attributed to its recipient by the core indexer);
 //   • RedeemQueued/Paid/PayoutFailed/Cancelled → ArcoUSDRedeemRequest, transitions only forward;
 //   • every snapshotIntervalMs, one Lens snapshot → ArcoUSDReserveSnapshot.
 // Inert (no RPC calls) while the ArcoUSD registry is missing or not deployed.
@@ -105,17 +106,25 @@ function toJson(value: unknown): unknown {
   return value
 }
 
-export function decodeReserveLog(log: RawEvmLog): { eventName: string; args: JsonObject } | null {
+function decodeWith(abi: typeof reserveEventsAbi | typeof routerEventsAbi, log: RawEvmLog): { eventName: string; args: JsonObject } | null {
   try {
     const decoded = decodeEventLog({
-      abi: reserveEventsAbi,
+      abi,
       data: log.data,
       topics: [...log.topics] as [`0x${string}`, ...`0x${string}`[]],
     })
     return { eventName: decoded.eventName, args: toJson(decoded.args ?? {}) as JsonObject }
   } catch {
-    return null // not a Reserve event we know (e.g. emitted by a future upgrade): skip it
+    return null // not an event we know (e.g. emitted by a future upgrade): skip it
   }
+}
+
+export function decodeReserveLog(log: RawEvmLog): { eventName: string; args: JsonObject } | null {
+  return decodeWith(reserveEventsAbi, log)
+}
+
+export function decodeRouterLog(log: RawEvmLog): { eventName: string; args: JsonObject } | null {
+  return decodeWith(routerEventsAbi, log)
 }
 
 export class ArcoUSDIndexer {
@@ -170,6 +179,8 @@ export class ArcoUSDIndexer {
 
     const startBlock = BigInt(deployment.deploymentBlock)
     const reserve = deployment.reserveAddress.toLowerCase() as `0x${string}`
+    // The deploy executor deploys the Router with the rest, so deploymentBlock covers it too.
+    const router = deployment.routerAddress ? (deployment.routerAddress.toLowerCase() as `0x${string}`) : null
     const latestBlock = await this.options.rpc.getBlockNumber()
     const confirmedBlock = latestBlock - BigInt(this.options.confirmations)
     const snapshot = await this.maybeSnapshot(chainId, deployment)
@@ -217,18 +228,20 @@ export class ArcoUSDIndexer {
 
     const span = fromBlock + this.options.maxBlockRange - 1n
     const toBlock = span < confirmedBlock ? span : confirmedBlock
-    const logs = await this.options.rpc.getLogs({ addresses: [reserve], fromBlock, toBlock })
+    const logs = await this.options.rpc.getLogs({ addresses: router ? [reserve, router] : [reserve], fromBlock, toBlock })
     const timestamps = new Map<bigint, Date>()
     let indexedEvents = 0
     let staleTransitions = 0
     for (const log of logs) {
-      if (log.address.toLowerCase() !== reserve) continue
-      const decoded = decodeReserveLog(log)
+      const address = log.address.toLowerCase()
+      const fromReserve = address === reserve
+      if (!fromReserve && address !== router) continue
+      const decoded = fromReserve ? decodeReserveLog(log) : decodeRouterLog(log)
       if (!decoded) continue
       const at = await this.blockTime(timestamps, log.blockNumber)
       await this.options.store.insertIndexedEvent({
         chainId,
-        contractAddress: reserve,
+        contractAddress: address,
         blockNumber: log.blockNumber,
         blockHash: log.blockHash,
         txHash: log.transactionHash,
@@ -239,7 +252,8 @@ export class ArcoUSDIndexer {
         blockTimestamp: at,
       })
       indexedEvents++
-      if ((await this.applyRequestEvent(chainId, reserve, log, decoded, at)) === 0) staleTransitions++
+      // Redeem requests live on the Reserve only (Router events carry no requestId of the Reserve's).
+      if (fromReserve && (await this.applyRequestEvent(chainId, reserve, log, decoded, at)) === 0) staleTransitions++
     }
 
     const last = await this.options.rpc.getBlock({ blockNumber: toBlock })

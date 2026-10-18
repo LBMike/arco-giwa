@@ -34,8 +34,11 @@ import {IArcoUSD, IArcoDepositVaultLike, IArcoRedemptionVaultLike} from "./IArco
 ///         live in ArcoUSDReserveLens to keep this contract under the 24KB code limit.
 /// @dev Free buffer of an asset = balance − unpaid queued payouts of that asset. Instant
 ///      redemptions, settlement and allocation only ever draw on the free buffer, so a later
-///      request can never jump ahead of a queued one. Queued (fee-free) requests are payable only
-///      after `queueMinDelay`, so the queue cannot be used as a same-block fee-free Instant.
+///      request can never jump ahead of a queued one. Queued requests skip the Instant fee and
+///      are payable only after `queueMinDelay`, so the queue cannot be used as a same-block
+///      fee-free Instant. Fees: `swapFeeBps` (non-base stablecoins such as USDT/RLUSD; 0 for
+///      USDC) applies to deposits and to every redemption, Instant or queued; `instantFeeBps`
+///      applies to Instant only. Fees stay in the Reserve as surplus backing.
 contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
     using DecimalsCorrectionLibrary for uint256;
@@ -66,7 +69,8 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
     struct AssetParams {
         bool depositEnabled;
         bool redeemEnabled;
-        uint16 instantFeeBps;
+        uint16 instantFeeBps; // Instant redemptions only
+        uint16 swapFeeBps; // deposits and all redemptions of a non-base stablecoin (0 for USDC)
         uint256 depositCap;
         address priceFeed;
         uint16 maxDepegBps;
@@ -81,6 +85,8 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
         uint16 instantFeeBps;
         uint16 maxDepegBps;
         address priceFeed;
+        // Appended after priceFeed (bytes 28-29 of the first slot) so the layout before it is unchanged.
+        uint16 swapFeeBps;
         uint256 depositCap;
         uint256 minQueued;
     }
@@ -137,7 +143,8 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
         address indexed recipient,
         address indexed asset,
         uint256 assetAmount,
-        uint256 arcoUSDOut
+        uint256 arcoUSDOut,
+        uint256 fee
     );
     event RedeemedInstant(
         address indexed sender,
@@ -199,6 +206,7 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
         bool depositEnabled,
         bool redeemEnabled,
         uint16 instantFeeBps,
+        uint16 swapFeeBps,
         uint256 depositCap,
         address priceFeed,
         uint16 maxDepegBps,
@@ -300,16 +308,20 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
         if (received == 0) revert ZeroAmount();
         if (balanceAfter > config.depositCap) revert DepositCap();
 
-        arcoUSDOut = received.convertToBase18(config.decimals);
+        uint256 gross = received.convertToBase18(config.decimals);
+        uint256 fee = (gross * config.swapFeeBps) / BPS; // non-base stablecoins only
+        arcoUSDOut = gross - fee;
+        if (arcoUSDOut == 0) revert ZeroAmount();
         if (arcoUSD.totalSupply() + arcoUSDOut > mintCap) revert MintCap();
         arcoUSD.mint(recipient, arcoUSDOut);
-        emit Deposited(_msgSender(), recipient, asset, received, arcoUSDOut);
+        emit Deposited(_msgSender(), recipient, asset, received, arcoUSDOut, fee);
     }
 
     // ──────────────────────────── redemptions ───────────────────────────
 
     /// @notice One withdrawal request: Instant when the free buffer of `asset` covers it,
-    ///         otherwise queued (no fee) and pushed to `recipient` when liquidity arrives.
+    ///         otherwise queued (swap fee only, no Instant fee) and pushed to `recipient` when
+    ///         liquidity arrives.
     /// @return requestId 0 when paid instantly.
     /// @return assetPaid Net amount paid now (0 when queued).
     function redeem(
@@ -594,7 +606,9 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
     function setAsset(address asset, AssetParams calldata params) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (asset == address(0)) revert ZeroAddress();
         if (asset == address(arcoUSD) || strategyProductToken[asset]) revert InvalidAsset();
-        if (params.instantFeeBps > MAX_INSTANT_FEE_BPS) revert InvalidParams();
+        if (params.instantFeeBps > MAX_INSTANT_FEE_BPS || params.swapFeeBps > MAX_INSTANT_FEE_BPS) {
+            revert InvalidParams();
+        }
         if (params.maxDepegBps > BPS) revert InvalidParams();
         AssetConfig storage config = _assetConfig[asset];
         if (!config.supported) {
@@ -608,6 +622,7 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
         config.depositEnabled = params.depositEnabled;
         config.redeemEnabled = params.redeemEnabled;
         config.instantFeeBps = params.instantFeeBps;
+        config.swapFeeBps = params.swapFeeBps;
         config.depositCap = params.depositCap;
         config.priceFeed = params.priceFeed;
         config.maxDepegBps = params.maxDepegBps;
@@ -617,6 +632,7 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
             params.depositEnabled,
             params.redeemEnabled,
             params.instantFeeBps,
+            params.swapFeeBps,
             params.depositCap,
             params.priceFeed,
             params.maxDepegBps,
@@ -752,9 +768,9 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
 
     // ──────────────────────────── internals ─────────────────────────────
 
-    /// @dev Pays whatever the free buffer covers now (Instant, with fee) and queues only the
-    ///      shortfall (Standard, no fee). Queued amounts therefore never exceed a real shortage,
-    ///      so a large cancellable request cannot reserve liquidity that is actually available.
+    /// @dev Pays whatever the free buffer covers now (Instant: instant + swap fee) and queues only
+    ///      the shortfall (Standard: swap fee only). Queued amounts therefore never exceed a real
+    ///      shortage, so a large cancellable request cannot reserve liquidity that is available.
     function _redeem(
         address owner,
         address asset,
@@ -772,18 +788,17 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
 
         IERC20Upgradeable(address(arcoUSD)).safeTransferFrom(owner, address(this), arcoUSDUsed);
 
-        uint256 available = availableLiquidity(asset);
-        uint256 instantGross = available >= assetOut ? assetOut : available;
+        uint256 instantGross = availableLiquidity(asset);
+        if (instantGross > assetOut) instantGross = assetOut;
         if (!allowQueue && instantGross < assetOut) revert InsufficientLiquidity();
-        uint256 queued = assetOut - instantGross;
         if (instantGross > 0) {
             assetPaid = _payInstant(owner, recipient, asset, config, instantGross);
         }
-        if (queued > 0) {
-            if (queued < config.minQueued) revert BelowQueueMinimum();
-            requestId = _enqueue(owner, recipient, asset, config.decimals, queued);
+        uint256 queuedNet;
+        if (assetOut > instantGross) {
+            (requestId, queuedNet) = _enqueue(owner, recipient, asset, config, assetOut - instantGross);
         }
-        if (assetPaid + queued < minAssetOut) revert MinOut();
+        if (assetPaid + queuedNet < minAssetOut) revert MinOut();
     }
 
     function _payInstant(
@@ -793,7 +808,7 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
         AssetConfig memory config,
         uint256 gross
     ) internal returns (uint256 net) {
-        uint256 fee = (gross * config.instantFeeBps) / BPS;
+        uint256 fee = (gross * (uint256(config.instantFeeBps) + config.swapFeeBps)) / BPS;
         net = gross - fee;
         uint256 arcoUSDBurned = gross.convertToBase18(config.decimals);
         arcoUSD.burn(arcoUSDBurned);
@@ -801,14 +816,19 @@ contract ArcoUSDReserve is AccessControlUpgradeable, FunctionPausable, Reentranc
         emit RedeemedInstant(owner, recipient, asset, arcoUSDBurned, net, fee);
     }
 
+    /// @dev The swap fee applies to the queued part too (no swap-fee bypass by queueing): the full
+    ///      ArcoUSD of `gross` is escrowed (burned when paid, returned in full on cancel) and the
+    ///      net amount is what gets paid; the difference stays in the Reserve.
     function _enqueue(
         address owner,
         address recipient,
         address asset,
-        uint8 decimals_,
-        uint256 assetAmount
-    ) internal returns (uint256 requestId) {
-        uint256 arcoUSDEscrowed = assetAmount.convertToBase18(decimals_);
+        AssetConfig memory config,
+        uint256 gross
+    ) internal returns (uint256 requestId, uint256 assetAmount) {
+        assetAmount = gross - (gross * config.swapFeeBps) / BPS;
+        if (assetAmount == 0 || assetAmount < config.minQueued) revert BelowQueueMinimum();
+        uint256 arcoUSDEscrowed = gross.convertToBase18(config.decimals);
         requestId = nextRequestId++;
         uint64 requestedAt = uint64(block.timestamp);
         _requests[requestId] = RedeemRequest({

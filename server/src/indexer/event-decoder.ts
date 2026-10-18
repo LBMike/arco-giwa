@@ -45,13 +45,18 @@ function serialize(value: unknown): unknown {
   return value
 }
 
+// Activity attribution. A deposit belongs to whoever receives the shares: a buy through the
+// ArcoRouter has the Router as `sender` and the buyer as `recipient` (direct buys set both to the
+// buyer). A redemption belongs to the holder who burned the shares (`sender`).
 function withWalletAddress(eventName: string, args: Record<string, unknown>) {
   const wallet =
     eventName === "FaucetDrip"
       ? args.wallet
-      : eventName.startsWith("ProductRedeem") || eventName.startsWith("ProductDeposit")
-        ? args.sender ?? args.recipient
-        : undefined
+      : eventName.startsWith("ProductDeposit")
+        ? args.recipient ?? args.sender
+        : eventName.startsWith("ProductRedeem")
+          ? args.sender ?? args.recipient
+          : undefined
   return typeof wallet === "string" ? { ...args, walletAddress: wallet.toLowerCase() } : args
 }
 

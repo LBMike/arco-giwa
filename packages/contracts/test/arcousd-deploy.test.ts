@@ -1,12 +1,17 @@
 import { expect } from "chai"
 import { ethers } from "hardhat"
 import { deployFixture, deployProxy, parse, ROLES } from "./helpers"
-import { defaultArcoUSDRegistry, type ArcoUSDRegistry } from "../scripts/arcousd/arcousd-registry"
+import { mkdtempSync, writeFileSync } from "fs"
+import { tmpdir } from "os"
+import path from "path"
+import { defaultArcoUSDRegistry, loadArcoUSDRegistry, type ArcoUSDRegistry } from "../scripts/arcousd/arcousd-registry"
 import { planArcoUSDDeployment, runArcoUSDDeployment, type CoreRefs } from "../scripts/arcousd/deploy-steps"
 
 // Runs the SAME executor the GIWA deploy script uses (scripts/arcousd/deploy-steps.ts) against a
 // local core (tUSDC, two tUSDC products standing in for uMINT and iBENJI, the faucet) and checks
 // the on-chain result, idempotence and resume-after-lost-progress.
+
+const SETTLER_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("SETTLER_ROLE"))
 
 async function localCore() {
   const fixture = await deployFixture(6)
@@ -46,12 +51,19 @@ async function localCore() {
   return { ...fixture, usdc, core, faucet, secondProduct: second.product }
 }
 
+// The local core has no bEQTY stand-in: the Router allowlists the two local tUSDC products.
+function freshRegistry(): ArcoUSDRegistry {
+  const registry = defaultArcoUSDRegistry(31337, "hardhat", "test")
+  registry.routerVaults = registry.routerVaults.filter((vault) => vault.productId !== "beqty")
+  return registry
+}
+
 async function deploy(core: CoreRefs, registry?: ArcoUSDRegistry) {
   const [admin] = await ethers.getSigners()
   const saves: ArcoUSDRegistry[] = []
   const result = await runArcoUSDDeployment({
     signer: admin,
-    registry: registry ?? defaultArcoUSDRegistry(31337, "hardhat", "test"),
+    registry: registry ?? freshRegistry(),
     core,
     save: (next) => saves.push(JSON.parse(JSON.stringify(next))),
   })
@@ -61,11 +73,33 @@ async function deploy(core: CoreRefs, registry?: ArcoUSDRegistry) {
 describe("ArcoUSD deploy executor", () => {
   it("plans every step for a fresh registry", async () => {
     const { core } = await localCore()
-    const keys = planArcoUSDDeployment(defaultArcoUSDRegistry(31337, "hardhat", "test"), core).map((step) => step.key)
+    const keys = planArcoUSDDeployment(freshRegistry(), core).map((step) => step.key)
     expect(keys).to.include.members([
-      "deploy:tUSDT", "deploy:tRLUSD", "deploy:ArcoUSD", "deploy:ArcoUSDReserve", "deploy:ArcoUSDReserveLens",
-      "grant:MINTER_ROLE", "grant:BURNER_ROLE", "asset:tUSDC", "asset:tUSDT", "asset:tRLUSD",
-      "strategy:umint", "strategy:ibenji", "faucet:tUSDT", "faucet:tRLUSD", "greenlist:umint", "greenlist:ibenji", "finalize",
+      "deploy:tUSDT", "deploy:tRLUSD", "deploy:ArcoUSD", "deploy:ArcoUSDReserve", "deploy:ArcoUSDReserveLens", "deploy:ArcoRouter",
+      "grant:MINTER_ROLE", "grant:BURNER_ROLE", "grant:SETTLER_ROLE", "asset:tUSDC", "asset:tUSDT", "asset:tRLUSD",
+      "strategy:umint", "strategy:ibenji", "faucet:tUSDT", "faucet:tRLUSD", "greenlist:umint", "greenlist:ibenji",
+      "router:umint", "router:ibenji", "finalize",
+    ])
+  })
+
+  it("a registry written before the Router and swap fees existed loads with those steps still to do", async () => {
+    const { core } = await localCore()
+    const { result } = await deploy(core)
+    const legacy = JSON.parse(JSON.stringify(result))
+    delete legacy.router
+    delete legacy.routerVaults
+    legacy.roleGrants = legacy.roleGrants.filter((grant: { key: string }) => !grant.key.startsWith("Reserve:"))
+    for (const asset of legacy.reserveAssets) delete asset.swapFeeBps
+    legacy.reserveAssets[1].configured = false
+    const dir = mkdtempSync(path.join(tmpdir(), "arcousd-registry-"))
+    const file = path.join(dir, "arcousd-giwa.json")
+    writeFileSync(file, JSON.stringify(legacy))
+    const loaded = loadArcoUSDRegistry(file, freshRegistry)
+    expect(loaded.router.proxy).to.equal(null)
+    // Configured assets had no swap fee on chain; the unconfigured one takes the default.
+    expect(loaded.reserveAssets.map((asset) => asset.swapFeeBps)).to.deep.equal([0, 10, 0])
+    expect(planArcoUSDDeployment(loaded, core).map((step) => step.key)).to.deep.equal([
+      "deploy:ArcoRouter", "grant:SETTLER_ROLE", "asset:tUSDT", "router:umint", "router:ibenji",
     ])
   })
 
@@ -79,12 +113,20 @@ describe("ArcoUSD deploy executor", () => {
     const arco = await ethers.getContractAt("ArcoUSD", result.arcoUSD.proxy!)
     const reserve = await ethers.getContractAt("ArcoUSDReserve", result.reserve.proxy!)
     const lens = await ethers.getContractAt("ArcoUSDReserveLens", result.lens.address!)
+    const router = await ethers.getContractAt("ArcoRouter", result.router.proxy!)
     expect(await arco.hasRole(ROLES.MINTER_ROLE, reserve.address)).to.equal(true)
     expect(await arco.hasRole(ROLES.BURNER_ROLE, reserve.address)).to.equal(true)
     expect((await reserve.getAssets()).length).to.equal(3)
     expect(String(await reserve.queueMinDelay())).to.equal("600")
     const tusdt = result.testAssets.find((asset) => asset.symbol === "tUSDT")!
     expect(String((await reserve.getAssetConfig(tusdt.contract.proxy!)).minQueued)).to.equal("1000000")
+    expect((await reserve.getAssetConfig(tusdt.contract.proxy!)).swapFeeBps).to.equal(10)
+    expect((await reserve.getAssetConfig(usdc.address)).swapFeeBps).to.equal(0)
+    expect(await reserve.hasRole(SETTLER_ROLE, router.address)).to.equal(true)
+    expect(await router.reserve()).to.equal(reserve.address)
+    expect(await router.allowedVault(core.products.umint.depositVault)).to.equal(true)
+    expect(await router.allowedVault(core.products.ibenji.depositVault)).to.equal(true)
+    expect(result.routerVaults.every((vault) => vault.configured)).to.equal(true)
     expect(result.strategies.map((strategy) => strategy.strategyId)).to.deep.equal([0, 1])
     expect(await product.isGreenlisted(reserve.address)).to.equal(true)
     const drip = await faucet.assetConfigs(tusdt.contract.proxy)
@@ -96,25 +138,38 @@ describe("ArcoUSD deploy executor", () => {
     const tusdtToken = await ethers.getContractAt("TestAssetToken", tusdt.contract.proxy!)
     await tusdtToken.connect(investor).approve(reserve.address, parse("1000", 6))
     await reserve.connect(investor).deposit(tusdt.contract.proxy, parse("1000", 6), investor.address)
+    expect(String(await arco.balanceOf(investor.address))).to.equal(String(parse("999", 18))) // 10 bps swap fee
     await usdc.connect(investor).approve(reserve.address, parse("500", 6))
     await reserve.connect(investor).deposit(usdc.address, parse("500", 6), investor.address)
     await arco.connect(investor).approve(reserve.address, parse("500", 18))
     const before = await usdc.balanceOf(investor.address)
     await reserve.connect(investor).redeem(usdc.address, parse("500", 18), investor.address, 0)
     expect(String((await usdc.balanceOf(investor.address)).sub(before))).to.equal(String(parse("500", 6)))
-    const snap = await lens.snapshot(reserve.address)
-    expect(String(snap.totalBacking)).to.equal(String(snap.totalLiabilities))
+    // The fee stays in the Reserve as surplus (1 tUSDT over 999 ArcoUSD of liabilities).
+    let snap = await lens.snapshot(reserve.address)
+    expect(String(snap.totalBacking.sub(snap.totalLiabilities))).to.equal(String(parse("1", 18)))
     expect(snap.strategies.length).to.equal(2)
+
+    // A product buy through the Router, paid in ArcoUSD, settled from the Reserve's tUSDC (which
+    // the redeem above emptied, so a tUSDC deposit refills it first).
+    await usdc.connect(investor).approve(reserve.address, parse("200", 6))
+    await reserve.connect(investor).deposit(usdc.address, parse("200", 6), investor.address)
+    await arco.connect(investor).approve(router.address, parse("100", 18))
+    const shares = await product.balanceOf(investor.address)
+    await router.connect(investor).buy(arco.address, parse("100", 18), core.products.umint.depositVault, 0, investor.address, false)
+    expect((await product.balanceOf(investor.address)).gt(shares)).to.equal(true)
+    snap = await lens.snapshot(reserve.address)
+    expect(String(snap.totalBacking.sub(snap.totalLiabilities))).to.equal(String(parse("1", 18)))
   })
 
   it("is idempotent, and resumes from lost progress by reading the chain", async () => {
     const { core } = await localCore()
     const { result } = await deploy(core)
-    const addresses = [result.arcoUSD.proxy, result.reserve.proxy, result.lens.address, ...result.testAssets.map((a) => a.contract.proxy)]
+    const addresses = [result.arcoUSD.proxy, result.reserve.proxy, result.lens.address, result.router.proxy, ...result.testAssets.map((a) => a.contract.proxy)]
 
     // Same registry again: nothing new is deployed and nothing reverts.
     const again = await deploy(core, JSON.parse(JSON.stringify(result)))
-    expect([again.result.arcoUSD.proxy, again.result.reserve.proxy, again.result.lens.address, ...again.result.testAssets.map((a) => a.contract.proxy)]).to.deep.equal(addresses)
+    expect([again.result.arcoUSD.proxy, again.result.reserve.proxy, again.result.lens.address, again.result.router.proxy, ...again.result.testAssets.map((a) => a.contract.proxy)]).to.deep.equal(addresses)
 
     // Lost progress after the contracts exist (grants, assets, strategies, faucet, greenlist forgotten):
     // the chain is re-read; strategies are found, not re-added (which would revert as duplicates).
@@ -124,10 +179,15 @@ describe("ArcoUSD deploy executor", () => {
     lost.strategies.forEach((strategy) => (strategy.strategyId = null))
     lost.testAssets.forEach((asset) => (asset.faucetConfigured = false))
     lost.greenlisted = []
+    lost.routerVaults.forEach((vault) => (vault.configured = false))
     lost.deployed = false
     const resumed = await deploy(core, lost)
     expect(resumed.result.strategies.map((strategy) => strategy.strategyId)).to.deep.equal([0, 1])
+    expect(resumed.result.roleGrants.map((grant) => grant.key)).to.have.members([
+      "ArcoUSD:MINTER_ROLE:reserve", "ArcoUSD:BURNER_ROLE:reserve", "Reserve:SETTLER_ROLE:router",
+    ])
     expect(resumed.result.roleGrants.every((grant) => grant.status === "already-present")).to.equal(true)
+    expect(resumed.result.routerVaults.every((vault) => vault.configured)).to.equal(true)
     const reserve = await ethers.getContractAt("ArcoUSDReserve", result.reserve.proxy!)
     expect(String(await reserve.strategyCount())).to.equal("2")
     expect(resumed.result.deployed).to.equal(true)
@@ -141,7 +201,7 @@ describe("ArcoUSD deploy executor", () => {
     try {
       await runArcoUSDDeployment({
         signer: admin,
-        registry: defaultArcoUSDRegistry(31337, "hardhat", "test"),
+        registry: freshRegistry(),
         core,
         save: (next) => saves.push(JSON.parse(JSON.stringify(next))),
         confirm: async (tx, label) => {
@@ -166,7 +226,7 @@ describe("ArcoUSD deploy executor", () => {
     expect(result.deployed).to.equal(true)
     const reserve = await ethers.getContractAt("ArcoUSDReserve", result.reserve.proxy!)
     expect(String(await reserve.mintCap())).to.equal(result.params.mintCap)
-    // Only the Lens deploy (plus grants/config calls) followed; no second Reserve proxy.
+    // Only the Lens and Router deploys (plus grants/config calls) followed; no second Reserve proxy.
     const created: string[] = []
     for (let block = blockBefore + 1; block <= (await ethers.provider.getBlockNumber()); block++) {
       for (const hash of (await ethers.provider.getBlock(block)).transactions) {
@@ -174,12 +234,14 @@ describe("ArcoUSD deploy executor", () => {
         if (receipt.contractAddress) created.push(receipt.contractAddress)
       }
     }
-    expect(created).to.deep.equal([result.lens.address])
+    expect(created).to.include(result.lens.address)
+    expect(created).to.include(result.router.proxy)
+    expect(created.filter((address) => ![result.lens.address, result.router.proxy, result.router.implementation].includes(address as `0x${string}`))).to.deep.equal([])
   })
 
   it("a pending deploy the chain never saw is deployed again", async () => {
     const { core } = await localCore()
-    const registry = defaultArcoUSDRegistry(31337, "hardhat", "test")
+    const registry = freshRegistry()
     const ghost = "0x00000000000000000000000000000000000000ff" as `0x${string}`
     registry.testAssets[0].contract = {
       proxy: ghost,
@@ -241,11 +303,14 @@ describe("ArcoUSD deploy executor", () => {
       ["decimals", (registry) => (registry.reserveAssets[0].decimals = 18)],
       ["depositCap", (registry) => (registry.reserveAssets[1].depositCap = "1e6")],
       ["instantFeeBps", (registry) => (registry.reserveAssets[2].instantFeeBps = 101)],
+      ["swapFeeBps", (registry) => (registry.reserveAssets[1].swapFeeBps = 101)],
+      ["Router vault product nope", (registry) => registry.routerVaults.push({ productId: "nope", configured: false })],
+      ["listed twice", (registry) => registry.routerVaults.push({ productId: "umint", configured: false })],
       ["maxAllocation", (registry) => (registry.strategies[0].maxAllocation = "-1")],
       ["mintCap", (registry) => (registry.params.mintCap = (2n ** 256n).toString())],
     ]
     for (const [label, mutate] of cases) {
-      const registry = defaultArcoUSDRegistry(31337, "hardhat", "test")
+      const registry = freshRegistry()
       mutate(registry)
       expect(() => planArcoUSDDeployment(registry, core), label).to.throw(label)
       const saves: unknown[] = []
@@ -264,7 +329,7 @@ describe("ArcoUSD deploy executor", () => {
 
   it("refuses a strategy product the core registry does not know", async () => {
     const { core } = await localCore()
-    const registry = defaultArcoUSDRegistry(31337, "hardhat", "test")
+    const registry = freshRegistry()
     registry.strategies.push({ productId: "nope", maxAllocation: "1", strategyId: null })
     expect(() => planArcoUSDDeployment(registry, core)).to.throw("nope")
     const [admin] = await ethers.getSigners()

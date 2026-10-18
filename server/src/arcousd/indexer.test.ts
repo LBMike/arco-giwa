@@ -4,7 +4,7 @@ import { encodeAbiParameters, encodeEventTopics, type AbiEvent, type Hex } from 
 import type { RawEvmLog } from "../indexer/event-decoder.js"
 import type { GiwaIndexerCursor, GiwaIndexerRpc } from "../indexer/giwa-indexer.js"
 import type { IndexedEventInput } from "../services/types.js"
-import { reserveEventsAbi } from "./abi.js"
+import { reserveEventsAbi, routerEventsAbi } from "./abi.js"
 import {
   ArcoUSDIndexer,
   REDEEM_TRANSITION_FROM,
@@ -20,6 +20,8 @@ import { PrismaArcoUSDIndexerStore } from "./store.js"
 
 const A = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as `0x${string}`
 const RESERVE = A(0xabc)
+const ROUTER = A(0xdef)
+const VAULT = A(0x71)
 const OWNER = A(0x11)
 const USDC = A(0xc1)
 
@@ -38,8 +40,15 @@ const registry: ArcoUSDRegistryFile = {
   params: { mintCap: "1", mmfTargetBps: 5000, bufferFloorBps: 3000, queueMinDelay: 600 },
 }
 
-function log(eventName: string, args: Record<string, unknown>, blockNumber: bigint, logIndex: number, address = RESERVE): RawEvmLog {
-  const event = reserveEventsAbi.find((item) => item.name === eventName) as AbiEvent
+function log(
+  eventName: string,
+  args: Record<string, unknown>,
+  blockNumber: bigint,
+  logIndex: number,
+  address = RESERVE,
+  abi: readonly AbiEvent[] = reserveEventsAbi as readonly AbiEvent[],
+): RawEvmLog {
+  const event = abi.find((item) => item.name === eventName) as AbiEvent
   const topics = encodeEventTopics({ abi: [event], eventName, args } as never) as Hex[]
   const data = encodeAbiParameters(
     event.inputs.filter((input) => !input.indexed),
@@ -71,6 +80,7 @@ class FakeRpc implements GiwaIndexerRpc {
   calls = 0
   hashSalt = ""
   logs: RawEvmLog[] = []
+  requested: (readonly `0x${string}`[])[] = []
   async getChainId() {
     this.calls++
     return this.chainId
@@ -89,7 +99,11 @@ class FakeRpc implements GiwaIndexerRpc {
   }
   async getLogs(args: { addresses: readonly `0x${string}`[]; fromBlock: bigint; toBlock: bigint }) {
     this.calls++
-    return this.logs.filter((entry) => entry.blockNumber >= args.fromBlock && entry.blockNumber <= args.toBlock)
+    this.requested.push(args.addresses)
+    const wanted = new Set(args.addresses.map((address) => address.toLowerCase()))
+    return this.logs.filter(
+      (entry) => wanted.has(entry.address.toLowerCase()) && entry.blockNumber >= args.fromBlock && entry.blockNumber <= args.toBlock,
+    )
   }
 }
 
@@ -161,7 +175,7 @@ test("a registry on another chain fails loudly", async () => {
 test("indexes Reserve events and drives request status forward only", async () => {
   const { rpc, store, indexer } = setup()
   rpc.logs = [
-    log("Deposited", { sender: OWNER, recipient: OWNER, asset: USDC, assetAmount: 10_000_000n, arcoUSDOut: 10n * 10n ** 18n }, 110n, 0),
+    log("Deposited", { sender: OWNER, recipient: OWNER, asset: USDC, assetAmount: 10_000_000n, arcoUSDOut: 10n * 10n ** 18n, fee: 0n }, 110n, 0),
     queued(1n, 120n),
     queued(2n, 121n),
     paid(1n, 150n),
@@ -169,7 +183,7 @@ test("indexes Reserve events and drives request status forward only", async () =
     cancelled(2n, 160n),
     queued(3n, 170n),
     cancelled(3n, 199n), // beyond the confirmed head (200 - 2): next poll
-    log("Deposited", { sender: OWNER, recipient: OWNER, asset: USDC, assetAmount: 1n, arcoUSDOut: 1n }, 130n, 0, A(0xdead)), // other contract
+    log("Deposited", { sender: OWNER, recipient: OWNER, asset: USDC, assetAmount: 1n, arcoUSDOut: 1n, fee: 0n }, 130n, 0, A(0xdead)), // other contract
   ]
   const first = await indexer.pollOnce()
   assert.equal(first.mode, "poll")
@@ -188,10 +202,46 @@ test("indexes Reserve events and drives request status forward only", async () =
   assert.equal((deposited.args as Record<string, unknown>).walletAddress, undefined) // kept out of Activity
   assert.equal((deposited.args as Record<string, unknown>).arcoUSDOut, (10n * 10n ** 18n).toString())
 
+  assert.deepEqual(rpc.requested[0], [RESERVE.toLowerCase()]) // no Router in this registry
+
   rpc.latest = 210n
   const second = await indexer.pollOnce()
   assert.equal(second.mode === "poll" && second.fromBlock, 199n)
   assert.equal(store.requests.get("3")?.status, "CANCELLED")
+})
+
+test("indexes Router events beside the Reserve's, each decoded with its own contract's ABI", async () => {
+  const withRouter: ArcoUSDRegistryFile = {
+    ...registry,
+    router: { proxy: ROUTER, implementation: A(6), bytecodeHash: null },
+    routerVaults: [{ productId: "umint", configured: true }],
+  }
+  const { rpc, store, indexer } = setup({ loadRegistry: () => withRouter })
+  const routerLog = (eventName: string, args: Record<string, unknown>, block: bigint, logIndex = 0) =>
+    log(eventName, args, block, logIndex, ROUTER, routerEventsAbi as readonly AbiEvent[])
+  rpc.logs = [
+    log("Deposited", { sender: ROUTER, recipient: ROUTER, asset: USDC, assetAmount: 1_000_000n, arcoUSDOut: 999n * 10n ** 15n, fee: 10n ** 15n }, 110n, 0),
+    routerLog("VaultAllowed", { depositVault: VAULT, paymentToken: USDC, allowed: true }, 105n),
+    routerLog(
+      "Bought",
+      { payer: OWNER, recipient: OWNER, depositVault: VAULT, payAsset: USDC, payAmount: 1_000_000n, arcoUSDSettled: 999n * 10n ** 15n, paymentAmount: 999_000n, result: 7n, request: true },
+      110n,
+      1,
+    ),
+    queued(1n, 120n),
+    // A Reserve-shaped log from the Router address is not a Router event: skipped, never a transition.
+    log("RedeemCancelled", { requestId: 1n, owner: OWNER, arcoUSDReturned: 1n }, 130n, 0, ROUTER),
+  ]
+  const result = await indexer.pollOnce()
+  assert.equal(result.mode === "poll" && result.indexedEvents, 4)
+  assert.deepEqual(rpc.requested[0], [RESERVE.toLowerCase(), ROUTER.toLowerCase()])
+  const bought = [...store.events.values()].find((event) => event.eventName === "Bought")!
+  assert.equal(bought.contractAddress, ROUTER.toLowerCase())
+  const args = bought.args as Record<string, unknown>
+  assert.deepEqual([args.payer, args.result, args.request, args.walletAddress], [OWNER.toLowerCase(), "7", true, undefined])
+  assert.equal([...store.events.values()].find((event) => event.eventName === "Deposited")?.contractAddress, RESERVE.toLowerCase())
+  assert.equal((store.events.size), 4)
+  assert.equal(store.requests.get("1")?.status, "QUEUED")
 })
 
 test("a reorg replays the window without regressing any request", async () => {

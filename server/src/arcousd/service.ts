@@ -4,8 +4,10 @@ import type { ArcoUSDChainReader, ReserveState } from "./reader.js"
 import { deployedArcoUSD, type ArcoUSDRegistryFile, type DeployedArcoUSD } from "./registry.js"
 
 // Public ArcoUSD reserve state + the product "buy gate". The gate is the screen-side half of
-// the rule "when the USDC buffer is short, block every buy button"; the on-chain half is
-// ArcoUSDReserve.settleFor reverting with InsufficientLiquidity. Fails CLOSED once ArcoUSD is
+// the rule "when the USDC buffer is short, block every fund buy button"; the on-chain half is
+// ArcoUSDReserve.settleFor reverting with InsufficientLiquidity. It also closes on anything else
+// that makes a Router buy revert: the pauses on its path and a full mint cap (a stablecoin-paid
+// buy mints ArcoUSD before settling). Fails CLOSED once ArcoUSD is
 // deployed: an unreadable reserve disables buys rather than letting them fail on-chain.
 
 export type BuyGate = {
@@ -16,6 +18,8 @@ export type BuyGate = {
     | "not-deployed"
     | "read-failed"
     | "settlement-paused"
+    | "buy-paused"
+    | "mint-cap"
     | "insufficient-buffer"
     | "asset-missing"
     | "config-invalid"
@@ -28,7 +32,15 @@ export type BuyGate = {
 export type ReserveStateResponse = {
   readonly status: "not-deployed" | "live" | "unavailable"
   readonly chainId: number
-  readonly contracts: null | { readonly arcoUSD: string; readonly reserve: string; readonly lens: string }
+  readonly contracts: null | {
+    readonly arcoUSD: string
+    readonly reserve: string
+    readonly lens: string
+    /** null until the Router is deployed. */
+    readonly router: string | null
+    /** Products the Router can buy (fund buys paid in any Reserve stablecoin). */
+    readonly routerProducts: readonly string[]
+  }
   readonly readAt: string
   readonly reserve: ReserveState | null
   readonly gate: BuyGate
@@ -94,6 +106,8 @@ export class ArcoUSDService {
       arcoUSD: deployment.arcoUSDAddress.toLowerCase(),
       reserve: deployment.reserveAddress.toLowerCase(),
       lens: deployment.lensAddress.toLowerCase(),
+      router: deployment.routerAddress?.toLowerCase() ?? null,
+      routerProducts: deployment.routerProducts,
     }
     if (!this.deps.read) return this.unavailable(readAt, contracts)
     let reserve: ReserveState
@@ -122,6 +136,14 @@ export class ArcoUSDService {
     // fnPaused(burn)): any of the four makes every product buy revert on-chain.
     if (reserve.reservePaused || reserve.settlementPaused || reserve.arcoUSDPaused || reserve.arcoUSDBurnPaused) {
       return this.gateFor(readAt, "closed", "settlement-paused", null)
+    }
+    // The Router's own pause, and the deposit/mint a stablecoin-paid buy goes through first.
+    if (reserve.routerPaused || reserve.depositPaused || reserve.arcoUSDMintPaused) {
+      return this.gateFor(readAt, "closed", "buy-paused", null)
+    }
+    // Room left under mintCap (liabilities = ArcoUSD supply) must fit a buy of the threshold size.
+    if (BigInt(reserve.mintCap) - BigInt(reserve.totalLiabilities) < parseUnits(this.deps.env.buyGateMin, 18)) {
+      return this.gateFor(readAt, "closed", "mint-cap", null)
     }
     const asset = reserve.assets.find((item) => item.symbol === this.deps.env.buyGateAsset)
     if (!asset) return this.gateFor(readAt, "closed", "asset-missing", null)

@@ -19,6 +19,8 @@ contract ArcoUSDReserveLens {
         uint8 decimals;
         bool depositEnabled;
         bool redeemEnabled;
+        uint16 instantFeeBps; // Instant redemptions only
+        uint16 swapFeeBps; // deposits and all redemptions (non-base stablecoins)
         uint256 balance; // asset units
         uint256 queued; // asset units owed to the Standard queue
         uint256 available; // balance − queued (free for Instant, settlement, allocation)
@@ -108,6 +110,8 @@ contract ArcoUSDReserveLens {
                 decimals: config.decimals,
                 depositEnabled: config.depositEnabled,
                 redeemEnabled: config.redeemEnabled,
+                instantFeeBps: config.instantFeeBps,
+                swapFeeBps: config.swapFeeBps,
                 balance: reserve.bufferBalance(assets[i]),
                 queued: reserve.queuedAssets(assets[i]),
                 available: reserve.availableLiquidity(assets[i]),
