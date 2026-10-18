@@ -8,6 +8,8 @@ describe("upgrade storage-layout validation", () => {
     "TestAssetFaucet",
     "ArcoDepositVault",
     "ArcoRedemptionVault",
+    "ArcoUSD",
+    "ArcoUSDReserve",
   ]) {
     it(`validates ${name} as an upgradeable implementation`, async () => {
       await upgrades.validateImplementation(await ethers.getContractFactory(name))
