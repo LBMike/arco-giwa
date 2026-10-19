@@ -4,6 +4,7 @@ import {
   ARCOUSD_MINT_SELECTOR,
   DEPOSIT_SELECTOR,
   lensAbi,
+  PROCESS_QUEUE_SELECTOR,
   reservePauseAbi,
   ROUTER_BUY_SELECTOR,
   SETTLE_FOR_SELECTOR,
@@ -67,6 +68,8 @@ export type ReserveState = {
   readonly reservePaused: boolean
   /** Reserve.fnPaused(settleFor) */
   readonly settlementPaused: boolean
+  /** Reserve.fnPaused(processQueue) — Standard-queue payouts stop (requests keep their place). */
+  readonly queuePaused: boolean
   /** ArcoUSD.paused() — halts mint and burn (not transfers). */
   readonly arcoUSDPaused: boolean
   /** ArcoUSD.fnPaused(burn) — settleFor and queue payouts burn ArcoUSD. */
@@ -81,17 +84,18 @@ export type ReserveState = {
   readonly strategies: readonly StrategyState[]
 }
 
-export type ArcoUSDChainReader = (deployment: DeployedArcoUSD) => Promise<ReserveState>
+/** Reads at `blockNumber` when given (e.g. the indexer's last block, to compare like with like), else the latest. */
+export type ArcoUSDChainReader = (deployment: DeployedArcoUSD, blockNumber?: bigint) => Promise<ReserveState>
 
 export function createArcoUSDChainReader(client: Pick<PublicClient, "readContract" | "getBlockNumber">): ArcoUSDChainReader {
-  return async (deployment) => {
-    const blockNumber = await client.getBlockNumber()
+  return async (deployment, at) => {
+    const blockNumber = at ?? (await client.getBlockNumber())
     const pausedAt = (address: `0x${string}`) =>
       client.readContract({ address, abi: reservePauseAbi, functionName: "paused", blockNumber })
     const fnPausedAt = (address: `0x${string}`, selector: `0x${string}`) =>
       client.readContract({ address, abi: reservePauseAbi, functionName: "fnPaused", args: [selector], blockNumber })
     const router = deployment.routerAddress
-    const [snap, reservePaused, settlementPaused, arcoUSDPaused, arcoUSDBurnPaused, depositPaused, arcoUSDMintPaused, routerPaused, routerBuyPaused] = await Promise.all([
+    const [snap, reservePaused, settlementPaused, queuePaused, arcoUSDPaused, arcoUSDBurnPaused, depositPaused, arcoUSDMintPaused, routerPaused, routerBuyPaused] = await Promise.all([
       client.readContract({
         address: deployment.lensAddress,
         abi: lensAbi,
@@ -101,6 +105,7 @@ export function createArcoUSDChainReader(client: Pick<PublicClient, "readContrac
       }),
       pausedAt(deployment.reserveAddress),
       fnPausedAt(deployment.reserveAddress, SETTLE_FOR_SELECTOR),
+      fnPausedAt(deployment.reserveAddress, PROCESS_QUEUE_SELECTOR),
       pausedAt(deployment.arcoUSDAddress),
       fnPausedAt(deployment.arcoUSDAddress, ARCOUSD_BURN_SELECTOR),
       fnPausedAt(deployment.reserveAddress, DEPOSIT_SELECTOR),
@@ -111,6 +116,7 @@ export function createArcoUSDChainReader(client: Pick<PublicClient, "readContrac
     return toReserveState(deployment, blockNumber, snap, {
       reservePaused: Boolean(reservePaused),
       settlementPaused: Boolean(settlementPaused),
+      queuePaused: Boolean(queuePaused),
       arcoUSDPaused: Boolean(arcoUSDPaused),
       arcoUSDBurnPaused: Boolean(arcoUSDBurnPaused),
       depositPaused: Boolean(depositPaused),
@@ -122,12 +128,13 @@ export function createArcoUSDChainReader(client: Pick<PublicClient, "readContrac
 
 export type PauseFlags = Pick<
   ReserveState,
-  "reservePaused" | "settlementPaused" | "arcoUSDPaused" | "arcoUSDBurnPaused" | "depositPaused" | "arcoUSDMintPaused" | "routerPaused"
+  "reservePaused" | "settlementPaused" | "queuePaused" | "arcoUSDPaused" | "arcoUSDBurnPaused" | "depositPaused" | "arcoUSDMintPaused" | "routerPaused"
 >
 
 export const NO_PAUSES: PauseFlags = {
   reservePaused: false,
   settlementPaused: false,
+  queuePaused: false,
   arcoUSDPaused: false,
   arcoUSDBurnPaused: false,
   depositPaused: false,

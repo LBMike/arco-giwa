@@ -13,6 +13,7 @@ import { arcoUSDPlugin } from "./arcousd/plugin.js"
 import type { ArcoUSDService } from "./arcousd/service.js"
 import type { ArcoUSDRecalls, RecallRow } from "./arcousd/recall.js"
 import { inertArcoUSDAdmin, type ArcoUSDAdmin } from "./arcousd/admin.js"
+import { inertArcoUSDAlerts, type ArcoUSDAlertsAdmin } from "./arcousd/alerts.js"
 import type { StocksMarketDataPluginOptions } from "./stocks-market-data/index.js"
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify"
 import { generateNonce, SiweMessage } from "siwe"
@@ -127,6 +128,7 @@ export type ArcoAppServices = {
   readonly arcoUSDRecalls?: ArcoUSDRecalls
   /** ArcoUSD admin reads (snapshots, queue, flows) and the processQueue builder. */
   readonly arcoUSDAdmin?: ArcoUSDAdmin
+  readonly arcoUSDAlerts?: ArcoUSDAlertsAdmin
   readonly stocksMarketClock?: StocksMarketDataPluginOptions["marketClock"]
   readonly stocks?: StocksPluginOptions
   readonly arco: PrismaArcoService
@@ -1007,6 +1009,19 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
       return { transaction: result.transaction, symbol: result.symbol, maxCount: result.maxCount, preview: result.preview }
     },
   )
+
+  // ArcoUSD watcher alerts (docs/operations/arcousd-alerts.md): what is open, pending and recently
+  // resolved, the watcher's last run and which channels are on (never their credentials).
+  const arcoUSDAlerts = () => services.arcoUSDAlerts ?? inertArcoUSDAlerts(GIWA_CHAIN_ID)
+
+  app.get("/api/v1/admin/arcousd/alerts", { preHandler: requireOperator }, async () => arcoUSDAlerts().view())
+
+  // A test message to every configured channel (vault:write; at most one per 30 seconds).
+  app.post("/api/v1/admin/arcousd/alerts/test", { preHandler: requireOperator }, async (request, reply) => {
+    const result = await arcoUSDAlerts().sendTest(vaultPrincipals.get(request)?.wallet ?? null)
+    if (!result.ok) return reply.code(result.status).send({ error: result.error })
+    return { delivery: result.delivery }
+  })
 
   // Read-only monitoring dashboard aggregates (see EvmMonitoringService for the v1
   // timestamp caveats). Operator-guarded like the other admin console reads.

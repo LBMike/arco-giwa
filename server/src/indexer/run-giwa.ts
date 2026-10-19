@@ -1,16 +1,53 @@
 import { createPublicClient, http } from "viem"
+import { ArcoUSDAdmin, PrismaArcoUSDAdminStore } from "../arcousd/admin.js"
+import { parseArcoUSDAlertEnv } from "../arcousd/alert-config.js"
+import { PrismaArcoUSDAlertStore } from "../arcousd/alerts.js"
 import { parseArcoUSDEnv } from "../arcousd/config.js"
 import { ArcoUSDIndexer } from "../arcousd/indexer.js"
+import { alertChannels } from "../arcousd/notify.js"
 import { createArcoUSDChainReader } from "../arcousd/reader.js"
+import { ArcoUSDRecalls, createRecallReader, type RecallRow } from "../arcousd/recall.js"
 import { readArcoUSDRegistry } from "../arcousd/registry.js"
 import { PrismaArcoUSDIndexerStore } from "../arcousd/store.js"
+import { safeErrorText } from "../arcousd/safe-error.js"
+import { ArcoUSDWatcher } from "../arcousd/watcher.js"
 import { validateServerEnv } from "../config/env.js"
 import { createPrismaClient } from "../db/prisma.js"
 import { readRegistryFile } from "../registry/io.js"
+import { GIWA_CHAIN_ID } from "../registry/products.js"
 import { PrismaArcoService } from "../services/prisma-arco-service.js"
 import type { RawEvmLog } from "./event-decoder.js"
 import { GiwaIndexer, type GiwaIndexerRpc } from "./giwa-indexer.js"
 import { PrismaGiwaIndexerStore } from "./prisma-store.js"
+
+/** The most the indexer loop waits for one watcher round. */
+const WATCHER_BUDGET_MS = 20_000
+
+/**
+ * The promise's result, or "over-budget" after `ms`. The promise keeps running; how it ends then is
+ * reported to `onLate` (its result, or its error made safe for logs).
+ */
+async function withinBudget<T>(promise: Promise<T>, ms: number, onLate: (outcome: unknown) => void): Promise<T | { readonly mode: "over-budget" }> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let timedOut = false
+  const late = new Promise<{ readonly mode: "over-budget" }>((resolve) => {
+    timer = setTimeout(() => {
+      timedOut = true
+      resolve({ mode: "over-budget" })
+    }, ms)
+  })
+  promise
+    .then(
+      (value) => timedOut && onLate(value),
+      (error) => timedOut && onLate({ error: safeErrorText(error) }),
+    )
+    .catch(() => undefined) // a failing logger must never become an unhandled rejection
+  try {
+    return await Promise.race([promise, late])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -106,6 +143,51 @@ export async function runGiwaIndexer(envSource: NodeJS.ProcessEnv = process.env)
     snapshotIntervalMs: arcoUSDEnv.snapshotIntervalMs,
   })
 
+  // ArcoUSD watcher (docs/operations/arcousd-alerts.md): after the ArcoUSD poll, once per
+  // ARCOUSD_ALERT_INTERVAL_MS, with its own try/catch. Reads only; sends alerts to the configured
+  // Telegram / Slack channels (none configured: rows and logs only). Inert like the indexer.
+  const alertEnv = parseArcoUSDAlertEnv(envSource)
+  if (alertEnv.invalid.length) {
+    console.error(stringify({ service: "arco-arcousd-watcher", mode: "config-invalid", invalid: alertEnv.invalid }))
+  }
+  // Short, no-retry RPC reads: the watcher runs inline and must never hold up the indexer for long.
+  const watchClient = createPublicClient({ transport: http(env.indexerRpcUrl, { retryCount: 0, timeout: 5_000 }) })
+  const loadArcoUSDRegistry = () => readArcoUSDRegistry(arcoUSDEnv.registryPath)
+  let watcher: ArcoUSDWatcher | null = null
+  let lastBusyLogAt = 0
+  let arcoUSDPollSeq = 0
+  const recalls = new ArcoUSDRecalls({ chainId: GIWA_CHAIN_ID, loadRegistry: loadArcoUSDRegistry, read: createRecallReader(watchClient) })
+  watcher = new ArcoUSDWatcher({
+    chainId: GIWA_CHAIN_ID,
+    network: "GIWA Sepolia",
+    env: arcoUSDEnv,
+    alertEnv,
+    loadRegistry: loadArcoUSDRegistry,
+    readState: createArcoUSDChainReader(watchClient),
+    latestBlock: () => watchClient.getBlockNumber(),
+    indexedBlock: async () => {
+      const cursor = (await arco.getIndexerCursor(GIWA_CHAIN_ID, "arcousd")) as { lastBlock: bigint | number } | null
+      return cursor ? BigInt(cursor.lastBlock) : null
+    },
+    admin: new ArcoUSDAdmin({
+      chainId: GIWA_CHAIN_ID,
+      loadRegistry: loadArcoUSDRegistry,
+      store: new PrismaArcoUSDAdminStore(prisma),
+      liveQueueMinDelay: async () => (watcher ? watcher.liveQueueMinDelay() : null),
+    }),
+    lastSnapshotAt: async (deployment) => {
+      const row = await prisma.arcoUSDReserveSnapshot.findFirst({
+        where: { chainId: GIWA_CHAIN_ID, reserveAddress: deployment.reserveAddress.toLowerCase() },
+        orderBy: { takenAt: "desc" },
+        select: { takenAt: true },
+      })
+      return row?.takenAt ?? null
+    },
+    recalls: () => recalls.snapshot(async (reserve) => (await arco.redemptionsForWallet(reserve, GIWA_CHAIN_ID)) as RecallRow[]),
+    store: new PrismaArcoUSDAlertStore(prisma),
+    channels: alertChannels(alertEnv),
+  })
+
   const backfillFrom = envSource.INDEXER_BACKFILL_FROM ? BigInt(envSource.INDEXER_BACKFILL_FROM) : null
   const backfillTo = envSource.INDEXER_BACKFILL_TO ? BigInt(envSource.INDEXER_BACKFILL_TO) : null
   if (backfillFrom !== null && backfillTo !== null) {
@@ -130,8 +212,11 @@ export async function runGiwaIndexer(envSource: NodeJS.ProcessEnv = process.env)
     } catch (error) {
       coreError = error
     }
+    let arcoUSDPollOk = false
     try {
+      arcoUSDPollSeq++
       const result = await arcoUSDIndexer.pollOnce()
+      arcoUSDPollOk = true
       if (result.mode === "poll") console.log(stringify({ service: "arco-arcousd-indexer", mode: "poll", result }))
     } catch (error) {
       console.error(
@@ -141,6 +226,21 @@ export async function runGiwaIndexer(envSource: NodeJS.ProcessEnv = process.env)
           error: error instanceof Error ? error.message : String(error),
         }),
       )
+    }
+    try {
+      // Bounded: a slow round keeps running on its own (the next maybeRun answers "busy") while the
+      // indexer moves on. A poll that failed midway leaves rows past its cursor: no reconciling then.
+      const round = await withinBudget(watcher.maybeRun({ indexerPollOk: arcoUSDPollOk, pollSeq: () => arcoUSDPollSeq }), WATCHER_BUDGET_MS, (late) =>
+        console.log(stringify({ service: "arco-arcousd-watcher", mode: "late", outcome: late })),
+      )
+      if (round.mode === "run" || round.mode === "over-budget") console.log(stringify({ service: "arco-arcousd-watcher", mode: round.mode, round }))
+      // A round that never ends (a hung DB call) would silence the watcher: say so, once a minute.
+      if (round.mode === "busy" && round.sinceMs > 3 * WATCHER_BUDGET_MS && Date.now() - lastBusyLogAt > 60_000) {
+        lastBusyLogAt = Date.now()
+        console.error(stringify({ service: "arco-arcousd-watcher", mode: "stuck", sinceMs: round.sinceMs }))
+      }
+    } catch (error) {
+      console.error(stringify({ service: "arco-arcousd-watcher", mode: "error", error: safeErrorText(error) }))
     }
     if (coreError === null) {
       backoffMs = 1000

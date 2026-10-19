@@ -30,6 +30,9 @@ import { parseArcoUSDEnv } from "./arcousd/config.js"
 import { createArcoUSDChainReader } from "./arcousd/reader.js"
 import { ArcoUSDRecalls, createRecallReader } from "./arcousd/recall.js"
 import { ArcoUSDAdmin, createProcessQueueSimulator, PrismaArcoUSDAdminStore } from "./arcousd/admin.js"
+import { parseArcoUSDAlertEnv } from "./arcousd/alert-config.js"
+import { ArcoUSDAlertsAdmin, PrismaArcoUSDAlertStore } from "./arcousd/alerts.js"
+import { alertChannels } from "./arcousd/notify.js"
 import { readArcoUSDRegistry } from "./arcousd/registry.js"
 import { ArcoUSDService } from "./arcousd/service.js"
 
@@ -99,6 +102,20 @@ async function composeServer(
     simulateProcessQueue: createProcessQueueSimulator(rpcClient),
     // Live delay from the cached reserve read (setParams can change it after deploy).
     liveQueueMinDelay: async () => (await arcoUSD.reserveState()).reserve?.queueMinDelay ?? null,
+  })
+  // ArcoUSD alerts in the console: rows the watcher (indexer worker) writes, plus a test send to the
+  // same channels. Channel credentials stay server-side; the console only sees which are on.
+  const arcoUSDAlertEnv = parseArcoUSDAlertEnv(envSource)
+  if (arcoUSDAlertEnv.invalid.length) {
+    console.error(JSON.stringify({ service: "arco-giwa-api", arcousdAlerts: "config-invalid", invalid: arcoUSDAlertEnv.invalid }))
+  }
+  const arcoUSDAlerts = new ArcoUSDAlertsAdmin({
+    chainId: GIWA_CHAIN_ID,
+    network: "GIWA Sepolia",
+    loadRegistry: () => readArcoUSDRegistry(arcoUSDEnv.registryPath),
+    store: new PrismaArcoUSDAlertStore(prisma),
+    env: arcoUSDAlertEnv,
+    channels: alertChannels(arcoUSDAlertEnv),
   })
   const priceFeedReadAbi = parseAbi([
     "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)",
@@ -394,7 +411,7 @@ async function composeServer(
           registryPath: env.registryPath,
         },
         {
-          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD, arcoUSDRecalls, arcoUSDAdmin,
+          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD, arcoUSDRecalls, arcoUSDAdmin, arcoUSDAlerts,
           resolveStocksOperator: sessions?.resolveOperator,
           stocks: stocks ? {
             service: stocks.service,

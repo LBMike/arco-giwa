@@ -12,24 +12,32 @@ import {
   ARCOUSD_ADMIN_TABS,
   FLOW_WINDOWS,
   QUEUE_FILTERS,
+  alertBadge,
+  alertMeta,
   amountText,
   arcoUSDAdminTab,
   batchSize,
   countText,
   bpsText,
+  channelLabel,
+  deliveryText,
   durationText,
   eventLabel,
   gateText,
   headVerdict,
   mintHeadroomUsd,
   pauseRows,
+  payoutsPaused,
   queueFilter,
   shortAddress,
   usdCompact,
   usdText,
+  watcherStatus,
   type ArcoUSDAdminTab,
 } from "./arcousd-admin"
 import type {
+  GiwaArcoUSDAlertDelivery,
+  GiwaArcoUSDAlerts,
   GiwaArcoUSDFlows,
   GiwaArcoUSDProcessQueue,
   GiwaArcoUSDQueue,
@@ -38,10 +46,11 @@ import type {
   GiwaArcoUSDSnapshots,
 } from "./types"
 
-// Admin · ArcoUSD (docs/admin-console.md "ArcoUSD 관리자 API"): the reserve at a glance, the
-// Standard queue with the manual processQueue (operator-signed), and reserve flows. Reads the
-// public reserve state plus the operator-only snapshots / queue / flows routes; the only write is
-// a transaction the server builds and the operator wallet signs.
+// Admin · ArcoUSD (docs/admin-console.md "ArcoUSD 관리자 API"): the reserve at a glance with the
+// watcher's alerts, the Standard queue with the manual processQueue (operator-signed), and reserve
+// flows. Reads the public reserve state plus the operator-only snapshots / queue / flows / alerts
+// routes; the writes are a transaction the server builds and the operator wallet signs, and a test
+// alert the server sends to its configured channels.
 
 const REFRESH_FAST = 30_000
 const REFRESH_SLOW = 60_000
@@ -72,6 +81,13 @@ export default function GiwaAdminArcoUSDPage() {
     enabled: auth.ready && tab === "queue",
     refetchInterval: REFRESH_FAST,
     // A filter change keeps the cards (and any processQueue in flight) on screen while it loads.
+    placeholderData: keepPreviousData,
+  })
+  const alertsQuery = useQuery({
+    queryKey: ["giwa", "arcousd-admin", "alerts"],
+    queryFn: () => giwaApi.admin.arcousdAlerts(auth),
+    enabled: auth.ready && tab === "overview",
+    refetchInterval: REFRESH_FAST,
     placeholderData: keepPreviousData,
   })
   const flowsQuery = useQuery({
@@ -113,6 +129,12 @@ export default function GiwaAdminArcoUSDPage() {
         error: snapshotsQuery.isError ? readableError(snapshotsQuery.error) : null,
         days: trendDays,
         onDaysChange: setTrendDays,
+        alerts: {
+          alerts: alertsQuery.data ?? null,
+          loading: alertsQuery.isLoading,
+          error: alertsQuery.isError ? readableError(alertsQuery.error) : null,
+          onTest: async () => (await giwaApi.admin.arcousdAlertTest(auth)).delivery,
+        },
       }}
       queue={{
         queue: queueQuery.data ?? null,
@@ -144,6 +166,16 @@ type OverviewProps = {
   error?: string | null
   days: number
   onDaysChange: (days: number) => void
+  alerts?: AlertsProps
+}
+
+type AlertsProps = {
+  alerts: GiwaArcoUSDAlerts | null
+  loading?: boolean
+  error?: string | null
+  /** Sends a test message to the configured channels (vault:write). */
+  onTest: () => Promise<GiwaArcoUSDAlertDelivery>
+  now?: number
 }
 
 type QueueProps = {
@@ -269,9 +301,19 @@ function OverviewView({
   error,
   days,
   onDaysChange,
+  alerts,
 }: OverviewProps & { reserve: GiwaArcoUSDReserve | null; reserveLoading?: boolean; hasAuth: boolean }) {
-  if (reserveLoading && !reserve) return <LoadingNote>Loading the reserve…</LoadingNote>
-  if (!reserve) return null
+  // Alerts come from the operator API, not the public reserve read: they stay up when that read is down.
+  const alertsCard = alerts ? <AlertsCard hasAuth={hasAuth} {...alerts} /> : null
+  if (reserveLoading && !reserve) {
+    return (
+      <div className="space-y-6">
+        {alertsCard}
+        <LoadingNote>Loading the reserve…</LoadingNote>
+      </div>
+    )
+  }
+  if (!reserve) return alertsCard
   if (reserve.status === "not-deployed") {
     return (
       <Card>
@@ -292,6 +334,8 @@ function OverviewView({
           <p className="text-sm text-[var(--color-arco-down)]">The API could not read the reserve. Fund buys are blocked until it can.</p>
         </Card>
       )}
+
+      {alertsCard}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <TotalCard label="Total backing" sub="buffers + MMF value + pending recalls" value={state ? usdText(state.totalBackingUsd) : null} />
@@ -415,6 +459,102 @@ function OverviewView({
   )
 }
 
+/** What the watcher found (docs/operations/arcousd-alerts.md), whether it is alive, and a test send. */
+export function AlertsCard({ hasAuth, alerts, loading, error, onTest, now = Date.now() }: AlertsProps & { hasAuth: boolean }) {
+  const [testing, setTesting] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
+
+  async function test() {
+    setTesting(true)
+    setResult(null)
+    try {
+      const delivery = await onTest()
+      setResult({ ok: Object.values(delivery).some((item) => item?.ok), text: deliveryText(delivery) })
+    } catch (failure) {
+      setResult({ ok: false, text: readableError(failure) })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const channels = alerts ? (["telegram", "slack"] as const).filter((id) => alerts.channels[id]) : []
+  const watcher = alerts ? watcherStatus(alerts, now) : null
+  const shown = alerts?.alerts ?? []
+  const openCount = shown.filter((alert) => alert.status === "OPEN").length
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <CardTitle>Alerts</CardTitle>
+          {alerts?.status === "live" && <Pill tone={openCount ? "attention" : "neutral"}>{openCount ? `${openCount} open` : "None open"}</Pill>}
+        </div>
+        {alerts && (
+          <p className="text-[11px] text-[var(--color-arco-muted)]">
+            {channels.length ? `Sends to ${channels.map(channelLabel).join(" and ")}` : "No channel configured: alerts are only recorded here"}
+          </p>
+        )}
+      </div>
+      {!hasAuth ? (
+        <p className="mt-3 text-sm text-[var(--color-arco-muted)]">Sign in as an operator to load alerts.</p>
+      ) : loading && !alerts ? (
+        <LoadingNote>Loading alerts…</LoadingNote>
+      ) : error && !alerts ? (
+        <ErrorLine>Could not load alerts: {error}</ErrorLine>
+      ) : alerts ? (
+        <>
+          {error && <ErrorLine>Could not refresh alerts: {error}. Showing the last loaded data.</ErrorLine>}
+          {alerts.status === "unavailable" && <ErrorLine>Alerts are unavailable: {alerts.error ?? "unknown error"}</ErrorLine>}
+          {alerts.status === "not-deployed" && <p className="mt-2 text-sm text-[var(--color-arco-muted)]">ArcoUSD is not deployed: there is nothing to watch yet.</p>}
+          {alerts.status === "live" && watcher && (
+            <p className={`mt-2 break-words text-sm ${watcher.tone === "negative" ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-text-soft)]"}`}>{watcher.text}</p>
+          )}
+          {alerts.invalidSettings.length > 0 && (
+            <p className="mt-2 break-words text-sm text-[var(--color-arco-down)]">Ignored invalid settings: {alerts.invalidSettings.join(", ")}</p>
+          )}
+          {alerts.status === "live" &&
+            (shown.length ? (
+              <ul className="mt-3 divide-y divide-[var(--color-arco-border)]">
+                {shown.map((alert) => {
+                  const badge = alertBadge(alert)
+                  return (
+                    <li key={alert.key} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-start sm:gap-3">
+                      <div className="shrink-0 sm:w-24">
+                        <Pill tone={badge.tone}>{badge.label}</Pill>
+                      </div>
+                      <div className="min-w-0">
+                        <p className={`text-sm font-medium ${alert.status === "RESOLVED" ? "text-[var(--color-arco-text-soft)]" : "text-[var(--color-arco-ink)]"}`}>{alert.title}</p>
+                        {alert.status !== "RESOLVED" && <p className="mt-0.5 break-words text-sm text-[var(--color-arco-text-soft)]">{alert.detail}</p>}
+                        <p className="mt-1 text-[11px] text-[var(--color-arco-muted)]">{alertMeta(alert, now)}</p>
+                        {alert.status !== "RESOLVED" &&
+                          alert.deliveryErrors.map((failure) => (
+                            <p key={failure.channel} className="mt-0.5 break-words text-[11px] text-[var(--color-arco-down)]">
+                              {channelLabel(failure.channel)} did not take the last send: {failure.error}
+                            </p>
+                          ))}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm text-[var(--color-arco-muted)]">Nothing open, pending or resolved in the last 24 hours.</p>
+            ))}
+          <AdminWriteGroup className="mt-4 border-t border-[var(--color-arco-border)] pt-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <SmallButton onClick={() => void test()} disabled={testing || channels.length === 0}>
+                {testing ? "Sending…" : "Send test alert"}
+              </SmallButton>
+              <p aria-live="polite" className={`min-w-0 break-words text-[11px] ${result && !result.ok ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-text-soft)]"}`}>
+                {result?.text ?? (channels.length ? "" : "Set ARCOUSD_ALERT_TELEGRAM_* or ARCOUSD_ALERT_SLACK_WEBHOOK_URL on the server to send alerts.")}
+              </p>
+            </div>
+          </AdminWriteGroup>
+        </>
+      ) : null}
+    </Card>
+  )
+}
+
 function BackingChart({ snapshots }: { snapshots: GiwaArcoUSDSnapshots | null }) {
   const points = (snapshots?.points ?? []).map((point) => ({
     label: shortDateTime(point.takenAt, (snapshots?.days ?? 30) <= 7),
@@ -503,7 +643,7 @@ function QueueView({
   }
   const reserveAssets = reserve?.reserve?.assets ?? []
   const state = reserve?.reserve
-  const payoutPaused = Boolean(state && (state.reservePaused || state.arcoUSDPaused || state.arcoUSDBurnPaused))
+  const payoutPaused = payoutsPaused(state)
   return (
     <div className="space-y-6">
       {error && <ErrorLine>Could not refresh the queue: {error}. Showing the last loaded data.</ErrorLine>}

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import Fastify from "fastify"
-import { toEventSignature, toFunctionSignature, type AbiEvent, type AbiFunction } from "viem"
+import { toEventSignature, toFunctionSelector, toFunctionSignature, type AbiEvent, type AbiFunction } from "viem"
 import { reserveRecallAbi } from "./recall.js"
 import {
   ARCOUSD_BURN_SELECTOR,
@@ -13,6 +13,7 @@ import {
   DEPOSIT_SELECTOR,
   lensAbi,
   reserveEventsAbi,
+  PROCESS_QUEUE_SELECTOR,
   ROUTER_BUY_SELECTOR,
   routerEventsAbi,
   SETTLE_FOR_SELECTOR,
@@ -165,6 +166,7 @@ test("chain reader: one block for every read, and every pause on the buy path is
     `${A(1)}:paused:`,
     `${A(3)}:fnPaused:${SETTLE_FOR_SELECTOR}`,
     `${A(3)}:fnPaused:${DEPOSIT_SELECTOR}`,
+    `${A(3)}:fnPaused:${PROCESS_QUEUE_SELECTOR}`,
     `${A(3)}:paused:`,
     `${A(5)}:snapshot:${A(3)}`,
   ]
@@ -192,6 +194,26 @@ test("chain reader: one block for every read, and every pause on the buy path is
   assert.deepEqual(seen(), [...reads, `${A(6)}:fnPaused:${ROUTER_BUY_SELECTOR}`, `${A(6)}:paused:`].sort())
   assert.ok(calls.every((call) => call.blockNumber === 778n))
   assert.deepEqual([withRouter.routerPaused, withRouter.arcoUSDBurnPaused], [true, false])
+
+  // Reserve.fnPaused(processQueue) is read too, and a given block pins every read to it (the
+  // watcher compares the chain with the indexer at the indexer's own block).
+  calls.length = 0
+  let headAsked = false
+  const pinnedClient = {
+    getBlockNumber: async () => {
+      headAsked = true
+      return 999n
+    },
+    readContract: async (args: { address: string; functionName: string; args?: readonly unknown[]; blockNumber?: bigint }) => {
+      calls.push(args)
+      if (args.functionName === "snapshot") return snap
+      return args.functionName === "fnPaused" && args.address === A(3) && args.args?.[0] === PROCESS_QUEUE_SELECTOR
+    },
+  }
+  const pinned = await createArcoUSDChainReader(pinnedClient as never)(deployedArcoUSD(registry(), 91342)!, 555n)
+  assert.equal(headAsked, false)
+  assert.ok(calls.every((call) => call.blockNumber === 555n))
+  assert.deepEqual([pinned.blockNumber, pinned.queuePaused, pinned.settlementPaused], ["555", true, false])
 })
 
 test("buy gate: inactive until deployed, open above the threshold, closed below, paused or unreadable", async () => {
@@ -336,6 +358,19 @@ test("inline ABIs match the compiled ArcoUSD artifacts (no drift)", () => {
     const compiled = compiledReserve.find((candidate) => toFunctionSignature(candidate) === toFunctionSignature(fn))
     assert.ok(compiled, `ArcoUSDReserve has no ${toFunctionSignature(fn)}`)
     assert.equal(outputsShape(fn), outputsShape(compiled), `${fn.name} outputs differ`)
+  }
+
+  // Every function whose pause switch the reader checks exists on its contract.
+  const selectorsOf = (name: string) =>
+    artifact(name)
+      .filter((item): item is AbiFunction => item.type === "function")
+      .map((fn) => toFunctionSelector(toFunctionSignature(fn)))
+  for (const [name, selectors] of [
+    ["ArcoUSDReserve", [SETTLE_FOR_SELECTOR, DEPOSIT_SELECTOR, PROCESS_QUEUE_SELECTOR]],
+    ["ArcoUSD", [ARCOUSD_BURN_SELECTOR, ARCOUSD_MINT_SELECTOR]],
+    ["ArcoRouter", [ROUTER_BUY_SELECTOR]],
+  ] as const) {
+    for (const selector of selectors) assert.ok(selectorsOf(name).includes(selector), `${name} has no function ${selector}`)
   }
 
   const inlineSnapshot = lensAbi.find((item) => item.type === "function" && item.name === "snapshot") as AbiFunction
