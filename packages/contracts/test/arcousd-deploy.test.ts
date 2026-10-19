@@ -5,6 +5,8 @@ import { mkdtempSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import path from "path"
 import { defaultArcoUSDRegistry, loadArcoUSDRegistry, type ArcoUSDRegistry } from "../scripts/arcousd/arcousd-registry"
+import { loadCoreRefs } from "../scripts/arcousd/core-refs"
+import { loadRegistry, registryFilePath } from "../scripts/deploy-registry"
 import { planArcoUSDDeployment, runArcoUSDDeployment, SAVINGS_SEED_HOLDER, type CoreRefs } from "../scripts/arcousd/deploy-steps"
 
 // Runs the SAME executor the GIWA deploy script uses (scripts/arcousd/deploy-steps.ts) against a
@@ -76,6 +78,25 @@ async function deploy(core: CoreRefs, registry?: ArcoUSDRegistry) {
   })
   return { result, saves }
 }
+
+describe("ArcoUSD deploy: core registry refs", () => {
+  const repoRoot = path.resolve(__dirname, "../../..")
+  const deployer = "0xFDCf58E2954988E5bf0446aAF1284A1069136F29" as const
+
+  it("reads the real GIWA core registry, extra products (bEQTY) included", () => {
+    const core = loadCoreRefs(registryFilePath(repoRoot), deployer, repoRoot)
+    expect(core.products).to.include.keys("umint", "ibenji", "beqty")
+    for (const id of ["umint", "ibenji", "beqty"]) {
+      expect(core.products[id].depositVault).to.match(/^0x[0-9a-fA-F]{40}$/)
+    }
+    expect(core.assets.tUSDC.decimals).to.equal(6)
+    expect(core.faucet).to.match(/^0x[0-9a-fA-F]{40}$/)
+  })
+
+  it("loading with the built-in product list alone fails on the extra product (the dry-run error this fixes)", () => {
+    expect(() => loadRegistry(registryFilePath(repoRoot), deployer, repoRoot, "cancun")).to.throw(/Unknown product beqty/)
+  })
+})
 
 describe("ArcoUSD deploy executor", () => {
   it("plans every step for a fresh registry", async () => {

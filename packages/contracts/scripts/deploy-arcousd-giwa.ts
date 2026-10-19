@@ -2,7 +2,7 @@ import { execFileSync } from "child_process"
 import path from "path"
 import { BigNumber, Contract, ContractReceipt, ContractTransaction, Signer, utils } from "ethers"
 import { ethers, network } from "hardhat"
-import { gitCommit, loadRegistry, registryFilePath } from "./deploy-registry"
+import { gitCommit, registryFilePath } from "./deploy-registry"
 import { EXPECTED_GIWA_DEPLOYER } from "./keystore-constants"
 import {
   arcoUSDRegistryPath,
@@ -11,6 +11,7 @@ import {
   writeArcoUSDRegistry,
   type Address,
 } from "./arcousd/arcousd-registry"
+import { loadCoreRefs } from "./arcousd/core-refs"
 import { planArcoUSDDeployment, runArcoUSDDeployment, type CoreRefs } from "./arcousd/deploy-steps"
 
 // Deploys ArcoUSD v1 on GIWA Sepolia (docs/specs/arcousd-v1.md, docs/operations/arcousd-deploy.md):
@@ -84,25 +85,7 @@ function ensureContractTestsPass() {
 }
 
 function coreRefs(): CoreRefs {
-  const registry = loadRegistry(registryFilePath(repoRoot()), EXPECTED_GIWA_DEPLOYER as Address, repoRoot(), "cancun")
-  const usdc = registry.assets.find((asset) => asset.symbol === "tUSDC")
-  if (!usdc?.contract.proxy) throw new Error("Core registry has no tUSDC proxy")
-  if (!registry.faucet.proxy) throw new Error("Core registry has no faucet proxy")
-  const products: CoreRefs["products"] = {}
-  for (const product of registry.products) {
-    if (!product.depositVault.proxy || !product.redemptionVault.proxy || !product.productToken.proxy) continue
-    products[product.productId] = {
-      depositVault: product.depositVault.proxy,
-      redemptionVault: product.redemptionVault.proxy,
-      productToken: product.productToken.proxy,
-    }
-  }
-  return {
-    admin: EXPECTED_GIWA_DEPLOYER as Address,
-    faucet: registry.faucet.proxy,
-    assets: { tUSDC: { address: usdc.contract.proxy, decimals: usdc.decimals } },
-    products,
-  }
+  return loadCoreRefs(registryFilePath(repoRoot()), EXPECTED_GIWA_DEPLOYER as Address, repoRoot())
 }
 
 async function preflight(
