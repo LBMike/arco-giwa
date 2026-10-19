@@ -233,7 +233,7 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 - **인덱서**: 코어 인덱서와 같은 프로세스에서 별도 커서(`arcousd`)로 Reserve와 Router 이벤트를 읽는다(주소마다 그 컨트랙트의 ABI로 해석). 모든 이벤트는 `EvmIndexedEvent`에 남기되 `walletAddress`를 넣지 않아 포트폴리오 활동 내역에는 아직 나오지 않는다. Router 매수는 상품 입금 볼트의 `ProductDeposit`으로 활동 내역에 나온다: 코어 인덱서가 입금 이벤트를 `recipient`(지분을 받은 지갑)에게 붙인다(Router 매수는 보낸 주소가 Router다). 상환 이벤트는 그대로 `sender`. 대기열 요청은 `ArcoUSDRedeemRequest`에 기록하고, 상태는 컨트랙트와 같은 방향으로만 바뀐다(QUEUED → PAID·PAYOUT_FAILED·CANCELLED, PAYOUT_FAILED → CANCELLED). 재인덱싱해도 되돌아가지 않는다. 5분마다 Lens 스냅샷을 `ArcoUSDReserveSnapshot`에 남긴다.
 - **서버 API**: `GET /api/v1/arcousd/reserve`(리저브 상태, 15초 캐시. 자산별 Instant·스왑 수수료, `contracts.router`와 Router로 살 수 있는 상품 `contracts.routerProducts` 포함), `GET /api/v1/arcousd/gate`(매수 게이트). 게이트는 미배포면 `inactive`, 배포 뒤에는 실패 시 닫힘이다. 읽기 실패, Reserve 또는 `settleFor` 일시정지, ArcoUSD 또는 `burn` 일시정지(`settleFor`가 소각하므로), Router·Reserve `deposit`·ArcoUSD `mint` 일시정지(`buy-paused`), `mintCap`까지 남은 양이 기준 금액 미만(`mint-cap`), 자산 없음, 게이트 설정 오류, 정산 가능 잔액이 기준(기본 tUSDC 1,000달러) 미만이면 `closed`. ArcoUSD 환경변수가 잘못돼도 API·인덱서는 그대로 뜬다.
 
-- **관리자 API(2b)**: `GET /api/v1/admin/arcousd/{snapshots,queue,flows}`와 `POST /api/v1/admin/arcousd/process-queue`(서명할 `processQueue`와 eth_call 미리보기). 인덱서 테이블만 읽는다. 대기열은 T+2(48시간) 초과를 표시한다. 자세한 내용은 `docs/admin-console.md`의 "ArcoUSD 관리자 API".
+- **관리자 API와 화면(2b)**: `GET /api/v1/admin/arcousd/{snapshots,queue,flows}`와 `POST /api/v1/admin/arcousd/process-queue`(서명할 `processQueue`와 eth_call 미리보기). 인덱서 테이블만 읽는다. 대기열은 T+2(48시간) 초과를 표시한다. 콘솔 화면은 Vaults → ArcoUSD(Overview·Queue·Flows). 자세한 내용은 `docs/admin-console.md`의 "ArcoUSD 관리자 API".
 
 - **고객 화면(2c)**: Router가 살 수 있는 펀드(`contracts.routerProducts`)의 매수 패널에서 "You pay" 칸이 드롭다운이 된다. USDC(펀드 자체 결제 자산)가 기본이고 USDT·RLUSD·ArcoUSD 순으로 고를 수 있다. 고른 자산을 Router에 승인하고 `buy` 한 번으로 산다. 스왑 수수료 줄과 수수료를 뺀 받을 지분을 보여 준다. 매수 게이트가 `closed`면(서버가 리저브를 못 읽은 `unavailable` 포함) 매수 버튼을 막고 "Purchases are temporarily paused while the reserve refills."를 띄운다. 첫 응답 전에는 펀드 매수 버튼이 "Loading…"으로 잠긴다. Savings, Router가 없는 상태, Router 대상이 아닌 펀드는 기존 볼트 직접 매수 그대로다. API 자체가 응답하지 못하면 Router 주소를 알 수 없으므로 직접 매수로 남는다(리저브를 거치지 않는다). 게이트는 결제 자산과 관계없이 펀드 매수 전체를 막는다(ArcoUSD로 내는 매수 포함). 테스트 자산 받기는 tUSDT·tRLUSD 잔고도 보여 준다(`dripAll`이 이미 지급).
 
@@ -241,7 +241,7 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 
 아직 하지 않는 것:
 
-- 관리자 ArcoUSD 화면(2b의 API 위에, UI 기획 뒤). 키퍼·대사·알림(3단계).
+- 키퍼·대사·알림(3단계).
 
 ## 6. 신뢰 가정
 

@@ -18,7 +18,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 /** Modules that only the admin UI loads, as paths relative to the repository root. */
 export const ADMIN_MODULES = [
   /^src\/admin\//,
-  /^src\/demo\/giwa\/(?:GiwaAdminLayout|RequireGiwaAdmin|AdminPrices|AdminConfig|AdminFeatured|AdminOperations|AdminMonitoring|VaultAdmin|PriceFeedAdminPanel|admin-context|admin-roles)\.tsx?$/,
+  /^src\/demo\/giwa\/(?:GiwaAdminLayout|RequireGiwaAdmin|AdminPrices|AdminConfig|AdminFeatured|AdminOperations|AdminMonitoring|AdminArcoUSD|arcousd-admin|VaultAdmin|PriceFeedAdminPanel|admin-context|admin-roles)\.tsx?$/,
   /^src\/demo\/giwa\/stocks-market\/StocksAdminPage\.tsx$/,
   /^src\/demo\/giwa\/stocks-admin\//,
   /^src\/demo\/giwa\/stocks-trading-control\//,

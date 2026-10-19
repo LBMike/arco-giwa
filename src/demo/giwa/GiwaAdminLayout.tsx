@@ -4,6 +4,7 @@ import { GiwaAdminContext } from "./admin-context"
 import { operatorTokenAuth } from "./api"
 import { AdminNotice } from "./components"
 import {
+  GIWA_ADMIN_ARCOUSD_ROUTE,
   GIWA_ADMIN_CONFIG_ROUTE,
   GIWA_ADMIN_FEATURED_ROUTE,
   GIWA_ADMIN_MONITORING_ROUTE,
@@ -20,6 +21,7 @@ const ADMIN_TABS = [
   { label: "Featured cards", to: GIWA_ADMIN_FEATURED_ROUTE },
   { label: "Vault Operations", to: GIWA_ADMIN_OPERATIONS_ROUTE },
   { label: "Monitoring", to: GIWA_ADMIN_MONITORING_ROUTE },
+  { label: "ArcoUSD", to: GIWA_ADMIN_ARCOUSD_ROUTE },
 ] as const
 
 function storedOperatorToken() {

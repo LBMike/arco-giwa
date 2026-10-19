@@ -153,9 +153,11 @@ function preparedTransactionValue(tx: UnsignedAdminTransaction) {
   return tx.value === "0x0" ? 0n : BigInt(tx.value)
 }
 
+// "simulated": the server already ran the call (eth_call) and it would succeed (ArcoUSD processQueue).
+// "failed" (or anything else) stops the send before the wallet is asked.
 function assertBackendSimulationHint(tx: UnsignedAdminTransaction) {
   const status = tx.simulation?.status?.toLowerCase()
-  if (!status || status === "success" || status === "ok" || status === "not-run" || status === "skipped") return
+  if (!status || status === "success" || status === "ok" || status === "simulated" || status === "not-run" || status === "skipped") return
   throw new Error(tx.simulation?.reason ? `Backend simulation failed: ${tx.simulation.reason}` : "Backend simulation failed")
 }
 

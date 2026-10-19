@@ -1,7 +1,7 @@
 import { GIWA_ADMIN_ROUTE } from "./routes"
 
 // Legacy /admin/<tab> pages that the admin console keeps under /vaults/<tab>.
-const VAULT_TABS = new Set(["operations", "prices", "config", "featured", "monitoring"])
+const VAULT_TABS = new Set(["operations", "prices", "config", "featured", "monitoring", "arcousd"])
 
 /**
  * Where a legacy admin path of the customer app goes when the build names the separate admin console
