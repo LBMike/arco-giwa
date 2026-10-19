@@ -4,6 +4,7 @@ import {
   earliestBlock,
   type Address,
   type ArcoUSDContract,
+  type ArcoUSDPlainContract,
   type ArcoUSDRegistry,
   type ArcoUSDReserveAsset,
 } from "./arcousd-registry"
@@ -38,7 +39,14 @@ const ROLE = (name: string) => utils.keccak256(utils.toUtf8Bytes(name))
 const MINTER_ROLE = ROLE("MINTER_ROLE")
 const BURNER_ROLE = ROLE("BURNER_ROLE")
 const SETTLER_ROLE = ROLE("SETTLER_ROLE")
+const REWARDER_ROLE = ROLE("REWARDER_ROLE")
 const SETTLER_GRANT_KEY = "Reserve:SETTLER_ROLE:router"
+// Keyed by the distributor's address: a redeployed distributor gets its own grants (revoking the
+// old one's MINTER_ROLE is a manual, reviewed step).
+const distributorMinterKey = (address: string | null) => `ArcoUSD:MINTER_ROLE:distributor:${address ?? "new"}`
+const distributorRewarderKey = (address: string | null) => `sArcoUSD:REWARDER_ROLE:distributor:${address ?? "new"}`
+/** Holder of the sArcoUSD seed shares (nobody can redeem them). */
+export const SAVINGS_SEED_HOLDER = "0x000000000000000000000000000000000000dEaD"
 const FAUCET_DRIP: Record<string, string> = { tUSDT: "1000", tRLUSD: "1000" }
 const FAUCET_COOLDOWN = 24 * 60 * 60
 
@@ -51,6 +59,11 @@ const FAUCET_ABI = [
   "function configureAsset(address token,uint256 dripAmount,uint256 dailyCap,uint256 globalCap,uint256 cooldown,bool enabled)",
 ]
 const DEPOSIT_VAULT_ABI = ["function paymentToken() view returns (address)"]
+const ERC20_ABI = [
+  "function balanceOf(address account) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+]
 const PRODUCT_TOKEN_ABI = [
   "function greenlistEnforced() view returns (bool)",
   "function isGreenlisted(address account) view returns (bool)",
@@ -63,6 +76,11 @@ const MAX_STRATEGIES = 8
 const MAX_INSTANT_FEE_BPS = 100
 const BPS = 10_000
 const MAX_QUEUE_MIN_DELAY = 7 * 24 * 60 * 60
+// sArcoUSD and ArcoUSDSavingsDistributor limits (contract constants).
+const HOUR = 60 * 60
+const MAX_SAVINGS_PERIOD = 30 * 24 * HOUR
+const MAX_SAVINGS_APR_BPS = 5000
+const MAX_SAVINGS_MARGIN_BPS = 1000
 const UINT = /^\d+$/
 
 // GIWA's RPC can lag on read-after-write right after a confirmed deploy (see deploy-giwa.ts
@@ -117,6 +135,16 @@ export function validateArcoUSDInputs(registry: ArcoUSDRegistry, core: CoreRefs)
     if (routerProducts.has(vault.productId)) errors.push(`Router vault product ${vault.productId} is listed twice`)
     routerProducts.add(vault.productId)
   }
+  const savings = registry.savings.params
+  intIn(savings.vestingPeriod, HOUR, MAX_SAVINGS_PERIOD, "savings.params.vestingPeriod")
+  intIn(savings.minInterval, HOUR, MAX_SAVINGS_PERIOD, "savings.params.minInterval")
+  intIn(savings.maxAprBps, 0, MAX_SAVINGS_APR_BPS, "savings.params.maxAprBps")
+  intIn(savings.reserveMarginBps, 0, MAX_SAVINGS_MARGIN_BPS, "savings.params.reserveMarginBps")
+  // The distributor refuses an interval longer than the vesting period (it would cut the APR cap).
+  if (Number.isInteger(savings.minInterval) && Number.isInteger(savings.vestingPeriod) && savings.minInterval > savings.vestingPeriod) {
+    errors.push("savings.params.minInterval must not exceed savings.params.vestingPeriod")
+  }
+  if (!seedAsset(registry, core)) errors.push("savings seed needs a fee-free Reserve asset from the core registry (tUSDC)")
   if (errors.length) throw new Error(`ArcoUSD deploy inputs invalid: ${errors.join("; ")}`)
 }
 
@@ -171,6 +199,29 @@ export function planArcoUSDDeployment(registry: ArcoUSDRegistry, core: CoreRefs)
   for (const vault of registry.routerVaults) {
     if (!vault.configured) steps.push({ key: `router:${vault.productId}`, label: `ArcoRouter.setVault(${vault.productId} deposit vault, true)` })
   }
+  const savings = registry.savings
+  if (!savings.vault.proxy || savings.vault.pending) {
+    steps.push({ key: "deploy:SArcoUSD", label: `deploy sArcoUSD proxy (vesting ${savings.params.vestingPeriod}s)${resume(savings.vault.pending)}` })
+  }
+  if (!savings.distributor.address || savings.distributor.pending) {
+    const { minInterval, maxAprBps, reserveMarginBps } = savings.params
+    steps.push({
+      key: "deploy:ArcoUSDSavingsDistributor",
+      label: `deploy ArcoUSDSavingsDistributor (every ${minInterval}s, APR cap ${maxAprBps} bps, margin ${reserveMarginBps} bps)${resume(savings.distributor.pending)}`,
+    })
+  }
+  if (!savings.zap.address || savings.zap.pending) {
+    steps.push({ key: "deploy:ArcoSavingsZap", label: `deploy ArcoSavingsZap${resume(savings.zap.pending)}` })
+  }
+  if (!registry.roleGrants.some((grant) => grant.key === distributorMinterKey(savings.distributor.address))) {
+    steps.push({ key: "grant:distributor:MINTER_ROLE", label: "ArcoUSD.grantRole(MINTER_ROLE, ArcoUSDSavingsDistributor)" })
+  }
+  if (!registry.roleGrants.some((grant) => grant.key === distributorRewarderKey(savings.distributor.address))) {
+    steps.push({ key: "grant:distributor:REWARDER_ROLE", label: "sArcoUSD.grantRole(REWARDER_ROLE, ArcoUSDSavingsDistributor)" })
+  }
+  if (!savings.seeded) {
+    steps.push({ key: "seed:sArcoUSD", label: `sArcoUSD.seed(): 1 sArcoUSD for ${SAVINGS_SEED_HOLDER} and open deposits (1 ArcoUSD from the deployer, made from ${seedAsset(registry, core)?.symbol ?? "tUSDC"} via the Reserve if needed)` })
+  }
   if (!registry.deployed) steps.push({ key: "finalize", label: "mark registry deployed" })
   return steps
 }
@@ -186,7 +237,7 @@ export async function runArcoUSDDeployment(ctx: DeployContext): Promise<ArcoUSDR
   registry.admin = signer.address as Address
   const tracked = { confirm, log }
 
-  // 1-4. Test assets (tUSDT, tRLUSD), ArcoUSD, Reserve, Lens, Router. Each deploy is recorded as pending
+  // 1-4 (and 11). Test assets (tUSDT, tRLUSD), ArcoUSD, Reserve, Lens, Router (and the Savings contracts). Each deploy is recorded as pending
   // (address + tx hash) BEFORE waiting, so a timeout or crash is settled by receipt on re-run.
   const proxyDeploy = (current: ArcoUSDContract, label: string, contractName: string, args: () => unknown[], assign: (next: ArcoUSDContract) => void) =>
     ensureDeployed(
@@ -232,23 +283,41 @@ export async function runArcoUSDDeployment(ctx: DeployContext): Promise<ArcoUSDR
       (next) => (registry.reserve = next),
     )
   }
-  if (!registry.lens.address || registry.lens.pending) {
-    await ensureDeployed(
-      "ArcoUSDReserveLens",
-      registry.lens,
-      async () => (await ethers.getContractFactory("ArcoUSDReserveLens", signer)).deploy(await overrides("deploy")),
+  // Plain contracts (no proxy) keep their addresses in storage, not immutables, so the runtime
+  // bytecode equals the artifact and an interrupted deploy can be matched against it.
+  const plainDeploy = (current: ArcoUSDPlainContract, contractName: string, args: () => unknown[], assign: (next: ArcoUSDPlainContract) => void) =>
+    ensureDeployed(
+      contractName,
+      current,
+      async () => (await ethers.getContractFactory(contractName, signer)).deploy(...args(), await overrides("deploy")),
       (address, deployTxHash) => {
-        registry.lens = { address, bytecodeHash: null, deployTxHash, pending: true }
+        assign({ address, bytecodeHash: null, deployTxHash, pending: true })
         save()
       },
       async (address, deployTxHash, blockNumber) => {
-        const bytecodeHash = await readbackWithRetry(() => codeHash(address), "ArcoUSDReserveLens", log)
-        registry.lens = { address, bytecodeHash, deployTxHash, blockNumber }
+        const bytecodeHash = await readbackWithRetry(() => codeHash(address), contractName, log)
+        assign({ address, bytecodeHash, deployTxHash, blockNumber })
         save()
       },
-      (address) => matchesArtifact(address, "ArcoUSDReserveLens"),
+      (address) => matchesArtifact(address, contractName),
       tracked,
     )
+  const grantAll = async (grants: { key: string; target: Contract; role: string; account: string }[]) => {
+    for (const { key, target, role, account } of grants) {
+      if (registry.roleGrants.some((grant) => grant.key === key)) continue
+      if (await target.hasRole(role, account)) {
+        registry.roleGrants.push({ key, txHash: null, status: "already-present" })
+      } else {
+        const tx = (await target.grantRole(role, account, await overrides("call"))) as ContractTransaction
+        await confirm(tx, key)
+        registry.roleGrants.push({ key, txHash: tx.hash as `0x${string}`, status: "confirmed" })
+      }
+      save()
+    }
+  }
+
+  if (!registry.lens.address || registry.lens.pending) {
+    await plainDeploy(registry.lens, "ArcoUSDReserveLens", () => [], (next) => (registry.lens = next))
   }
   if (!registry.router.proxy || registry.router.pending) {
     await proxyDeploy(registry.router, "ArcoRouter", "ArcoRouter", () => [registry.reserve.proxy, signer.address], (next) => (registry.router = next))
@@ -258,22 +327,11 @@ export async function runArcoUSDDeployment(ctx: DeployContext): Promise<ArcoUSDR
   const router = await ethers.getContractAt("ArcoRouter", registry.router.proxy!, signer)
 
   // 5. Mint/burn on ArcoUSD for the Reserve only; settleFor on the Reserve for the Router only.
-  const grants = [
+  await grantAll([
     { key: "ArcoUSD:MINTER_ROLE:reserve", target: arcoUSD, role: MINTER_ROLE, account: reserve.address },
     { key: "ArcoUSD:BURNER_ROLE:reserve", target: arcoUSD, role: BURNER_ROLE, account: reserve.address },
     { key: SETTLER_GRANT_KEY, target: reserve as Contract, role: SETTLER_ROLE, account: router.address },
-  ]
-  for (const { key, target, role, account } of grants) {
-    if (registry.roleGrants.some((grant) => grant.key === key)) continue
-    if (await target.hasRole(role, account)) {
-      registry.roleGrants.push({ key, txHash: null, status: "already-present" })
-    } else {
-      const tx = (await target.grantRole(role, account, await overrides("call"))) as ContractTransaction
-      await confirm(tx, key)
-      registry.roleGrants.push({ key, txHash: tx.hash as `0x${string}`, status: "confirmed" })
-    }
-    save()
-  }
+  ])
 
   // 6. Reserve assets.
   for (const asset of registry.reserveAssets) {
@@ -362,10 +420,82 @@ export async function runArcoUSDDeployment(ctx: DeployContext): Promise<ArcoUSDR
     save()
   }
 
+  // 11. Savings: sArcoUSD, the surplus distributor (MINTER on ArcoUSD, REWARDER on sArcoUSD), the Zap.
+  const savings = registry.savings
+  if (!savings.vault.proxy || savings.vault.pending) {
+    await proxyDeploy(savings.vault, "sArcoUSD", "SArcoUSD", () => [registry.arcoUSD.proxy, signer.address, savings.params.vestingPeriod], (next) => (savings.vault = next))
+  }
+  if (!savings.distributor.address || savings.distributor.pending) {
+    const { minInterval, maxAprBps, reserveMarginBps } = savings.params
+    await plainDeploy(
+      savings.distributor,
+      "ArcoUSDSavingsDistributor",
+      () => [reserve.address, registry.lens.address, savings.vault.proxy, signer.address, minInterval, maxAprBps, reserveMarginBps],
+      (next) => (savings.distributor = next),
+    )
+  }
+  if (!savings.zap.address || savings.zap.pending) {
+    await plainDeploy(savings.zap, "ArcoSavingsZap", () => [reserve.address, savings.vault.proxy], (next) => (savings.zap = next))
+  }
+  const sArcoUSD = await ethers.getContractAt("SArcoUSD", savings.vault.proxy!, signer)
+  const distributorAddress = savings.distributor.address!
+  await grantAll([
+    { key: distributorMinterKey(distributorAddress), target: arcoUSD, role: MINTER_ROLE, account: distributorAddress },
+    { key: distributorRewarderKey(distributorAddress), target: sArcoUSD as Contract, role: REWARDER_ROLE, account: distributorAddress },
+  ])
+
+  // 12. Seed: sArcoUSD.seed() mints MIN_SHARES (1 sArcoUSD) to 0x…dEaD for exactly 1 ArcoUSD and
+  // opens deposits in the same call (deposits stay closed until then, so nothing can front-run it).
+  // The floor shares belong to nobody, so small holders can always exit in full. Paid with the
+  // deployer's ArcoUSD, made from the base asset (tUSDC, 1:1) through the Reserve when short.
+  if (!savings.seeded) {
+    const minShares = (await sArcoUSD.MIN_SHARES()) as BigNumber
+    if ((await sArcoUSD.balanceOf(SAVINGS_SEED_HOLDER)).lt(minShares)) {
+      if (!((await sArcoUSD.totalSupply()) as BigNumber).isZero()) {
+        throw new Error(
+          `sArcoUSD ${sArcoUSD.address} already has shares but no seed (deposits were opened by hand?). seed() only runs on an empty vault: inspect it before re-running.`,
+        )
+      }
+      const arco = new Contract(registry.arcoUSD.proxy!, ERC20_ABI, signer)
+      const held = (await arco.balanceOf(signer.address)) as BigNumber
+      if (held.lt(minShares)) {
+        const base = seedAsset(registry, core)!
+        const scale = BigNumber.from(10).pow(18 - base.decimals)
+        const amount = minShares.sub(held).add(scale).sub(1).div(scale) // rounded up to whole base units
+        const token = new Contract(base.address, ERC20_ABI, signer)
+        if ((await token.balanceOf(signer.address)).lt(amount)) {
+          throw new Error(
+            `Seeding sArcoUSD needs ${utils.formatUnits(amount, base.decimals)} ${base.symbol} (or ${utils.formatEther(minShares.sub(held))} more ArcoUSD) in the deployer wallet ${signer.address}. Fund it and re-run: everything before this step is recorded.`,
+          )
+        }
+        if ((await token.allowance(signer.address, reserve.address)).lt(amount)) {
+          await confirm(await token.approve(reserve.address, amount, await overrides("call")), `${base.symbol} approve Reserve (seed)`)
+        }
+        log(`Reserve.deposit ${utils.formatUnits(amount, base.decimals)} ${base.symbol} for the sArcoUSD seed`)
+        await confirm(await reserve.deposit(base.address, amount, signer.address, await overrides("call")), "Reserve.deposit (seed)")
+      }
+      if ((await arco.allowance(signer.address, sArcoUSD.address)).lt(minShares)) {
+        await confirm(await arco.approve(sArcoUSD.address, minShares, await overrides("call")), "ArcoUSD approve sArcoUSD (seed)")
+      }
+      log(`sArcoUSD.seed() for ${SAVINGS_SEED_HOLDER}`)
+      await confirm(await sArcoUSD.seed(await overrides("call")), "sArcoUSD seed")
+    }
+    savings.seeded = true
+    save()
+  }
+
   registry.deploymentBlock = earliestBlock(registry)
   registry.deployed = true
   save()
   return registry
+}
+
+/** The fee-free Reserve asset from the core registry (tUSDC) that pays for the sArcoUSD seed. */
+function seedAsset(registry: ArcoUSDRegistry, core: CoreRefs): { symbol: string; address: Address; decimals: number } | null {
+  const asset = registry.reserveAssets.find((item) => item.swapFeeBps === 0 && core.assets[item.symbol])
+  if (!asset) return null
+  const ref = core.assets[asset.symbol]
+  return { symbol: asset.symbol, address: ref.address, decimals: ref.decimals }
 }
 
 function resolveAssetAddress(asset: ArcoUSDReserveAsset, registry: ArcoUSDRegistry, core: CoreRefs): Address {

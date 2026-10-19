@@ -19,12 +19,21 @@
 | `faucet:tUSDT`, `faucet:tRLUSD` | 파우셋에 MINTER 부여, 드립 1,000 · 일 한도 10,000 · 전체 한도 1,000,000,000 · 쿨다운 24h |
 | `greenlist:umint`, `greenlist:ibenji` | 상품 토큰이 그린리스트를 강제하면 Reserve 추가 |
 | `router:umint`, `router:ibenji`, `router:beqty` | Router가 살 수 있는 펀드 입금 볼트 등록(`setVault`). 체인의 `allowedVault`를 먼저 보고, 결제 토큰이 Reserve 자산이 아니면 보내지 않고 멈춘다 |
+| `deploy:SArcoUSD`, `deploy:ArcoUSDSavingsDistributor`, `deploy:ArcoSavingsZap` | Savings(4단계): sArcoUSD 볼트(트랜스페어런트 프록시), 수익 분배기·Zap(일반 배포) |
+| `grant:distributor:MINTER_ROLE`, `grant:distributor:REWARDER_ROLE` | 분배기에 ArcoUSD 발행 권한과 sArcoUSD 수익 추가 권한 부여 (체인에 이미 있으면 건너뜀. 기록 키에 분배기 주소가 들어간다) |
+| `seed:sArcoUSD` | `sArcoUSD.seed()`: 정확히 1 ArcoUSD로 1 sArcoUSD를 소각 주소 `0x…dEaD`에 발행하고 예치를 연다(배포 직후에는 예치가 닫혀 있다). 배포자의 ArcoUSD를 쓰고, 모자라면 tUSDC를 Reserve에 넣어 만든다. 이미 시드가 있으면 건너뛰고, 시드 없이 지분이 있으면(누가 예치를 손으로 열었으면) 멈춘다 |
 | `finalize` | `deployed: true`, `deploymentBlock` 기록 |
 
 파라미터 기본값(레지스트리 `params`): `mintCap` 10,000,000 ArcoUSD · `mmfTargetBps` 5000 ·
 `bufferFloorBps` 3000 · `queueMinDelay` 600초.
 
-**하지 않는 것:** MMF 배분(`allocate`). 상품 볼트 결제 피드 복구(0단계 B5, PR #2,
+Savings 파라미터 기본값(레지스트리 `savings.params`): `vestingPeriod` 86,400초(수익이 하루에 걸쳐
+반영) · `minInterval` 86,400초(분배는 하루 한 번, `vestingPeriod` 이하여야 함) · `maxAprBps` 2000(분배
+한 번이 시간 가중 평균 예치액의 연 20% 비율 × 최대 하루치를 넘지 않음) · `reserveMarginBps` 50(부채의
+0.5%는 항상 Reserve에 남김). 1~3단계가 이미 배포된
+레지스트리도 그대로 읽고, Savings 단계만 이어서 한다.
+
+**하지 않는 것:** 첫 수익 분배(`distribute`, 4b의 봇 또는 누구나), MMF 배분(`allocate`). 상품 볼트 결제 피드 복구(0단계 B5, PR #2,
 `docs/operations/payment-feed-repair.md`)가 GIWA에 적용된 뒤 운영자가 따로 실행한다.
 
 ## 1. 사전 조건
@@ -35,8 +44,12 @@
 - Router 볼트 상품(uMINT·iBENJI·bEQTY)의 결제 토큰이 tUSDC다 (`preflight`의
   `routerVaultPaysReserveAsset:*`).
 - 배포자 잔액이 충분하다 (드라이런에 `deployerBalanceEth` 표시).
+- 시드가 아직 없으면 배포자 지갑에 tUSDC와 ArcoUSD를 합쳐 1달러어치 이상 (`preflight`의
+  `deployerCanSeedSavings`). 모자라면 브로드캐스트가 첫 트랜잭션 전에 거부된다. (드물게 그 사이
+  잔고가 줄어 시드 단계에서 모자라면 필요한 양을 적고 멈추며, 채운 뒤 다시 실행하면 시드만 이어서 한다.)
 - 깨끗한 git 트리. 사전 테스트(`arcousd-token`, `arcousd-reserve`, `arcousd-router`,
-  `arcousd-deploy`, `storage-layout`)는 브로드캐스트 직전에 로컬 hardhat에서 자동으로 돈다.
+  `arcousd-savings`, `arcousd-deploy`, `storage-layout`)는 브로드캐스트 직전에 로컬 hardhat에서
+  자동으로 돈다.
 
 ## 2. 드라이런 (기본, 트랜잭션 없음)
 
@@ -47,7 +60,7 @@ corepack yarn hardhat run scripts/deploy-arcousd-giwa.ts --network giwaSepolia
 
 출력의 `preflight.checks`가 모두 `true`인지, `pendingSteps`가 위 표와 맞는지,
 `strategies`의 볼트 주소가 코어 레지스트리의 uMINT·iBENJI와 같은지, `reserveAssets`의
-`swapFeeBps`(tUSDC 0, tUSDT·tRLUSD 10)와 `routerVaults`의 입금 볼트 주소를 확인한다.
+`swapFeeBps`(tUSDC 0, tUSDT·tRLUSD 10)와 `routerVaults`의 입금 볼트 주소, `savings.params`를 확인한다.
 파일은 쓰지 않는다.
 
 ## 3. 브로드캐스트 (사람)
@@ -106,6 +119,10 @@ CONFIRM_GIWA_BROADCAST=I_UNDERSTAND_THIS_BROADCASTS_TO_GIWA \
 4. 확인: 파우셋에서 tUSDT를 받아 `deposit` → ArcoUSD 수령(0.1% 적게) → 소액 `redeem`(Instant) →
    `/api/v1/arcousd/reserve`의 `totalBacking`이 `totalLiabilities`보다 스왑 수수료만큼 큰지.
    `contracts.router`가 Router 주소, `contracts.routerProducts`가 `["umint","ibenji","beqty"]`인지.
+5. Savings 확인(탐색기 또는 cast): sArcoUSD `totalSupply`가 1(시드), `balanceOf(0x…dEaD)`가 1,
+   `fnPaused(deposit 선택자)`가 false(예치 열림), ArcoUSD `hasRole(MINTER_ROLE, 분배기)`, sArcoUSD
+   `hasRole(REWARDER_ROLE, 분배기)`가 true, 분배기 `preview()`가 `navOk = true`. 서버 API·화면은
+   4b·4c에서 붙는다.
 
 ## 6. 서버 환경변수 (모두 선택)
 
@@ -133,7 +150,11 @@ UI 연동(펀드 매수 버튼 차단)은 2c에서 붙인다.
 
 ## 7. 되돌리기
 
-컨트랙트는 되돌리지 않는다. 문제가 있으면 Reserve를 `pause()`하고(출금 취소 `cancelRedeem`은
+컨트랙트는 되돌리지 않는다. Savings만 멈추려면 sArcoUSD `pauseFn(deposit)`(예치만) 또는
+`pause()`(출금 포함), 분배만 멈추려면 분배기 `pause()`(Reserve 전체 일시정지 중에도 분배는 멈춘다),
+영구히 끄려면 ArcoUSD에서 분배기의 `MINTER_ROLE`을 회수한다. 분배기 교체는 이 스크립트로 하지 않는다
+(레지스트리를 손으로 고치지 않는다). 필요하면 별도 검토 절차를 만들고, 옛 분배기의 `MINTER_ROLE`을
+먼저 회수한다. 문제가 있으면 Reserve를 `pause()`하고(출금 취소 `cancelRedeem`은
 일시정지와 무관하게 열려 있다) 원인을 고친 뒤 `unpause()`한다. 매수만 막으려면 Router의
 `pauseFn(buy)`, 특정 상품만 막으려면 `setVault(볼트, false)`를 쓴다.
 

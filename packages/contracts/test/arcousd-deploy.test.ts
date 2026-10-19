@@ -5,13 +5,18 @@ import { mkdtempSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import path from "path"
 import { defaultArcoUSDRegistry, loadArcoUSDRegistry, type ArcoUSDRegistry } from "../scripts/arcousd/arcousd-registry"
-import { planArcoUSDDeployment, runArcoUSDDeployment, type CoreRefs } from "../scripts/arcousd/deploy-steps"
+import { planArcoUSDDeployment, runArcoUSDDeployment, SAVINGS_SEED_HOLDER, type CoreRefs } from "../scripts/arcousd/deploy-steps"
 
 // Runs the SAME executor the GIWA deploy script uses (scripts/arcousd/deploy-steps.ts) against a
 // local core (tUSDC, two tUSDC products standing in for uMINT and iBENJI, the faucet) and checks
 // the on-chain result, idempotence and resume-after-lost-progress.
 
 const SETTLER_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("SETTLER_ROLE"))
+const REWARDER_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("REWARDER_ROLE"))
+const SAVINGS_STEPS = [
+  "deploy:SArcoUSD", "deploy:ArcoUSDSavingsDistributor", "deploy:ArcoSavingsZap",
+  "grant:distributor:MINTER_ROLE", "grant:distributor:REWARDER_ROLE", "seed:sArcoUSD",
+]
 
 async function localCore() {
   const fixture = await deployFixture(6)
@@ -31,6 +36,8 @@ async function localCore() {
   const faucet = await deployProxy("TestAssetFaucet", [admin.address])
   // uMINT stand-in enforces its greenlist, so the Reserve must be greenlisted to hold shares.
   await fixture.product.setGreenlistEnforced(true)
+  // The deployer pays the 1 sArcoUSD seed with tUSDC through the Reserve.
+  await usdc.mint(admin.address, parse("10", 6))
   const core: CoreRefs = {
     admin: admin.address as `0x${string}`,
     faucet: faucet.address as `0x${string}`,
@@ -78,8 +85,42 @@ describe("ArcoUSD deploy executor", () => {
       "deploy:tUSDT", "deploy:tRLUSD", "deploy:ArcoUSD", "deploy:ArcoUSDReserve", "deploy:ArcoUSDReserveLens", "deploy:ArcoRouter",
       "grant:MINTER_ROLE", "grant:BURNER_ROLE", "grant:SETTLER_ROLE", "asset:tUSDC", "asset:tUSDT", "asset:tRLUSD",
       "strategy:umint", "strategy:ibenji", "faucet:tUSDT", "faucet:tRLUSD", "greenlist:umint", "greenlist:ibenji",
-      "router:umint", "router:ibenji", "finalize",
+      "router:umint", "router:ibenji", ...SAVINGS_STEPS, "finalize",
     ])
+  })
+
+  it("a registry written before Savings resumes with only the Savings steps, then distributes surplus", async () => {
+    const { core, usdc, investor } = await localCore()
+    const { result } = await deploy(core)
+    const legacy = JSON.parse(JSON.stringify(result))
+    delete legacy.savings
+    legacy.roleGrants = legacy.roleGrants.filter((grant: { key: string }) => !grant.key.includes("distributor"))
+    const dir = mkdtempSync(path.join(tmpdir(), "arcousd-registry-"))
+    const file = path.join(dir, "arcousd-giwa.json")
+    writeFileSync(file, JSON.stringify(legacy))
+    const loaded = loadArcoUSDRegistry(file, freshRegistry)
+    expect(loaded.savings.vault.proxy).to.equal(null)
+    expect(loaded.savings.params).to.deep.equal({ vestingPeriod: 86_400, minInterval: 86_400, maxAprBps: 2000, reserveMarginBps: 50 })
+    expect(planArcoUSDDeployment(loaded, core).map((step) => step.key)).to.deep.equal(SAVINGS_STEPS)
+
+    const { result: resumed } = await deploy(core, loaded)
+    // Phase 1-3 contracts are untouched; only the Savings ones are new.
+    expect([resumed.arcoUSD.proxy, resumed.reserve.proxy, resumed.lens.address, resumed.router.proxy]).to.deep.equal([
+      legacy.arcoUSD.proxy, legacy.reserve.proxy, legacy.lens.address, legacy.router.proxy,
+    ])
+    expect(resumed.savings.vault.proxy).to.not.equal(result.savings.vault.proxy)
+
+    // End to end on the resumed deployment: save through the Zap, surplus arrives, it is distributed.
+    const vault = await ethers.getContractAt("SArcoUSD", resumed.savings.vault.proxy!)
+    const zap = await ethers.getContractAt("ArcoSavingsZap", resumed.savings.zap.address!)
+    const distributor = await ethers.getContractAt("ArcoUSDSavingsDistributor", resumed.savings.distributor.address!)
+    await usdc.connect(investor).approve(zap.address, parse("1000", 6))
+    await zap.connect(investor).deposit(usdc.address, parse("1000", 6), 0, investor.address)
+    await usdc.mint(resumed.reserve.proxy, parse("100", 6))
+    await ethers.provider.send("evm_increaseTime", [86_400])
+    await ethers.provider.send("evm_mine", [])
+    await distributor.distribute()
+    expect((await vault.vestingAmount()).gt(0)).to.equal(true)
   })
 
   it("a registry written before the Router and swap fees existed loads with those steps still to do", async () => {
@@ -160,16 +201,37 @@ describe("ArcoUSD deploy executor", () => {
     expect((await product.balanceOf(investor.address)).gt(shares)).to.equal(true)
     snap = await lens.snapshot(reserve.address)
     expect(String(snap.totalBacking.sub(snap.totalLiabilities))).to.equal(String(parse("1", 18)))
+
+    // Savings: sArcoUSD over ArcoUSD, the distributor's two roles, the seed, and the Zap.
+    const vault = await ethers.getContractAt("SArcoUSD", result.savings.vault.proxy!)
+    const distributor = await ethers.getContractAt("ArcoUSDSavingsDistributor", result.savings.distributor.address!)
+    const zap = await ethers.getContractAt("ArcoSavingsZap", result.savings.zap.address!)
+    expect(await vault.asset()).to.equal(arco.address)
+    expect(String(await vault.vestingPeriod())).to.equal("86400")
+    expect(await arco.hasRole(ROLES.MINTER_ROLE, distributor.address)).to.equal(true)
+    expect(await vault.hasRole(REWARDER_ROLE, distributor.address)).to.equal(true)
+    expect(await distributor.vault()).to.equal(vault.address)
+    expect(await distributor.lens()).to.equal(lens.address)
+    expect([String(await distributor.minInterval()), await distributor.maxAprBps(), await distributor.reserveMarginBps()]).to.deep.equal(["86400", 2000, 50])
+    expect(String(await vault.balanceOf(SAVINGS_SEED_HOLDER))).to.equal(String(parse("1", 18)))
+    expect(result.savings.seeded).to.equal(true)
+    expect(result.roleGrants.map((grant) => grant.key)).to.include.members([
+      `ArcoUSD:MINTER_ROLE:distributor:${distributor.address}`, `sArcoUSD:REWARDER_ROLE:distributor:${distributor.address}`,
+    ])
+    await usdc.connect(investor).approve(zap.address, parse("50", 6))
+    await zap.connect(investor).deposit(usdc.address, parse("50", 6), 0, investor.address)
+    expect(String(await vault.balanceOf(investor.address))).to.equal(String(parse("50", 18)))
   })
 
   it("is idempotent, and resumes from lost progress by reading the chain", async () => {
     const { core } = await localCore()
     const { result } = await deploy(core)
-    const addresses = [result.arcoUSD.proxy, result.reserve.proxy, result.lens.address, result.router.proxy, ...result.testAssets.map((a) => a.contract.proxy)]
+    const savingsAddresses = (registry: ArcoUSDRegistry) => [registry.savings.vault.proxy, registry.savings.distributor.address, registry.savings.zap.address]
+    const addresses = [result.arcoUSD.proxy, result.reserve.proxy, result.lens.address, result.router.proxy, ...result.testAssets.map((a) => a.contract.proxy), ...savingsAddresses(result)]
 
     // Same registry again: nothing new is deployed and nothing reverts.
     const again = await deploy(core, JSON.parse(JSON.stringify(result)))
-    expect([again.result.arcoUSD.proxy, again.result.reserve.proxy, again.result.lens.address, again.result.router.proxy, ...again.result.testAssets.map((a) => a.contract.proxy)]).to.deep.equal(addresses)
+    expect([again.result.arcoUSD.proxy, again.result.reserve.proxy, again.result.lens.address, again.result.router.proxy, ...again.result.testAssets.map((a) => a.contract.proxy), ...savingsAddresses(again.result)]).to.deep.equal(addresses)
 
     // Lost progress after the contracts exist (grants, assets, strategies, faucet, greenlist forgotten):
     // the chain is re-read; strategies are found, not re-added (which would revert as duplicates).
@@ -180,11 +242,17 @@ describe("ArcoUSD deploy executor", () => {
     lost.testAssets.forEach((asset) => (asset.faucetConfigured = false))
     lost.greenlisted = []
     lost.routerVaults.forEach((vault) => (vault.configured = false))
+    lost.savings.seeded = false
     lost.deployed = false
+    const vault = await ethers.getContractAt("SArcoUSD", result.savings.vault.proxy!)
+    const supply = await vault.totalSupply()
     const resumed = await deploy(core, lost)
+    expect(String(await vault.totalSupply())).to.equal(String(supply)) // the seed is found, not paid twice
+    expect(resumed.result.savings.seeded).to.equal(true)
     expect(resumed.result.strategies.map((strategy) => strategy.strategyId)).to.deep.equal([0, 1])
     expect(resumed.result.roleGrants.map((grant) => grant.key)).to.have.members([
       "ArcoUSD:MINTER_ROLE:reserve", "ArcoUSD:BURNER_ROLE:reserve", "Reserve:SETTLER_ROLE:router",
+      `ArcoUSD:MINTER_ROLE:distributor:${result.savings.distributor.address}`, `sArcoUSD:REWARDER_ROLE:distributor:${result.savings.distributor.address}`,
     ])
     expect(resumed.result.roleGrants.every((grant) => grant.status === "already-present")).to.equal(true)
     expect(resumed.result.routerVaults.every((vault) => vault.configured)).to.equal(true)
@@ -226,7 +294,7 @@ describe("ArcoUSD deploy executor", () => {
     expect(result.deployed).to.equal(true)
     const reserve = await ethers.getContractAt("ArcoUSDReserve", result.reserve.proxy!)
     expect(String(await reserve.mintCap())).to.equal(result.params.mintCap)
-    // Only the Lens and Router deploys (plus grants/config calls) followed; no second Reserve proxy.
+    // Only the Lens, Router and Savings deploys (plus grants/config calls) followed; no second Reserve proxy.
     const created: string[] = []
     for (let block = blockBefore + 1; block <= (await ethers.provider.getBlockNumber()); block++) {
       for (const hash of (await ethers.provider.getBlock(block)).transactions) {
@@ -236,7 +304,11 @@ describe("ArcoUSD deploy executor", () => {
     }
     expect(created).to.include(result.lens.address)
     expect(created).to.include(result.router.proxy)
-    expect(created.filter((address) => ![result.lens.address, result.router.proxy, result.router.implementation].includes(address as `0x${string}`))).to.deep.equal([])
+    const expected = [
+      result.lens.address, result.router.proxy, result.router.implementation,
+      result.savings.vault.proxy, result.savings.vault.implementation, result.savings.distributor.address, result.savings.zap.address,
+    ]
+    expect(created.filter((address) => !expected.includes(address as `0x${string}`))).to.deep.equal([])
   })
 
   it("a pending deploy the chain never saw is deployed again", async () => {
@@ -308,6 +380,11 @@ describe("ArcoUSD deploy executor", () => {
       ["listed twice", (registry) => registry.routerVaults.push({ productId: "umint", configured: false })],
       ["maxAllocation", (registry) => (registry.strategies[0].maxAllocation = "-1")],
       ["mintCap", (registry) => (registry.params.mintCap = (2n ** 256n).toString())],
+      ["savings.params.vestingPeriod", (registry) => (registry.savings.params.vestingPeriod = 60)],
+      ["savings.params.minInterval", (registry) => (registry.savings.params.minInterval = 31 * 24 * 60 * 60)],
+      ["savings.params.maxAprBps", (registry) => (registry.savings.params.maxAprBps = 5001)],
+      ["savings.params.reserveMarginBps", (registry) => (registry.savings.params.reserveMarginBps = 1001)],
+      ["must not exceed savings.params.vestingPeriod", (registry) => (registry.savings.params.minInterval = 2 * 86_400)],
     ]
     for (const [label, mutate] of cases) {
       const registry = freshRegistry()
@@ -342,5 +419,52 @@ describe("ArcoUSD deploy executor", () => {
     }
     expect(message).to.contain("nope")
     expect(saves.length).to.equal(0) // failed before deploying or recording anything
+  })
+
+  // Replacing the distributor is outside the script (no hand edits to the live registry); this pins
+  // the executor's behaviour should a reviewed procedure ever record a new distributor.
+  it("grants are keyed by distributor address: a newly recorded distributor gets its own roles", async () => {
+    const { core } = await localCore()
+    const { result } = await deploy(core)
+    const old = result.savings.distributor.address!
+    const cleared = JSON.parse(JSON.stringify(result)) as ArcoUSDRegistry
+    cleared.savings.distributor = { address: null, bytecodeHash: null }
+    expect(planArcoUSDDeployment(cleared, core).map((step) => step.key)).to.deep.equal([
+      "deploy:ArcoUSDSavingsDistributor", "grant:distributor:MINTER_ROLE", "grant:distributor:REWARDER_ROLE",
+    ])
+    const { result: redeployed } = await deploy(core, cleared)
+    const fresh = redeployed.savings.distributor.address!
+    expect(fresh).to.not.equal(old)
+    const arco = await ethers.getContractAt("ArcoUSD", result.arcoUSD.proxy!)
+    const vault = await ethers.getContractAt("SArcoUSD", result.savings.vault.proxy!)
+    expect(await arco.hasRole(ROLES.MINTER_ROLE, fresh)).to.equal(true)
+    expect(await vault.hasRole(REWARDER_ROLE, fresh)).to.equal(true)
+    // Revoking the old distributor is a separate, reviewed admin step (spec §3.14).
+    expect(await arco.hasRole(ROLES.MINTER_ROLE, old)).to.equal(true)
+  })
+
+  it("stops at the seed with a clear message when the deployer has no tUSDC, and resumes once funded", async () => {
+    const { core, usdc } = await localCore()
+    const [admin] = await ethers.getSigners()
+    await usdc.connect(admin).transfer((await ethers.getSigners())[5].address, await usdc.balanceOf(admin.address))
+    const saves: ArcoUSDRegistry[] = []
+    let message = ""
+    try {
+      await runArcoUSDDeployment({ signer: admin, registry: freshRegistry(), core, save: (next) => saves.push(JSON.parse(JSON.stringify(next))) })
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).to.contain("Seeding sArcoUSD needs 1.0 tUSDC")
+    const stopped = saves[saves.length - 1]
+    expect(stopped.savings.zap.address).to.be.a("string")
+    expect(stopped.savings.seeded).to.equal(false)
+    expect(planArcoUSDDeployment(stopped, core).map((step) => step.key)).to.deep.equal(["seed:sArcoUSD", "finalize"])
+
+    await usdc.mint(admin.address, parse("1", 6))
+    const { result } = await deploy(core, stopped)
+    expect(result.savings.seeded).to.equal(true)
+    expect(result.deployed).to.equal(true)
+    const vault = await ethers.getContractAt("SArcoUSD", result.savings.vault.proxy!)
+    expect(String(await vault.balanceOf(SAVINGS_SEED_HOLDER))).to.equal(String(parse("1", 18)))
   })
 })
