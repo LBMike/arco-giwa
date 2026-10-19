@@ -25,15 +25,26 @@ const DISTRIBUTE_REVERTS: Readonly<Record<string, string>> = {
   NothingToDistribute: "nothing to distribute (no surplus above the margin, no APR room, or the mint cap is reached)",
 }
 
-/** "TooSoon: the interval … has not passed" from a reverted simulation; else the safe error line. */
-export function distributeRevertText(error: unknown): string {
+/**
+ * Why a simulated distribute() reverted ("TooSoon: the interval … has not passed", "Pausable: paused",
+ * or the selector of an error from deeper down, e.g. sArcoUSD's), or null when the error is not a
+ * contract revert at all (an RPC failure).
+ */
+export function distributeRevertReason(error: unknown): string | null {
   const reverted = error instanceof BaseError ? error.walk((cause) => cause instanceof ContractFunctionRevertedError) : null
   if (reverted instanceof ContractFunctionRevertedError) {
     if (reverted.reason) return reverted.reason // Error(string) / Panic, e.g. "Pausable: paused"
     const name = reverted.data?.errorName
     if (name) return DISTRIBUTE_REVERTS[name] ? `${name}: ${DISTRIBUTE_REVERTS[name]}` : name
+    // An error the distributor's ABI does not know (raised by sArcoUSD or ArcoUSD underneath).
+    return reverted.signature ? `reverted with error ${reverted.signature}` : "reverted without a reason"
   }
-  return safeErrorText(error)
+  return null
+}
+
+/** The revert reason when there is one; else the safe error line. */
+export function distributeRevertText(error: unknown): string {
+  return distributeRevertReason(error) ?? safeErrorText(error)
 }
 
 export type SavingsAdminStatus = "not-deployed" | "live" | "unavailable"

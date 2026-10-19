@@ -13,12 +13,13 @@ import { GIWA_CHAIN_ID } from '../../server/dist/registry/products.js';
 import { createLocalKeystoreCustody } from '../../server/dist/stocks-signer/custody-local.js';
 import { readSecretPassword, withPrivateKeystoreCopy } from '../stocks-signer/secret-files.mjs';
 
-// ArcoUSD queue keeper (docs/operations/arcousd-keeper.md), a Render background worker.
+// ArcoUSD keeper (docs/operations/arcousd-keeper.md), a Render background worker.
 //
 //   node scripts/arcousd/run-keeper.mjs [--keystore <abs path> --password-file <abs path>] [--check]
 //
 // ARCOUSD_KEEPER_MODE=off (default) idles, dry-run simulates and reports, live signs and sends
-// Reserve.processQueue. Live needs the encrypted keystore and its password as two platform secret
+// Reserve.processQueue and, once Savings is deployed, the distributor's distribute()
+// (ARCOUSD_KEEPER_DISTRIBUTE=off leaves distribute to the console). Live needs the encrypted keystore and its password as two platform secret
 // files (like the Stocks signer service); neither a key nor a password is ever read from the
 // environment — the keeper refuses to start if one is there. --check validates the settings, unlocks
 // the keystore (live) and checks the RPC chain, then exits without sending anything.
@@ -98,8 +99,8 @@ try {
   const client = createPublicClient({ transport: http(rpcUrl, { retryCount: 1, timeout: 10_000 }) });
   const rpc = viemKeeperRpc(client);
   if ((await rpc.chainId()) !== GIWA_CHAIN_ID) throw Error('WRONG_CHAIN');
-  // The keeper needs no role. A wallet holding one on the ArcoUSD contracts (a deployer, an operator,
-  // a pauser) must not sit on a hosted worker: refuse it and name the roles. (Wallets privileged only
+  // The keeper needs no role. A wallet holding one on the ArcoUSD or Savings contracts (a deployer, an
+  // operator, a pauser, a rewarder) must not sit on a hosted worker: refuse it and name the roles. (Wallets privileged only
   // elsewhere are not detectable here: the runbook says to use a new, dedicated wallet.)
   const deployment = config.address ? deployedArcoUSD(loadRegistry(), GIWA_CHAIN_ID) : null;
   if (deployment) {

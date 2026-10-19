@@ -1,10 +1,11 @@
-# ArcoUSD 감시·대사·알림 (3a)
+# ArcoUSD 감시·대사·알림 (3a, Savings 규칙 4b-2)
 
 > 스펙: `docs/specs/arcousd-v1.md` §5 · 코드: `server/src/arcousd/{watch,watcher,alerts,notify,alert-config}.ts`
 > · 콘솔: Vaults → ArcoUSD → Overview의 **Alerts** 카드
 
-감시기는 체인을 **읽기만** 한다. 트랜잭션을 만들거나 서명하거나 보내지 않는다. 대기열 처리(`processQueue`)는
-3b 봇이 생기기 전까지 콘솔의 Queue 탭에서 사람이 한다. MMF 배분·회수는 앞으로도 운영자 승인이다.
+감시기는 체인을 **읽기만** 한다. 트랜잭션을 만들거나 서명하거나 보내지 않는다. 대기열 처리(`processQueue`)와 Savings
+분배(`distribute()`)는 키퍼 봇(`docs/operations/arcousd-keeper.md`)이 하거나, 봇이 꺼져 있으면 콘솔에서 사람이 한다.
+MMF 배분·회수는 앞으로도 운영자 승인이다.
 
 ## 1. 어디서 어떻게 도나
 
@@ -21,7 +22,9 @@
      **인덱서가 마지막으로 읽은 블록**에서 읽는다. 이렇게 해야 체인과 인덱서 DB가 같은 시점을 가리켜
      대사(맞대어 보기)를 할 수 있다. 그렇지 않으면(더 뒤처짐, 인덱서 실행이 중간에 실패해 DB가 커서보다 앞섬,
      노드가 그 블록 상태를 주지 않음) 최신 블록에서 읽고 그 회차에는 대사를 건너뛴다. 콘솔에 그렇게 표시된다.
-  2. 인덱서 DB의 대기열, 마지막 스냅샷 시각, Reserve 회수(recall) 상태를 읽는다.
+  2. 인덱서 DB의 대기열, 마지막 스냅샷 시각, Reserve 회수(recall) 상태, 키퍼 봇의 하트비트를 읽는다. Savings가
+     레지스트리에 있으면 sArcoUSD와 분배기(최신 블록), Savings 인덱서의 커서(`arcousd-savings`)와 마지막 지분 가격
+     스냅샷도 읽는다.
   3. 규칙을 평가하고(§2), 알림 상태를 갱신하고(§3), 보낼 것이 있으면 설정된 채널마다 메시지 **한 통**을 보낸다.
   4. 결과를 `ArcoUSDAlert`(규칙별 한 행)와 `ArcoUSDHeartbeat`(`watcher` 행)에 남긴다.
 - 어떤 읽기가 실패한 회차에는 그 읽기에 기대는 알림을 **해결로 처리하지 않고** 그대로 둔다.
@@ -29,6 +32,8 @@
   - NAV를 못 읽는 동안에는 `reserve:under-backed`와 `reserve:mmf-band`가 그대로 남는다(MMF가 0으로 계산되므로 판단할 수 없다).
   - 지급 경로가 일시정지된 동안에는 `stalled`·`liquidity`가 그대로 남는다.
   - 회수 하나의 체인 읽기가 실패하면 그 회수의 알림만 그대로 남는다.
+  - Savings를 못 읽은 회차에는 `savings:*` 알림이 그대로 남는다. `savings:read-failed`와, 따로 읽는 `savings:indexer-lag`·
+    `savings:snapshots`만 새로 판단한다. 분배기 `preview()`만 못 읽으면 `savings:overdue`와 `savings:no-yield`만 그대로 남는다.
 - 체인 헤드를 읽지 못해도(RPC 장애) 회차를 건너뛰지 않는다. `reserve:read-failed`를 내고, 인덱서 DB만 보는
   규칙(T+2 초과, 지급 실패 등)은 계속 평가한다.
 - 밖으로 나가는 오류 문구(알림 메시지, 알림 테이블, 콘솔)에는 RPC URL을 넣지 않는다. URL 경로에 API 키가 있기
@@ -61,14 +66,26 @@
 | `recall:<상품>:<요청>:acknowledge` | 경고 | 직접 송금으로 정산한 회수를 `acknowledgeRecallPaid` 하지 않음(담보가 이중 계산됨) | 30분 |
 | `recall:<상품>:<요청>:claim` | 경고 | 볼트가 fulfill 한 회수를 `claimRecall` 하지 않음 | 30분 |
 | `recall:<상품>:<요청>:warning` | 경고 | 회수 상태에 운영자가 봐야 할 불일치가 있음 | 없음 |
-| `keeper:stale` | 경고 | 대기열 처리 봇(dry-run·live)이 주기의 3배(최소 5분) 넘게 돌지 않음 | 없음 |
+| `keeper:stale` | 경고 | 키퍼 봇(dry-run·live)이 주기의 3배(최소 5분) 넘게 돌지 않음 | 없음 |
 | `keeper:failing` | 경고 | 봇의 마지막 성공 후 10분 넘게 오류가 이어짐 | 없음 |
 | `keeper:low-gas` | 경고 | live 봇 지갑 잔고가 `ARCOUSD_KEEPER_LOW_GAS_WEI` 아래 | 없음 |
 | `keeper:stuck` | 경고 | 봇 지갑의 트랜잭션이 10분 넘게 채굴되지 않음 | 없음 |
+| `savings:read-failed` | 경고 | sArcoUSD나 분배기를 읽지 못함(Savings 탭과 공개 Savings API도 못 읽음) | 5분 |
+| `savings:not-seeded` | 경고 | Savings는 배포됐는데 `sArcoUSD.seed()`가 안 돼서 예치가 닫혀 있음 | 30분 |
+| `savings:pauses` | 경고 | Savings 쪽 일시정지가 하나라도 켜짐(분배기, sArcoUSD 전체, deposit, withdraw, addRewards). 시드 전의 deposit 정지는 의도된 것이라 넣지 않는다. Reserve·ArcoUSD mint 정지는 `pauses`가 알린다. 켜진 목록이 바뀌면 바로 다시 알림 | 없음 |
+| `savings:preview` | 경고 | 분배기 `preview()`를 읽지 못함(이유는 서버 로그). 다음 분배가 얼마일지 아무도 알 수 없음 | 15분 |
+| `savings:overdue` | 경고 | 분배 시각이 2시간 넘게 지났는데 지금 $0.01 이상 분배할 수 있음. 분배를 막는 일시정지가 있거나 NAV를 못 읽으면 내지 않는다(그 알림이 따로 온다). 유예는 막혀 있던 분배가 풀린 직후 봇이 먼저 보낼 시간이다 | 10분 |
+| `savings:no-yield` | 경고 | 시드 외에 예치자가 있는데 7일 넘게 분배가 없고, 지금도 분배할 것이 $0.01 미만이며, 그 이유가 손쓸 수 있는 것일 때: mint cap까지 남은 양이나 마진 위 잉여가 $0.01 미만. APR 상한만 걸리는 경우(하루 수익이 1센트가 안 되는 작은 볼트)는 고칠 것이 없어 내지 않는다 | 없음 |
+| `savings:indexer-lag` | 경고 | Savings 인덱서가 `ARCOUSD_ALERT_INDEXER_LAG_BLOCKS`블록 넘게 뒤처짐. 한 번도 돌지 않았으면 Savings 배포 블록부터 센다 | 5분 |
+| `savings:snapshots` | 경고 | 마지막 sArcoUSD 지분 가격 스냅샷이 스냅샷 주기의 3배보다 오래됨 | 없음 |
 
-`queue:<자산>:stalled`는 "누군가 `processQueue`를 돌려야 한다"는 뜻이다. 대기열 처리 봇(`docs/operations/arcousd-keeper.md`)이
+`queue:<자산>:stalled`는 "누군가 `processQueue`를 돌려야 한다"는 뜻이다. 키퍼 봇(`docs/operations/arcousd-keeper.md`)이
 live로 돌고 있으면 1분 안에 처리되므로, 이 알림은 봇이 멈췄거나 꺼져 있을 때의 안전망이다.
 지급 경로가 일시정지된 동안에는 `stalled`와 `liquidity`를 내지 않고 `pauses`만 낸다.
+
+`savings:overdue`도 같은 안전망이다. 봇은 분배 시각이 지나면 1분 안에 `distribute()`를 보낸다. APR 상한은 지난 분배 뒤 흐른
+시간만큼 쌓이되 vesting 기간(기본 하루)까지만 쌓이므로, 분배가 하루 넘게 밀리면 그만큼의 수익 여유가 예치자에게 가지 않고
+Reserve에 남는다.
 
 ## 3. 알림 상태와 재발송
 
@@ -179,3 +196,7 @@ API: `GET /api/v1/admin/arcousd/alerts`, `POST /api/v1/admin/arcousd/alerts/test
 | `pauses` | 의도한 일시정지인지 확인한다 |
 | `indexer:*` | 인덱서 워커 상태와 RPC를 확인한다 |
 | `recall:*` | Redemptions 화면에서 `acknowledgeRecallPaid` 또는 `claimRecall`을 처리한다 |
+| `savings:overdue` | Queue 탭의 Keeper bot 카드에서 Savings 줄과 오류를 본다. 봇이 꺼져 있거나 멈췄으면 Savings 탭에서 Preview → Sign & send로 `distribute()`를 보낸다 |
+| `savings:no-yield` | 적힌 이유대로: mint cap이면 `mintCap` 상향, 잉여가 없으면 MMF 배분·수익 상태 확인(운영자 승인) |
+| `savings:pauses` · `savings:not-seeded` | 의도한 상태인지 확인한다. 시드가 안 됐으면 배포 스크립트를 다시 돌려 `seed:sArcoUSD` 단계를 마친다 |
+| `savings:read-failed` · `savings:preview` · `savings:indexer-lag` · `savings:snapshots` | RPC와 인덱서 워커 로그(`arco-arcousd-savings-indexer`)를 확인한다 |

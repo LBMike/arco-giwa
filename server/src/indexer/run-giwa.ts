@@ -9,7 +9,7 @@ import { createArcoUSDChainReader } from "../arcousd/reader.js"
 import { ArcoUSDRecalls, createRecallReader, type RecallRow } from "../arcousd/recall.js"
 import { readArcoUSDRegistry } from "../arcousd/registry.js"
 import { createSavingsChainReader } from "../arcousd/savings.js"
-import { ArcoUSDSavingsIndexer, PrismaSavingsIndexerStore } from "../arcousd/savings-indexer.js"
+import { ArcoUSDSavingsIndexer, PrismaSavingsIndexerStore, SAVINGS_CURSOR } from "../arcousd/savings-indexer.js"
 import { PrismaArcoUSDIndexerStore } from "../arcousd/store.js"
 import { safeErrorText } from "../arcousd/safe-error.js"
 import { ArcoUSDWatcher } from "../arcousd/watcher.js"
@@ -198,6 +198,21 @@ export async function runGiwaIndexer(envSource: NodeJS.ProcessEnv = process.env)
       return row?.takenAt ?? null
     },
     recalls: () => recalls.snapshot(async (reserve) => (await arco.redemptionsForWallet(reserve, GIWA_CHAIN_ID)) as RecallRow[]),
+    savings: {
+      read: createSavingsChainReader(watchClient),
+      indexedBlock: async () => {
+        const cursor = (await arco.getIndexerCursor(GIWA_CHAIN_ID, SAVINGS_CURSOR)) as { lastBlock: bigint | number } | null
+        return cursor ? BigInt(cursor.lastBlock) : null
+      },
+      lastSnapshotAt: async (savings) => {
+        const row = await prisma.arcoUSDSavingsSnapshot.findFirst({
+          where: { chainId: GIWA_CHAIN_ID, vaultAddress: savings.vaultAddress.toLowerCase() },
+          orderBy: { takenAt: "desc" },
+          select: { takenAt: true },
+        })
+        return row?.takenAt ?? null
+      },
+    },
     store: new PrismaArcoUSDAlertStore(prisma),
     channels: alertChannels(alertEnv),
   })

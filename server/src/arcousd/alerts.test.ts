@@ -23,7 +23,8 @@ import { NO_PAUSES, type AssetState, type ReserveState, type StrategyState } fro
 import type { RecallView } from "./recall.js"
 import type { ArcoUSDRegistryFile } from "./registry.js"
 import { safeErrorText } from "./safe-error.js"
-import { evaluateWatch, type Finding, type WatchInput } from "./watch.js"
+import type { SavingsState } from "./savings.js"
+import { evaluateWatch, SAVINGS_NO_YIELD_MS, SAVINGS_OVERDUE_MS, type Finding, type SavingsSeen, type WatchInput } from "./watch.js"
 import { ArcoUSDWatcher } from "./watcher.js"
 
 const A = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as `0x${string}`
@@ -551,6 +552,7 @@ class MemoryAlertStore implements ArcoUSDAlertStore {
 
 function watcherWith(over: {
   registry?: () => ArcoUSDRegistryFile | null
+  savings?: NonNullable<ConstructorParameters<typeof ArcoUSDWatcher>[0]["savings"]>
   readState?: (at?: bigint) => Promise<ReserveState>
   latest?: bigint
   indexed?: bigint | null
@@ -580,6 +582,7 @@ function watcherWith(over: {
     },
     lastSnapshotAt: async () => new Date(NOW - MIN),
     recalls: async () => ({ status: "live", recalls: [] }),
+    savings: over.savings,
     store,
     channels: over.channels ?? [{ id: "slack", send: async (text) => void sent.push(text) }],
     now: over.now ?? (() => NOW),
@@ -1015,4 +1018,193 @@ test("console keeper view: never run, stale, and its report", async () => {
   assert.equal((await admin.keeper()).keeper?.stale, true)
   await store.beat(91342, "keeper", { at: new Date(now - 30 * MIN), ok: true, data: { mode: "off" } })
   assert.equal((await admin.keeper()).keeper?.stale, false) // off is never "stale"
+})
+
+// ─────────────────────────────── Savings ───────────────────────────────
+
+const VAULT = A(0x5a)
+const DISTRIBUTOR = A(0x5b)
+const DAY = 24 * HOUR
+
+/** A healthy, seeded vault with savers; distributed an hour ago, next in 23 hours, nothing to send yet. */
+function savingsState(over: Partial<SavingsState> = {}, distributor: Partial<SavingsState["distributor"]> = {}, preview: Partial<NonNullable<SavingsState["distributor"]["preview"]>> = {}): SavingsState {
+  return {
+    blockNumber: "1000",
+    totalAssets: e18(5000).toString(),
+    totalAssetsUsd: "5000",
+    totalSupply: e18(4990).toString(),
+    sharePrice: e18(1.002).toString(),
+    sharePriceHuman: "1.002",
+    unvested: "0",
+    unvestedUsd: "0",
+    vestingAmount: "0",
+    vestingPeriodSeconds: 86_400,
+    vestingStartedAt: null,
+    vestingEndsAt: null,
+    rewardRate: "0",
+    currentAprBps: 0,
+    currentApyBps: 0,
+    seeded: true,
+    vaultPaused: false,
+    depositPaused: false,
+    withdrawPaused: false,
+    rewardsPaused: false,
+    depositsOpen: true,
+    withdrawalsOpen: true,
+    ...over,
+    distributor: {
+      paused: false,
+      reservePaused: false,
+      arcoUSDMintPaused: false,
+      minIntervalSeconds: 86_400,
+      maxAprBps: 2000,
+      reserveMarginBps: 50,
+      lastDistributionAt: new Date(NOW - HOUR).toISOString(),
+      nextDistributionAt: new Date(NOW + 23 * HOUR).toISOString(),
+      preview: { amount: "0", amountUsd: "0", surplus: e18(40).toString(), rateCap: "0", mintHeadroom: e18(1e6).toString(), navOk: true, ...preview },
+      ...distributor,
+    },
+  }
+}
+
+const seenSavings = (state: SavingsState | null, over: Partial<SavingsSeen> = {}): SavingsSeen => ({
+  state,
+  error: state ? null : "rpc.example.invalid, HTTP 503",
+  lagBlocks: 2,
+  lastSnapshotAt: new Date(NOW - MIN),
+  ...over,
+})
+const savingsFindings = (state: SavingsState | null, over: Partial<SavingsSeen> = {}) => evaluateWatch(input({ savings: seenSavings(state, over) }))
+
+test("rules: Savings — healthy raises nothing; unreadable, not seeded, and its own switches", () => {
+  assert.deepEqual(savingsFindings(savingsState()), [])
+  assert.deepEqual(evaluateWatch(input({ savings: null })), [])
+
+  const unreadable = find(savingsFindings(null), "savings:read-failed")
+  assert.deepEqual([unreadable.severity, unreadable.sustainMs], ["WARNING", 5 * MIN])
+  assert.match(unreadable.detail, /could not read sArcoUSD or its distributor \(rpc\.example\.invalid, HTTP 503\)/)
+
+  // Before the seed deposits are closed by design: "not seeded" says so, the deposit switch is not a pause.
+  const unseeded = savingsFindings(savingsState({ seeded: false, depositPaused: true, totalSupply: "0" }))
+  assert.deepEqual(keys(unseeded), ["savings:not-seeded"])
+  assert.equal(find(unseeded, "savings:not-seeded").sustainMs, 30 * MIN)
+
+  const paused = find(savingsFindings(savingsState({ withdrawPaused: true, rewardsPaused: true }, { paused: true })), "savings:pauses")
+  assert.equal(paused.title, "Savings paused: Savings distributor, sArcoUSD withdraw, sArcoUSD addRewards")
+  assert.equal(paused.fingerprint, "distributor,withdraw,rewards")
+  assert.match(paused.detail, /sArcoUSD withdraw: savings withdrawals, the Zap's too\./)
+
+  const noPreview = savingsFindings(savingsState({}, { preview: null, previewError: "preview-unreadable" }))
+  assert.deepEqual(keys(noPreview), ["savings:preview"])
+})
+
+test("rules: Savings — a due distribution unsent for 2 hours is overdue; none for a week says why; silent while blocked", () => {
+  const due = (ago: number, amount = e18(3.21)) =>
+    savingsState({}, { lastDistributionAt: new Date(NOW - DAY - ago).toISOString(), nextDistributionAt: new Date(NOW - ago).toISOString() }, { amount: amount.toString(), rateCap: amount.toString() })
+
+  assert.deepEqual(savingsFindings(due(SAVINGS_OVERDUE_MS - MIN)), []) // the keeper still has time
+  const overdue = find(savingsFindings(due(3 * HOUR)), "savings:overdue")
+  assert.deepEqual([overdue.severity, overdue.sustainMs], ["WARNING", 10 * MIN]) // the keeper's to send first
+  assert.match(overdue.detail, /^Due for 3h, and \$3\.21 can be distributed now\./)
+  assert.deepEqual(savingsFindings(due(3 * HOUR, 10n ** 16n - 1n)), []) // under a cent is not worth a transaction
+
+  // Anything that makes distribute() revert, or a NAV that is down, is said by its own alert instead.
+  const late = due(3 * HOUR)
+  for (const [vault, distributor] of [
+    [{ rewardsPaused: true }, {}],
+    [{ vaultPaused: true }, {}],
+    [{}, { paused: true }],
+    [{}, { reservePaused: true }],
+    [{}, { arcoUSDMintPaused: true }],
+  ] as const) {
+    const state: SavingsState = { ...late, ...vault, distributor: { ...late.distributor, ...distributor } }
+    assert.ok(!keys(savingsFindings(state)).includes("savings:overdue"))
+  }
+  const navDown = due(3 * HOUR)
+  assert.deepEqual(savingsFindings({ ...navDown, distributor: { ...navDown.distributor, preview: { ...navDown.distributor.preview!, navOk: false } } }), [])
+
+  // A week with nothing to send while savers hold sArcoUSD: say why.
+  const quiet = (preview: Partial<NonNullable<SavingsState["distributor"]["preview"]>>, over: Partial<SavingsState> = {}) =>
+    savingsFindings(savingsState(over, { lastDistributionAt: new Date(NOW - SAVINGS_NO_YIELD_MS - HOUR).toISOString(), nextDistributionAt: new Date(NOW - 6 * DAY).toISOString() }, preview))
+  assert.match(find(quiet({ surplus: "0", rateCap: e18(9).toString() }), "savings:no-yield").detail, /^No distribution for 7d 1h .*no surplus above its 0\.5% margin/)
+  assert.match(find(quiet({ mintHeadroom: "0" }), "savings:no-yield").detail, /mint cap is reached; raise mintCap/)
+  assert.match(find(quiet({ surplus: e18(0.004).toString(), rateCap: e18(9).toString() }), "savings:no-yield").detail, /no surplus above/) // under a cent is none
+  // Only the APR cap binds (a vault too small or too new to earn a cent a day): nothing anyone can fix.
+  assert.deepEqual(quiet({ rateCap: e18(0.009).toString() }), [])
+  assert.deepEqual(quiet({ surplus: "0" }, { totalSupply: (10n ** 18n).toString() }), []) // only the seed: nobody to pay
+})
+
+test("rules: the savings indexer behind, and its snapshots stale", () => {
+  const lag = find(savingsFindings(savingsState(), { lagBlocks: 700 }), "savings:indexer-lag")
+  assert.match(lag.detail, /700 blocks behind/)
+  const stale = find(savingsFindings(savingsState(), { lastSnapshotAt: new Date(NOW - 20 * MIN) }), "savings:snapshots")
+  assert.match(stale.detail, /20m old \(expected every 5m\)/)
+  assert.deepEqual(savingsFindings(savingsState(), { lagBlocks: null, lastSnapshotAt: null }), [])
+})
+
+test("watcher: reads Savings once it is in the registry; what it could not read keeps its alerts as they were", async () => {
+  const withSavings = () =>
+    registry({
+      savings: {
+        vault: { proxy: VAULT, implementation: A(0x50), bytecodeHash: null, blockNumber: 150 },
+        distributor: { address: DISTRIBUTOR, bytecodeHash: null, blockNumber: 151 },
+        zap: { address: A(0x5c), bytecodeHash: null, blockNumber: 152 },
+        seeded: true,
+      },
+    })
+  const overdue = savingsState({}, { lastDistributionAt: new Date(NOW - 2 * DAY).toISOString(), nextDistributionAt: new Date(NOW - DAY).toISOString() }, { amount: e18(4).toString() })
+  let read: () => Promise<SavingsState> = async () => overdue
+  let cursor: () => Promise<bigint | null> = async () => 1_000n
+  const asked: string[] = []
+  let now = NOW
+  const { watcher, store } = watcherWith({
+    registry: withSavings,
+    now: () => now,
+    savings: {
+      read: async (savings) => (asked.push(savings.vaultAddress), read()),
+      indexedBlock: () => cursor(),
+      lastSnapshotAt: async () => new Date(now - MIN),
+    },
+  })
+  await watcher.runOnce()
+  assert.deepEqual(asked, [VAULT])
+  assert.equal(store.rows.get("savings:overdue")?.status, "PENDING") // the keeper's to send first
+  for (let round = 0; round < 3; round++) {
+    now += 4 * MIN
+    await watcher.runOnce()
+  }
+  assert.equal(store.rows.get("savings:overdue")?.status, "OPEN")
+
+  // The preview unreadable: what could be distributed is unknown, so "overdue" stays as it was.
+  now += MIN
+  read = async () => ({ ...overdue, distributor: { ...overdue.distributor, preview: null, previewError: "preview-unreadable" } })
+  await watcher.runOnce()
+  assert.equal(store.rows.get("savings:overdue")?.status, "OPEN")
+  assert.equal(store.rows.get("savings:preview")?.status, "PENDING")
+
+  // RPC down: "unreadable" waits its 5 minutes, and "overdue" is neither re-judged nor resolved.
+  now += MIN
+  read = async () => {
+    throw new HttpRequestError({ url: "https://rpc.example.invalid/SECRETKEY42", status: 503, body: {}, details: "Unavailable" })
+  }
+  cursor = async () => {
+    throw new Error("db down")
+  }
+  await watcher.runOnce()
+  assert.equal(store.rows.get("savings:overdue")?.status, "OPEN")
+  assert.equal(store.rows.get("savings:read-failed")?.status, "PENDING")
+  assert.ok(!JSON.stringify([...store.rows.values()]).includes("SECRETKEY42"))
+
+  // Read again and distributed: resolved.
+  now += MIN
+  read = async () => savingsState()
+  cursor = async () => 1_000n
+  await watcher.runOnce()
+  assert.equal(store.rows.get("savings:overdue")?.status, "RESOLVED")
+
+  // Without Savings in the registry nothing is read.
+  let plainReads = 0
+  const plain = watcherWith({ savings: { read: async () => (plainReads++, overdue), indexedBlock: async () => null, lastSnapshotAt: async () => null } })
+  await plain.watcher.runOnce()
+  assert.equal(plainReads, 0)
 })

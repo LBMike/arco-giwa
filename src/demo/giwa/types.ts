@@ -547,7 +547,7 @@ export type GiwaArcoUSDAlerts = {
   alerts: GiwaArcoUSDAlert[]
 }
 
-/** The queue keeper's last report (docs/operations/arcousd-keeper.md). */
+/** The keeper's last report (docs/operations/arcousd-keeper.md): the queue, and Savings distributions. */
 export type GiwaArcoUSDKeeperReport = {
   mode: "off" | "dry-run" | "live"
   address: string | null
@@ -564,19 +564,37 @@ export type GiwaArcoUSDKeeperReport = {
   simulations: { symbol: string; paid: number | null; error: string | null; clearing?: boolean }[]
   lastTx: null | {
     hash: string
+    /** Absent in reports from before Savings: processQueue. */
+    action?: "processQueue" | "distribute"
+    /** The asset paid, or "sArcoUSD" for distribute. */
     symbol: string
     nonce: number
     sentAt: string
     status: "pending" | "success" | "reverted" | "replaced" | "failed"
     paid: number | null
+    /** distribute: ArcoUSD minted into sArcoUSD (decimal string). */
+    amountUsd?: string | null
     blockNumber: string | null
     error: string | null
   }
   /** hash null: a pending transaction this keeper process did not send. */
   pending: null | { hash: string | null; nonce: number; since: string; stuck: boolean }
-  /** Simulating only until then, after a reverted transaction. */
+  /** Simulating only until then, after a reverted processQueue. */
   holdUntil?: string | null
+  /** The Savings step (absent from keepers before Savings; null when the round stopped before it). */
+  distribute?: GiwaArcoUSDKeeperDistribute | null
+  /** No distribute() until then, after a reverted one. */
+  distributeHoldUntil?: string | null
   note: string | null
+}
+
+/** What the keeper's Savings step found: see keeper.ts KeeperDistribute. */
+export type GiwaArcoUSDKeeperDistribute = {
+  state: "off" | "not-deployed" | "waiting" | "nothing" | "ready" | "sent" | "reverts" | "error"
+  nextAt: string | null
+  /** Would mint (waiting: accrued so far), or minted (sent); decimal string in ArcoUSD. */
+  amountUsd: string | null
+  detail: string | null
 }
 
 export type GiwaArcoUSDKeeper = {

@@ -297,6 +297,41 @@ export function keeperTxBadge(status: NonNullable<GiwaArcoUSDKeeperReport["lastT
   return TX_STATUS[status] ?? { label: status, tone: "neutral" }
 }
 
+/** The last transaction's what: "tUSDC · paid 3", or "distribute · $7.99". */
+export function keeperTxText(tx: NonNullable<GiwaArcoUSDKeeperReport["lastTx"]>): string {
+  if (tx.action === "distribute") return `distribute${tx.amountUsd ? ` · ${usdText(tx.amountUsd)}` : ""}`
+  return `${tx.symbol}${tx.paid !== null ? ` · paid ${tx.paid}` : ""}`
+}
+
+/** The keeper's Savings step in words: "Due in 23h · $1.2 accrued", "Distributed $7.99", "Dry run: would distribute $3", … */
+export function keeperDistributeText(distribute: GiwaArcoUSDKeeperReport["distribute"], now: number): string {
+  if (!distribute) return "Not checked this round"
+  const amount = usdText(distribute.amountUsd)
+  switch (distribute.state) {
+    case "off":
+      return "Off (ARCOUSD_KEEPER_DISTRIBUTE=off): distribute from the Savings tab"
+    case "not-deployed":
+      return "Savings is not deployed"
+    case "waiting": {
+      const at = distribute.nextAt ? Date.parse(distribute.nextAt) : Number.NaN
+      const accrued = amount === "—" ? "" : ` · ${amount} accrued`
+      return Number.isFinite(at) ? `Due in ${durationText(Math.max(0, (at - now) / 1000))}${accrued}` : `Waiting${accrued}`
+    }
+    case "nothing":
+      return "Due, nothing to distribute now (under $0.01)"
+    case "ready":
+      return `${distribute.detail ?? "Ready"}: ${amount}`
+    case "sent":
+      return distribute.detail === "Distributed" ? `Distributed ${amount}` : `${distribute.detail ?? "Sent"} (${amount})`
+    case "reverts":
+      return `distribute() would revert: ${distribute.detail ?? "no reason given"}`
+    case "error":
+      return `Could not check: ${distribute.detail ?? "unknown error"}`
+    default:
+      return distribute.detail ?? String(distribute.state)
+  }
+}
+
 /** "tUSDC would pay 3 · tUSDT nothing now · tRLUSD failed: …"; "Not checked this round" when it stopped first. */
 export function simulationText(report: Pick<GiwaArcoUSDKeeperReport, "simulations" | "simulated">): string {
   if (report.simulated === false) return "Not checked this round"

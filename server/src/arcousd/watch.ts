@@ -2,9 +2,10 @@ import { formatUnits } from "viem"
 import type { QueueAssetSummary } from "./admin.js"
 import type { AssetState, ReserveState } from "./reader.js"
 import type { RecallView } from "./recall.js"
+import { DISTRIBUTE_MIN_AMOUNT, type DistributorPreview, type SavingsState } from "./savings.js"
 import type { BuyGate } from "./service.js"
 
-/** What the queue keeper last wrote to its heartbeat (keeper.ts KeeperReport, as stored). */
+/** What the keeper last wrote to its heartbeat (keeper.ts KeeperReport, as stored). */
 export type KeeperSeen = {
   readonly lastRunAt: Date
   readonly lastOkAt: Date | null
@@ -17,7 +18,19 @@ export type KeeperSeen = {
     readonly lowGasWei?: string
     readonly lowGas?: boolean | null
     readonly pending?: { readonly nonce: number; readonly since: string; readonly stuck: boolean } | null
+    readonly distribute?: { readonly state?: string } | null
   } | null
+}
+
+/** What the watcher read of Savings this round (the input is absent while Savings is not deployed). */
+export type SavingsSeen = {
+  /** null when the vault or the distributor could not be read (`error` says why). */
+  readonly state: SavingsState | null
+  readonly error: string | null
+  /** Blocks the savings indexer is behind the head; null when unknown this round. */
+  readonly lagBlocks: number | null
+  /** The savings indexer's last share-price snapshot; null before the first, or unread. */
+  readonly lastSnapshotAt: Date | null
 }
 
 // ArcoUSD watcher rules (docs/operations/arcousd-alerts.md): one pure pass over what the watcher
@@ -46,6 +59,13 @@ export const MMF_BAND_BPS = 1_000
 /** Mint-cap room under this share of the cap is "nearly full". */
 export const MINT_HEADROOM_BPS = 1_000
 const MINUTE = 60_000
+/** A distribution that is due and would mint ≥ $0.01, not sent this long after its time: overdue
+ *  (the keeper checks every minute; savers lose APR room for every day it is late). */
+export const SAVINGS_OVERDUE_MS = 2 * 60 * MINUTE
+/** Savers beyond the seed and no distribution for this long: "earning nothing". */
+export const SAVINGS_NO_YIELD_MS = 7 * 24 * 60 * MINUTE
+/** sArcoUSD MIN_SHARES, held by 0x…dEaD after the seed: a supply above it means real savers. */
+const SEED_SHARES = 10n ** 18n
 
 export type WatchInput = {
   readonly now: number
@@ -66,8 +86,10 @@ export type WatchInput = {
   readonly indexer: { readonly lagBlocks: number } | null
   readonly lastSnapshotAt: Date | null
   readonly recalls: readonly RecallView[] | null
-  /** The queue keeper's heartbeat; null when it has never run. */
+  /** The keeper's heartbeat; null when it has never run. */
   readonly keeper?: KeeperSeen | null
+  /** Savings (sArcoUSD); absent or null while it is not deployed. */
+  readonly savings?: SavingsSeen | null
 }
 
 export function evaluateWatch(input: WatchInput): Finding[] {
@@ -120,10 +142,11 @@ export function evaluateWatch(input: WatchInput): Finding[] {
 
   for (const recall of input.recalls ?? []) recallRules(recall, add)
   if (input.keeper) keeperRules(input.keeper, input.now, add)
+  if (input.savings) savingsRules(input.savings, input, add)
   return findings
 }
 
-/** The keeper's own health (it pays the queue in dry-run/live; `off` raises nothing). */
+/** The keeper's own health (it pays the queue and distributes Savings yield in dry-run/live; `off` raises nothing). */
 function keeperRules(keeper: KeeperSeen, now: number, add: Add) {
   const report = keeper.report
   const mode = report?.mode
@@ -134,20 +157,20 @@ function keeperRules(keeper: KeeperSeen, now: number, add: Add) {
     add({
       key: "keeper:stale",
       severity: "WARNING",
-      title: "Queue keeper not running",
-      detail: `The ${mode} keeper last ran ${duration(silentFor / 1000)} ago. Until it is back, payouts wait for processQueue from the console.`,
+      title: "Keeper not running",
+      detail: `The ${mode} keeper last ran ${duration(silentFor / 1000)} ago. Until it is back, queue payouts and Savings distributions wait for the console (processQueue, distribute).`,
       sustainMs: 0,
     })
     return // its other readings are as old as that
   }
   if (keeper.lastError && (!keeper.lastOkAt || now - keeper.lastOkAt.getTime() > 10 * MINUTE)) {
-    add({ key: "keeper:failing", severity: "WARNING", title: "Queue keeper failing", detail: keeper.lastError, sustainMs: 0 })
+    add({ key: "keeper:failing", severity: "WARNING", title: "Keeper failing", detail: keeper.lastError, sustainMs: 0 })
   }
   if (mode === "live" && report?.lowGas && report.gasBalanceWei) {
     add({
       key: "keeper:low-gas",
       severity: "WARNING",
-      title: "Queue keeper low on gas",
+      title: "Keeper low on gas",
       detail: `The keeper wallet ${report.address ?? ""} holds ${eth(BigInt(report.gasBalanceWei))} ETH (warns below ${eth(BigInt(report.lowGasWei ?? "0"))} ETH). Send it GIWA Sepolia ETH.`,
       sustainMs: 0,
     })
@@ -156,7 +179,7 @@ function keeperRules(keeper: KeeperSeen, now: number, add: Add) {
     add({
       key: "keeper:stuck",
       severity: "WARNING",
-      title: "Queue keeper transaction stuck",
+      title: "Keeper transaction stuck",
       detail: `Nonce ${report.pending.nonce} has been pending since ${report.pending.since}. The keeper sends nothing else until it is mined or dropped.`,
       sustainMs: 0,
     })
@@ -164,6 +187,128 @@ function keeperRules(keeper: KeeperSeen, now: number, add: Add) {
 }
 
 type Add = (finding: Omit<Finding, "fingerprint"> & { fingerprint?: string }) => void
+
+/**
+ * Savings (sArcoUSD and its distributor). The Reserve's own pauses, NAV and mint cap have their alerts
+ * above; these say what they mean for savers, and what only Savings has: its switches, the seed, a
+ * distribution that should have gone out, yield that has stopped, and the savings indexer.
+ */
+function savingsRules(seen: SavingsSeen, input: WatchInput, add: Add) {
+  const state = seen.state
+  if (!state) {
+    add({
+      key: "savings:read-failed",
+      severity: "WARNING",
+      title: "Savings unreadable",
+      detail: `The watcher could not read sArcoUSD or its distributor${seen.error ? ` (${seen.error})` : ""}. The Savings tab and the public savings API cannot read them either.`,
+      sustainMs: 5 * MINUTE,
+    })
+  } else {
+    if (!state.seeded) {
+      add({
+        key: "savings:not-seeded",
+        severity: "WARNING",
+        title: "sArcoUSD not seeded",
+        detail: "Savings is deployed but sArcoUSD.seed() has not run, so deposits stay closed. Finish the deploy (its seed:sArcoUSD step).",
+        sustainMs: 30 * MINUTE,
+      })
+    }
+    const paused = SAVINGS_PAUSES.filter((pause) => pause.on(state))
+    if (paused.length) {
+      add({
+        key: "savings:pauses",
+        severity: "WARNING",
+        title: `Savings paused: ${paused.map((pause) => pause.label).join(", ")}`,
+        detail: paused.map((pause) => `${pause.label}: ${pause.effect}.`).join(" "),
+        sustainMs: 0,
+        fingerprint: paused.map((pause) => pause.id).join(","),
+      })
+    }
+    const preview = state.distributor.preview
+    if (!preview) {
+      add({
+        key: "savings:preview",
+        severity: "WARNING",
+        title: "Savings distributor preview unreadable",
+        detail: "distributor.preview() could not be read (the server log says why), so nobody can tell what the next distribution would be.",
+        sustainMs: 15 * MINUTE,
+      })
+    } else {
+      distributionRules(state, preview, input.now, add)
+    }
+  }
+
+  if (seen.lagBlocks !== null && seen.lagBlocks > input.indexerLagBlocks) {
+    add({
+      key: "savings:indexer-lag",
+      severity: "WARNING",
+      title: "Savings indexer behind",
+      detail: `The savings indexer is ${count(seen.lagBlocks)} blocks behind the chain, so the Savings tab's flows and the share-price history are stale.`,
+      sustainMs: 5 * MINUTE,
+    })
+  }
+  const snapshotAge = seen.lastSnapshotAt ? input.now - seen.lastSnapshotAt.getTime() : null
+  if (snapshotAge !== null && snapshotAge > 3 * input.snapshotIntervalMs) {
+    add({
+      key: "savings:snapshots",
+      severity: "WARNING",
+      title: "Savings snapshots stale",
+      detail: `The last sArcoUSD share-price snapshot is ${duration(snapshotAge / 1000)} old (expected every ${duration(input.snapshotIntervalMs / 1000)}).`,
+      sustainMs: 0,
+    })
+  }
+}
+
+/** Overdue (yield waiting to go out) and no yield (nothing to send for a week). Silent while anything
+ *  blocks distribute() or the NAV is down: the pause and NAV alerts say why then. */
+function distributionRules(state: SavingsState, preview: DistributorPreview, now: number, add: Add) {
+  const distributor = state.distributor
+  if (distributor.paused || distributor.reservePaused || state.vaultPaused || state.rewardsPaused || distributor.arcoUSDMintPaused || !preview.navOk) return
+  const amount = BigInt(preview.amount)
+  const nextAt = Date.parse(distributor.nextDistributionAt)
+  if (amount >= DISTRIBUTE_MIN_AMOUNT && Number.isFinite(nextAt) && now - nextAt > SAVINGS_OVERDUE_MS) {
+    add({
+      key: "savings:overdue",
+      severity: "WARNING",
+      title: "Savings distribution overdue",
+      detail: `Due for ${duration((now - nextAt) / 1000)}, and ${usd(amount)} can be distributed now. The keeper sends distribute() once it is due: check the Keeper bot (Queue tab), or distribute from the Savings tab. Savers lose APR room for every day it waits.`,
+      // Yield that only just became distributable (a pause lifted, the mint cap raised) is the keeper's
+      // to send within a round or two, however long ago the distribution became due.
+      sustainMs: 10 * MINUTE,
+    })
+  }
+  const last = Date.parse(distributor.lastDistributionAt)
+  const reason = amount < DISTRIBUTE_MIN_AMOUNT ? noYieldReason(preview, distributor.reserveMarginBps) : null
+  if (reason && BigInt(state.totalSupply) > SEED_SHARES && Number.isFinite(last) && now - last > SAVINGS_NO_YIELD_MS) {
+    add({
+      key: "savings:no-yield",
+      severity: "WARNING",
+      title: "Savers earning nothing",
+      detail: `No distribution for ${duration((now - last) / 1000)} (since ${distributor.lastDistributionAt}, or the deploy): ${reason}.`,
+      sustainMs: 0,
+    })
+  }
+}
+
+/**
+ * Why nothing can be distributed, when someone can do something about it: the mint cap, or no surplus.
+ * null when only the APR cap binds (a vault too small or too new to earn a cent a day): nothing to fix.
+ */
+function noYieldReason(preview: DistributorPreview, marginBps: number): string | null {
+  const under = (value: string) => BigInt(value) < DISTRIBUTE_MIN_AMOUNT
+  if (under(preview.mintHeadroom)) return "the Reserve mint cap is reached; raise mintCap"
+  if (under(preview.surplus)) return `the Reserve has no surplus above its ${pct(marginBps)} margin (MMF income has not built up)`
+  return null
+}
+
+const SAVINGS_PAUSES: readonly { id: string; label: string; effect: string; on: (state: SavingsState) => boolean }[] = [
+  { id: "distributor", label: "Savings distributor", effect: "no yield is distributed", on: (state) => state.distributor.paused },
+  { id: "vault", label: "sArcoUSD (all)", effect: "deposits, withdrawals and yield", on: (state) => state.vaultPaused },
+  // Closed until the seed by design: "not seeded" covers that.
+  { id: "deposit", label: "sArcoUSD deposit", effect: "new savings deposits, the Zap's too", on: (state) => state.seeded && state.depositPaused },
+  { id: "withdraw", label: "sArcoUSD withdraw", effect: "savings withdrawals, the Zap's too", on: (state) => state.withdrawPaused },
+  { id: "rewards", label: "sArcoUSD addRewards", effect: "no yield can be added", on: (state) => state.rewardsPaused },
+]
 
 function reserveRules(state: ReserveState, input: WatchInput, add: Add) {
   const backing = BigInt(state.totalBacking)

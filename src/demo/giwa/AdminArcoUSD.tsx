@@ -28,7 +28,9 @@ import {
   gateText,
   headVerdict,
   keeperBadge,
+  keeperDistributeText,
   keeperTxBadge,
+  keeperTxText,
   mintHeadroomUsd,
   pauseRows,
   payoutsPaused,
@@ -846,37 +848,39 @@ function QueueView({
   )
 }
 
-/** The queue bot (docs/operations/arcousd-keeper.md): mode, wallet, gas, what it would pay now, its last transaction. */
+/** The keeper bot (docs/operations/arcousd-keeper.md): mode, wallet, gas, what it would pay now, its
+ *  Savings distribution step, its last transaction. */
 export function KeeperCard({ keeper, loading, error, now = Date.now() }: KeeperProps & { now?: number }) {
   const state = keeper?.keeper ?? null
   const report = state?.report ?? null
   const badge = keeperBadge(state, now)
   const holding = report?.holdUntil && Date.parse(report.holdUntil) > now ? report.holdUntil : null
+  const distributeHolding = report?.distributeHoldUntil && Date.parse(report.distributeHoldUntil) > now ? report.distributeHoldUntil : null
   const running = report && report.mode !== "off"
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <CardTitle>Queue bot</CardTitle>
+          <CardTitle>Keeper bot</CardTitle>
           {keeper?.status === "live" && <Pill tone={badge.tone}>{badge.label}</Pill>}
         </div>
         {report?.address && <AddressLink address={report.address} />}
       </div>
       {loading && !keeper ? (
-        <LoadingNote>Loading the queue bot…</LoadingNote>
+        <LoadingNote>Loading the keeper bot…</LoadingNote>
       ) : error && !keeper ? (
-        <ErrorLine>Could not load the queue bot: {error}</ErrorLine>
+        <ErrorLine>Could not load the keeper bot: {error}</ErrorLine>
       ) : keeper?.status === "unavailable" ? (
-        <ErrorLine>The queue bot status is unavailable: {keeper.error ?? "unknown error"}</ErrorLine>
+        <ErrorLine>The keeper bot status is unavailable: {keeper.error ?? "unknown error"}</ErrorLine>
       ) : !running ? (
         <p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">
           {state
-            ? "The queue bot is off. Pay the queue with Preview and Sign & send below."
-            : "The queue bot has not run yet. Until it is set up, pay the queue with Preview and Sign & send below."}
+            ? "The keeper bot is off. Pay the queue with Preview and Sign & send below, and distribute Savings yield from the Savings tab."
+            : "The keeper bot has not run yet. Until it is set up, pay the queue with Preview and Sign & send below, and distribute Savings yield from the Savings tab."}
         </p>
       ) : (
         <>
-          {error && <ErrorLine>Could not refresh the queue bot: {error}. Showing the last loaded data.</ErrorLine>}
+          {error && <ErrorLine>Could not refresh the keeper bot: {error}. Showing the last loaded data.</ErrorLine>}
           <dl className="mt-3 space-y-2 text-sm">
             <Row label="Last run" value={`${agoText(state!.lastRunAt, now)}${state!.stale ? " (not running)" : ""}`} attention={state!.stale} />
             {report!.mode === "live" && (
@@ -884,6 +888,10 @@ export function KeeperCard({ keeper, loading, error, now = Date.now() }: KeeperP
             )}
             <Row label="Now" value={<span className="break-words">{simulationText(report!)}</span>} />
             {holding && <Row label="Holding" value={`until ${timeText(holding)} (after a reverted transaction)`} attention />}
+            {report!.distribute !== undefined && (
+              <Row label="Savings" value={<span className="break-words">{keeperDistributeText(report!.distribute, now)}</span>} attention={report!.distribute?.state === "error"} />
+            )}
+            {distributeHolding && <Row label="Savings held" value={`until ${timeText(distributeHolding)} (after a reverted distribute())`} attention />}
             <Row
               label="Last transaction"
               value={
@@ -891,8 +899,7 @@ export function KeeperCard({ keeper, loading, error, now = Date.now() }: KeeperP
                   <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
                     <Pill tone={keeperTxBadge(report!.lastTx.status).tone}>{keeperTxBadge(report!.lastTx.status).label}</Pill>
                     <span>
-                      {report!.lastTx.symbol}
-                      {report!.lastTx.paid !== null ? ` · paid ${report!.lastTx.paid}` : ""} · {agoText(report!.lastTx.sentAt, now)}
+                      {keeperTxText(report!.lastTx)} · {agoText(report!.lastTx.sentAt, now)}
                     </span>
                     <TxLink hash={report!.lastTx.hash} />
                   </span>
