@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { AlertsCard, ArcoUSDAdminView, KeeperCard, ProcessQueueControl } from "./AdminArcoUSD"
 import { sendPreparedTransactionWithClients } from "./contracts"
 import {
+  ARCOUSD_ADMIN_TABS,
   agoText,
   alertBadge,
   alertMeta,
@@ -13,6 +14,7 @@ import {
   bpsText,
   countText,
   deliveryText,
+  distributionVerdict,
   durationText,
   gasText,
   keeperBadge,
@@ -23,12 +25,15 @@ import {
   pauseRows,
   payoutsPaused,
   queueFilter,
+  rewardsPerDayUsd,
+  savingsPauseRows,
+  sharePriceText,
   usdCompact,
   simulationText,
   usdText,
   watcherStatus,
 } from "./arcousd-admin"
-import type { GiwaArcoUSDAlert, GiwaArcoUSDAlerts, GiwaArcoUSDKeeper, GiwaArcoUSDKeeperReport, GiwaArcoUSDFlows, GiwaArcoUSDQueue, GiwaArcoUSDReserve, GiwaArcoUSDSnapshots } from "./types"
+import type { GiwaArcoUSDAlert, GiwaArcoUSDAlerts, GiwaArcoUSDKeeper, GiwaArcoUSDKeeperReport, GiwaArcoUSDFlows, GiwaArcoUSDQueue, GiwaArcoUSDReserve, GiwaArcoUSDSavings, GiwaArcoUSDSavingsAdmin, GiwaArcoUSDSavingsHistory, GiwaArcoUSDSavingsState, GiwaArcoUSDSnapshots } from "./types"
 
 // Admin · ArcoUSD page: the pure helpers and the three views over fixed data.
 
@@ -198,7 +203,7 @@ const flows: GiwaArcoUSDFlows = {
 const noop = () => undefined
 const pending = () => new Promise<never>(() => undefined)
 
-function page(tab: "overview" | "queue" | "flows", over: Record<string, unknown> = {}) {
+function page(tab: "overview" | "queue" | "flows" | "savings", over: Record<string, unknown> = {}) {
   return renderToStaticMarkup(
     <ArcoUSDAdminView
       tab={tab}
@@ -534,4 +539,188 @@ test("queue bot card: live, dry run, off, never run, and its trouble states", ()
   // On the Queue tab it sits above the per-asset cards.
   const queuePage = text(page("queue", { queue: { queue, filter: "open", onFilterChange: noop, walletAddress: A(0xee), onConnectWallet: noop, onPrepare: pending, onSend: pending, now: NOW, keeper: { keeper: keeper(keeperReport()) } } }))
   assert.ok(queuePage.indexOf("Queue bot") < queuePage.indexOf("Standard redemptions are paid"))
+})
+
+// ─────────────────────────────── Savings ───────────────────────────────
+
+const SAVINGS_NOW = Date.parse("2026-10-21T12:00:00.000Z")
+
+function savingsState(over: Partial<GiwaArcoUSDSavingsState> = {}, distributor: Partial<GiwaArcoUSDSavingsState["distributor"]> = {}): GiwaArcoUSDSavingsState {
+  const base: GiwaArcoUSDSavingsState = {
+    blockNumber: "900",
+    totalAssets: (10_000n * 10n ** 18n).toString(),
+    totalAssetsUsd: "10000",
+    totalSupply: (9_990n * 10n ** 18n).toString(),
+    sharePrice: "1001001001001001001",
+    sharePriceHuman: "1.001001001001001001",
+    unvested: (3n * 10n ** 18n).toString(),
+    unvestedUsd: "3",
+    vestingAmount: (6n * 10n ** 18n).toString(),
+    vestingPeriodSeconds: 86_400,
+    vestingStartedAt: "2026-10-21T00:00:00.000Z",
+    vestingEndsAt: "2026-10-22T00:00:00.000Z",
+    rewardRate: ((6n * 10n ** 18n) / 86_400n).toString(),
+    currentAprBps: 2189,
+    currentApyBps: 2447,
+    seeded: true,
+    vaultPaused: false,
+    depositPaused: false,
+    withdrawPaused: false,
+    rewardsPaused: false,
+    depositsOpen: true,
+    withdrawalsOpen: true,
+    distributor: {
+      paused: false,
+      reservePaused: false,
+      arcoUSDMintPaused: false,
+      minIntervalSeconds: 86_400,
+      maxAprBps: 2000,
+      reserveMarginBps: 50,
+      lastDistributionAt: "2026-10-20T11:00:00.000Z",
+      nextDistributionAt: "2026-10-21T11:00:00.000Z",
+      preview: { amount: (5n * 10n ** 18n).toString(), amountUsd: "5", surplus: (40n * 10n ** 18n).toString(), rateCap: (5n * 10n ** 18n).toString(), mintHeadroom: (10n ** 24n).toString(), navOk: true },
+      ...distributor,
+    },
+  }
+  return { ...base, ...over }
+}
+
+function savingsResponse(state: GiwaArcoUSDSavingsState | null = savingsState(), status: GiwaArcoUSDSavings["status"] = "live"): GiwaArcoUSDSavings {
+  return {
+    status,
+    chainId: 91342,
+    contracts: status === "not-deployed" ? null : { sArcoUSD: A(0x51), distributor: A(0x52), zap: A(0x53), arcoUSD: A(0x01), reserve: A(0x02) },
+    readAt: "2026-10-21T12:00:00.000Z",
+    savings: state,
+  }
+}
+
+const savingsHistory: GiwaArcoUSDSavingsHistory = {
+  status: "live",
+  chainId: 91342,
+  days: 30,
+  total: 2,
+  sampled: false,
+  truncated: false,
+  points: [
+    { takenAt: "2026-10-19T12:00:00.000Z", blockNumber: "800", sharePrice: "1", totalAssetsUsd: "9000", aprBps: 1800 },
+    { takenAt: "2026-10-21T12:00:00.000Z", blockNumber: "900", sharePrice: "1.001", totalAssetsUsd: "10000", aprBps: 2189 },
+  ],
+  realizedApyBps: 2002,
+}
+
+const savingsActivity: GiwaArcoUSDSavingsAdmin = {
+  status: "live",
+  days: 30,
+  contracts: { sArcoUSD: A(0x51), distributor: A(0x52), zap: A(0x53) },
+  totals: { depositsUsd: "10000", deposits: 3, withdrawalsUsd: "250", withdrawals: 1, distributedUsd: "12", distributions: 2, toppedUpUsd: "1" },
+  daily: [],
+  distributions: [{ at: "2026-10-20T11:00:00.000Z", txHash: `0x${"dd".repeat(32)}`, caller: A(0x77), amountUsd: "6", surplusUsd: "40", rateCapUsd: "6", backingUsd: "10050", liabilitiesUsd: "10000" }],
+  rewards: [
+    { at: "2026-10-20T11:00:00.000Z", txHash: `0x${"dd".repeat(32)}`, caller: A(0x52), amountUsd: "6", fromDistributor: true },
+    { at: "2026-10-19T09:00:00.000Z", txHash: `0x${"ee".repeat(32)}`, caller: A(0x99), amountUsd: "1", fromDistributor: false },
+  ],
+  activity: [
+    { at: "2026-10-21T10:00:00.000Z", txHash: `0x${"11".repeat(32)}`, kind: "withdraw", account: A(0xa1), sender: A(0x53), amountUsd: "250", viaZap: true },
+    { at: "2026-10-19T08:00:00.000Z", txHash: `0x${"22".repeat(32)}`, kind: "seed", account: "0x000000000000000000000000000000000000dead", sender: A(0x99), amountUsd: "1", viaZap: false },
+  ],
+  zapAssets: [{ asset: A(0xc1), symbol: "tUSDC", deposits: 2, depositAmount: "9000", redemptions: 1, redeemAmount: "249.5" }],
+  truncated: false,
+}
+
+function savingsPage(over: Partial<Record<string, unknown>> = {}) {
+  return page("savings", {
+    savings: {
+      savings: savingsResponse(),
+      history: savingsHistory,
+      activity: savingsActivity,
+      days: 30,
+      onDaysChange: noop,
+      walletAddress: A(0xee),
+      onConnectWallet: noop,
+      onPrepareDistribute: pending,
+      onSendDistribute: pending,
+      now: SAVINGS_NOW,
+      ...over,
+    },
+  })
+}
+
+test("savings helpers: share price to 4 decimals, rewards per day, switches, the Savings tab", () => {
+  assert.deepEqual([sharePriceText("1"), sharePriceText("1.001001001"), sharePriceText(1.23456), sharePriceText(null)], ["1.00", "1.001", "1.2346", "—"])
+  assert.equal(Math.round(rewardsPerDayUsd(savingsState())! * 1e6) / 1e6, 6)
+  assert.deepEqual(
+    savingsPauseRows(savingsState({ withdrawPaused: true }, { paused: true, reservePaused: true })).filter((row) => row.paused).map((row) => row.label),
+    ["sArcoUSD withdraw", "Distributor", "Reserve (all)"],
+  )
+  assert.equal(savingsPauseRows(savingsState({ seeded: false }))[0].effect, "Deposits and mints (closed until the seed)")
+  assert.deepEqual([arcoUSDAdminTab("savings"), ARCOUSD_ADMIN_TABS.map((item) => item.id)], ["savings", ["overview", "queue", "flows", "savings"]])
+})
+
+test("distribution verdict: paused, unreadable, NAV, waiting, nothing (and why), ready", () => {
+  const verdict = (state: GiwaArcoUSDSavingsState, now = SAVINGS_NOW) => distributionVerdict(state, now)
+  assert.deepEqual(verdict(savingsState()), { kind: "ready", amountUsd: "5" })
+  assert.deepEqual(verdict(savingsState({}, { paused: true })), { kind: "paused", what: "The distributor" })
+  assert.deepEqual(verdict(savingsState({}, { reservePaused: true })), { kind: "paused", what: "The Reserve" })
+  assert.deepEqual(verdict(savingsState({ rewardsPaused: true })), { kind: "paused", what: "sArcoUSD addRewards" })
+  assert.deepEqual(verdict(savingsState({ vaultPaused: true })), { kind: "paused", what: "sArcoUSD" })
+  assert.deepEqual(verdict(savingsState({}, { arcoUSDMintPaused: true })), { kind: "paused", what: "ArcoUSD mint" })
+  assert.deepEqual(verdict(savingsState({}, { preview: null, previewError: "preview-unreadable" })), { kind: "unknown", error: "The distributor preview could not be read (see the API log)" })
+  assert.deepEqual(verdict(savingsState({}, { preview: { ...savingsState().distributor.preview!, navOk: false } })), { kind: "nav" })
+  assert.deepEqual(verdict(savingsState(), Date.parse("2026-10-21T10:00:00.000Z")), { kind: "waiting", until: "2026-10-21T11:00:00.000Z" })
+  assert.deepEqual(verdict(savingsState({ seeded: false })), { kind: "nothing", why: "No savers yet (the vault is not seeded)" })
+  const zeroWith = (field: "surplus" | "rateCap" | "mintHeadroom") =>
+    verdict(savingsState({}, { preview: { ...savingsState().distributor.preview!, amount: "0", amountUsd: "0", [field]: "0" } }))
+  assert.deepEqual(zeroWith("mintHeadroom"), { kind: "nothing", why: "The Reserve mint cap is reached" })
+  assert.deepEqual(zeroWith("surplus"), { kind: "nothing", why: "No Reserve surplus above the margin" })
+  assert.deepEqual(zeroWith("rateCap"), { kind: "nothing", why: "Nothing saved long enough to earn yet" })
+})
+
+test("savings tab: totals, distribution with its verdict, vesting, switches, chart, activity and contracts", () => {
+  const html = savingsPage()
+  const plain = text(html)
+  assert.match(html, /aria-selected="true"[^>]*>Savings</)
+  for (const expected of [
+    /Saved \$10,000/,
+    /Share price 1\.001 ArcoUSD per sArcoUSD/,
+    /APY now 24\.47% APR 21\.89% of what is vesting, compounded daily/,
+    /Realized APY \(30d\) 20\.02%/,
+    /Distribution Ready distribute\(\) would mint \$5 into sArcoUSD now\./,
+    /Reserve surplus above the margin \$40/,
+    /APR cap since the last distribution \$5/,
+    /Rules every 1d · cap 20% APR · margin 0\.5%/,
+    /Last distribution \(or deploy\) 1d 1h ago/,
+    /Still vesting \$3/,
+    /Released per day now \$6/,
+    /Seed \(1 sArcoUSD for 0x…dEaD\) Done/,
+    /Deposits Open/,
+    /Share price \(ArcoUSD\)/,
+    /Deposits \(30d\) \$10,000 3 deposits/,
+    /Operator top-ups \(30d\) \$1/,
+    /Top-up by 0x0000…0099/,
+    /Withdrawal .* \$250 Zap/,
+    /Seed .* \$1 Direct/,
+    /tUSDC 2 9,000 1 249\.5/,
+    /Savings Zap 0x0000…0053/,
+  ]) {
+    assert.match(plain, expected)
+  }
+  assert.ok(!/Deposits are closed until/.test(plain))
+})
+
+test("savings tab: not deployed, unseeded, a waiting distributor and an unreadable activity view", () => {
+  assert.match(text(savingsPage({ savings: savingsResponse(null, "not-deployed") })), /Savings is not deployed yet\./)
+  const unseeded = text(savingsPage({ savings: savingsResponse(savingsState({ seeded: false, depositsOpen: false, depositPaused: true })) }))
+  assert.match(unseeded, /Deposits are closed until sArcoUSD\.seed\(\) runs\./)
+  assert.match(unseeded, /Nothing to distribute No savers yet/)
+  const waiting = savingsPage({ now: Date.parse("2026-10-21T10:00:00.000Z") })
+  assert.match(text(waiting), /Next at .* The interval since the last distribution has not passed yet\./)
+  // Preview stays disabled until the distributor is ready.
+  assert.match(waiting, /<button type="button" disabled="" class="[^"]*">Preview<\/button>/)
+  assert.match(text(savingsPage({ activity: { ...savingsActivity, status: "unavailable", error: "Event read failed: db down" } })), /Savings activity is unavailable: Event read failed: db down/)
+  // Ready by the numbers, but the vault's addRewards is paused: distribute() would revert.
+  const paused = text(savingsPage({ savings: savingsResponse(savingsState({ rewardsPaused: true })) }))
+  assert.match(paused, /Distribution Paused sArcoUSD addRewards is paused, so distribute\(\) would revert\./)
+  assert.match(text(savingsPage({ savings: savingsResponse(null, "unavailable") })), /The API could not read the Savings contracts\./)
+  assert.match(text(savingsPage({ history: { ...savingsHistory, points: [], realizedApyBps: null } })), /needs a day of share price history .* No snapshots in this window yet/)
 })

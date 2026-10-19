@@ -6,20 +6,22 @@ import type {
   GiwaArcoUSDKeeperReport,
   GiwaArcoUSDQueue,
   GiwaArcoUSDReserve,
+  GiwaArcoUSDSavingsState,
 } from "./types"
 
 // Pure helpers for the admin ArcoUSD page (AdminArcoUSD.tsx): number formatting, the gate and
 // pause readouts, and the queue head's "can it be paid now" verdict. No React, no I/O.
 
-export type ArcoUSDAdminTab = "overview" | "queue" | "flows"
+export type ArcoUSDAdminTab = "overview" | "queue" | "flows" | "savings"
 export const ARCOUSD_ADMIN_TABS: readonly { id: ArcoUSDAdminTab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "queue", label: "Queue" },
   { id: "flows", label: "Flows" },
+  { id: "savings", label: "Savings" },
 ]
 
 export function arcoUSDAdminTab(value: string | null): ArcoUSDAdminTab {
-  return value === "queue" || value === "flows" ? value : "overview"
+  return value === "queue" || value === "flows" || value === "savings" ? value : "overview"
 }
 
 /** "$1,234.56" from a decimal string (max 2 decimals, no forced trailing zeros); "—" when not a number. */
@@ -311,4 +313,79 @@ export function simulationText(report: Pick<GiwaArcoUSDKeeperReport, "simulation
             : `${item.symbol} nothing payable now`,
     )
     .join(" · ")
+}
+
+// ─────────────────────────────── Savings ───────────────────────────────
+
+/** Share price (ArcoUSD per sArcoUSD): up to 4 decimals, at least 2 (the NAV exception: near-par
+ *  prices need sub-cent precision). "—" when not a number. */
+export function sharePriceText(value: string | number | null | undefined): string {
+  const price = typeof value === "number" ? value : Number(value)
+  if (value === null || value === undefined || value === "" || !Number.isFinite(price)) return "—"
+  return price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+}
+
+/** ArcoUSD released into the share price per day at the current rate. */
+export function rewardsPerDayUsd(state: Pick<GiwaArcoUSDSavingsState, "rewardRate">): number | null {
+  try {
+    return Number(BigInt(state.rewardRate) * 86_400n) / 1e18
+  } catch {
+    return null
+  }
+}
+
+/** Every switch Savings depends on: the vault's own (deposit, withdraw, addRewards, all), the
+ *  distributor, and the Reserve and ArcoUSD mint pauses that stop distribute(). */
+export function savingsPauseRows(state: GiwaArcoUSDSavingsState): PauseRow[] {
+  return [
+    { label: "sArcoUSD deposit", paused: state.depositPaused, effect: state.seeded ? "Deposits and mints" : "Deposits and mints (closed until the seed)" },
+    { label: "sArcoUSD withdraw", paused: state.withdrawPaused, effect: "Withdrawals and redemptions" },
+    { label: "sArcoUSD addRewards", paused: state.rewardsPaused, effect: "No yield can be added (distributions revert)" },
+    { label: "sArcoUSD (all)", paused: state.vaultPaused, effect: "Deposits, withdrawals and rewards (share transfers continue)" },
+    { label: "Distributor", paused: state.distributor.paused, effect: "distribute()" },
+    { label: "Reserve (all)", paused: state.distributor.reservePaused, effect: "distribute() refuses while the Reserve is paused" },
+    { label: "ArcoUSD mint", paused: state.distributor.arcoUSDMintPaused, effect: "distribute() cannot mint (ArcoUSD paused or mint paused)" },
+  ]
+}
+
+export type DistributionVerdict =
+  | { readonly kind: "paused"; readonly what: string }
+  | { readonly kind: "unknown"; readonly error: string }
+  | { readonly kind: "nav" }
+  | { readonly kind: "waiting"; readonly until: string }
+  | { readonly kind: "nothing"; readonly why: string }
+  | { readonly kind: "ready"; readonly amountUsd: string }
+
+/** Whether distribute() would mint now, and if not, why (the first reason that applies). Every pause
+ *  on its path makes it revert: the distributor, the Reserve, sArcoUSD (all or addRewards), ArcoUSD mint. */
+export function distributionVerdict(state: GiwaArcoUSDSavingsState, now: number): DistributionVerdict {
+  const { distributor } = state
+  if (distributor.paused) return { kind: "paused", what: "The distributor" }
+  if (distributor.reservePaused) return { kind: "paused", what: "The Reserve" }
+  if (state.vaultPaused) return { kind: "paused", what: "sArcoUSD" }
+  if (state.rewardsPaused) return { kind: "paused", what: "sArcoUSD addRewards" }
+  if (distributor.arcoUSDMintPaused) return { kind: "paused", what: "ArcoUSD mint" }
+  const preview = distributor.preview
+  if (!preview) return { kind: "unknown", error: "The distributor preview could not be read (see the API log)" }
+  if (!preview.navOk) return { kind: "nav" }
+  if (Date.parse(distributor.nextDistributionAt) > now) return { kind: "waiting", until: distributor.nextDistributionAt }
+  if (!state.seeded) return { kind: "nothing", why: "No savers yet (the vault is not seeded)" }
+  let amount = 0n
+  try {
+    amount = BigInt(preview.amount)
+  } catch {
+    return { kind: "unknown", error: "Unreadable preview amount" }
+  }
+  if (amount > 0n) return { kind: "ready", amountUsd: preview.amountUsd }
+  const zero = (value: string) => {
+    try {
+      return BigInt(value) === 0n
+    } catch {
+      return false
+    }
+  }
+  if (zero(preview.mintHeadroom)) return { kind: "nothing", why: "The Reserve mint cap is reached" }
+  if (zero(preview.surplus)) return { kind: "nothing", why: "No Reserve surplus above the margin" }
+  if (zero(preview.rateCap)) return { kind: "nothing", why: "Nothing saved long enough to earn yet" }
+  return { kind: "nothing", why: "Nothing to distribute" }
 }

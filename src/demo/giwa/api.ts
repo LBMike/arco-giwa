@@ -12,6 +12,10 @@ import type {
   GiwaArcoUSDQueueFilter,
   GiwaArcoUSDReserve,
   GiwaArcoUSDSnapshots,
+  GiwaArcoUSDDistribute,
+  GiwaArcoUSDSavings,
+  GiwaArcoUSDSavingsAdmin,
+  GiwaArcoUSDSavingsHistory,
   GiwaActivity,
   GiwaAsset,
   GiwaCatalogItem,
@@ -257,6 +261,8 @@ export const giwaApi = {
   arcousd: {
     reserve: () => fetchJson<GiwaArcoUSDReserve>(`/api/v1/arcousd/reserve`),
     gate: () => fetchJson<GiwaArcoUSDReserve["gate"]>(`/api/v1/arcousd/gate`),
+    savings: () => fetchJson<GiwaArcoUSDSavings>(`/api/v1/arcousd/savings`),
+    savingsHistory: (days?: number) => fetchJson<GiwaArcoUSDSavingsHistory>(`/api/v1/arcousd/savings/history${days ? `?days=${days}` : ""}`),
   },
   monitoring: {
     overview: (auth: AdminAuth, chainId: number) =>
@@ -376,6 +382,10 @@ export const giwaApi = {
     // ArcoUSD watcher alerts, and a test message to the configured channels (vault:write).
     arcousdAlerts: (auth: AdminAuth) => adminJson<GiwaArcoUSDAlerts>(auth, `/api/v1/admin/arcousd/alerts`),
     arcousdKeeper: (auth: AdminAuth) => adminJson<GiwaArcoUSDKeeper>(auth, `/api/v1/admin/arcousd/keeper`),
+    arcousdSavings: (auth: AdminAuth, days?: number) =>
+      adminJson<GiwaArcoUSDSavingsAdmin>(auth, `/api/v1/admin/arcousd/savings${days ? `?days=${days}` : ""}`),
+    arcousdDistribute: (auth: AdminAuth) =>
+      adminJson<GiwaArcoUSDDistribute>(auth, `/api/v1/admin/arcousd/savings/distribute`, { method: "POST", body: "{}" }),
     arcousdAlertTest: (auth: AdminAuth) =>
       adminJson<{ delivery: GiwaArcoUSDAlertDelivery }>(auth, `/api/v1/admin/arcousd/alerts/test`, { method: "POST", body: "{}" }),
     acknowledgeRecall: (auth: AdminAuth, productId: string, requestId: string) =>

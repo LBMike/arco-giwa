@@ -14,6 +14,8 @@ import type { ArcoUSDService } from "./arcousd/service.js"
 import type { ArcoUSDRecalls, RecallRow } from "./arcousd/recall.js"
 import { inertArcoUSDAdmin, type ArcoUSDAdmin } from "./arcousd/admin.js"
 import { inertArcoUSDAlerts, type ArcoUSDAlertsAdmin } from "./arcousd/alerts.js"
+import type { ArcoUSDSavingsService } from "./arcousd/savings.js"
+import { inertArcoUSDSavingsAdmin, type ArcoUSDSavingsAdmin } from "./arcousd/savings-admin.js"
 import type { StocksMarketDataPluginOptions } from "./stocks-market-data/index.js"
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify"
 import { generateNonce, SiweMessage } from "siwe"
@@ -129,6 +131,10 @@ export type ArcoAppServices = {
   /** ArcoUSD admin reads (snapshots, queue, flows) and the processQueue builder. */
   readonly arcoUSDAdmin?: ArcoUSDAdmin
   readonly arcoUSDAlerts?: ArcoUSDAlertsAdmin
+  /** sArcoUSD (Savings) public state + history; absent → the savings routes are not registered. */
+  readonly arcoUSDSavings?: ArcoUSDSavingsService
+  /** Savings admin reads (distributions, flows) and the distribute() builder. */
+  readonly arcoUSDSavingsAdmin?: ArcoUSDSavingsAdmin
   readonly stocksMarketClock?: StocksMarketDataPluginOptions["marketClock"]
   readonly stocks?: StocksPluginOptions
   readonly arco: PrismaArcoService
@@ -1010,6 +1016,23 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     },
   )
 
+  // Savings (sArcoUSD) in the admin console: distributions, rewards, deposits/withdrawals and Zap
+  // use over the window, from what the savings indexer records; status live | not-deployed | unavailable.
+  const arcoUSDSavingsAdmin = () => services.arcoUSDSavingsAdmin ?? inertArcoUSDSavingsAdmin(GIWA_CHAIN_ID)
+
+  app.get<{ Querystring: { days?: string } }>("/api/v1/admin/arcousd/savings", { preHandler: requireOperator }, async (request) =>
+    arcoUSDSavingsAdmin().view(request.query?.days),
+  )
+
+  // Unsigned distribute() for the operator's wallet — the manual path beside the keeper. distribute()
+  // is permissionless on-chain (it only moves Reserve surplus to savers within its caps); this builds
+  // the call and dry-runs it (preview.amountUsd = what it would mint now).
+  app.post("/api/v1/admin/arcousd/savings/distribute", { preHandler: requireOperator }, async (_request, reply) => {
+    const result = await arcoUSDSavingsAdmin().distributeTransaction()
+    if (!result.ok) return reply.code(result.status).send({ error: result.error })
+    return { transaction: result.transaction, preview: result.preview }
+  })
+
   // ArcoUSD watcher alerts (docs/operations/arcousd-alerts.md): what is open, pending and recently
   // resolved, the watcher's last run and which channels are on (never their credentials).
   const arcoUSDAlerts = () => services.arcoUSDAlerts ?? inertArcoUSDAlerts(GIWA_CHAIN_ID)
@@ -1760,7 +1783,7 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     reply.code(400).send({ error: errorMessage(error) })
   })
 
-  if (services.arcoUSD) app.register(arcoUSDPlugin, { service: services.arcoUSD })
+  if (services.arcoUSD) app.register(arcoUSDPlugin, { service: services.arcoUSD, savings: services.arcoUSDSavings })
   if (services.stocks) app.register(stocksPlugin, services.stocks)
   if (services.stocksRuntimeStatus) {
     app.register(stocksRuntimeStatusPlugin, services.stocksRuntimeStatus)

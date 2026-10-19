@@ -121,8 +121,12 @@ CONFIRM_GIWA_BROADCAST=I_UNDERSTAND_THIS_BROADCASTS_TO_GIWA \
    `contracts.router`가 Router 주소, `contracts.routerProducts`가 `["umint","ibenji","beqty"]`인지.
 5. Savings 확인(탐색기 또는 cast): sArcoUSD `totalSupply`가 1(시드), `balanceOf(0x…dEaD)`가 1,
    `fnPaused(deposit 선택자)`가 false(예치 열림), ArcoUSD `hasRole(MINTER_ROLE, 분배기)`, sArcoUSD
-   `hasRole(REWARDER_ROLE, 분배기)`가 true, 분배기 `preview()`가 `navOk = true`. 서버 API·화면은
-   4b·4c에서 붙는다.
+   `hasRole(REWARDER_ROLE, 분배기)`가 true, 분배기 `preview()`가 `navOk = true`.
+6. Savings 서버: **마이그레이션 먼저** `npm run prisma:migrate:deploy`(`20261020000000_arcousd_savings`,
+   테이블 1개 추가만). API·인덱서 재배포 뒤 `GET /api/v1/arcousd/savings`가 `status: "live"`,
+   `savings.seeded: true`, `savings.depositsOpen: true`인지. 인덱서 로그에
+   `service: "arco-arcousd-savings-indexer"`가 보이고(커서 `arcousd-savings`), 5분 안에
+   `GET /api/v1/arcousd/savings/history`에 점이 생긴다. 콘솔 Vaults → ArcoUSD → Savings 탭.
 
 ## 6. 서버 환경변수 (모두 선택)
 

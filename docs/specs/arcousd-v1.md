@@ -304,10 +304,17 @@ Reserve의 잉여를 sArcoUSD로 옮기는 유일한 길이다. Reserve는 24KB 
 
 - **sArcoUSD 컨트랙트(4a)**: `SArcoUSD`, `ArcoUSDSavingsDistributor`, `ArcoSavingsZap`(3.13~3.15)과 배포 스크립트 단계. 배포 스크립트가 셋을 배포하고, 분배기에 ArcoUSD `MINTER_ROLE`과 sArcoUSD `REWARDER_ROLE`을 주고, `seed()`로 1 ArcoUSD 시드를 소각 주소에 넣으면서 예치를 연다(배포자에게 ArcoUSD가 없으면 tUSDC 1개를 Reserve에 넣어 만든다). 시드 비용이 모자라면 브로드캐스트가 `preflight`에서 첫 트랜잭션 전에 거부된다(드라이런은 결과만 보여 준다). 파라미터는 레지스트리 `savings.params`(테스트넷 기본값: 반영 기간 1일, 분배 간격 1일, 연율 상한 2000bps, 여유분 50bps). 1~3단계가 이미 배포된 레지스트리에서도 이 단계만 이어서 한다. 서버·인덱서·화면은 4b·4c.
 
+- **Savings 조회·인덱서·콘솔(4b-1)**:
+  - 레지스트리 `savings`의 세 컨트랙트가 모두 기록되고 대기 중(`pending`)인 것이 없을 때만 Savings가 켜진다(그 전에는 `not-deployed`).
+  - 공개 `GET /api/v1/arcousd/savings`(15초 캐시): sArcoUSD 총자산·지분 가격·반영 중인 수익·지금 APR/APY(`rewardRate × 1년 ÷ totalAssets`, 일복리)·시드·일시정지와 예치·출금 열림, 분배기의 파라미터·마지막·다음 분배·`preview()`, 그리고 `distribute()`를 막는 Reserve·ArcoUSD 발행 일시정지. `preview()`를 못 읽어도(Lens 실패) 볼트 상태는 보여 주고, 공개 경로라 이유 대신 `previewError: "preview-unreadable"`만 준다(이유는 서버 로그). APR·APY는 2,147,483,647bps에서 자른다(시드만 있는 거의 빈 볼트에 보충이 들어오면 터무니없는 값이 나온다).
+  - 공개 `GET /api/v1/arcousd/savings/history?days=30`(1~90일, 기간별 60초 캐시 — 읽기 실패는 5초만): Savings 스냅샷의 지분 가격·저축액 추이(최대 360점)와 기간 실현 APY(첫·마지막 스냅샷의 지분 가격, 하루 이상일 때).
+  - Savings 인덱서: ArcoUSD 인덱서 옆에서 **자기 커서**(`arcousd-savings`)로 세 컨트랙트의 배포 블록부터 읽는다(Savings를 나중에 배포해도 ArcoUSD 커서가 이미 지나간 블록을 놓치지 않게). sArcoUSD·분배기·Zap 이벤트를 `EvmIndexedEvent`에 남기되(`walletAddress` 없음) sArcoUSD `Transfer`·`Approval`은 뺀다(예치·출금마다 `Deposit`·`Withdraw`가 있다). `ARCOUSD_SNAPSHOT_INTERVAL_MS`마다 `ArcoUSDSavingsSnapshot`(마이그레이션 `20261020000000_arcousd_savings`, 추가만)에 남긴다.
+  - 관리자 API `GET /api/v1/admin/arcousd/savings`, `POST /api/v1/admin/arcousd/savings/distribute`와 콘솔 Savings 탭은 `docs/admin-console.md`.
+
 아직 하지 않는 것:
 
 - 알림 이메일.
-- sArcoUSD의 서버 API·인덱서·감시 규칙·봇 분배(4b), 고객 화면(4c).
+- Savings 감시 규칙과 봇의 `distribute()`(4b-2), 고객 화면(4c).
 
 ## 6. 신뢰 가정
 
