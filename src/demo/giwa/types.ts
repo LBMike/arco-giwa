@@ -425,6 +425,99 @@ export type GiwaArcoUSDProcessQueue = {
   preview: { paid: number; blockNumber: string } | { error: string }
 }
 
+/** sArcoUSD (Savings) state: GET /api/v1/arcousd/savings (docs/specs/arcousd-v1.md §3.13–3.14). */
+export type GiwaArcoUSDSavingsState = {
+  blockNumber: string
+  totalAssets: string
+  totalAssetsUsd: string
+  totalSupply: string
+  /** ArcoUSD per 1 sArcoUSD, base18 / human. */
+  sharePrice: string
+  sharePriceHuman: string
+  unvested: string
+  unvestedUsd: string
+  vestingAmount: string
+  vestingPeriodSeconds: number
+  vestingStartedAt: string | null
+  vestingEndsAt: string | null
+  /** ArcoUSD per second being released now, base18. */
+  rewardRate: string
+  currentAprBps: number
+  currentApyBps: number
+  seeded: boolean
+  vaultPaused: boolean
+  depositPaused: boolean
+  withdrawPaused: boolean
+  rewardsPaused: boolean
+  depositsOpen: boolean
+  withdrawalsOpen: boolean
+  distributor: {
+    paused: boolean
+    /** Reserve.paused(): distribute() refuses. */
+    reservePaused: boolean
+    /** ArcoUSD paused() or fnPaused(mint): distribute() cannot mint. */
+    arcoUSDMintPaused: boolean
+    minIntervalSeconds: number
+    maxAprBps: number
+    reserveMarginBps: number
+    lastDistributionAt: string
+    nextDistributionAt: string
+    preview: { amount: string; amountUsd: string; surplus: string; rateCap: string; mintHeadroom: string; navOk: boolean } | null
+    /** "preview-unreadable" when preview() could not be read (the detail is in the API log). */
+    previewError?: string
+  }
+}
+
+export type GiwaArcoUSDSavings = {
+  status: GiwaArcoUSDStatus
+  chainId: number
+  contracts: { sArcoUSD: string; distributor: string; zap: string; arcoUSD: string; reserve: string } | null
+  readAt: string
+  savings: GiwaArcoUSDSavingsState | null
+}
+
+/** GET /api/v1/arcousd/savings/history: share price / TVL from the savings indexer's snapshots. */
+export type GiwaArcoUSDSavingsHistory = {
+  status: GiwaArcoUSDStatus
+  chainId: number
+  days: number
+  total: number
+  sampled: boolean
+  truncated: boolean
+  points: { takenAt: string; blockNumber: string; sharePrice: string; totalAssetsUsd: string; aprBps: number }[]
+  /** Share-price growth over the window, annualized (bps); null with under a day of history. */
+  realizedApyBps: number | null
+}
+
+/** GET /api/v1/admin/arcousd/savings: distributions, top-ups, deposits/withdrawals, Zap use. */
+export type GiwaArcoUSDSavingsAdmin = {
+  status: GiwaArcoUSDStatus
+  error?: string
+  days: number
+  contracts: { sArcoUSD: string; distributor: string; zap: string } | null
+  totals: {
+    depositsUsd: string
+    deposits: number
+    withdrawalsUsd: string
+    withdrawals: number
+    distributedUsd: string
+    distributions: number
+    toppedUpUsd: string
+  }
+  daily: { day: string; depositsUsd: string; withdrawalsUsd: string }[]
+  distributions: { at: string | null; txHash: string; caller: string; amountUsd: string; surplusUsd: string; rateCapUsd: string; backingUsd: string; liabilitiesUsd: string }[]
+  rewards: { at: string | null; txHash: string; caller: string; amountUsd: string; fromDistributor: boolean }[]
+  activity: { at: string | null; txHash: string; kind: "deposit" | "withdraw" | "seed"; account: string; sender: string; amountUsd: string; viaZap: boolean }[]
+  zapAssets: { asset: string; symbol: string; deposits: number; depositAmount: string; redemptions: number; redeemAmount: string }[]
+  truncated: boolean
+}
+
+/** POST /api/v1/admin/arcousd/savings/distribute: the unsigned distribute() and its dry run. */
+export type GiwaArcoUSDDistribute = {
+  transaction: UnsignedAdminTransaction
+  preview: { amountUsd: string; blockNumber: string } | { error: string }
+}
+
 /** One watcher alert (docs/operations/arcousd-alerts.md). PENDING: seen, not yet held long enough to send. */
 export type GiwaArcoUSDAlert = {
   key: string

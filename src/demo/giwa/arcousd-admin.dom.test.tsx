@@ -232,3 +232,52 @@ test("alerts card: a test send shows each channel's answer (set GIWA_HOST_DOM_RU
     assert.match(doc.body.textContent ?? "", /Wait 30 seconds between test alerts/)
   })
 })
+
+test("distribute control: preview, sign & send, then spent; a reverting dry run cannot be sent (set GIWA_HOST_DOM_RUNTIME)", { skip: !runtime }, async () => {
+  await withDom(async ({ doc, React, root, act }) => {
+    const { DistributeControl } = (await import("./AdminArcoUSD")) as AnyModule
+    const transaction = { chainId: 91342, to: "0x0000000000000000000000000000000000000052", value: "0x0", data: "0xe4fc6b6d", description: "distribute" }
+    const replies = [
+      { transaction, preview: { amountUsd: "5.25", blockNumber: "901" } },
+      { transaction, preview: { error: "distribute() would revert or could not be simulated: TooSoon()" } },
+    ]
+    const calls: string[] = []
+    let finishConfirm: () => void = () => undefined
+    const handlers = {
+      walletAddress: "0x00000000000000000000000000000000000000ee",
+      onConnectWallet: () => undefined,
+      onPrepare: async () => {
+        calls.push("prepare")
+        return replies.shift()
+      },
+      onSend: (_sent: unknown, onSigned: (hash: string) => void) =>
+        new Promise<string>((resolve) => {
+          calls.push("send")
+          onSigned(`0x${"cd".repeat(32)}`)
+          finishConfirm = () => resolve(`0x${"cd".repeat(32)}`)
+        }),
+    }
+    const render = (stateKey: string) => root.render(React.createElement(DistributeControl, { ...handlers, stateKey }))
+    await act(() => render("2026-10-20T11:00:00.000Z"))
+    assert.equal(button(doc, "Sign & send").disabled, true)
+    await act(() => button(doc, "Preview").click())
+    await act(tick)
+    assert.match(doc.body.textContent ?? "", /Would mint \$5\.25 into sArcoUSD now \(block 901\)\./)
+    await act(() => button(doc, "Sign & send").click())
+    assert.ok(button(doc, "Confirming…").disabled)
+    await act(() => finishConfirm())
+    await act(tick)
+    assert.match(doc.body.textContent ?? "", /Sent\. View transaction Refreshing the distributor…/)
+    assert.equal(button(doc, "Sign & send").disabled, true)
+    // The cached state still shows the old distribution: Preview waits until it changes.
+    assert.equal(button(doc, "Preview").disabled, true)
+    await act(() => render("2026-10-21T12:00:00.000Z"))
+    assert.equal(button(doc, "Preview").disabled, false)
+
+    await act(() => button(doc, "Preview").click())
+    await act(tick)
+    assert.match(doc.body.textContent ?? "", /TooSoon\(\)/)
+    assert.equal(button(doc, "Sign & send").disabled, true)
+    assert.deepEqual(calls, ["prepare", "send", "prepare"])
+  })
+})

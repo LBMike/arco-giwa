@@ -218,6 +218,28 @@ model ArcoUSDReserveSnapshot {
   @@schema("arco_evm")
 }
 
+// sArcoUSD (Savings) snapshots from the savings indexer (docs/specs/arcousd-v1.md §5): the share
+// price and assets over time, for the Savings APY history and the admin console.
+model ArcoUSDSavingsSnapshot {
+  id           String   @id @default(cuid())
+  chainId      Int
+  vaultAddress String
+  blockNumber  BigInt
+  takenAt      DateTime
+  totalAssets  String
+  totalSupply  String
+  // ArcoUSD per 1 sArcoUSD, base18
+  sharePrice   String
+  // rewardRate × 1 year ÷ totalAssets at the time
+  aprBps       Int
+  data         Json
+  createdAt    DateTime @default(now())
+
+  @@unique([chainId, vaultAddress, blockNumber])
+  @@index([chainId, vaultAddress, takenAt])
+  @@schema("arco_evm")
+}
+
 // ArcoUSD watcher alerts (docs/operations/arcousd-alerts.md), one row per rule key, reused across
 // occurrences: PENDING (seen, not yet held for the rule's sustain time) -> OPEN (notified) ->
 // RESOLVED (cleared). Written only by the watcher in the indexer worker; the API reads them.

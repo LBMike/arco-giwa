@@ -33,16 +33,25 @@ import {
   pauseRows,
   payoutsPaused,
   queueFilter,
+  rewardsPerDayUsd,
+  savingsPauseRows,
+  sharePriceText,
+  distributionVerdict,
   shortAddress,
   simulationText,
   usdCompact,
   usdText,
   watcherStatus,
   type ArcoUSDAdminTab,
+  type DistributionVerdict,
 } from "./arcousd-admin"
 import type {
   GiwaArcoUSDAlertDelivery,
   GiwaArcoUSDAlerts,
+  GiwaArcoUSDDistribute,
+  GiwaArcoUSDSavings,
+  GiwaArcoUSDSavingsAdmin,
+  GiwaArcoUSDSavingsHistory,
   GiwaArcoUSDFlows,
   GiwaArcoUSDKeeper,
   GiwaArcoUSDProcessQueue,
@@ -53,13 +62,15 @@ import type {
 } from "./types"
 
 // Admin · ArcoUSD (docs/admin-console.md "ArcoUSD 관리자 API"): the reserve at a glance with the
-// watcher's alerts, the Standard queue with the manual processQueue (operator-signed), and reserve
-// flows. Reads the public reserve state plus the operator-only snapshots / queue / flows / alerts
+// watcher's alerts, the Standard queue with the manual processQueue (operator-signed), reserve
+// flows, and Savings (sArcoUSD: yield, the surplus distributor with a manual distribute()). Reads the public reserve state plus the operator-only snapshots / queue / flows / alerts
 // routes; the writes are a transaction the server builds and the operator wallet signs, and a test
 // alert the server sends to its configured channels.
 
 const REFRESH_FAST = 30_000
 const REFRESH_SLOW = 60_000
+/** Past the API's 15 s savings cache, so a refetch after a send sees the new distribution. */
+const SAVINGS_CACHE_SETTLE_MS = 16_000
 
 export default function GiwaAdminArcoUSDPage() {
   const { auth, wallet } = useGiwaAdmin()
@@ -68,6 +79,7 @@ export default function GiwaAdminArcoUSDPage() {
   const filter = queueFilter(params.get("status"))
   const [trendDays, setTrendDays] = useState(30)
   const [flowDays, setFlowDays] = useState(30)
+  const [savingsDays, setSavingsDays] = useState(30)
 
   const reserveQuery = useQuery({
     queryKey: ["giwa", "arcousd", "reserve"],
@@ -111,6 +123,27 @@ export default function GiwaAdminArcoUSDPage() {
     placeholderData: keepPreviousData,
   })
 
+  const savingsQuery = useQuery({
+    queryKey: ["giwa", "arcousd", "savings"],
+    queryFn: () => giwaApi.arcousd.savings(),
+    enabled: tab === "savings",
+    refetchInterval: REFRESH_FAST,
+  })
+  const savingsHistoryQuery = useQuery({
+    queryKey: ["giwa", "arcousd", "savings-history", savingsDays],
+    queryFn: () => giwaApi.arcousd.savingsHistory(savingsDays),
+    enabled: tab === "savings",
+    refetchInterval: REFRESH_SLOW,
+    placeholderData: keepPreviousData,
+  })
+  const savingsAdminQuery = useQuery({
+    queryKey: ["giwa", "arcousd-admin", "savings", savingsDays],
+    queryFn: () => giwaApi.admin.arcousdSavings(auth, savingsDays),
+    enabled: auth.ready && tab === "savings",
+    refetchInterval: REFRESH_SLOW,
+    placeholderData: keepPreviousData,
+  })
+
   function setParam(key: string, value: string | null) {
     const next = new URLSearchParams(params)
     if (value === null) next.delete(key)
@@ -125,6 +158,18 @@ export default function GiwaAdminArcoUSDPage() {
     await afterConfirmedReceipt(hash, async () => {
       await Promise.all([queueQuery.refetch(), reserveQuery.refetch()])
     })
+    return hash
+  }
+
+  async function sendDistribute(prepared: GiwaArcoUSDDistribute, onSigned: (hash: string) => void): Promise<string> {
+    if (!wallet.address) throw new Error("Connect the operator wallet first")
+    const hash = await sendPreparedTransaction(wallet.address, prepared.transaction)
+    onSigned(hash)
+    await afterConfirmedReceipt(hash, async () => {
+      await Promise.all([savingsQuery.refetch(), savingsAdminQuery.refetch(), reserveQuery.refetch()])
+    })
+    // The public savings state is cached server-side for 15 s: read it again once that has passed.
+    setTimeout(() => void savingsQuery.refetch(), SAVINGS_CACHE_SETTLE_MS)
     return hash
   }
 
@@ -171,6 +216,23 @@ export default function GiwaAdminArcoUSDPage() {
         error: flowsQuery.isError ? readableError(flowsQuery.error) : null,
         days: flowDays,
         onDaysChange: setFlowDays,
+      }}
+      savings={{
+        savings: savingsQuery.data ?? null,
+        loading: savingsQuery.isLoading,
+        error: savingsQuery.isError ? readableError(savingsQuery.error) : null,
+        history: savingsHistoryQuery.data ?? null,
+        historyLoading: savingsHistoryQuery.isLoading,
+        historyError: savingsHistoryQuery.isError ? readableError(savingsHistoryQuery.error) : null,
+        activity: savingsAdminQuery.data ?? null,
+        activityLoading: savingsAdminQuery.isLoading,
+        activityError: savingsAdminQuery.isError ? readableError(savingsAdminQuery.error) : null,
+        days: savingsDays,
+        onDaysChange: setSavingsDays,
+        walletAddress: wallet.address ?? null,
+        onConnectWallet: () => void wallet.connect(),
+        onPrepareDistribute: () => giwaApi.admin.arcousdDistribute(auth),
+        onSendDistribute: sendDistribute,
       }}
     />
   )
@@ -224,6 +286,28 @@ type FlowsProps = {
   onDaysChange: (days: number) => void
 }
 
+type SavingsProps = {
+  /** Public sArcoUSD state (vault, vesting, the distributor's next distribution). */
+  savings: GiwaArcoUSDSavings | null
+  loading?: boolean
+  error?: string | null
+  /** Public share price / saved history over `days`. */
+  history: GiwaArcoUSDSavingsHistory | null
+  historyLoading?: boolean
+  historyError?: string | null
+  /** Operator view: distributions, yield added, deposits/withdrawals, Zap use over `days`. */
+  activity: GiwaArcoUSDSavingsAdmin | null
+  activityLoading?: boolean
+  activityError?: string | null
+  days: number
+  onDaysChange: (days: number) => void
+  walletAddress: string | null
+  onConnectWallet: () => void
+  onPrepareDistribute: () => Promise<GiwaArcoUSDDistribute>
+  onSendDistribute: (prepared: GiwaArcoUSDDistribute, onSigned: (hash: string) => void) => Promise<string>
+  now?: number
+}
+
 /** The whole page over already-fetched data (rendered and tested without the query layer). */
 export function ArcoUSDAdminView({
   tab,
@@ -235,6 +319,7 @@ export function ArcoUSDAdminView({
   overview,
   queue,
   flows,
+  savings,
 }: {
   tab: ArcoUSDAdminTab
   onTabChange: (tab: ArcoUSDAdminTab) => void
@@ -245,6 +330,7 @@ export function ArcoUSDAdminView({
   overview: OverviewProps
   queue: QueueProps
   flows: FlowsProps
+  savings?: SavingsProps
 }) {
   return (
     <div className="w-full space-y-6">
@@ -297,6 +383,7 @@ export function ArcoUSDAdminView({
           {tab === "overview" && <OverviewView reserve={reserve} reserveLoading={reserveLoading} hasAuth={hasAuth} {...overview} />}
           {tab === "queue" && <QueueView reserve={reserve} {...queue} />}
           {tab === "flows" && <FlowsView {...flows} />}
+          {tab === "savings" && savings && <SavingsView {...savings} />}
         </div>
       )}
     </div>
@@ -1143,6 +1230,461 @@ function FlowsView({ flows, loading, error, days, onDaysChange }: FlowsProps) {
 }
 
 // ─────────────────────────── presentational pieces ───────────────────────────
+
+// ── Savings ───────────────────────────────────────────────────────────────
+
+/** sArcoUSD: what is saved and earning, the next distribution (with a manual distribute()), the
+ *  switches, the share price over time and the window's activity. */
+export function SavingsView({
+  savings,
+  loading,
+  error,
+  history,
+  historyLoading,
+  historyError,
+  activity,
+  activityLoading,
+  activityError,
+  days,
+  onDaysChange,
+  walletAddress,
+  onConnectWallet,
+  onPrepareDistribute,
+  onSendDistribute,
+  now = Date.now(),
+}: SavingsProps) {
+  if (loading && !savings) return <LoadingNote>Loading Savings…</LoadingNote>
+  if (!savings) return error ? <ErrorLine>Could not load Savings: {error}</ErrorLine> : null
+  if (savings.status === "not-deployed") {
+    return (
+      <Card>
+        <p className="text-sm text-[var(--color-arco-ink)]">Savings is not deployed yet.</p>
+        <p className="mt-1 text-sm text-[var(--color-arco-muted)]">
+          This tab fills in once the deploy script has added sArcoUSD, the distributor and the Zap to deployments/91342/arcousd-giwa.json and the API has been redeployed.
+        </p>
+      </Card>
+    )
+  }
+  const state = savings.savings
+  const verdict = state ? distributionVerdict(state, now) : null
+  const preview = state?.distributor.preview ?? null
+  const perDay = state ? rewardsPerDayUsd(state) : null
+  return (
+    <div className="space-y-6">
+      {savings.status === "unavailable" && (
+        <Card>
+          <p className="text-sm text-[var(--color-arco-down)]">The API could not read the Savings contracts.</p>
+        </Card>
+      )}
+      {error && <ErrorLine>Could not refresh Savings: {error}. Showing the last loaded data.</ErrorLine>}
+      {state && !state.seeded && (
+        <Card>
+          <p className="text-sm text-[var(--color-arco-ink)]">Deposits are closed until sArcoUSD.seed() runs.</p>
+          <p className="mt-1 text-sm text-[var(--color-arco-muted)]">The deploy script does it in its seed:sArcoUSD step (1 ArcoUSD for 0x…dEaD).</p>
+        </Card>
+      )}
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <TotalCard label="Saved" sub="sArcoUSD assets (rewards still vesting excluded)" value={state ? usdText(state.totalAssetsUsd) : null} />
+        <TotalCard label="Share price" sub="ArcoUSD per sArcoUSD" value={state ? sharePriceText(state.sharePriceHuman) : null} />
+        <TotalCard
+          label="APY now"
+          sub={state ? `APR ${bpsText(state.currentAprBps)} of what is vesting, compounded daily` : "of what is vesting"}
+          value={state ? bpsText(state.currentApyBps) : null}
+        />
+        <TotalCard
+          label={`Realized APY (${days}d)`}
+          sub={history && history.realizedApyBps === null ? "needs a day of share price history" : "share price growth over the window"}
+          value={history && history.realizedApyBps !== null ? bpsText(history.realizedApyBps) : null}
+        />
+      </section>
+
+      <section className="grid gap-3 lg:grid-cols-2">
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle>Distribution</CardTitle>
+            {verdict && <VerdictPill verdict={verdict} />}
+          </div>
+          {verdict && <VerdictLine verdict={verdict} />}
+          <dl className="mt-3 space-y-2 text-sm">
+            <Row label="Would mint now" value={preview ? usdText(preview.amountUsd) : "—"} />
+            <Row label="Reserve surplus above the margin" value={preview ? usdText(Number(preview.surplus) / 1e18) : "—"} />
+            <Row label="APR cap since the last distribution" value={preview ? usdText(Number(preview.rateCap) / 1e18) : "—"} />
+            <Row label="Room under the mint cap" value={preview ? usdText(Number(preview.mintHeadroom) / 1e18) : "—"} />
+            {/* The distributor starts its clock at deploy: before the first distribution this is the deploy time. */}
+            <Row label="Last distribution (or deploy)" value={state ? agoText(state.distributor.lastDistributionAt, now) : "—"} />
+            <Row label="Next allowed" value={state ? timeText(state.distributor.nextDistributionAt) : "—"} />
+            <Row
+              label="Rules"
+              value={
+                state
+                  ? `every ${durationText(state.distributor.minIntervalSeconds)} · cap ${bpsText(state.distributor.maxAprBps)} APR · margin ${bpsText(state.distributor.reserveMarginBps)}`
+                  : "—"
+              }
+            />
+          </dl>
+          <DistributeControl
+            disabled={verdict?.kind !== "ready"}
+            stateKey={state?.distributor.lastDistributionAt ?? null}
+            walletAddress={walletAddress}
+            onConnectWallet={onConnectWallet}
+            onPrepare={onPrepareDistribute}
+            onSend={onSendDistribute}
+          />
+        </Card>
+        <Card>
+          <CardTitle>Vesting</CardTitle>
+          <dl className="mt-3 space-y-2 text-sm">
+            <Row label="Still vesting" value={state ? usdText(state.unvestedUsd) : "—"} />
+            <Row label="Released per day now" value={perDay !== null ? usdText(perDay) : "—"} />
+            <Row label="Current window ends" value={state?.vestingEndsAt ? timeText(state.vestingEndsAt) : "—"} />
+            <Row label="Vesting period" value={state ? durationText(state.vestingPeriodSeconds) : "—"} />
+            <Row label="sArcoUSD supply" value={state ? amountText(Number(state.totalSupply) / 1e18) : "—"} />
+            <Row label="Seed (1 sArcoUSD for 0x…dEaD)" value={state ? (state.seeded ? "Done" : "Not yet") : "—"} attention={state ? !state.seeded : false} />
+            <Row label="Deposits" value={state ? (state.depositsOpen ? "Open" : "Closed") : "—"} attention={state ? !state.depositsOpen : false} />
+            <Row label="Withdrawals" value={state ? (state.withdrawalsOpen ? "Open" : "Closed") : "—"} attention={state ? !state.withdrawalsOpen : false} />
+          </dl>
+        </Card>
+      </section>
+
+      <Card>
+        <CardTitle>Switches</CardTitle>
+        {state ? (
+          <ul className="mt-3 divide-y divide-[var(--color-arco-border)]">
+            {savingsPauseRows(state).map((row) => (
+              <li key={row.label} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <div>
+                  <p className="text-sm text-[var(--color-arco-ink)]">{row.label}</p>
+                  <p className="text-[11px] text-[var(--color-arco-muted)]">{row.effect}</p>
+                </div>
+                <Pill tone={row.paused ? "negative" : "neutral"}>{row.paused ? "Paused" : "Running"}</Pill>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-3 text-sm text-[var(--color-arco-muted)]">—</p>
+        )}
+      </Card>
+
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle>Share price and saved</CardTitle>
+          <WindowPicker days={days} onChange={onDaysChange} label="Savings window" />
+        </div>
+        {historyLoading && !history ? (
+          <LoadingNote>Loading the share price history…</LoadingNote>
+        ) : historyError && !history ? (
+          <ErrorLine>Could not load the share price history: {historyError}</ErrorLine>
+        ) : (
+          <SavingsChart history={history} />
+        )}
+      </Card>
+
+      <SavingsActivity activity={activity} loading={activityLoading} error={activityError} days={days} />
+
+      {savings.contracts && (
+        <Card>
+          <CardTitle>Contracts</CardTitle>
+          <dl className="mt-3 space-y-2 text-sm">
+            <AddressRow label="sArcoUSD" address={savings.contracts.sArcoUSD} />
+            <AddressRow label="Distributor" address={savings.contracts.distributor} />
+            <AddressRow label="Savings Zap" address={savings.contracts.zap} />
+          </dl>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+function VerdictPill({ verdict }: { verdict: DistributionVerdict }) {
+  if (verdict.kind === "ready") return <Pill tone="positive">Ready</Pill>
+  if (verdict.kind === "waiting") return <Pill tone="active">{`Next at ${timeText(verdict.until)}`}</Pill>
+  if (verdict.kind === "paused") return <Pill tone="negative">Paused</Pill>
+  if (verdict.kind === "nav") return <Pill tone="attention">NAV unavailable</Pill>
+  if (verdict.kind === "unknown") return <Pill tone="attention">Unknown</Pill>
+  return <Pill tone="neutral">Nothing to distribute</Pill>
+}
+
+function VerdictLine({ verdict }: { verdict: DistributionVerdict }) {
+  const text =
+    verdict.kind === "ready"
+      ? `distribute() would mint ${usdText(verdict.amountUsd)} into sArcoUSD now.`
+      : verdict.kind === "waiting"
+        ? "The interval since the last distribution has not passed yet."
+        : verdict.kind === "paused"
+          ? `${verdict.what} is paused, so distribute() would revert.`
+          : verdict.kind === "nav"
+            ? "A strategy price feed cannot be read, so the surplus is unknown and distribute() refuses."
+            : verdict.kind === "unknown"
+              ? `${verdict.error}.`
+              : verdict.why
+  return <p className="mt-2 break-words text-sm text-[var(--color-arco-text-soft)]">{text}</p>
+}
+
+function SavingsChart({ history }: { history: GiwaArcoUSDSavingsHistory | null }) {
+  const points = (history?.points ?? []).map((point) => ({
+    label: shortDateTime(point.takenAt, (history?.days ?? 30) <= 7),
+    price: Number(point.sharePrice),
+    saved: Number(point.totalAssetsUsd),
+  }))
+  return (
+    <>
+      <Legend items={[{ label: "Share price (ArcoUSD)", color: SERIES_A }]} />
+      <div className="mt-2 h-[200px] w-full">
+        {points.length === 0 ? (
+          <EmptyChart>No snapshots in this window yet</EmptyChart>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke="var(--color-arco-border)" vertical={false} />
+              <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={24} />
+              <YAxis width={64} tick={AXIS_TICK} tickLine={false} axisLine={false} domain={["auto", "auto"]} tickFormatter={(value) => sharePriceText(Number(value))} />
+              <Tooltip formatter={(value) => sharePriceText(Number(value))} labelStyle={TOOLTIP_LABEL} contentStyle={TOOLTIP_BOX} />
+              <Line type="monotone" dataKey="price" name="Share price" stroke={SERIES_A} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+      {points.length > 0 && (
+        <>
+          <h3 className="mt-5 text-xs font-medium text-[var(--color-arco-text-soft)]">Saved (sArcoUSD assets)</h3>
+          <div className="mt-2 h-[140px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                <defs>
+                  <linearGradient id="arcousd-saved" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--color-arco-chart-area)" />
+                    <stop offset="100%" stopColor="var(--color-arco-chart-area)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="var(--color-arco-border)" vertical={false} />
+                <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={24} />
+                <YAxis width={64} tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={(value) => usdCompact(Number(value))} />
+                <Tooltip formatter={(value) => usdText(Number(value))} labelStyle={TOOLTIP_LABEL} contentStyle={TOOLTIP_BOX} />
+                <Area type="linear" dataKey="saved" name="Saved" stroke="var(--color-arco-chart-line)" strokeWidth={2} fill="url(#arcousd-saved)" dot={false} activeDot={{ r: 4 }} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
+      {history?.sampled && (
+        <p className="mt-2 text-[11px] text-[var(--color-arco-muted)]">
+          {history.total} snapshots, shown as {history.points.length} points (the last of each interval).
+          {history.truncated ? " The oldest part of the window is not shown." : ""}
+        </p>
+      )}
+    </>
+  )
+}
+
+function SavingsActivity({
+  activity,
+  loading,
+  error,
+  days,
+}: {
+  activity: GiwaArcoUSDSavingsAdmin | null
+  loading?: boolean
+  error?: string | null
+  days: number
+}) {
+  if (loading && !activity) return <LoadingNote>Loading Savings activity…</LoadingNote>
+  if (!activity) return error ? <ErrorLine>Could not load Savings activity: {error}</ErrorLine> : null
+  if (activity.status === "unavailable") return <ErrorLine>Savings activity is unavailable: {activity.error ?? "unknown error"}</ErrorLine>
+  if (activity.status !== "live") return null
+  const { totals } = activity
+  return (
+    <>
+      {error && <ErrorLine>Could not refresh Savings activity: {error}. Showing the last loaded data.</ErrorLine>}
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <TotalCard label={`Deposits (${days}d)`} sub={countText(totals.deposits, "deposit")} value={usdText(totals.depositsUsd)} />
+        <TotalCard label={`Withdrawals (${days}d)`} sub={countText(totals.withdrawals, "withdrawal")} value={usdText(totals.withdrawalsUsd)} />
+        <TotalCard label={`Distributed (${days}d)`} sub={countText(totals.distributions, "distribution")} value={usdText(totals.distributedUsd)} />
+        <TotalCard label={`Operator top-ups (${days}d)`} sub="yield added by hand, not from the Reserve" value={usdText(totals.toppedUpUsd)} />
+      </section>
+      <Card>
+        <CardTitle>Distributions</CardTitle>
+        <Table
+          caption="Distributions"
+          head={["When", "Minted", "Surplus", "APR cap", "Transaction"]}
+          rows={activity.distributions.map((row) => [
+            row.at ? timeText(row.at) : "—",
+            usdText(row.amountUsd),
+            usdText(row.surplusUsd),
+            usdText(row.rateCapUsd),
+            <TxLink key="tx" hash={row.txHash} />,
+          ])}
+          numeric={[1, 2, 3]}
+          empty="No distributions in this window"
+        />
+      </Card>
+      <Card>
+        <CardTitle>Yield added</CardTitle>
+        <Table
+          caption="Yield added"
+          head={["When", "Amount", "Source", "Transaction"]}
+          rows={activity.rewards.map((row) => [
+            row.at ? timeText(row.at) : "—",
+            usdText(row.amountUsd),
+            row.fromDistributor ? "Distributor" : `Top-up by ${shortAddress(row.caller)}`,
+            <TxLink key="tx" hash={row.txHash} />,
+          ])}
+          numeric={[1]}
+          empty="No yield added in this window"
+        />
+      </Card>
+      <Card>
+        <CardTitle>Deposits and withdrawals</CardTitle>
+        <Table
+          caption="Deposits and withdrawals"
+          head={["When", "Kind", "Saver", "Amount", "Route", "Transaction"]}
+          rows={activity.activity.map((row) => [
+            row.at ? timeText(row.at) : "—",
+            row.kind === "seed" ? "Seed" : row.kind === "deposit" ? "Deposit" : "Withdrawal",
+            <AddressLink key="a" address={row.account} />,
+            usdText(row.amountUsd),
+            row.viaZap ? "Zap" : "Direct",
+            <TxLink key="tx" hash={row.txHash} />,
+          ])}
+          numeric={[3]}
+          empty="No deposits or withdrawals in this window"
+        />
+        {activity.truncated && <p className="mt-2 text-[11px] text-[var(--color-arco-muted)]">The oldest part of the window is not counted (event limit).</p>}
+      </Card>
+      <Card>
+        <CardTitle>Zap by asset</CardTitle>
+        <Table
+          caption="Zap by asset"
+          head={["Asset", "Deposits", "Paid in", "Withdrawals", "Paid out"]}
+          rows={activity.zapAssets.map((row) => [
+            <span key="s" className="font-medium text-[var(--color-arco-ink)]">{row.symbol}</span>,
+            String(row.deposits),
+            amountText(row.depositAmount),
+            String(row.redemptions),
+            amountText(row.redeemAmount),
+          ])}
+          numeric={[1, 2, 3, 4]}
+          empty="No Zap use in this window"
+        />
+      </Card>
+    </>
+  )
+}
+
+/** Preview (server dry-run) → Sign & send (operator wallet) for distribute(). */
+export function DistributeControl({
+  disabled = false,
+  stateKey = null,
+  walletAddress,
+  onConnectWallet,
+  onPrepare,
+  onSend,
+}: {
+  disabled?: boolean
+  /** The distributor's lastDistributionAt: after a send, Preview stays off until the read shows it changed
+   *  (the public state is cached for up to 15 s and would still say "Ready"). */
+  stateKey?: string | null
+  walletAddress: string | null
+  onConnectWallet: () => void
+  onPrepare: () => Promise<GiwaArcoUSDDistribute>
+  onSend: (prepared: GiwaArcoUSDDistribute, onSigned: (hash: string) => void) => Promise<string>
+}) {
+  const previewSeq = useRef(0)
+  const [phase, setPhase] = useState<ControlPhase>("idle")
+  const [prepared, setPrepared] = useState<GiwaArcoUSDDistribute | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [hash, setHash] = useState<string | null>(null)
+  const [sentAtKey, setSentAtKey] = useState<string | null | undefined>(undefined)
+  const busy = phase === "preparing" || phase === "signing" || phase === "confirming"
+  const awaitingRefresh = phase === "done" && sentAtKey !== undefined && sentAtKey === stateKey
+
+  async function preview() {
+    const seq = ++previewSeq.current
+    setPhase("preparing")
+    setMessage(null)
+    setHash(null)
+    try {
+      const reply = await onPrepare()
+      if (seq !== previewSeq.current) return
+      setPrepared(reply)
+      setPhase("prepared")
+    } catch (error) {
+      if (seq !== previewSeq.current) return
+      setPrepared(null)
+      setPhase("failed")
+      setMessage(readableError(error))
+    }
+  }
+
+  async function send() {
+    if (!prepared) return
+    const sending = prepared
+    const keyAtSend = stateKey
+    setPhase("signing")
+    setMessage(null)
+    setHash(null)
+    try {
+      await onSend(sending, (sent) => {
+        setHash(sent)
+        setPhase("confirming")
+      })
+      setPrepared(null)
+      setSentAtKey(keyAtSend)
+      setPhase("done")
+    } catch (error) {
+      setPrepared(null)
+      setPhase("failed")
+      setMessage(readableError(error))
+    }
+  }
+
+  const willMint = prepared && "amountUsd" in prepared.preview ? Number(prepared.preview.amountUsd) : null
+  // Nothing to send when the dry run would revert or mint nothing.
+  const sendable = prepared !== null && willMint !== null && willMint > 0
+  return (
+    <AdminWriteGroup className="mt-4 border-t border-[var(--color-arco-border)] pt-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <SmallButton onClick={() => void preview()} disabled={disabled || busy || awaitingRefresh}>
+          {phase === "preparing" ? "Previewing…" : "Preview"}
+        </SmallButton>
+        {walletAddress ? (
+          <SmallButton primary onClick={() => void send()} disabled={!sendable || busy}>
+            {phase === "signing" ? "Confirm in wallet…" : phase === "confirming" ? "Confirming…" : "Sign & send"}
+          </SmallButton>
+        ) : (
+          <SmallButton onClick={onConnectWallet}>Connect wallet</SmallButton>
+        )}
+      </div>
+      <div aria-live="polite" className="mt-2 text-[11px]">
+        {prepared && "amountUsd" in prepared.preview && (
+          <p className={willMint === 0 ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-text-soft)]"}>
+            {willMint === 0
+              ? `Would mint nothing now (block ${prepared.preview.blockNumber}).`
+              : `Would mint ${usdText(prepared.preview.amountUsd)} into sArcoUSD now (block ${prepared.preview.blockNumber}).`}
+          </p>
+        )}
+        {prepared && "error" in prepared.preview && <p className="break-words text-[var(--color-arco-down)]">{prepared.preview.error}</p>}
+        {phase === "failed" && message && (
+          <p className="text-[var(--color-arco-down)]">
+            {message}
+            {hash && (
+              <>
+                {" "}
+                <TxLink hash={hash} label="View transaction" />
+              </>
+            )}
+          </p>
+        )}
+        {phase === "done" && hash && (
+          <p className="text-[var(--color-arco-text-soft)]">
+            Sent. <TxLink hash={hash} label="View transaction" />
+            {awaitingRefresh ? " Refreshing the distributor…" : ""}
+          </p>
+        )}
+      </div>
+    </AdminWriteGroup>
+  )
+}
 
 const FOCUS_RING =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"

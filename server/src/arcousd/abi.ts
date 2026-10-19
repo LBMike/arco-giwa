@@ -68,3 +68,83 @@ export const routerEventsAbi = parseAbi([
   "event RoleAdminChanged(bytes32 indexed role, bytes32 indexed previousAdminRole, bytes32 indexed newAdminRole)",
   "event Initialized(uint8 version)",
 ])
+
+// ─────────────────────────── Savings (phase 4) ───────────────────────────
+
+/** sArcoUSD reads (SArcoUSD.sol, docs/specs/arcousd-v1.md §3.13). */
+export const savingsVaultReadAbi = parseAbi([
+  "function totalAssets() view returns (uint256)",
+  "function totalSupply() view returns (uint256)",
+  "function convertToAssets(uint256 shares) view returns (uint256)",
+  "function unvestedAmount() view returns (uint256)",
+  "function vestingAmount() view returns (uint256)",
+  "function vestingStart() view returns (uint64)",
+  "function vestingPeriod() view returns (uint64)",
+  "function rewardRate() view returns (uint256)",
+  "function balanceOf(address account) view returns (uint256)",
+  "function MIN_SHARES() view returns (uint256)",
+  "function paused() view returns (bool)",
+  "function fnPaused(bytes4 selector) view returns (bool)",
+])
+
+/** ArcoUSDSavingsDistributor reads and its one write (§3.14). */
+export const distributorAbi = parseAbi([
+  "function preview() view returns (uint256 amount, uint256 surplus, uint256 rateCap, uint256 mintHeadroom, uint256 nextAt, bool navOk)",
+  "function minInterval() view returns (uint64)",
+  "function maxAprBps() view returns (uint16)",
+  "function reserveMarginBps() view returns (uint16)",
+  "function lastDistribution() view returns (uint64)",
+  "function paused() view returns (bool)",
+  "function distribute() returns (uint256 amount)",
+  // Custom errors, so a simulated distribute() that reverts names its reason.
+  "error TooSoon()",
+  "error ReservePaused()",
+  "error NoDepositors()",
+  "error NavUnavailable()",
+  "error NothingToDistribute()",
+])
+
+/** sArcoUSD pause switches: deposit (also mint), withdraw (also redeem), addRewards. */
+export const SAVINGS_DEPOSIT_SELECTOR = toFunctionSelector("deposit(uint256,address)")
+export const SAVINGS_WITHDRAW_SELECTOR = toFunctionSelector("withdraw(uint256,address,address)")
+export const SAVINGS_REWARDS_SELECTOR = toFunctionSelector("addRewards(uint256)")
+/** Holder of the 1 sArcoUSD seed (SArcoUSD.SEED_HOLDER). */
+export const SAVINGS_SEED_HOLDER = "0x000000000000000000000000000000000000dEaD" as const
+
+/** Every SArcoUSD event (indexer; Transfer and Approval are decoded but not stored). */
+export const savingsVaultEventsAbi = parseAbi([
+  "event Deposit(address indexed sender, address indexed owner, uint256 assets, uint256 shares)",
+  "event Withdraw(address indexed sender, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)",
+  "event RewardsAdded(address indexed caller, uint256 amount, uint256 vestingAmount, uint64 vestingPeriod)",
+  "event Seeded(address indexed caller, address indexed holder, uint256 assets)",
+  "event VestingPeriodUpdated(uint64 vestingPeriod)",
+  "event Rescued(address indexed token, address indexed to, uint256 amount)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+  "event Approval(address indexed owner, address indexed spender, uint256 value)",
+  "event Paused(address account)",
+  "event Unpaused(address account)",
+  "event FunctionPaused(bytes4 indexed selector, address indexed account)",
+  "event FunctionUnpaused(bytes4 indexed selector, address indexed account)",
+  "event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender)",
+  "event RoleRevoked(bytes32 indexed role, address indexed account, address indexed sender)",
+  "event RoleAdminChanged(bytes32 indexed role, bytes32 indexed previousAdminRole, bytes32 indexed newAdminRole)",
+  "event Initialized(uint8 version)",
+  "event EIP712DomainChanged()",
+])
+
+/** Every ArcoUSDSavingsDistributor event (indexer). */
+export const distributorEventsAbi = parseAbi([
+  "event Distributed(address indexed caller, uint256 amount, uint256 backing, uint256 liabilities, uint256 surplus, uint256 rateCap)",
+  "event ParamsUpdated(uint64 minInterval, uint16 maxAprBps, uint16 reserveMarginBps)",
+  "event Paused(address account)",
+  "event Unpaused(address account)",
+  "event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender)",
+  "event RoleRevoked(bytes32 indexed role, address indexed account, address indexed sender)",
+  "event RoleAdminChanged(bytes32 indexed role, bytes32 indexed previousAdminRole, bytes32 indexed newAdminRole)",
+])
+
+/** Every ArcoSavingsZap event (indexer): which stablecoin a saver came in or left with. */
+export const savingsZapEventsAbi = parseAbi([
+  "event ZapDeposit(address indexed caller, address indexed receiver, address indexed asset, uint256 amount, uint256 arcoUSDIn, uint256 shares)",
+  "event ZapRedeem(address indexed caller, address indexed receiver, address indexed asset, uint256 shares, uint256 arcoUSDOut, uint256 assetOut)",
+])

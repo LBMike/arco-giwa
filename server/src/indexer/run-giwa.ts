@@ -8,6 +8,8 @@ import { alertChannels } from "../arcousd/notify.js"
 import { createArcoUSDChainReader } from "../arcousd/reader.js"
 import { ArcoUSDRecalls, createRecallReader, type RecallRow } from "../arcousd/recall.js"
 import { readArcoUSDRegistry } from "../arcousd/registry.js"
+import { createSavingsChainReader } from "../arcousd/savings.js"
+import { ArcoUSDSavingsIndexer, PrismaSavingsIndexerStore } from "../arcousd/savings-indexer.js"
 import { PrismaArcoUSDIndexerStore } from "../arcousd/store.js"
 import { safeErrorText } from "../arcousd/safe-error.js"
 import { ArcoUSDWatcher } from "../arcousd/watcher.js"
@@ -143,6 +145,18 @@ export async function runGiwaIndexer(envSource: NodeJS.ProcessEnv = process.env)
     snapshotIntervalMs: arcoUSDEnv.snapshotIntervalMs,
   })
 
+  // Savings (sArcoUSD) events and share-price snapshots: its own cursor ("arcousd-savings") from the
+  // Savings deploy block; inert until the Savings contracts are in the ArcoUSD registry.
+  const savingsIndexer = new ArcoUSDSavingsIndexer({
+    loadRegistry: () => readArcoUSDRegistry(arcoUSDEnv.registryPath),
+    rpc: createRpc(env.indexerRpcUrl),
+    store: new PrismaSavingsIndexerStore(prisma, arco),
+    readState: createSavingsChainReader(createPublicClient({ transport: http(env.indexerRpcUrl) })),
+    confirmations: env.indexerConfirmations,
+    maxBlockRange: env.indexerMaxBlockRange,
+    snapshotIntervalMs: arcoUSDEnv.snapshotIntervalMs,
+  })
+
   // ArcoUSD watcher (docs/operations/arcousd-alerts.md): after the ArcoUSD poll, once per
   // ARCOUSD_ALERT_INTERVAL_MS, with its own try/catch. Reads only; sends alerts to the configured
   // Telegram / Slack channels (none configured: rows and logs only). Inert like the indexer.
@@ -226,6 +240,12 @@ export async function runGiwaIndexer(envSource: NodeJS.ProcessEnv = process.env)
           error: error instanceof Error ? error.message : String(error),
         }),
       )
+    }
+    try {
+      const result = await savingsIndexer.pollOnce()
+      if (result.mode === "poll") console.log(stringify({ service: "arco-arcousd-savings-indexer", mode: "poll", result }))
+    } catch (error) {
+      console.error(stringify({ service: "arco-arcousd-savings-indexer", mode: "error", error: safeErrorText(error) }))
     }
     try {
       // Bounded: a slow round keeps running on its own (the next maybeRun answers "busy") while the

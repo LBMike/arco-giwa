@@ -7,8 +7,10 @@ import { buildApp, type VaultPauseDetail } from "./app.js"
 import { ArcoUSDRecalls, reserveRecallAbi, type RecallChainState, type RecallReader } from "./arcousd/recall.js"
 import type { ArcoUSDRegistryFile } from "./arcousd/registry.js"
 import { ArcoUSDAdmin, processQueueAbi } from "./arcousd/admin.js"
+import { distributorAbi } from "./arcousd/abi.js"
 import { parseArcoUSDAlertEnv } from "./arcousd/alert-config.js"
 import { ArcoUSDAlertsAdmin } from "./arcousd/alerts.js"
+import { ArcoUSDSavingsAdmin } from "./arcousd/savings-admin.js"
 import type { PayoutExpectation, PayoutVerifier } from "./evm/payout-verification.js"
 import { buildDryRunGiwaRegistry } from "./registry/generate.js"
 import { EvmMarketService } from "./services/evm-market-service.js"
@@ -288,6 +290,8 @@ function makeApp(options?: {
   /** ArcoUSD admin reads + processQueue builder; absent leaves the service out. */
   arcoUSDAdmin?: ArcoUSDAdmin
   arcoUSDAlerts?: ArcoUSDAlertsAdmin
+  /** Savings admin reads + distribute builder; absent leaves the service out. */
+  arcoUSDSavingsAdmin?: ArcoUSDSavingsAdmin
 }) {
   const prisma = makePrisma()
   const arco = new PrismaArcoService(prisma as PrismaLike)
@@ -362,6 +366,7 @@ function makeApp(options?: {
       ...(options?.arcoUSDRecalls ? { arcoUSDRecalls: options.arcoUSDRecalls } : {}),
       ...(options?.arcoUSDAdmin ? { arcoUSDAdmin: options.arcoUSDAdmin } : {}),
       ...(options?.arcoUSDAlerts ? { arcoUSDAlerts: options.arcoUSDAlerts } : {}),
+      ...(options?.arcoUSDSavingsAdmin ? { arcoUSDSavingsAdmin: options.arcoUSDSavingsAdmin } : {}),
     },
   )
   return { app, prisma, registry: fullRegistry }
@@ -2883,3 +2888,41 @@ function arcoUSDTestRegistry(): ArcoUSDRegistryFile {
     params: { mintCap: "1", mmfTargetBps: 5000, bufferFloorBps: 3000, queueMinDelay: 600 },
   } as ArcoUSDRegistryFile
 }
+
+test("ArcoUSD Savings admin routes: operator-only view and the distribute() builder", async () => {
+  const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}`
+  const savingsAdmin = new ArcoUSDSavingsAdmin({
+    chainId: 91342,
+    loadRegistry: () => ({
+      ...arcoUSDTestRegistry(),
+      savings: {
+        vault: { proxy: addr(0x51), implementation: addr(0x52), bytecodeHash: null, blockNumber: 9 },
+        distributor: { address: addr(0x53), bytecodeHash: null, blockNumber: 9 },
+        zap: { address: addr(0x54), bytecodeHash: null, blockNumber: 10 },
+        seeded: true,
+      },
+    }) as ArcoUSDRegistryFile,
+    store: { events: async () => [] },
+    simulateDistribute: async () => ({ amount: 2n * 10n ** 18n, blockNumber: 77n }),
+    now: () => Date.parse("2026-10-20T00:00:00Z"),
+  })
+  const { app } = makeApp({ arcoUSDSavingsAdmin: savingsAdmin })
+  assert.equal((await app.inject({ method: "GET", url: "/api/v1/admin/arcousd/savings" })).statusCode, 401)
+  const view = (await app.inject({ method: "GET", url: "/api/v1/admin/arcousd/savings?days=7", headers: OPERATOR })).json()
+  assert.deepEqual([view.status, view.days, view.contracts.distributor, view.daily.length], ["live", 7, addr(0x53), 8])
+
+  const reader = sessionHeaders(TEST_READER_WALLET)
+  assert.equal((await app.inject({ method: "POST", url: "/api/v1/admin/arcousd/savings/distribute", headers: reader })).statusCode, 403)
+  const built = await app.inject({ method: "POST", url: "/api/v1/admin/arcousd/savings/distribute", headers: OPERATOR })
+  assert.equal(built.statusCode, 200)
+  const body = built.json()
+  assert.deepEqual(body.preview, { amountUsd: "2", blockNumber: "77" })
+  assert.equal(body.transaction.to.toLowerCase(), addr(0x53))
+  assert.equal(decodeFunctionData({ abi: distributorAbi, data: body.transaction.data }).functionName, "distribute")
+
+  // Built without the service: not-deployed, nothing to build.
+  const bare = makeApp().app
+  const bareView = (await bare.inject({ method: "GET", url: "/api/v1/admin/arcousd/savings", headers: OPERATOR })).json()
+  assert.deepEqual([bareView.status, bareView.totals.deposits, bareView.days], ["not-deployed", 0, 30])
+  assert.equal((await bare.inject({ method: "POST", url: "/api/v1/admin/arcousd/savings/distribute", headers: OPERATOR })).statusCode, 409)
+})
