@@ -28,3 +28,32 @@ services:
     startCommand: node scripts/indexer/run-giwa.mjs
     envVars:
       - fromGroup: arco-giwa-server
+  # ArcoUSD queue keeper (docs/operations/arcousd-keeper.md). Inert until ARCOUSD_KEEPER_MODE is set
+  # (default off). Live mode signs Reserve.processQueue only, with a key from two Secret Files added
+  # to THIS service in the dashboard (never env vars). Auto-deploy is off: a service holding a key is
+  # deployed by hand. The keystore loader runs from packages/contracts, so its deps are installed.
+  # Least privilege: NOT the shared env group (its API, Stocks and alert secrets have no business next
+  # to a signing key) — only what the keeper reads. A tick may wait up to 45s per asset for receipts.
+  - type: worker
+    name: arco-arcousd-keeper
+    runtime: node
+    plan: starter
+    autoDeploy: false
+    maxShutdownDelaySeconds: 180
+    buildCommand: npm install --include=dev && npm run prisma:generate && npm run build:server && cd packages/contracts && export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 && corepack yarn install --immutable
+    startCommand: node scripts/arcousd/run-keeper.mjs --keystore /etc/secrets/arcousd-keeper-keystore.json --password-file /etc/secrets/arcousd-keeper-password
+    envVars:
+      # Set in the dashboard (sync: false keeps a Blueprint sync from overwriting them). INDEXER_RPC_URL
+      # and DATABASE_URL: the same values as the shared group. Mode off | dry-run | live, and the keeper
+      # wallet address. The other ARCOUSD_KEEPER_* have defaults.
+      - key: INDEXER_RPC_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      # Optional: only if the shared group sets a non-default path (the API and watcher must agree).
+      - key: ARCOUSD_REGISTRY_PATH
+        sync: false
+      - key: ARCOUSD_KEEPER_MODE
+        sync: false
+      - key: ARCOUSD_KEEPER_ADDRESS
+        sync: false

@@ -6,6 +6,7 @@ import type {
   GiwaArcoUSDFlows,
   GiwaArcoUSDAlertDelivery,
   GiwaArcoUSDAlerts,
+  GiwaArcoUSDKeeper,
   GiwaArcoUSDProcessQueue,
   GiwaArcoUSDQueue,
   GiwaArcoUSDQueueFilter,
@@ -374,6 +375,7 @@ export const giwaApi = {
       }),
     // ArcoUSD watcher alerts, and a test message to the configured channels (vault:write).
     arcousdAlerts: (auth: AdminAuth) => adminJson<GiwaArcoUSDAlerts>(auth, `/api/v1/admin/arcousd/alerts`),
+    arcousdKeeper: (auth: AdminAuth) => adminJson<GiwaArcoUSDKeeper>(auth, `/api/v1/admin/arcousd/keeper`),
     arcousdAlertTest: (auth: AdminAuth) =>
       adminJson<{ delivery: GiwaArcoUSDAlertDelivery }>(auth, `/api/v1/admin/arcousd/alerts/test`, { method: "POST", body: "{}" }),
     acknowledgeRecall: (auth: AdminAuth, productId: string, requestId: string) =>

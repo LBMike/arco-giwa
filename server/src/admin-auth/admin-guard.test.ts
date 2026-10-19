@@ -73,6 +73,7 @@ const KNOWN = [
   'POST /api/v1/admin/arcousd/process-queue',
   'GET /api/v1/admin/arcousd/alerts',
   'POST /api/v1/admin/arcousd/alerts/test',
+  'GET /api/v1/admin/arcousd/keeper',
   'GET /api/v1/admin/pause-state',
   'POST /api/v1/admin/products/:productId/withdraw',
   'POST /api/v1/admin/products/:productId/redemptions/:requestId/payout',

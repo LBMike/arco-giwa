@@ -4,6 +4,22 @@ import type { AssetState, ReserveState } from "./reader.js"
 import type { RecallView } from "./recall.js"
 import type { BuyGate } from "./service.js"
 
+/** What the queue keeper last wrote to its heartbeat (keeper.ts KeeperReport, as stored). */
+export type KeeperSeen = {
+  readonly lastRunAt: Date
+  readonly lastOkAt: Date | null
+  readonly lastError: string | null
+  readonly report: {
+    readonly mode?: string
+    readonly intervalMs?: number
+    readonly address?: string | null
+    readonly gasBalanceWei?: string | null
+    readonly lowGasWei?: string
+    readonly lowGas?: boolean | null
+    readonly pending?: { readonly nonce: number; readonly since: string; readonly stuck: boolean } | null
+  } | null
+}
+
 // ArcoUSD watcher rules (docs/operations/arcousd-alerts.md): one pure pass over what the watcher
 // read this round → the conditions that are true right now. No I/O, no clock of its own; the alert
 // book (alerts.ts) turns findings into PENDING / OPEN / RESOLVED and decides what to send.
@@ -50,6 +66,8 @@ export type WatchInput = {
   readonly indexer: { readonly lagBlocks: number } | null
   readonly lastSnapshotAt: Date | null
   readonly recalls: readonly RecallView[] | null
+  /** The queue keeper's heartbeat; null when it has never run. */
+  readonly keeper?: KeeperSeen | null
 }
 
 export function evaluateWatch(input: WatchInput): Finding[] {
@@ -101,7 +119,48 @@ export function evaluateWatch(input: WatchInput): Finding[] {
   }
 
   for (const recall of input.recalls ?? []) recallRules(recall, add)
+  if (input.keeper) keeperRules(input.keeper, input.now, add)
   return findings
+}
+
+/** The keeper's own health (it pays the queue in dry-run/live; `off` raises nothing). */
+function keeperRules(keeper: KeeperSeen, now: number, add: Add) {
+  const report = keeper.report
+  const mode = report?.mode
+  if (mode !== "dry-run" && mode !== "live") return
+  const interval = report?.intervalMs && report.intervalMs > 0 ? report.intervalMs : 60_000
+  const silentFor = now - keeper.lastRunAt.getTime()
+  if (silentFor > Math.max(5 * MINUTE, 3 * interval)) {
+    add({
+      key: "keeper:stale",
+      severity: "WARNING",
+      title: "Queue keeper not running",
+      detail: `The ${mode} keeper last ran ${duration(silentFor / 1000)} ago. Until it is back, payouts wait for processQueue from the console.`,
+      sustainMs: 0,
+    })
+    return // its other readings are as old as that
+  }
+  if (keeper.lastError && (!keeper.lastOkAt || now - keeper.lastOkAt.getTime() > 10 * MINUTE)) {
+    add({ key: "keeper:failing", severity: "WARNING", title: "Queue keeper failing", detail: keeper.lastError, sustainMs: 0 })
+  }
+  if (mode === "live" && report?.lowGas && report.gasBalanceWei) {
+    add({
+      key: "keeper:low-gas",
+      severity: "WARNING",
+      title: "Queue keeper low on gas",
+      detail: `The keeper wallet ${report.address ?? ""} holds ${eth(BigInt(report.gasBalanceWei))} ETH (warns below ${eth(BigInt(report.lowGasWei ?? "0"))} ETH). Send it GIWA Sepolia ETH.`,
+      sustainMs: 0,
+    })
+  }
+  if (report?.pending?.stuck) {
+    add({
+      key: "keeper:stuck",
+      severity: "WARNING",
+      title: "Queue keeper transaction stuck",
+      detail: `Nonce ${report.pending.nonce} has been pending since ${report.pending.since}. The keeper sends nothing else until it is mined or dropped.`,
+      sustainMs: 0,
+    })
+  }
 }
 
 type Add = (finding: Omit<Finding, "fingerprint"> & { fingerprint?: string }) => void
@@ -340,6 +399,11 @@ const NUMBER = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 })
 /** "$1,234.56" from base18 USD. */
 export function usd(base18: bigint): string {
   return `$${NUMBER.format(Number(formatUnits(base18, 18)))}`
+}
+
+/** "0.0123" ETH from wei (gas balances need more than 2 decimals). */
+function eth(wei: bigint): string {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(Number(formatUnits(wei, 18)))
 }
 
 /** "1,234.56" from asset base units. */

@@ -241,9 +241,10 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 
 - **감시·대사·알림(3a)**: 인덱서 워커 안에서 1분마다 체인을 읽기만 하는 감시기가 돈다. 담보 부족, NAV 실패, 체인과 인덱서 DB의 대기열 불일치(인덱서가 읽은 블록과 같은 블록에서 비교), T+2 초과, 처리되지 않거나 유동성이 모자란 대기열, 지급 실패, 매수 게이트 닫힘, 발행 상한 임박, MMF 비율 이탈, 일시정지, 인덱서 지연, 처리 안 된 Reserve 회수를 본다. 알림은 `ArcoUSDAlert`에 규칙별로 남고(PENDING → OPEN → RESOLVED), 텔레그램 봇과 슬랙 웹훅으로 보낸다. 이메일은 아직 없다. 콘솔 Overview에 Alerts 카드와 테스트 발송이 있다. 리저브 조회에 `queuePaused`(`fnPaused(processQueue)`)가 추가됐다. 규칙과 설정은 `docs/operations/arcousd-alerts.md`.
 
+- **대기열 처리 봇(3b)**: 별도 워커(`arco-arcousd-keeper`)가 1분마다 대기열이 남은 자산별로 `processQueue`를 eth_call로 미리 돌려 보고, `live`면 1건 이상 지급될 자산에 `processQueue(asset, 20)`을 보낸다. 한 번에 트랜잭션 하나, 영수증 확인 후 다음. `dry-run`은 결과만 기록하고, 기본 `off`. 봇 지갑에는 역할이 없고 가스만 있다(역할이 있는 지갑이면 시작하지 않는다). 서명은 레지스트리 자산에 대한 `processQueue`로만 제한한다. 맨 앞이 취소·실패 항목으로 막혀 있으면 그 항목들을 지나가는 호출도 보낸다. revert 뒤에는 10분간 보내지 않는다. 키는 암호화 키스토어와 비밀번호 Secret File 두 개로만 받는다. MMF 배분·회수는 하지 않는다. 상태는 콘솔 Queue 탭의 Queue bot 카드와 감시기 알림(`keeper:*`)으로 본다. 절차는 `docs/operations/arcousd-keeper.md`.
+
 아직 하지 않는 것:
 
-- `processQueue`를 자동으로 돌리는 봇(3b).
 - 알림 이메일.
 
 ## 6. 신뢰 가정

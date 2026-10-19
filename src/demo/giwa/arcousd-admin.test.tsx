@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
-import { AlertsCard, ArcoUSDAdminView, ProcessQueueControl } from "./AdminArcoUSD"
+import { AlertsCard, ArcoUSDAdminView, KeeperCard, ProcessQueueControl } from "./AdminArcoUSD"
 import { sendPreparedTransactionWithClients } from "./contracts"
 import {
   agoText,
@@ -14,6 +14,9 @@ import {
   countText,
   deliveryText,
   durationText,
+  gasText,
+  keeperBadge,
+  keeperTxBadge,
   gateText,
   headVerdict,
   mintHeadroomUsd,
@@ -21,10 +24,11 @@ import {
   payoutsPaused,
   queueFilter,
   usdCompact,
+  simulationText,
   usdText,
   watcherStatus,
 } from "./arcousd-admin"
-import type { GiwaArcoUSDAlert, GiwaArcoUSDAlerts, GiwaArcoUSDFlows, GiwaArcoUSDQueue, GiwaArcoUSDReserve, GiwaArcoUSDSnapshots } from "./types"
+import type { GiwaArcoUSDAlert, GiwaArcoUSDAlerts, GiwaArcoUSDKeeper, GiwaArcoUSDKeeperReport, GiwaArcoUSDFlows, GiwaArcoUSDQueue, GiwaArcoUSDReserve, GiwaArcoUSDSnapshots } from "./types"
 
 // Admin · ArcoUSD page: the pure helpers and the three views over fixed data.
 
@@ -449,4 +453,85 @@ test("alerts card: open first, pending and resolved after, channel and send prob
   // On the overview it sits above the totals.
   const overview = text(page("overview", { overview: { snapshots, days: 30, onDaysChange: noop, alerts: { alerts: alerts(), onTest: pending, now: NOW } } }))
   assert.ok(overview.indexOf("Alerts 2 open") < overview.indexOf("Total backing"))
+})
+
+// ── Queue bot ───────────────────────────────────────────────────────────────
+
+const keeperReport = (over: Partial<GiwaArcoUSDKeeperReport> = {}): GiwaArcoUSDKeeperReport => ({
+  mode: "live",
+  address: A(0xee),
+  intervalMs: 60_000,
+  batch: 20,
+  gasBalanceWei: "48500000000000000",
+  lowGasWei: "10000000000000000",
+  lowGas: false,
+  canAffordTx: true,
+  simulations: [
+    { symbol: "tUSDC", paid: 3, error: null },
+    { symbol: "tUSDT", paid: 0, error: null },
+  ],
+  lastTx: { hash: `0x${"cd".repeat(32)}`, symbol: "tUSDC", nonce: 12, sentAt: "2026-10-19T11:58:00.000Z", status: "success", paid: 3, blockNumber: "900", error: null },
+  pending: null,
+  note: "Sent 1 transaction",
+  ...over,
+})
+
+const keeper = (report: GiwaArcoUSDKeeperReport | null, over: Partial<NonNullable<GiwaArcoUSDKeeper["keeper"]>> = {}): GiwaArcoUSDKeeper => ({
+  status: "live",
+  keeper: { lastRunAt: "2026-10-19T11:59:30.000Z", lastOkAt: "2026-10-19T11:59:30.000Z", lastError: null, stale: false, report, ...over },
+})
+
+test("queue bot helpers: mode badge, gas with 4 decimals, simulations and transaction states", () => {
+  assert.deepEqual(keeperBadge(null), { label: "Off", tone: "neutral" })
+  assert.deepEqual(keeperBadge(keeper(keeperReport({ mode: "off" })).keeper), { label: "Off", tone: "neutral" })
+  assert.deepEqual(keeperBadge(keeper(keeperReport()).keeper), { label: "Live", tone: "positive" })
+  assert.deepEqual(keeperBadge(keeper(keeperReport({ mode: "dry-run" })).keeper), { label: "Dry run", tone: "attention" })
+  assert.deepEqual(keeperBadge(keeper(keeperReport(), { stale: true }).keeper), { label: "Not running", tone: "negative" })
+  assert.deepEqual(keeperBadge(keeper(keeperReport(), { lastError: "x", lastOkAt: "2026-10-19T11:45:00.000Z" }).keeper, NOW), { label: "Live · failing", tone: "negative" })
+  assert.deepEqual([gasText("48500000000000000"), gasText("4200000000000"), gasText(null), gasText("x")], ["0.0485 ETH", "0 ETH", "—", "—"])
+  assert.equal(simulationText(keeperReport()), "tUSDC would pay 3 requests · tUSDT nothing payable now")
+  assert.equal(
+    simulationText({ simulations: [{ symbol: "tUSDC", paid: 1, error: null }, { symbol: "tRLUSD", paid: null, error: "reverted" }, { symbol: "tUSDT", paid: 0, error: null, clearing: true }] }),
+    "tUSDC would pay 1 request · tRLUSD failed: reverted · tUSDT would first step past cancelled or failed entries",
+  )
+  assert.equal(simulationText({ simulations: [] }), "No backlog to check")
+  assert.equal(simulationText({ simulations: [], simulated: false }), "Not checked this round")
+  // A failure right after a good round is "retrying"; ten minutes without one is "failing".
+  assert.deepEqual(keeperBadge(keeper(keeperReport(), { lastError: "x", lastOkAt: "2026-10-19T11:58:00.000Z" }).keeper, NOW), { label: "Live · retrying", tone: "attention" })
+  assert.deepEqual(keeperTxBadge("reverted"), { label: "Reverted", tone: "negative" })
+})
+
+test("queue bot card: live, dry run, off, never run, and its trouble states", () => {
+  const live = text(renderToStaticMarkup(<KeeperCard keeper={keeper(keeperReport())} now={NOW} />))
+  for (const expected of ["Queue bot Live", "Last run just now", "Gas 0.0485 ETH", "Now tUSDC would pay 3 requests · tUSDT nothing payable now", "Mined tUSDC · paid 3 · 2m ago", "Sent 1 transaction"]) {
+    assert.ok(live.includes(expected), expected)
+  }
+  const holdingCard = text(renderToStaticMarkup(<KeeperCard keeper={keeper(keeperReport({ holdUntil: "2026-10-19T12:08:00.000Z", simulated: false }))} now={NOW} />))
+  assert.match(holdingCard, /Now Not checked this round/)
+  assert.match(holdingCard, /Holding until .* \(after a reverted transaction\)/)
+  const dry = text(renderToStaticMarkup(<KeeperCard keeper={keeper(keeperReport({ mode: "dry-run", lastTx: null, note: "Dry run: would pay tUSDC" }))} now={NOW} />))
+  assert.match(dry, /Queue bot Dry run/)
+  assert.doesNotMatch(dry, /Gas/) // a dry run spends nothing
+  assert.match(dry, /Last transaction —/)
+  assert.match(text(renderToStaticMarkup(<KeeperCard keeper={keeper(keeperReport({ mode: "off" }))} now={NOW} />)), /The queue bot is off\. Pay the queue with Preview and Sign (&amp;|&) send below\./)
+  assert.match(text(renderToStaticMarkup(<KeeperCard keeper={{ status: "live", keeper: null }} now={NOW} />)), /has not run yet/)
+
+  const trouble = renderToStaticMarkup(
+    <KeeperCard
+      keeper={keeper(keeperReport({ lowGas: true, gasBalanceWei: "4200000000000000", pending: { hash: null, nonce: 13, since: "2026-10-19T11:45:00.000Z", stuck: true } }), {
+        stale: true,
+        lastRunAt: "2026-10-19T11:50:00.000Z",
+        lastError: "Send failed: nonce too low",
+      })}
+      now={NOW}
+    />,
+  )
+  const troubleText = text(trouble)
+  for (const expected of ["Queue bot Not running", "Last run 10m ago (not running)", "Gas 0.0042 ETH (low)", "Waiting on nonce 13 for 15m (stuck)", "Send failed: nonce too low"]) {
+    assert.ok(troubleText.includes(expected), expected)
+  }
+
+  // On the Queue tab it sits above the per-asset cards.
+  const queuePage = text(page("queue", { queue: { queue, filter: "open", onFilterChange: noop, walletAddress: A(0xee), onConnectWallet: noop, onPrepare: pending, onSend: pending, now: NOW, keeper: { keeper: keeper(keeperReport()) } } }))
+  assert.ok(queuePage.indexOf("Queue bot") < queuePage.indexOf("Standard redemptions are paid"))
 })

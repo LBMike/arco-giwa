@@ -39,6 +39,7 @@
     "registry:validate:giwa": "npm run build:server && node scripts/registry/validate-giwa.mjs",
     "registry:sync:supabase": "npm run build:server && node scripts/registry/sync-supabase.mjs",
     "indexer:giwa": "npm run build:server && node scripts/indexer/run-giwa.mjs",
+    "arcousd:keeper": "npm run build:server && node scripts/arcousd/run-keeper.mjs",
     "smoke:giwa": "npm run build:server && node scripts/smoke/giwa.mjs",
     "evm:build": "cd packages/contracts && corepack yarn compile",
     "evm:test": "cd packages/contracts && corepack yarn test",

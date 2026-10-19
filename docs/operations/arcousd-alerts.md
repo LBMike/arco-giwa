@@ -61,8 +61,13 @@
 | `recall:<상품>:<요청>:acknowledge` | 경고 | 직접 송금으로 정산한 회수를 `acknowledgeRecallPaid` 하지 않음(담보가 이중 계산됨) | 30분 |
 | `recall:<상품>:<요청>:claim` | 경고 | 볼트가 fulfill 한 회수를 `claimRecall` 하지 않음 | 30분 |
 | `recall:<상품>:<요청>:warning` | 경고 | 회수 상태에 운영자가 봐야 할 불일치가 있음 | 없음 |
+| `keeper:stale` | 경고 | 대기열 처리 봇(dry-run·live)이 주기의 3배(최소 5분) 넘게 돌지 않음 | 없음 |
+| `keeper:failing` | 경고 | 봇의 마지막 성공 후 10분 넘게 오류가 이어짐 | 없음 |
+| `keeper:low-gas` | 경고 | live 봇 지갑 잔고가 `ARCOUSD_KEEPER_LOW_GAS_WEI` 아래 | 없음 |
+| `keeper:stuck` | 경고 | 봇 지갑의 트랜잭션이 10분 넘게 채굴되지 않음 | 없음 |
 
-`queue:<자산>:stalled`는 3b 봇이 생기기 전까지 "누군가 콘솔에서 `processQueue`를 돌려야 한다"는 뜻이다.
+`queue:<자산>:stalled`는 "누군가 `processQueue`를 돌려야 한다"는 뜻이다. 대기열 처리 봇(`docs/operations/arcousd-keeper.md`)이
+live로 돌고 있으면 1분 안에 처리되므로, 이 알림은 봇이 멈췄거나 꺼져 있을 때의 안전망이다.
 지급 경로가 일시정지된 동안에는 `stalled`와 `liquidity`를 내지 않고 `pauses`만 낸다.
 
 ## 3. 알림 상태와 재발송

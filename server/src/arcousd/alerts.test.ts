@@ -956,3 +956,63 @@ test("Prisma alert store: upsert by key, an empty delivery for a fresh occurrenc
   assert.deepEqual(upsert.where, { chainId_key: { chainId: 91342, key: "pauses" } })
   assert.deepEqual([upsert.update.delivery, upsert.create.delivery, upsert.create.chainId], [{}, {}, 91342])
 })
+
+// ─────────────────────────────── queue keeper health ───────────────────────────────
+
+test("rules: the queue keeper's own health (nothing while it is off)", () => {
+  const seen = (over: Record<string, unknown>, beat: Partial<{ lastRunAt: Date; lastOkAt: Date | null; lastError: string | null }> = {}) => ({
+    lastRunAt: new Date(NOW - MIN),
+    lastOkAt: new Date(NOW - MIN),
+    lastError: null,
+    ...beat,
+    report: { mode: "live", intervalMs: 60_000, address: A(0xee), gasBalanceWei: "50000000000000000", lowGasWei: "10000000000000000", lowGas: false, pending: null, ...over },
+  })
+  assert.deepEqual(evaluateWatch(input({ keeper: seen({}) })), [])
+  assert.deepEqual(evaluateWatch(input({ keeper: seen({ mode: "off" }, { lastRunAt: new Date(NOW - 5 * HOUR) }) })), [])
+
+  const stale = evaluateWatch(input({ keeper: seen({ lowGas: true }, { lastRunAt: new Date(NOW - 20 * MIN), lastError: "rpc down", lastOkAt: null }) }))
+  assert.deepEqual(keys(stale), ["keeper:stale"]) // older readings are not judged
+  assert.match(find(stale, "keeper:stale").detail, /The live keeper last ran 20m ago/)
+
+  const failing = find(evaluateWatch(input({ keeper: seen({}, { lastError: "Send failed: nonce too low", lastOkAt: new Date(NOW - 11 * MIN) }) })), "keeper:failing")
+  assert.equal(failing.detail, "Send failed: nonce too low")
+  assert.deepEqual(keys(evaluateWatch(input({ keeper: seen({}, { lastError: "blip", lastOkAt: new Date(NOW - 2 * MIN) }) }))), [])
+
+  const gas = find(evaluateWatch(input({ keeper: seen({ lowGas: true, gasBalanceWei: "4200000000000000" }) })), "keeper:low-gas")
+  assert.match(gas.detail, /holds 0\.0042 ETH \(warns below 0\.01 ETH\)/)
+  assert.deepEqual(keys(evaluateWatch(input({ keeper: seen({ mode: "dry-run", lowGas: true }) }))), []) // dry-run spends no gas
+
+  const stuck = find(evaluateWatch(input({ keeper: seen({ pending: { nonce: 7, since: "2026-10-19T11:40:00.000Z", stuck: true } }) })), "keeper:stuck")
+  assert.match(stuck.detail, /Nonce 7 has been pending since 2026-10-19T11:40:00\.000Z/)
+})
+
+test("watcher: the keeper heartbeat feeds its rules; an unreadable one keeps keeper alerts as they were", async () => {
+  let now = NOW
+  const { watcher, store } = watcherWith({ now: () => now })
+  await store.beat(91342, "keeper", { at: new Date(NOW - 30 * MIN), ok: true, data: { mode: "live", intervalMs: 60_000 } })
+  await watcher.runOnce()
+  assert.equal(store.rows.get("keeper:stale")?.status, "OPEN")
+  now += MIN
+  const heartbeat = store.heartbeat.bind(store)
+  store.heartbeat = async (chainId: number, name: string) => {
+    if (name === "keeper") throw new Error("db down")
+    return heartbeat(chainId, name)
+  }
+  await watcher.runOnce()
+  assert.equal(store.rows.get("keeper:stale")?.status, "OPEN")
+})
+
+test("console keeper view: never run, stale, and its report", async () => {
+  const store = new MemoryAlertStore()
+  let now = NOW
+  const admin = new ArcoUSDAlertsAdmin({ chainId: 91342, network: "GIWA Sepolia", loadRegistry: () => registry(), store, env: parseArcoUSDAlertEnv({}), channels: [], now: () => now })
+  assert.deepEqual(await admin.keeper(), { status: "live", keeper: null })
+  assert.deepEqual(await inertArcoUSDAlerts(91342).keeper(), { status: "not-deployed", keeper: null })
+  await store.beat(91342, "keeper", { at: new Date(NOW - MIN), ok: true, data: { mode: "live", intervalMs: 60_000, address: A(0xee), lastTx: null } })
+  const fresh = await admin.keeper()
+  assert.deepEqual([fresh.keeper?.stale, fresh.keeper?.report?.mode, fresh.keeper?.report?.address], [false, "live", A(0xee)])
+  now += 10 * MIN
+  assert.equal((await admin.keeper()).keeper?.stale, true)
+  await store.beat(91342, "keeper", { at: new Date(now - 30 * MIN), ok: true, data: { mode: "off" } })
+  assert.equal((await admin.keeper()).keeper?.stale, false) // off is never "stale"
+})
