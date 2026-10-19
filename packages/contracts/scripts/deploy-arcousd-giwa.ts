@@ -18,7 +18,10 @@ import { planArcoUSDDeployment, runArcoUSDDeployment, type CoreRefs } from "./ar
 // mint/burn roles and the Router's SETTLER_ROLE; reserve assets (tUSDC/tUSDT/tRLUSD, with swap fees
 // and minQueued); uMINT and iBENJI as MMF strategies; faucet drips for the new test assets;
 // product-token greenlisting of the Reserve when enforced; the fund deposit vaults the Router may
-// buy into.
+// buy into; Savings (phase 4): sArcoUSD, ArcoUSDSavingsDistributor (ArcoUSD MINTER_ROLE, sArcoUSD
+// REWARDER_ROLE) and ArcoSavingsZap, plus sArcoUSD.seed() (1 sArcoUSD for 0x…dEaD, paid in ArcoUSD or
+// 1 tUSDC through the Reserve; opens deposits). A registry from before phase 4 resumes with only the
+// Savings steps.
 // It does NOT allocate to MMF (operator step, after the B5 payment-feed repair) and never touches
 // existing contracts beyond those grants/configs.
 //
@@ -33,10 +36,12 @@ const forbiddenGiwaEvmVersion = "pra" + "gue"
 const ROLE = (name: string) => utils.keccak256(utils.toUtf8Bytes(name))
 const ACCESS_ABI = ["function hasRole(bytes32 role, address account) view returns (bool)"]
 const DEPOSIT_VAULT_ABI = ["function paymentToken() view returns (address)"]
+const ERC20_BALANCE_ABI = ["function balanceOf(address account) view returns (uint256)"]
 const PRE_DEPLOY_TESTS = [
   "test/arcousd-token.test.ts",
   "test/arcousd-reserve.test.ts",
   "test/arcousd-router.test.ts",
+  "test/arcousd-savings.test.ts",
   "test/arcousd-deploy.test.ts",
   "test/storage-layout.test.ts",
 ]
@@ -100,7 +105,13 @@ function coreRefs(): CoreRefs {
   }
 }
 
-async function preflight(core: CoreRefs, strategyProducts: string[], routerProducts: string[]) {
+async function preflight(
+  core: CoreRefs,
+  strategyProducts: string[],
+  routerProducts: string[],
+  seeded: boolean,
+  arcoUSDAddress: string | null,
+) {
   const checks: Record<string, boolean> = {}
   const faucet = new Contract(core.faucet, ACCESS_ABI, ethers.provider)
   checks.deployerIsFaucetAdmin = await faucet.hasRole(ROLE("FAUCET_ADMIN_ROLE"), EXPECTED_GIWA_DEPLOYER)
@@ -113,6 +124,15 @@ async function preflight(core: CoreRefs, strategyProducts: string[], routerProdu
   for (const productId of routerProducts) {
     const vault = new Contract(core.products[productId].depositVault, DEPOSIT_VAULT_ABI, ethers.provider)
     checks[`routerVaultPaysReserveAsset:${productId}`] = reserveAssets.has(String(await vault.paymentToken()).toLowerCase())
+  }
+  // The 1 sArcoUSD seed is paid with the deployer's ArcoUSD, or made from 1 tUSDC through the Reserve.
+  if (!seeded) {
+    // Refused up front (before any transaction) rather than stopping halfway at the seed step.
+    const usdc = new Contract(core.assets.tUSDC.address, ERC20_BALANCE_ABI, ethers.provider)
+    const usdc18 = BigNumber.from(await usdc.balanceOf(EXPECTED_GIWA_DEPLOYER)).mul(BigNumber.from(10).pow(18 - core.assets.tUSDC.decimals))
+    const arcoUSD = arcoUSDAddress ? new Contract(arcoUSDAddress, ERC20_BALANCE_ABI, ethers.provider) : null
+    const arco18 = arcoUSD ? BigNumber.from(await arcoUSD.balanceOf(EXPECTED_GIWA_DEPLOYER)) : BigNumber.from(0)
+    checks.deployerCanSeedSavings = usdc18.add(arco18).gte(utils.parseEther("1"))
   }
   const balance = await ethers.provider.getBalance(EXPECTED_GIWA_DEPLOYER)
   return { checks, deployerBalanceEth: utils.formatEther(balance) }
@@ -137,6 +157,8 @@ async function main() {
     core,
     registry.strategies.map((strategy) => strategy.productId),
     registry.routerVaults.map((vault) => vault.productId),
+    registry.savings.seeded,
+    registry.arcoUSD.pending ? null : registry.arcoUSD.proxy,
   )
 
   if (!broadcast) {
@@ -162,6 +184,7 @@ async function main() {
             configured,
             depositVault: core.products[productId].depositVault,
           })),
+          savings: { params: registry.savings.params, seeded: registry.savings.seeded },
           preflight: checks,
           pendingSteps: plan,
           note: "No transactions sent. MMF allocation is NOT part of this script and must wait for the B5 payment-feed repair. Set CONFIRM_GIWA_BROADCAST=I_UNDERSTAND_THIS_BROADCASTS_TO_GIWA (with the keystore) to broadcast.",
@@ -202,6 +225,12 @@ async function main() {
         lens: result.lens.address,
         router: result.router.proxy,
         routerVaults: result.routerVaults,
+        savings: {
+          sArcoUSD: result.savings.vault.proxy,
+          distributor: result.savings.distributor.address,
+          zap: result.savings.zap.address,
+          seeded: result.savings.seeded,
+        },
         testAssets: result.testAssets.map((asset) => ({ symbol: asset.symbol, proxy: asset.contract.proxy })),
         strategies: result.strategies,
         deploymentBlock: result.deploymentBlock,

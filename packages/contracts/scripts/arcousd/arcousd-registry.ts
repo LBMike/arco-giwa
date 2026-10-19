@@ -19,6 +19,33 @@ export type ArcoUSDContract = {
   pending?: boolean
 }
 
+/** A plain (non-proxy) contract: the Lens, the savings distributor and the Zap. */
+export type ArcoUSDPlainContract = {
+  address: Address | null
+  bytecodeHash: `0x${string}` | null
+  deployTxHash?: `0x${string}`
+  blockNumber?: number
+  pending?: boolean
+}
+
+/** Phase 4 Savings (docs/specs/arcousd-v1.md §3.13–3.15). */
+export type ArcoUSDSavings = {
+  /** sArcoUSD, the ERC-4626 Savings vault (transparent proxy). */
+  vault: ArcoUSDContract
+  /** ArcoUSDSavingsDistributor: mints Reserve surplus into sArcoUSD; holds ArcoUSD MINTER_ROLE. */
+  distributor: ArcoUSDPlainContract
+  /** ArcoSavingsZap: stablecoin ↔ Savings in one transaction; no roles, no funds. */
+  zap: ArcoUSDPlainContract
+  params: {
+    vestingPeriod: number // seconds a reward takes to reach the share price
+    minInterval: number // seconds between distributions
+    maxAprBps: number // APR cap on the vault's assets per distribution
+    reserveMarginBps: number // share of liabilities kept as surplus cushion
+  }
+  /** 1 sArcoUSD deposited for 0x…dEaD, so the supply never drops below MIN_SHARES. */
+  seeded: boolean
+}
+
 export type ArcoUSDTestAsset = {
   symbol: "tUSDT" | "tRLUSD"
   name: string
@@ -54,7 +81,7 @@ export type ArcoUSDRegistry = {
   admin: Address | null
   arcoUSD: ArcoUSDContract
   reserve: ArcoUSDContract
-  lens: { address: Address | null; bytecodeHash: `0x${string}` | null; deployTxHash?: `0x${string}`; blockNumber?: number; pending?: boolean }
+  lens: ArcoUSDPlainContract
   testAssets: ArcoUSDTestAsset[]
   reserveAssets: ArcoUSDReserveAsset[]
   strategies: ArcoUSDStrategy[]
@@ -65,6 +92,7 @@ export type ArcoUSDRegistry = {
   router: ArcoUSDContract
   /** Products whose deposit vault the Router may buy into (setVault). */
   routerVaults: { productId: string; configured: boolean }[]
+  savings: ArcoUSDSavings
 }
 
 export function arcoUSDRegistryPath(repoRoot: string) {
@@ -72,6 +100,7 @@ export function arcoUSDRegistryPath(repoRoot: string) {
 }
 
 const emptyContract = (): ArcoUSDContract => ({ proxy: null, implementation: null, bytecodeHash: null })
+const emptyPlain = (): ArcoUSDPlainContract => ({ address: null, bytecodeHash: null })
 
 /** Testnet defaults (docs/specs/arcousd-v1.md §3.9). */
 export function defaultArcoUSDRegistry(chainId: number, network: string, gitCommit: string): ArcoUSDRegistry {
@@ -119,6 +148,15 @@ export function defaultArcoUSDRegistry(chainId: number, network: string, gitComm
       { productId: "ibenji", configured: false },
       { productId: "beqty", configured: false },
     ],
+    // Testnet: rewards vest over a day, one distribution a day, savings APR capped at 20%, and
+    // 0.5% of liabilities always left in the Reserve as a cushion.
+    savings: {
+      vault: emptyContract(),
+      distributor: emptyPlain(),
+      zap: emptyPlain(),
+      params: { vestingPeriod: 86_400, minInterval: 86_400, maxAprBps: 2000, reserveMarginBps: 50 },
+      seeded: false,
+    },
   }
 }
 
@@ -135,6 +173,8 @@ export function loadArcoUSDRegistry(
   const defaults = fallback()
   raw.router ??= defaults.router
   raw.routerVaults ??= defaults.routerVaults
+  // Files written before Savings (phase 4) resume with the Savings steps still to do.
+  raw.savings ??= defaults.savings
   for (const asset of raw.reserveAssets) {
     asset.swapFeeBps ??= asset.configured ? 0 : (defaults.reserveAssets.find((item) => item.symbol === asset.symbol)?.swapFeeBps ?? 0)
   }
@@ -154,6 +194,9 @@ export function earliestBlock(registry: ArcoUSDRegistry): number | null {
     registry.reserve.blockNumber,
     registry.lens.blockNumber,
     registry.router?.blockNumber,
+    registry.savings?.vault.blockNumber,
+    registry.savings?.distributor.blockNumber,
+    registry.savings?.zap.blockNumber,
     ...registry.testAssets.map((asset) => asset.contract.blockNumber),
   ].filter((block): block is number => typeof block === "number")
   return blocks.length ? Math.min(...blocks) : null

@@ -11,6 +11,7 @@ describe("upgrade storage-layout validation", () => {
     "ArcoUSD",
     "ArcoUSDReserve",
     "ArcoRouter",
+    "SArcoUSD",
   ]) {
     it(`validates ${name} as an upgradeable implementation`, async () => {
       await upgrades.validateImplementation(await ethers.getContractFactory(name))

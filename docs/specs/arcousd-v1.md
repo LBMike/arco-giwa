@@ -1,6 +1,6 @@
 # ArcoUSD v1 컨트랙트 인터페이스 명세 (GIWA 테스트넷)
 
-2026-10-18(2026-10-19 2단계 반영: 스왑 수수료, `ArcoRouter`). 로드맵 1단계(ArcoUSD + Reserve)와 2단계 Router의 컨트랙트 인터페이스다. 이 문서는 코드와 테스트(`packages/contracts/contracts/arcousd/`, `test/arcousd-*.test.ts`)의 기준이며, 테스트넷 배포 완료를 뜻하지 않는다. 배포 스크립트, 레지스트리 v2, 인덱서 테이블은 승인 후 별도로 만든다.
+2026-10-18(2026-10-19 2단계 반영: 스왑 수수료, `ArcoRouter`. 2026-10-19 4a 반영: sArcoUSD, 수익 분배기, Savings Zap). 로드맵 1단계(ArcoUSD + Reserve), 2단계 Router, 4단계 sArcoUSD의 컨트랙트 인터페이스다. 이 문서는 코드와 테스트(`packages/contracts/contracts/arcousd/`, `test/arcousd-*.test.ts`)의 기준이며, 테스트넷 배포 완료를 뜻하지 않는다. 배포 스크립트, 레지스트리 v2, 인덱서 테이블은 승인 후 별도로 만든다.
 
 상품 문서(docs.arco.financial `products/arcousd`)의 약속을 컨트랙트로 옮긴 것이다.
 
@@ -17,6 +17,9 @@
 | `ArcoUSDReserve` | 투명 프록시(업그레이드 가능) | 입금, Instant·Standard 출금, 대기열, 상품 결제(`settleFor`), MMF 배분·회수, 한도, 일시정지, 자산별 조회 |
 | `ArcoUSDReserveLens` | 일반 컨트랙트(상태·권한 없음, 언제든 재배포) | 총 담보·총 부채·MMF 비율, 서버와 대시보드용 한 번 호출 스냅샷(`snapshot`) |
 | `ArcoRouter` | 투명 프록시(업그레이드 가능) | 상품 매수: 결제 자산 → Reserve 입금 → `settleFor` → 상품 입금 볼트. 자금을 들고 있지 않는다 |
+| `SArcoUSD` | 투명 프록시(업그레이드 가능) | Savings 볼트. ArcoUSD만 받는 ERC-4626(18자리, permit). 들어온 수익을 정해진 기간에 걸쳐 초 단위로 반영하고, 출금은 언제나 즉시 지갑으로 (3.13) |
+| `ArcoUSDSavingsDistributor` | 일반 컨트랙트(교체는 별도 절차, 3.14) | Reserve 잉여(담보 − 부채)만큼만 ArcoUSD를 발행해 sArcoUSD에 넣는다. ArcoUSD `MINTER_ROLE` 보유 (3.14) |
+| `ArcoSavingsZap` | 일반 컨트랙트(권한·자금 없음, 언제든 재배포) | 스테이블코인 → Reserve 입금 → sArcoUSD 예치, sArcoUSD → Reserve Instant 출금을 한 트랜잭션으로 (3.15) |
 | tUSDT(6자리), tRLUSD(18자리) | 기존 `TestAssetToken` 프록시 | 테스트 입금 자산. 파우셋에 등록 |
 | MMF 전략 | 기존 Arco 상품 볼트(uMINT, iBENJI) | Reserve가 tUSDC로 상품을 사서 들고, 상품 가격 피드(NAV)로 평가 |
 
@@ -206,6 +209,54 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 - 매수를 멈추는 것: Router `pause()`·`pauseFn(buy)`, Reserve `pause()`·`deposit`·`settleFor` 일시정지, ArcoUSD `pause()`·`mint`·`burn` 일시정지, 그리고 `mintCap`. 스테이블코인으로 사면 Reserve 입금(ArcoUSD 발행)을 먼저 거치므로 같은 거래에서 소각해 총발행량이 늘지 않아도 `mintCap`·`depositCap`에 걸린다. ArcoUSD로 사면 입금을 거치지 않는다.
 - 이벤트: `Bought(payer, recipient, depositVault, payAsset, payAmount, arcoUSDSettled, paymentAmount, result, request)`, `VaultAllowed(depositVault, paymentToken, allowed)`, `Rescued(token, to, amount)`. 오류: `NotReserveAsset`, `NotBaseAsset`, `NotGreenlisted`, `InvalidRecipient`, `VaultNotAllowed`, `ZeroAddress`, `ZeroAmount`.
 
+### 3.13 sArcoUSD (Savings 볼트)
+
+ArcoUSD를 넣고 지분 `sArcoUSD`(18자리, EIP-2612 permit)를 받는 ERC-4626 볼트다(OpenZeppelin 4.9.6 `ERC4626Upgradeable`). 볼트는 ArcoUSD만 들고 있고 다른 곳에 운용하지 않는다. 수익은 Reserve 잉여에서 분배기가 넣어 준다(3.14). Sky의 sUSDS처럼 지분 가격이 오르는 방식이고, 지분 수는 변하지 않는다.
+
+- **표준 함수**: `deposit`, `mint`, `withdraw`, `redeem`과 각 `preview*`·`max*`·`convertTo*`. 출금은 언제나 즉시 받는 주소로 간다(대기열·클레임 없음). 볼트가 ArcoUSD를 100% 들고 있기 때문이다. ArcoUSD를 다른 스테이블코인으로 바꾸는 것은 Reserve 출금(3.4)의 몫이다.
+- **수익 반영**: `addRewards(amount)`(`REWARDER_ROLE`: 분배기와 운영자)가 호출자의 ArcoUSD를 가져온다. 아직 반영되지 않은 이전 수익과 합쳐 `vestingPeriod`(테스트넷 1일) 동안 초 단위로 똑같이 반영한다. `totalAssets = 볼트의 ArcoUSD 잔고 − 아직 반영되지 않은 수익`이라, 수익이 들어온 순간 지분 가격이 뛰지 않고 그 기간 동안 매초 조금씩 오른다. 수익이 들어오기 직전에 넣고 직후에 빼면 그 몇 초분만 받는다(받으려면 반영 기간 동안 들고 있어야 한다). 예치자가 없으면(`totalSupply < MIN_SHARES`) 거부한다(첫 예치자가 공짜로 가져가지 않게).
+- **조회**: `unvestedAmount()`(아직 반영되지 않은 수익), `vestingAmount`, `vestingStart`, `vestingPeriod`, `vestingEnd()`, `rewardRate()`(지금 초당 반영되는 ArcoUSD), `cumulativeAssetSeconds()`(아래). 연환산 수익률은 서버가 `rewardRate × 1년 ÷ totalAssets`와 지분 가격 이력으로 계산한다.
+- **시간 가중 예치액**: `cumulativeAssetSeconds()` = 배포 뒤 `totalAssets`를 시간으로 적분한 값(ArcoUSD·초). 예치·출금·수익 추가·`seed`·`setVestingPeriod` 때마다 기록하고, 그 사이 반영되는 수익과 볼트로 직접 보낸 ArcoUSD는 다음 기록부터 센다(적게 세는 쪽). 분배기는 이 값으로 지난 분배 뒤의 평균 예치액을 구한다. 분배 직전에 넣은 큰 예치는 들고 있던 몇 초만큼만 들어간다.
+- **시드와 첫 예치자(인플레이션) 공격 방지**: 배포 직후에는 예치가 닫혀 있다(`deposit` 함수 일시정지). 관리자의 `seed()`가 정확히 1 ArcoUSD로 `MIN_SHARES`(1 sArcoUSD)를 소각 주소 `0x…dEaD`에 발행하고 같은 호출에서 예치를 연다. 그 전에 누가 ArcoUSD를 보내 두면 그 돈은 시드 지분의 몫이 될 뿐 시드 가격을 올리지 못한다(배포와 시드 사이를 앞질러 막을 수 없다). 예치·출금 뒤 총 지분은 0이거나 `MIN_SHARES` 이상이어야 하므로, 시드가 없어도 1 wei 지분으로 시작하는 공격에는 피해 예치액의 약 10^18배 기부가 필요하다. `maxRedeem`·`maxWithdraw`는 이 하한을 반영한다. 시드 지분은 아무도 뺄 수 없어 총 지분이 늘 1개 이상이므로, 작은 예치자도 언제나 전액을 뺄 수 있다. 시드 전에 일시정지 관리자가 예치를 손으로 열면 이 보장이 없다(하한 검사만 남는다).
+- **블랙리스트**: 별도 목록 없이 ArcoUSD 블랙리스트를 그대로 읽는다. 블랙리스트 주소는 지분을 받거나 보내거나 상환할 수 없고, 남의 승인으로 지분을 옮길 수도 없다(`transferFrom`·대리 출금의 spender 검사). 블랙리스트 주소가 지분을 다른 주소로 넘겨 ArcoUSD를 빼 가는 길을 막는다.
+- **일시정지** (`PAUSER_ROLE`): 전체 `pause()`, `pauseFn(deposit)`(예치·`mint`), `pauseFn(withdraw)`(출금·`redeem`), `pauseFn(addRewards)`. 멈춘 동안 해당 `max*`는 0을 돌려준다(ERC-4626 규약). 지분 전송은 멈추지 않는다(ArcoUSD와 같은 이유).
+- **관리** (`DEFAULT_ADMIN_ROLE`): `seed()`(한 번), `setVestingPeriod`(1시간~30일; 바꾸기 전에 지금까지 반영분을 확정하고 남은 수익을 새 기간으로 다시 나눈다. 분배 간격보다 짧게 줄이면 분배기의 연율 상한이 그만큼 줄어들고, 분배기 `minInterval`을 그 아래로 낮추기 전까지 분배기 `setParams`가 모두 거부된다(안전한 쪽으로 멈춘다)), `rescue`(ArcoUSD 외 토큰만).
+- 이벤트: `RewardsAdded(caller, amount, vestingAmount, vestingPeriod)`, `VestingPeriodUpdated(vestingPeriod)`, `Seeded(caller, holder, assets)`, `Rescued(token, to, amount)`, 표준 `Deposit`(시드 포함)·`Withdraw`. 오류: `ZeroAddress`, `ZeroAmount`, `InvalidParams`, `NoDepositors`, `MinSharesViolation`, `Blacklisted`, `CannotRescueAsset`, `AlreadySeeded`.
+
+### 3.14 ArcoUSDSavingsDistributor (수익 분배)
+
+Reserve의 잉여를 sArcoUSD로 옮기는 유일한 길이다. Reserve는 24KB 한도에 가까워 바꾸지 않고, ArcoUSD `MINTER_ROLE`을 가진 작은 컨트랙트가 잉여만큼만 발행한다.
+
+`distribute() returns (uint256 amount)` — 누구나 부를 수 있다(정해진 규칙대로 잉여를 저축자에게 옮길 뿐이다).
+
+1. 지난 분배 뒤 `minInterval`(테스트넷 1일)이 지나야 한다.
+2. Reserve가 전체 일시정지(`paused()`) 상태가 아니어야 한다.
+3. 볼트 예치자가 있어야 한다(`totalSupply ≥ MIN_SHARES`. 시드가 있으면 늘 참).
+4. Lens `totalBacking`이 NAV 정상(`navOk`)이어야 한다.
+5. `잉여 = 담보 − 부채(ArcoUSD 총발행) − 여유분(부채 × reserveMarginBps)`. 여유분은 NAV가 조금 떨어져도 담보 부족이 되지 않게 남겨 두는 몫이다(테스트넷 50bps).
+6. `연율 상한 = 지난 분배 뒤 볼트의 시간 가중 평균 예치액 × maxAprBps × min(경과 시간, vestingPeriod) ÷ 1년`(테스트넷 2000bps = 연 20%). 평균은 `cumulativeAssetSeconds`의 차이 ÷ 경과 시간이라, 분배 직전에 큰돈을 넣어 상한을 키울 수 없다. 한 번에 반영 기간(1일)어치까지만 센다. 분배가 며칠 밀리면 하루를 넘는 기간의 상한은 사라지고(하루만 들고 있다가 며칠치를 가져가는 것을 막는다), 잉여 자체는 Reserve에 남아 이후 분배에서 하루치 상한씩 나간다. 그래서 봇이 멈춘 동안 상한이 묶여 있던 만큼의 수익은 저축자에게 늦게 가거나 덜 간다. 피드 오류로 잉여가 부풀어도 한 번에 나가는 양은 이 상한을 넘지 않는다.
+7. Reserve `mintCap`까지 남은 양.
+8. 셋 중 가장 작은 값을 발행해 `addRewards`로 볼트에 넣는다. 0이면 되돌린다(`NothingToDistribute`; 봇이 eth_call로 미리 보고 보내지 않는다).
+
+- 담보보다 많이 발행할 수 없다. 잉여가 가장 작은 값이었으면 발행 뒤 잉여는 여유분만 남고, 연율 상한이나 `mintCap`이 더 작았으면 남은 잉여는 다음 분배로 넘어간다.
+- 관리(`DEFAULT_ADMIN_ROLE`): `setParams(minInterval, maxAprBps, reserveMarginBps)`(1시간~30일이면서 볼트 `vestingPeriod` 이하, 최대 5000bps, 최대 1000bps). `PAUSER_ROLE`: `pause`·`unpause`. 영구히 끄려면 ArcoUSD에서 분배기의 `MINTER_ROLE`을 회수한다.
+- 상태는 주소들과 파라미터, `lastDistribution`, `lastAssetSeconds`뿐이다. 주소는 `immutable`이 아닌 저장소에 둔다(배포가 중단됐을 때 배포 스크립트가 런타임 바이트코드를 아티팩트와 비교해 확인할 수 있게).
+- 분배기 교체는 배포 스크립트의 범위 밖이다(레지스트리를 손으로 고치지 않는다). 필요하면 별도로 검토한 절차로 하고, 두 분배기가 함께 발행하지 않게 옛 분배기의 `MINTER_ROLE`을 먼저 회수한다. (배포 스크립트의 역할 기록은 분배기 주소별이라, 그런 절차가 새 주소를 기록하면 새 분배기에 역할을 다시 준다.)
+- `preview() returns (amount, surplus, rateCap, mintHeadroom, nextAt, navOk)`: 지금 분배하면 얼마인지(NAV 이상이나 Reserve 일시정지면 0)와 각 상한. 콘솔·봇용.
+- 이벤트: `Distributed(caller, amount, backing, liabilities, surplus, rateCap)`, `ParamsUpdated(minInterval, maxAprBps, reserveMarginBps)`. 오류: `TooSoon`, `ReservePaused`, `NoDepositors`, `NavUnavailable`, `NothingToDistribute`, `InvalidParams`, `ZeroAddress`.
+
+### 3.15 ArcoSavingsZap (스테이블코인으로 Savings)
+
+화면에서 USDC·USDT·RLUSD로 바로 Savings에 넣고 빼게 한다. 배포 때 정한 주소 외에 상태가 없고, 권한과 자금도 없다. 모든 양은 잔고 차이로 재고, 남는 1단위 미만 ArcoUSD는 호출자에게 돌려준다.
+
+- `deposit(asset, amount, minShares, receiver) returns (shares)`: 스테이블코인을 받아 `Reserve.deposit`(스왑 수수료 적용) → 받은 ArcoUSD 전액을 `sArcoUSD.deposit(receiver)`. `asset`이 ArcoUSD면 Reserve를 거치지 않는다. `receiver`가 Zap 자신이면 거부.
+- `redeem(shares, asset, minAssetOut, receiver) returns (assetOut)`: 호출자의 지분을 `sArcoUSD.redeem(Zap, owner = 호출자)`로 ArcoUSD로 바꾸고 `Reserve.redeemInstantOnly`로 `receiver`에게 지급한다(Instant·스왑 수수료 적용). 즉시 유동성이 모자라면 전체가 되돌아간다. 대기열 요청의 주인은 Zap이 될 수 없으므로(취소할 사람이 없다) Zap은 Instant만 한다. 화면은 이때 ArcoUSD로 받은 뒤 Reserve 출금(대기열)을 쓰게 안내한다. `asset`이 ArcoUSD면 지분을 바로 상환한다. 호출자는 Zap에 지분 승인이 필요하다.
+- `redeemWithPermit(..., deadline, v, r, s)`: sArcoUSD permit으로 승인과 출금을 한 번에. permit이 실패해도 이미 승인이 충분하면 진행한다(앞질러 보낸 permit으로 방해하지 못하게).
+- `quoteDeposit(asset, amount) returns (arcoUSDIn, shares)`: 스왑 수수료를 반영한 견적. Router `quoteBuy`처럼 일시정지·한도는 보지 않는다.
+- `quoteRedeem(shares, asset) returns (arcoUSDOut, assetOut, instant)`: Instant·스왑 수수료를 반영한 견적과, 지금 `redeem`이 되는지(`instant`: 볼트 출금이 열려 있고, 스테이블코인이면 그 자산 출금 허용, Reserve 전체·`redeem`·`redeemInstantOnly` 일시정지 없음, ArcoUSD 전체·`burn` 일시정지 없음, 여유 버퍼 충분. 받는 주소의 블랙리스트 여부는 보지 않는다).
+- Zap에 잘못 보낸 토큰을 꺼내는 함수는 없다(권한이 없으므로).
+- 이벤트: `ZapDeposit(caller, receiver, asset, amount, arcoUSD, shares)`, `ZapRedeem(caller, receiver, asset, shares, arcoUSD, assetOut)`. 오류: `ZeroAddress`, `ZeroAmount`, `InvalidRecipient`, `InvalidParams`, `NotReserveAsset`, `MinOut`.
+
 ## 4. 결정 사항과 이유
 
 | 결정 | 이유 |
@@ -223,6 +274,14 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 | 기본 자산 외 스테이블코인은 입출금 모두 스왑 수수료 | 리저브는 USDC로 상품을 사므로 다른 스테이블코인은 결국 바꿔야 한다. 대기 출금에도 붙여 대기열로 수수료를 피하지 못하게 |
 | `settleFor`는 수수료 없음 | 매수자는 입금 때 이미 스왑 수수료를 냈다. USDC·ArcoUSD로 사면 수수료 없이 1:1 |
 | 매수는 별도 `ArcoRouter`, Reserve는 `settleFor`만 | Reserve를 24KB 한도 아래로 두고, 매수 경로는 Reserve와 따로 고치고 멈출 수 있게 |
+| sArcoUSD 수익은 Reserve 잉여에서 (Sky의 USDS·sUSDS 구조) | Reserve가 MMF와 수수료로 번 잉여를 저축자에게 준다. 볼트는 ArcoUSD만 들고 있어 출금이 언제나 즉시다 |
+| 분배는 잉여·연율 상한·`mintCap` 중 최소, NAV 정상일 때만 | 담보보다 많이 발행하지 않고, 피드 오류가 있어도 한 번에 나가는 양을 묶는다 |
+| 연율 상한은 시간 가중 평균 예치액 × 최대 반영 기간 1회분 | 분배 직전 큰 예치로 상한을 키우거나, 밀린 며칠치를 하루만 들고 가져가는 것을 막는다 |
+| 배포 직후 예치는 닫혀 있고 `seed()`가 시드와 함께 연다 | 배포와 시드 사이에 누가 앞질러 시드 비용을 올리거나 첫 예치자 공격을 하지 못하게 |
+| 수익은 기간에 걸쳐 초 단위로 반영 | 분배 직전에 넣고 직후에 빼는 수익 가로채기를 막고, 수익률이 매초 쌓이게 |
+| 총 지분은 0 또는 1 sArcoUSD 이상 + 소각 주소로 1개 시드 | 소수점 오프셋(지분 24자리) 없이 첫 예치자 공격을 막고, 시드가 있어 작은 예치자가 하한에 묶이지 않는다 |
+| sArcoUSD는 ArcoUSD 블랙리스트를 따른다 | 블랙리스트 주소가 지분을 넘겨 ArcoUSD를 빼 가지 못하게 |
+| Zap은 Instant 출금만 | Reserve 대기열 요청의 주인이 Zap이 되면 아무도 취소할 수 없다 |
 
 ## 5. 1단계 백엔드
 
@@ -243,9 +302,12 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 
 - **대기열 처리 봇(3b)**: 별도 워커(`arco-arcousd-keeper`)가 1분마다 대기열이 남은 자산별로 `processQueue`를 eth_call로 미리 돌려 보고, `live`면 1건 이상 지급될 자산에 `processQueue(asset, 20)`을 보낸다. 한 번에 트랜잭션 하나, 영수증 확인 후 다음. `dry-run`은 결과만 기록하고, 기본 `off`. 봇 지갑에는 역할이 없고 가스만 있다(역할이 있는 지갑이면 시작하지 않는다). 서명은 레지스트리 자산에 대한 `processQueue`로만 제한한다. 맨 앞이 취소·실패 항목으로 막혀 있으면 그 항목들을 지나가는 호출도 보낸다. revert 뒤에는 10분간 보내지 않는다. 키는 암호화 키스토어와 비밀번호 Secret File 두 개로만 받는다. MMF 배분·회수는 하지 않는다. 상태는 콘솔 Queue 탭의 Queue bot 카드와 감시기 알림(`keeper:*`)으로 본다. 절차는 `docs/operations/arcousd-keeper.md`.
 
+- **sArcoUSD 컨트랙트(4a)**: `SArcoUSD`, `ArcoUSDSavingsDistributor`, `ArcoSavingsZap`(3.13~3.15)과 배포 스크립트 단계. 배포 스크립트가 셋을 배포하고, 분배기에 ArcoUSD `MINTER_ROLE`과 sArcoUSD `REWARDER_ROLE`을 주고, `seed()`로 1 ArcoUSD 시드를 소각 주소에 넣으면서 예치를 연다(배포자에게 ArcoUSD가 없으면 tUSDC 1개를 Reserve에 넣어 만든다). 시드 비용이 모자라면 브로드캐스트가 `preflight`에서 첫 트랜잭션 전에 거부된다(드라이런은 결과만 보여 준다). 파라미터는 레지스트리 `savings.params`(테스트넷 기본값: 반영 기간 1일, 분배 간격 1일, 연율 상한 2000bps, 여유분 50bps). 1~3단계가 이미 배포된 레지스트리에서도 이 단계만 이어서 한다. 서버·인덱서·화면은 4b·4c.
+
 아직 하지 않는 것:
 
 - 알림 이메일.
+- sArcoUSD의 서버 API·인덱서·감시 규칙·봇 분배(4b), 고객 화면(4c).
 
 ## 6. 신뢰 가정
 
@@ -253,6 +315,8 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 - MMF 상품의 관리자는 상품 토큰 `BURNER_ROLE`과 입금 볼트 `withdrawTo`를 가진다. Reserve가 보유한 상품 토큰과 입금 자금은 그 관리자를 신뢰한다.
 - Reserve 바이트코드는 23,696바이트로 한도(24,576)에 가깝다. 이후 기능은 별도 컨트랙트(Router 등)로 둔다. 저장 슬롯은 15개 + `__gap[35]` = 50. `swapFeeBps`는 저장되는 자산 설정 구조체의 첫 슬롯 끝(`priceFeed` 뒤 28~29바이트)에 붙여, 그 앞의 배치가 바뀌지 않고 슬롯도 늘지 않는다.
 - `ArcoRouter`는 `SETTLER_ROLE`로 Reserve 버퍼에서 결제 토큰을 꺼낼 수 있다. 같은 양의 ArcoUSD를 소각한 뒤에만 되고, 꺼낸 토큰은 허용된 볼트로만 보낸다. Router 관리자(`DEFAULT_ADMIN_ROLE`)는 볼트 목록을 바꾸고 `rescue`를 부를 수 있으므로 메인넷에서는 Reserve와 같은 멀티시그여야 한다.
+- `ArcoUSDSavingsDistributor`는 ArcoUSD `MINTER_ROLE`을 가진다. 잉여 계산은 Lens의 NAV 평가를 믿으므로, 가격 피드 관리자(`FEED_ADMIN_ROLE`)가 MMF NAV를 잘못 올리면 실제로 없는 잉여가 발행될 수 있다. 연율 상한(시간 가중 평균 예치액 기준, 한 번에 반영 기간 1회분)이 한 번에 나갈 수 있는 양을 묶는다. NAV 평가 이익은 실현되지 않은 이익이라, 분배 뒤 NAV가 여유분보다 크게 떨어지면 담보 부족이 된다(감시기 `reserve:under-backed`).
+- sArcoUSD 관리자는 `REWARDER_ROLE`을 줄 수 있고(수익을 넣는 권한일 뿐 빼는 권한은 없다), 일시정지로 출금을 멈출 수 있으며, ProxyAdmin 소유자는 구현을 바꿀 수 있다. 메인넷에서는 Reserve와 같은 멀티시그여야 한다.
 - 수수료 없는 기본 자산(tUSDC)은 넣고 빼는 비용이 가스뿐이라, 누구나 tUSDC를 넣어 `mintCap`을 채우고 스테이블코인 매수를 막을 수 있다(자금은 묶인다). 게이트가 `mint-cap`으로 닫히면 관리자가 `mintCap`을 올린다. ArcoUSD로 결제하는 매수는 영향이 없다.
 
 ## 7. 주의
