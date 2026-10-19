@@ -316,10 +316,60 @@ Reserve의 잉여를 sArcoUSD로 옮기는 유일한 길이다. Reserve는 24KB 
   - 감시기가 Savings를 읽는다(`savings:*`, 모두 경고): 읽기 실패, 시드 안 됨, Savings 쪽 일시정지, `preview()` 실패, 분배 지연(분배 시각에서 2시간 넘게 지났는데 $0.01 이상 분배 가능, 10분 유예), 수익 없음(예치자가 있는데 7일 넘게 분배가 없고 mint cap이나 마진 위 잉여 부족 때문일 때, 이유 포함), Savings 인덱서 지연과 스냅샷 지연. 감시기 알림 제목의 "Queue keeper"는 "Keeper"로 바꿨다(키는 그대로).
   - 콘솔 Queue 탭의 봇 카드 이름을 Keeper bot으로 바꾸고 Savings 줄(이번 회차 분배 확인 결과)과 분배 트랜잭션 표시를 더했다. 절차는 `docs/operations/arcousd-keeper.md`·`docs/operations/arcousd-alerts.md`.
 
+- **4c 백엔드(고객 화면 연결 준비)**: 프론트 세션이 만든 4c 화면(헤더 Get ArcoUSD, Savings의 sArcoUSD 계정, 포트폴리오)이 쓰는 서버 쪽. 스키마 변경 없음.
+  - 공개 `GET /api/v1/arcousd/redemptions/:wallet?status=open|all`: 그 지갑이 owner인 Standard 출금 요청(`ArcoUSDRedeemRequest`). `open`(기본)은 QUEUED·PAYOUT_FAILED, `all`은 모든 상태. 최신순(같은 블록이면 requestId 순) 최대 100건(`truncated`). 요청마다 자산(심볼·주소·decimals), 상태, 받는 주소, ArcoUSD·자산 금액(원시값과 human), 요청·지급·실패·취소 시각과 tx 해시, `cancellable`(QUEUED·PAYOUT_FAILED), `payableFrom`(요청 시각 + `queueMinDelay`; 체인 값, 못 읽으면 레지스트리 값), `overdue`(QUEUED로 T+2 초과), `position`(QUEUED일 때 같은 자산 대기열에서 requestId가 더 작은 QUEUED 건수와 금액. 자산당 1만 건을 넘거나 대기열을 못 읽으면 `null`). 지갑·필터별 5초 캐시(최대 1,000개, 동시 요청은 한 번만 읽음), 자산별 대기열은 모든 지갑이 함께 쓰는 5초 캐시라 지갑을 훑어도 DB 부담이 늘지 않는다. 잘못된 주소나 status는 다른 공개 지갑 라우트처럼 400 `{ "error": "…" }`, 레지스트리가 없으면 `not-deployed`, 읽기 실패는 `unavailable`과 고정 코드 `error: "registry-invalid" | "read-failed"`(자세한 이유는 서버 로그에만 남긴다. DB 호스트 같은 내부 정보가 공개 응답에 나가지 않게).
+  - `GET /api/v1/arcousd/reserve`(기존 필드 그대로): `reserve.redeemPaused`(`fnPaused(redeem)`, Instant·Standard 출금 모두 멈춤; `cancelRedeem`은 계속 된다. `depositPaused`처럼 이 스위치만이라, 화면은 `reservePaused`와 함께 봐야 한다)와 자산마다 `minQueued`·`minQueuedHuman`(이보다 작은 Standard 요청은 `BelowQueueMinimum`), `depositCap`·`depositCapHuman`, `depositRoom`·`depositRoomHuman`(= cap − Reserve 잔고, 0 아래로 내려가지 않음. 컨트랙트는 입금 뒤 잔고가 cap을 넘으면 `DepositCap`으로 되돌린다. cap 아래 여유일 뿐이라 입금은 그 밖에 mint cap, `depositEnabled`, 페그 확인으로도 되돌려질 수 있다). 배포 기본값처럼 cap이 `max uint256`이면 한도 없음이라 `depositCapHuman`과 `depositRoom*`이 `null`이다. 한도는 Lens 스냅샷과 같은 블록에서 자산마다 `getAssetConfig`로 읽는다.
+  - 포트폴리오 활동: ArcoUSD·Savings 인덱서가 지갑 자신의 동작에 `walletAddress`를 붙인다(코어 인덱서와 같은 규칙, `activityForWallet`가 읽는다). 동작 하나는 한 줄이다: Zap·Router가 그 안에서 부른 단계는 누구의 것도 아니다.
+
+    | 컨트랙트 | 이벤트 | walletAddress | 붙이지 않는 경우 |
+    |---|---|---|---|
+    | Reserve | `Deposited` | recipient | sender가 Zap·Router |
+    | Reserve | `RedeemedInstant` | sender | sender가 Zap·Router |
+    | Reserve | `RedeemQueued`, `RedeemCancelled` | owner | |
+    | Reserve | `RedeemPaid`, `RedeemPayoutFailed` | 요청 테이블의 owner | 요청이 테이블에 없음 |
+    | sArcoUSD | `Deposit`, `Withdraw` | owner | sender가 Zap, owner가 `0x…dEaD`(시드) |
+    | Zap | `ZapDeposit` / `ZapRedeem` | receiver / caller | |
+    | 그 밖 | `SettledFor`, 배분·회수, 분배기, `RewardsAdded`, `Seeded`, Router 이벤트, 설정·역할·일시정지 | 없음 | |
+
+    한 번의 `redeem`이 버퍼로 일부를 바로 주고 나머지를 대기열에 넣으면(같은 tx에 `RedeemedInstant`와 `RedeemQueued`) 둘 다 owner의 줄이 된다. 컨트랙트가 두 결과를 따로 남기기 때문이며, 화면이 한 줄로 보이려면 txHash로 묶는다. 또 활동 피드의 `RedeemQueued`·`RedeemPaid` 줄과 `/redemptions`의 요청을 함께 그리면 같은 출금이 두 번 보이므로, 대기열 상태는 한쪽에서만 그린다.
+
+    Zap 주소는 레지스트리에 기록되는 순간(대기 중이어도)부터 쓴다. 이 두 인덱서는 같은 이벤트를 다시 인덱싱하면 args를 새로 쓴다(코어 인덱서는 그대로). 그래서 이 규칙보다 먼저 인덱싱된 행은 커서를 배포 블록으로 되돌리면 고쳐진다(`docs/operations/arcousd-deploy.md` §6). 기존 화면은 모르는 eventName을 건너뛰므로 피드가 바로 바뀌지는 않는다.
+  - 응답 예시(값은 예시):
+
+    ```json
+    GET /api/v1/arcousd/redemptions/0x5f1a…3b4c
+    { "status": "live", "chainId": 91342, "readAt": "2026-10-20T09:00:00.000Z",
+      "wallet": "0x5f1a9b6c3d2e4f7081a2b3c4d5e6f708192a3b4c", "filter": "open",
+      "queueMinDelay": 600, "queueMinDelaySource": "chain", "targetSeconds": 172800, "truncated": false,
+      "requests": [{
+        "requestId": "12",
+        "asset": { "symbol": "tUSDC", "address": "0x869d9c8d9bf0a961fc2fd3bba300fdbeee3c2633", "decimals": 6 },
+        "status": "QUEUED", "recipient": "0x5f1a9b6c3d2e4f7081a2b3c4d5e6f708192a3b4c",
+        "arcoUSDAmount": "250000000000000000000", "arcoUSDAmountHuman": "250",
+        "assetAmount": "250000000", "assetAmountHuman": "250",
+        "requestedAt": "2026-10-20T08:40:00.000Z", "queuedTxHash": "0x1a1a…",
+        "paidAt": null, "paidTxHash": null, "failedAt": null, "failedTxHash": null,
+        "cancelledAt": null, "cancelledTxHash": null,
+        "cancellable": true, "payableFrom": "2026-10-20T08:50:00.000Z", "overdue": false,
+        "position": { "ahead": 2, "aheadAssetAmount": "1200000000", "aheadAssetAmountHuman": "1200" } }] }
+    ```
+
+    ```json
+    GET /api/v1/arcousd/reserve → reserve.assets[] (추가된 끝 여섯 필드) 와 reserve.redeemPaused
+    { "symbol": "tUSDT", "balance": "41200000000", "balanceHuman": "41200", "…": "…",
+      "minQueued": "1000000", "minQueuedHuman": "1",
+      "depositCap": "50000000000", "depositCapHuman": "50000",
+      "depositRoom": "8800000000", "depositRoomHuman": "8800" }
+    { "symbol": "tUSDC", "…": "…", "minQueued": "1000000", "minQueuedHuman": "1",
+      "depositCap": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "depositCapHuman": null, "depositRoom": null, "depositRoomHuman": null }
+    ```
+  - 출시 순서와 배포 체크리스트는 `docs/operations/arcousd-deploy.md` §5·§6.
+
 아직 하지 않는 것:
 
 - 알림 이메일.
-- 고객 화면(4c): Savings 페이지의 sArcoUSD 계정(Zap 예치·출금), 포트폴리오, 헤더의 ArcoUSD 받기.
+- 4c 고객 화면 자체(프론트 세션이 별도 PR로 낸다).
 
 ## 6. 신뢰 가정
 

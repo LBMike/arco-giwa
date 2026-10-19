@@ -120,9 +120,14 @@ class FakeStore implements ArcoUSDIndexerStore {
   async upsertCursor(input: { chainId: number; name: string; fromBlock: bigint; lastBlock: bigint; lastBlockHash: string | null }) {
     this.cursors.set(`${input.chainId}:${input.name}`, input)
   }
+  /** Like the Prisma store: the first write creates the row, a re-index rewrites its args. */
   async insertIndexedEvent(input: IndexedEventInput) {
     const key = `${input.txHash}:${input.logIndex}`
-    if (!this.events.has(key)) this.events.set(key, input)
+    const existing = this.events.get(key)
+    this.events.set(key, existing ? { ...existing, args: input.args } : input)
+  }
+  async redeemOwner(input: { requestId: string }) {
+    return this.requests.get(input.requestId)?.owner.toLowerCase() ?? null
   }
   async recordRedeemQueued(input: RedeemQueuedInput) {
     if (!this.requests.has(input.requestId)) this.requests.set(input.requestId, { ...input, status: "QUEUED", txs: {} })
@@ -199,7 +204,7 @@ test("indexes Reserve events and drives request status forward only", async () =
   assert.equal(row.requestedAt.toISOString(), new Date(1_700_000_000_000).toISOString())
   const deposited = [...store.events.values()].find((event) => event.eventName === "Deposited")!
   assert.equal(deposited.contractAddress, RESERVE.toLowerCase())
-  assert.equal((deposited.args as Record<string, unknown>).walletAddress, undefined) // kept out of Activity
+  assert.equal((deposited.args as Record<string, unknown>).walletAddress, OWNER.toLowerCase()) // its recipient's Activity (4c)
   assert.equal((deposited.args as Record<string, unknown>).arcoUSDOut, (10n * 10n ** 18n).toString())
 
   assert.deepEqual(rpc.requested[0], [RESERVE.toLowerCase()]) // no Router in this registry
@@ -298,7 +303,20 @@ test("Prisma store: queued is create-only, transitions are conditional on the pr
     },
     arcoUSDReserveSnapshot: { upsert: async (args: unknown) => void calls.push({ op: "snapshot", args: args as Record<string, any> }) },
   }
-  const store = new PrismaArcoUSDIndexerStore(prisma, {} as never)
+  const store = new PrismaArcoUSDIndexerStore(
+    {
+      ...prisma,
+      evmIndexedEvent: { upsert: async (args: unknown) => void calls.push({ op: "event", args: args as Record<string, any> }) },
+      arcoUSDRedeemRequest: {
+        ...prisma.arcoUSDRedeemRequest,
+        findUnique: async (args: unknown) => {
+          calls.push({ op: "findUnique", args: args as Record<string, any> })
+          return { owner: OWNER.toUpperCase().replace("0X", "0x") }
+        },
+      },
+    },
+    {} as never,
+  )
   await store.recordRedeemQueued({
     chainId: 91342,
     reserveAddress: RESERVE,
@@ -323,4 +341,83 @@ test("Prisma store: queued is create-only, transitions are conditional on the pr
   await store.transitionRedeem({ chainId: 91342, reserveAddress: RESERVE, requestId: "7", to: "PAID", txHash: "0x1", at: new Date(2) })
   assert.deepEqual(calls[2].args.where.status, { in: ["QUEUED"] })
   assert.deepEqual(Object.keys(calls[2].args.data), ["status", "paidTxHash", "paidAt"])
+
+  // The owner of a payout's request, lowercase; events are created once and re-indexing rewrites args.
+  assert.equal(await store.redeemOwner({ chainId: 91342, reserveAddress: RESERVE, requestId: "7" }), OWNER.toLowerCase())
+  assert.equal(calls[3].args.where.chainId_reserveAddress_requestId.reserveAddress, RESERVE.toLowerCase())
+  await store.insertIndexedEvent({
+    chainId: 91342, contractAddress: RESERVE.toUpperCase().replace("0X", "0x"), blockNumber: 5, blockHash: "0x1", txHash: "0x2", logIndex: 0,
+    eventName: "RedeemQueued", args: { walletAddress: OWNER.toLowerCase() },
+  })
+  assert.deepEqual(calls[4].args.update, { args: { walletAddress: OWNER.toLowerCase() } })
+  assert.deepEqual([calls[4].args.create.contractAddress, calls[4].args.create.blockNumber, calls[4].args.create.removed], [RESERVE.toLowerCase(), 5n, false])
+})
+
+// ─────────────────────────────── portfolio activity ───────────────────────────────
+
+const ZAP = A(0x5c)
+const OTHER = A(0x22)
+const withZap: ArcoUSDRegistryFile = {
+  ...registry,
+  router: { proxy: ROUTER, implementation: A(0xd0), bytecodeHash: null },
+  // Pending: the Zap's Reserve steps are skipped as soon as its address is recorded.
+  savings: {
+    vault: { proxy: A(0x5a), implementation: A(0x50), bytecodeHash: null, blockNumber: 150 },
+    distributor: { address: A(0x5b), bytecodeHash: null, blockNumber: 151 },
+    zap: { address: ZAP, bytecodeHash: null, blockNumber: 152, pending: true },
+    seeded: false,
+  },
+}
+
+test("activity: a wallet's own Reserve actions carry walletAddress; the Zap's and the Router's steps and operations do not", async () => {
+  const { rpc, store, indexer } = setup({ loadRegistry: () => withZap })
+  const deposited = (sender: string, recipient: string, block: bigint) =>
+    log("Deposited", { sender, recipient, asset: USDC, assetAmount: 1_000_000n, arcoUSDOut: 10n ** 18n, fee: 0n }, block, 0)
+  const instant = (sender: string, block: bigint) =>
+    log("RedeemedInstant", { sender, recipient: OTHER, asset: USDC, arcoUSDIn: 10n ** 18n, assetOut: 1_000_000n, fee: 0n }, block, 0)
+  rpc.logs = [
+    deposited(OWNER, OTHER, 101n), // for someone else: the recipient's
+    deposited(ZAP, ZAP, 102n), // a Zap deposit's first step
+    deposited(ROUTER, ROUTER, 103n), // a stablecoin-paid Router buy's first step
+    instant(OWNER, 104n), // the sender's (it burned its ArcoUSD), whoever receives
+    instant(ZAP, 105n), // a Zap redeem's last step
+    queued(1n, 106n),
+    paid(1n, 107n), // names only the recipient: the request's owner
+    queued(2n, 108n),
+    failed(2n, 109n),
+    cancelled(2n, 110n),
+    paid(99n, 111n), // a request the table never saw: nobody's
+    log("SettledFor", { settler: ROUTER, asset: USDC, arcoUSDIn: 10n ** 18n, assetOut: 1_000_000n, to: VAULT }, 112n, 0),
+    log("Bought", { payer: OWNER, recipient: OWNER, depositVault: VAULT, payAsset: USDC, payAmount: 1n, arcoUSDSettled: 1n, paymentAmount: 1n, result: 1n, request: false }, 113n, 0, ROUTER, routerEventsAbi as readonly AbiEvent[]),
+  ]
+  await indexer.pollOnce()
+  const walletOf = (block: number) => [...store.events.values()].find((event) => Number(event.blockNumber) === block)?.args.walletAddress ?? null
+  assert.deepEqual(
+    [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113].map(walletOf),
+    [OTHER, null, null, OWNER, null, OWNER, OWNER, OWNER, OWNER, OWNER, null, null, null].map((wallet) => wallet?.toLowerCase() ?? null),
+  )
+})
+
+test("activity: a redeem the buffer only partly covers leaves two rows of the owner in one tx (paid now, queued)", async () => {
+  const { rpc, store, indexer } = setup({ loadRegistry: () => withZap })
+  const instantPart = log("RedeemedInstant", { sender: OWNER, recipient: OWNER, asset: USDC, arcoUSDIn: 2n * 10n ** 18n, assetOut: 2_000_000n, fee: 0n }, 120n, 0)
+  const queuedPart = queued(5n, 120n, 1)
+  rpc.logs = [instantPart, { ...queuedPart, transactionHash: instantPart.transactionHash }]
+  await indexer.pollOnce()
+  const rows = [...store.events.values()].filter((event) => event.txHash === instantPart.transactionHash)
+  // The contract records two outcomes; a screen that wants one line groups the feed by txHash.
+  assert.deepEqual(rows.map((event) => [event.eventName, event.args.walletAddress]), [
+    ["RedeemedInstant", OWNER.toLowerCase()],
+    ["RedeemQueued", OWNER.toLowerCase()],
+  ])
+})
+
+test("activity: rows indexed before the rules are brought up to date by re-indexing", async () => {
+  const { rpc, store, indexer } = setup()
+  rpc.logs = [queued(1n, 101n)]
+  const key = `${queued(1n, 101n).transactionHash}:0`
+  // A row written by an older indexer (no walletAddress) …
+  store.events.set(key, { chainId: 91342, contractAddress: RESERVE, blockNumber: 101n, blockHash: "0x", txHash: queued(1n, 101n).transactionHash, logIndex: 0, eventName: "RedeemQueued", args: { requestId: "1" } })
+  await indexer.pollOnce()
+  assert.equal(store.events.get(key)?.args.walletAddress, OWNER.toLowerCase())
 })

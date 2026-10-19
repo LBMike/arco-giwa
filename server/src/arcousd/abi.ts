@@ -15,6 +15,12 @@ export const reservePauseAbi = parseAbi([
   "function fnPaused(bytes4 selector) view returns (bool)",
 ])
 
+/** Reserve.getAssetConfig: the per-asset limits the Lens snapshot leaves out (depositCap, minQueued). */
+export const reserveAssetConfigAbi = parseAbi([
+  "struct AssetConfig { bool supported; bool depositEnabled; bool redeemEnabled; uint8 decimals; uint16 instantFeeBps; uint16 maxDepegBps; address priceFeed; uint16 swapFeeBps; uint256 depositCap; uint256 minQueued; }",
+  "function getAssetConfig(address asset) view returns (AssetConfig)",
+])
+
 export const SETTLE_FOR_SELECTOR = toFunctionSelector("settleFor(address,uint256,address)")
 /** ArcoUSD.burn(uint256): settleFor burns the settler's ArcoUSD, so pausing it halts settlement. */
 export const ARCOUSD_BURN_SELECTOR = toFunctionSelector("burn(uint256)")
@@ -25,6 +31,8 @@ export const ARCOUSD_MINT_SELECTOR = toFunctionSelector("mint(address,uint256)")
 export const ROUTER_BUY_SELECTOR = toFunctionSelector("buy(address,uint256,address,uint256,address,bool)")
 /** Reserve.processQueue: its own pause switch halts Standard-queue payouts. */
 export const PROCESS_QUEUE_SELECTOR = toFunctionSelector("processQueue(address,uint256)")
+/** Reserve.redeem: its switch halts every redemption, Instant and Standard (the Zap's Instant-only one too). */
+export const REDEEM_SELECTOR = toFunctionSelector("redeem(address,uint256,address,uint256)")
 
 /** Every ArcoUSDReserve event (indexer). */
 export const reserveEventsAbi = parseAbi([

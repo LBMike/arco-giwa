@@ -4,6 +4,7 @@ import type { GiwaIndexerCursor, GiwaIndexerRpc } from "../indexer/giwa-indexer.
 import type { PrismaArcoService } from "../services/prisma-arco-service.js"
 import type { IndexedEventInput, JsonObject } from "../services/types.js"
 import { distributorEventsAbi, savingsVaultEventsAbi, savingsZapEventsAbi } from "./abi.js"
+import { savingsEventWallet, upsertIndexedEvent, withActivityWallet, type IndexedEventDelegate } from "./activity.js"
 import { deployedArcoUSD, type ArcoUSDRegistryFile, type DeployedSavings } from "./registry.js"
 import { safeErrorText } from "./safe-error.js"
 import type { SavingsChainReader, SavingsState } from "./savings.js"
@@ -12,9 +13,11 @@ import type { SavingsChainReader, SavingsState } from "./savings.js"
 // cursor ("arcousd-savings") that starts at the Savings contracts' deploy block: Savings can be
 // deployed after the rest, and the ArcoUSD cursor may already be past that block by the time the
 // registry lists them.
-//   • every sArcoUSD, ArcoUSDSavingsDistributor and ArcoSavingsZap event → EvmIndexedEvent (audit
-//     trail; no walletAddress, like the Reserve's) — except sArcoUSD Transfer and Approval: every
-//     deposit and withdrawal already has its Deposit / Withdraw;
+//   • every sArcoUSD, ArcoUSDSavingsDistributor and ArcoSavingsZap event → EvmIndexedEvent — except
+//     sArcoUSD Transfer and Approval: every deposit and withdrawal already has its Deposit / Withdraw.
+//     A saver's own action carries `walletAddress` for the portfolio Activity feed (activity.ts):
+//     ZapDeposit / ZapRedeem, or a direct sArcoUSD Deposit / Withdraw; not the vault steps the Zap
+//     makes, not the seed, not distributions;
 //   • every snapshotIntervalMs, one savings read → ArcoUSDSavingsSnapshot (share price history).
 // Inert (no RPC calls) until all three Savings contracts are in the registry.
 
@@ -195,7 +198,7 @@ export class ArcoUSDSavingsIndexer {
         txHash: log.transactionHash,
         logIndex: log.logIndex,
         eventName: decoded.eventName,
-        args: decoded.args,
+        args: withActivityWallet(decoded.args, savingsEventWallet(decoded.eventName, decoded.args, { zap: savings.zapAddress })),
         removed: log.removed ?? false,
         blockTimestamp: await this.blockTime(timestamps, log.blockNumber),
       })
@@ -252,15 +255,15 @@ export class ArcoUSDSavingsIndexer {
 
 // ─────────────────────────────── Prisma ───────────────────────────────
 
-export type PrismaSavingsIndexerDelegates = {
+export type PrismaSavingsIndexerDelegates = IndexedEventDelegate & {
   arcoUSDSavingsSnapshot: { upsert(args: unknown): Promise<unknown> }
 }
 
-/** Cursor + generic events through the core indexer's service; the snapshot table here. */
+/** The cursor through the core indexer's service; events (args rewritten on re-index) and the snapshot table here. */
 export class PrismaSavingsIndexerStore implements SavingsIndexerStore {
   constructor(
     private readonly prisma: PrismaSavingsIndexerDelegates,
-    private readonly arco: Pick<PrismaArcoService, "getIndexerCursor" | "upsertIndexerCursor" | "insertIndexedEvent">,
+    private readonly arco: Pick<PrismaArcoService, "getIndexerCursor" | "upsertIndexerCursor">,
   ) {}
 
   getCursor(chainId: number, name: string) {
@@ -272,7 +275,7 @@ export class PrismaSavingsIndexerStore implements SavingsIndexerStore {
   }
 
   insertIndexedEvent(input: IndexedEventInput) {
-    return this.arco.insertIndexedEvent(input)
+    return upsertIndexedEvent(this.prisma, input)
   }
 
   insertSavingsSnapshot(input: SavingsSnapshotInput) {

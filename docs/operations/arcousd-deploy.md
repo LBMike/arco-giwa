@@ -128,7 +128,73 @@ CONFIRM_GIWA_BROADCAST=I_UNDERSTAND_THIS_BROADCASTS_TO_GIWA \
    `service: "arco-arcousd-savings-indexer"`가 보이고(커서 `arcousd-savings`), 5분 안에
    `GET /api/v1/arcousd/savings/history`에 점이 생긴다. 콘솔 Vaults → ArcoUSD → Savings 탭.
 
-## 6. 서버 환경변수 (모두 선택)
+## 6. 4c 출시: 브로드캐스트 뒤 체크리스트와 순서
+
+4c(고객 화면: 헤더 Get ArcoUSD, Savings의 sArcoUSD 계정, 포트폴리오)를 실제 ArcoUSD v1에 붙이는 순서다.
+4c 백엔드(지갑별 대기열 API, `/reserve`의 한도·`redeemPaused`, 활동 내역의 `walletAddress`) PR이 먼저
+머지돼 있어야 한다. 브로드캐스트는 사람이 한다(§3).
+
+### 브로드캐스트 직전
+
+1. §2 드라이런: `preflight.checks`가 모두 `true`, `deployerCanSeedSavings: true`, `deployerBalanceEth` 확인.
+2. 깨끗한 git 트리에서 §3 명령으로 브로드캐스트한다.
+
+### 브로드캐스트 뒤
+
+1. **레지스트리 PR:** `deployments/91342/arcousd-giwa.json`과 `packages/contracts/.openzeppelin/unknown-91342.json`을
+   커밋해 staging으로 PR을 올리고 머지한다(손으로 고치지 않는다).
+2. **DB 마이그레이션:** `npm run prisma:migrate:deploy`. 아직 적용 안 된 ArcoUSD 마이그레이션 세 개가 모두
+   들어간다: `20261018000000_arcousd_reserve`, `20261019000000_arcousd_alerts`(감시기 알림·하트비트),
+   `20261020000000_arcousd_savings`. 모두 테이블 추가만 한다. Render는 자동 실행하지 않는다.
+3. **재배포:** API와 인덱서 워커. 둘 다 레지스트리 파일을 읽어 켜진다.
+4. **확인:**
+   - `GET /api/v1/arcousd/reserve` → `status: "live"`, 자산마다 `minQueued`·`depositCap`, `reserve.redeemPaused: false`.
+   - `GET /api/v1/arcousd/savings` → `status: "live"`, `savings.seeded: true`, `savings.depositsOpen: true`.
+   - `GET /api/v1/arcousd/redemptions/<지갑>` → `status: "live"`(요청이 없으면 `requests: []`).
+   - 인덱서 로그에 `arco-arcousd-indexer`와 `arco-arcousd-savings-indexer`가 보인다.
+5. **키퍼:** `ARCOUSD_KEEPER_MODE=dry-run`으로 배포해 콘솔 Queue 탭 Keeper bot 카드가 "Dry run"과 Savings 줄을
+   보여 주는지 본 뒤 `live`로 바꾼다(`docs/operations/arcousd-keeper.md` §3).
+6. **CORS:** API의 `CORS_ALLOWED_ORIGINS`에 프론트 staging 주소(스킴 포함, 끝 `/` 없이)가 있는지 확인한다.
+   없으면 브라우저에서 새 API 호출이 막힌다.
+
+### 화면이 나갈 때: 옛 Savings 상품 숨기기 (스펙 7장)
+
+옛 Savings 상품 `arcousd`의 토큰 심볼은 `arcoUSD`(소문자 a)라 새 ArcoUSD·sArcoUSD와 헷갈린다. sArcoUSD 화면이
+나가는 배포와 같은 때에 투자자 화면에서 숨긴다. 숨김은 화면 정리일 뿐이라 상품·토큰·주소는 그대로다.
+
+1. 콘솔 **Vaults → Featured**에 `arcousd` 카드가 있으면 먼저 숨기거나 뺀다. 공개 캐러셀은 카드의 표시 여부만
+   보므로, 상품을 숨겨도 걸려 있는 카드는 남는다.
+2. 콘솔 **Vaults → Vault Config**에서 `arcousd`를 고르고 **Hidden**을 켠 뒤 저장한다. Funds·Savings 목록, 검색,
+   Home에서 빠진다. Featured 후보에서도 빠진다.
+3. 새 4c 프론트를 배포한다.
+4. 확인: Savings 페이지에 sArcoUSD 계정만 보이고 `arcoUSD` 상품이 없는지. 기존 `arcoUSD` 보유자는 포트폴리오에서
+   보유분을 계속 본다(포트폴리오는 숨김을 보지 않는다). 상환은 기존 상품 경로 그대로다.
+5. 되돌리기: Hidden을 끄면 바로 다시 보인다.
+
+### 4c 백엔드 머지 전에 배포한 경우: 활동 내역 백필
+
+4c 백엔드는 ArcoUSD·Savings 이벤트에 `walletAddress`를 붙인다. 머지 전에 인덱싱된 행에는 이 값이 없다.
+두 인덱서는 같은 이벤트를 다시 읽으면 args를 새로 쓰므로, 머지·재배포 뒤 커서를 배포 블록 직전으로 되돌리면 된다
+(요청 상태 전이는 앞으로만 가고 스냅샷은 블록마다 한 번이라 다시 읽어도 안전하다).
+
+1. 인덱서 워커를 멈춘다(Render에서 Suspend). 도는 중인 회차는 끝날 때 커서를 다시 써서 아래 UPDATE를 덮어쓴다.
+   같은 워커가 코어 인덱서와 감시기도 돌리므로 그동안 셋 다 멈춘다(다시 켜면 이어서 읽는다). 몇 분 안에 끝낸다.
+2. 아래 SQL을 실행한다.
+3. 워커를 다시 켜고, 다음 로그에서 `arco-arcousd-indexer`·`arco-arcousd-savings-indexer`의 `fromBlock`이 배포 블록부터
+   시작하는지 확인한다.
+
+```sql
+-- arco_evm 스키마. <배포 블록>은 레지스트리의 deploymentBlock, <Savings 시작 블록>은 savings의 세 블록 중 가장 작은 값.
+UPDATE arco_evm."EvmIndexerCursor" SET "lastBlock" = <배포 블록> - 1, "lastBlockHash" = NULL
+  WHERE "chainId" = 91342 AND "name" = 'arcousd';
+UPDATE arco_evm."EvmIndexerCursor" SET "lastBlock" = <Savings 시작 블록> - 1, "lastBlockHash" = NULL
+  WHERE "chainId" = 91342 AND "name" = 'arcousd-savings';
+```
+
+인덱서는 다음 회차부터 `INDEXER_MAX_BLOCK_RANGE`씩 다시 읽는다. 그동안 콘솔의 인덱서 지연 알림이 잠시 뜰 수 있다.
+배포 전에 머지하면 이 절차는 필요 없다.
+
+## 7. 서버 환경변수 (모두 선택)
 
 | 변수 | 기본값 | 의미 |
 |---|---|---|
@@ -152,7 +218,7 @@ CONFIRM_GIWA_BROADCAST=I_UNDERSTAND_THIS_BROADCASTS_TO_GIWA \
 
 UI 연동(펀드 매수 버튼 차단)은 2c에서 붙인다.
 
-## 7. 되돌리기
+## 8. 되돌리기
 
 컨트랙트는 되돌리지 않는다. Savings만 멈추려면 sArcoUSD `pauseFn(deposit)`(예치만) 또는
 `pause()`(출금 포함), 분배만 멈추려면 분배기 `pause()`(Reserve 전체 일시정지 중에도 분배는 멈춘다),
@@ -166,7 +232,7 @@ UI 연동(펀드 매수 버튼 차단)은 2c에서 붙인다.
 `not-deployed`/`inactive`가 된다. `inactive`는 "막음"이 아니라 "ArcoUSD를 거치지 않는 기존
 흐름"이라는 뜻이다. 매수를 막아야 하면 컨트랙트 일시정지를 쓴다.
 
-## 8. 알려진 한계
+## 9. 알려진 한계
 
 - 인덱서는 확인 블록 수(`INDEXER_CONFIRMATIONS`, 기본 5)보다 깊은 리오그를 되돌리지 못한다.
   사라진 이벤트가 만든 요청 상태(예: 고아가 된 `RedeemPaid`)는 그대로 남는다. 코어 인덱서와
