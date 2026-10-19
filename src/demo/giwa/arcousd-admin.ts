@@ -1,4 +1,4 @@
-import type { GiwaArcoUSDQueue, GiwaArcoUSDReserve } from "./types"
+import type { GiwaArcoUSDAlert, GiwaArcoUSDAlertDelivery, GiwaArcoUSDAlerts, GiwaArcoUSDQueue, GiwaArcoUSDReserve } from "./types"
 
 // Pure helpers for the admin ArcoUSD page (AdminArcoUSD.tsx): number formatting, the gate and
 // pause readouts, and the queue head's "can it be paid now" verdict. No React, no I/O.
@@ -86,7 +86,7 @@ export function gateText(gate: GiwaArcoUSDReserve["gate"]): { status: "open" | "
 
 export type PauseRow = { readonly label: string; readonly paused: boolean; readonly effect: string }
 
-/** Every pause on the buy and settlement path, in the order a buy meets them. */
+/** Every pause on the buy and settlement path, in the order a buy meets them, then queue payouts. */
 export function pauseRows(reserve: NonNullable<GiwaArcoUSDReserve["reserve"]>): PauseRow[] {
   return [
     { label: "Router buy", paused: reserve.routerPaused, effect: "Fund buys through the Router" },
@@ -94,6 +94,7 @@ export function pauseRows(reserve: NonNullable<GiwaArcoUSDReserve["reserve"]>): 
     { label: "ArcoUSD mint", paused: reserve.arcoUSDMintPaused, effect: "Deposits (mint) and stablecoin-paid buys" },
     { label: "Reserve settleFor", paused: reserve.settlementPaused, effect: "Every fund buy" },
     { label: "ArcoUSD burn", paused: reserve.arcoUSDBurnPaused, effect: "Settlement and queue payouts" },
+    { label: "Reserve processQueue", paused: reserve.queuePaused ?? false, effect: "Standard-queue payouts (requests keep their place)" },
     { label: "Reserve (all)", paused: reserve.reservePaused, effect: "Every Reserve function except cancel" },
     { label: "ArcoUSD (all)", paused: reserve.arcoUSDPaused, effect: "Mint and burn (transfers continue)" },
   ]
@@ -185,4 +186,62 @@ const EVENT_LABEL: Record<string, string> = {
 
 export function eventLabel(name: string): string {
   return EVENT_LABEL[name] ?? name
+}
+
+/** Queue payouts stop while the Reserve, its processQueue, ArcoUSD or ArcoUSD burn is paused. */
+export function payoutsPaused(reserve: GiwaArcoUSDReserve["reserve"] | null | undefined): boolean {
+  return Boolean(reserve && (reserve.reservePaused || reserve.queuePaused || reserve.arcoUSDPaused || reserve.arcoUSDBurnPaused))
+}
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+
+export type AlertTone = "negative" | "attention" | "neutral" | "positive"
+
+/** Pill label and tone: open alerts by severity, then waiting and cleared ones. */
+export function alertBadge(alert: Pick<GiwaArcoUSDAlert, "status" | "severity">): { label: string; tone: AlertTone } {
+  if (alert.status === "RESOLVED") return { label: "Resolved", tone: "positive" }
+  if (alert.status === "PENDING") return { label: "Pending", tone: "neutral" }
+  return alert.severity === "CRITICAL" ? { label: "Critical", tone: "negative" } : { label: "Warning", tone: "attention" }
+}
+
+/** "just now", "12m ago", "2h 5m ago". */
+export function agoText(iso: string | null | undefined, now: number): string {
+  if (!iso) return "—"
+  const seconds = (now - Date.parse(iso)) / 1000
+  if (!Number.isFinite(seconds)) return "—"
+  return seconds < 60 ? "just now" : `${durationText(seconds)} ago`
+}
+
+/** The line under an alert: how long it has been open / waiting / since it cleared, and the last send. */
+export function alertMeta(alert: GiwaArcoUSDAlert, now: number): string {
+  if (alert.status === "RESOLVED") return `Resolved ${agoText(alert.resolvedAt, now)}`
+  if (alert.status === "PENDING") return `Seen ${agoText(alert.firstSeenAt, now)}; sent only if it lasts`
+  const sent = alert.lastNotifiedAt ? `last sent ${agoText(alert.lastNotifiedAt, now)}` : "not sent yet"
+  return `Open ${durationText((now - Date.parse(alert.openedAt ?? alert.firstSeenAt)) / 1000)} · ${sent}`
+}
+
+/** Whether the watcher is alive: never ran, stopped running, failed its last round, or fine. */
+export function watcherStatus(alerts: Pick<GiwaArcoUSDAlerts, "watcher">, now: number): { tone: AlertTone; text: string } {
+  const watcher = alerts.watcher
+  if (!watcher) return { tone: "attention", text: "The watcher has not run yet. It runs in the indexer worker once ArcoUSD is deployed." }
+  if (watcher.stale) return { tone: "negative", text: `The watcher last ran ${agoText(watcher.lastRunAt, now)}. The indexer worker may be down.` }
+  if (watcher.lastError) return { tone: "negative", text: `The watcher's last run failed ${agoText(watcher.lastRunAt, now)}: ${watcher.lastError}` }
+  const ran = `The watcher ran ${agoText(watcher.lastRunAt, now)}.`
+  return watcher.reconciled === false
+    ? { tone: "attention", text: `${ran} It could not compare the queue with the chain this time (indexer behind, or its block unreadable).` }
+    : { tone: "positive", text: ran }
+}
+
+const CHANNEL_LABEL: Record<string, string> = { telegram: "Telegram", slack: "Slack" }
+
+/** "Telegram: sent · Slack: failed (Slack answered 404)". */
+export function deliveryText(delivery: GiwaArcoUSDAlertDelivery): string {
+  const parts = Object.entries(delivery).map(([channel, result]) =>
+    `${CHANNEL_LABEL[channel] ?? channel}: ${result?.ok ? "sent" : `failed${result?.error ? ` (${result.error})` : ""}`}`,
+  )
+  return parts.length ? parts.join(" · ") : "No channel answered"
+}
+
+export function channelLabel(id: string): string {
+  return CHANNEL_LABEL[id] ?? id
 }

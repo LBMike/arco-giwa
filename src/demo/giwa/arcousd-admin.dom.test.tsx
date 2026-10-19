@@ -187,3 +187,48 @@ test("pay-asset dropdown: opens in a themed portal, chooses, and Escape returns 
     assert.equal(doc.activeElement, trigger)
   })
 })
+
+test("alerts card: a test send shows each channel's answer (set GIWA_HOST_DOM_RUNTIME)", { skip: !runtime }, async () => {
+  await withDom(async ({ doc, React, root, act }) => {
+    const { AlertsCard } = (await import("./AdminArcoUSD")) as AnyModule
+    let answer: () => void = () => undefined
+    const props = (onTest: () => Promise<unknown>) => ({
+      hasAuth: true,
+      now: Date.parse("2026-10-19T12:00:00.000Z"),
+      onTest,
+      alerts: {
+        status: "live",
+        channels: { telegram: true, slack: true },
+        invalidSettings: [],
+        intervalMs: 60_000,
+        watcher: { lastRunAt: "2026-10-19T11:59:40.000Z", lastOkAt: "2026-10-19T11:59:40.000Z", lastError: null, stale: false },
+        alerts: [],
+      },
+    })
+    await act(() =>
+      root.render(
+        React.createElement(
+          AlertsCard,
+          props(
+            () =>
+              new Promise((resolve) => {
+                answer = () => resolve({ telegram: { ok: true, at: "" }, slack: { ok: false, at: "", error: "Slack answered 404: no_service" } })
+              }),
+          ),
+        ),
+      ),
+    )
+    assert.match(doc.body.textContent ?? "", /Sends to Telegram and Slack/)
+    await act(() => button(doc, "Send test alert").click())
+    assert.equal(button(doc, "Sending…").disabled, true)
+    await act(() => answer())
+    await act(tick)
+    assert.match(doc.body.textContent ?? "", /Telegram: sent · Slack: failed \(Slack answered 404: no_service\)/)
+
+    // A refused send (e.g. the 30-second cooldown) shows the server's reason.
+    await act(() => root.render(React.createElement(AlertsCard, props(async () => Promise.reject(new Error("Wait 30 seconds between test alerts"))))))
+    await act(() => button(doc, "Send test alert").click())
+    await act(tick)
+    assert.match(doc.body.textContent ?? "", /Wait 30 seconds between test alerts/)
+  })
+})

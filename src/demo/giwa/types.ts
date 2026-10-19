@@ -287,6 +287,8 @@ export type GiwaArcoUSDReserve = {
     mintCap: string
     reservePaused: boolean
     settlementPaused: boolean
+    /** Reserve.fnPaused(processQueue): queue payouts stop. Absent from older API builds. */
+    queuePaused?: boolean
     arcoUSDPaused: boolean
     arcoUSDBurnPaused: boolean
     depositPaused: boolean
@@ -422,6 +424,37 @@ export type GiwaArcoUSDProcessQueue = {
   /** Dry run of the same call: requests it would pay now, or why it could not be read. */
   preview: { paid: number; blockNumber: string } | { error: string }
 }
+
+/** One watcher alert (docs/operations/arcousd-alerts.md). PENDING: seen, not yet held long enough to send. */
+export type GiwaArcoUSDAlert = {
+  key: string
+  severity: "CRITICAL" | "WARNING"
+  status: "PENDING" | "OPEN" | "RESOLVED"
+  title: string
+  detail: string
+  firstSeenAt: string
+  lastSeenAt: string
+  openedAt: string | null
+  resolvedAt: string | null
+  lastNotifiedAt: string | null
+  notifyCount: number
+  deliveryErrors: { channel: string; error: string }[]
+}
+
+export type GiwaArcoUSDAlerts = {
+  status: GiwaArcoUSDStatus
+  error?: string
+  channels: { telegram: boolean; slack: boolean }
+  /** ARCOUSD_ALERT_* settings that are set but invalid (keys only). */
+  invalidSettings: string[]
+  intervalMs: number
+  /** `reconciled`: the last round compared the queue with the chain (null: not recorded). */
+  watcher: null | { lastRunAt: string; lastOkAt: string | null; lastError: string | null; stale: boolean; reconciled?: boolean | null }
+  /** Open (critical first), pending, then resolved in the last 24 hours. */
+  alerts: GiwaArcoUSDAlert[]
+}
+
+export type GiwaArcoUSDAlertDelivery = Partial<Record<"telegram" | "slack", { ok: boolean; at: string; error?: string }>>
 
 export type FaucetStatus = {
   walletAddress: string

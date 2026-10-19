@@ -4,6 +4,8 @@ import { ARCO_API_BASE, GIWA_CHAIN_ID } from "./config"
 import type {
   FaucetStatus,
   GiwaArcoUSDFlows,
+  GiwaArcoUSDAlertDelivery,
+  GiwaArcoUSDAlerts,
   GiwaArcoUSDProcessQueue,
   GiwaArcoUSDQueue,
   GiwaArcoUSDQueueFilter,
@@ -370,6 +372,10 @@ export const giwaApi = {
         method: "POST",
         body: JSON.stringify(maxCount === undefined ? { asset } : { asset, maxCount }),
       }),
+    // ArcoUSD watcher alerts, and a test message to the configured channels (vault:write).
+    arcousdAlerts: (auth: AdminAuth) => adminJson<GiwaArcoUSDAlerts>(auth, `/api/v1/admin/arcousd/alerts`),
+    arcousdAlertTest: (auth: AdminAuth) =>
+      adminJson<{ delivery: GiwaArcoUSDAlertDelivery }>(auth, `/api/v1/admin/arcousd/alerts/test`, { method: "POST", body: "{}" }),
     acknowledgeRecall: (auth: AdminAuth, productId: string, requestId: string) =>
       adminJson<{ transaction: UnsignedAdminTransaction }>(auth, redemptionPath(productId, requestId, "acknowledge-recall"), {
         method: "POST",

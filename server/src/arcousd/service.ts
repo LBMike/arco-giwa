@@ -116,7 +116,7 @@ export class ArcoUSDService {
     } catch {
       return this.unavailable(readAt, contracts)
     }
-    return { status: "live", chainId: this.deps.chainId, contracts, readAt, reserve, gate: this.evaluateGate(readAt, reserve) }
+    return { status: "live", chainId: this.deps.chainId, contracts, readAt, reserve, gate: evaluateBuyGate(this.deps.env, reserve, readAt) }
   }
 
   private unavailable(readAt: string, contracts: ReserveStateResponse["contracts"]): ReserveStateResponse {
@@ -130,41 +130,34 @@ export class ArcoUSDService {
     }
   }
 
-  private evaluateGate(readAt: string, reserve: ReserveState): BuyGate {
-    if (gateConfigInvalid(this.deps.env)) return this.gateFor(readAt, "closed", "config-invalid", null)
-    // settleFor needs the Reserve (paused / fnPaused(settleFor)) AND ArcoUSD.burn (paused /
-    // fnPaused(burn)): any of the four makes every product buy revert on-chain.
-    if (reserve.reservePaused || reserve.settlementPaused || reserve.arcoUSDPaused || reserve.arcoUSDBurnPaused) {
-      return this.gateFor(readAt, "closed", "settlement-paused", null)
-    }
-    // The Router's own pause, and the deposit/mint a stablecoin-paid buy goes through first.
-    if (reserve.routerPaused || reserve.depositPaused || reserve.arcoUSDMintPaused) {
-      return this.gateFor(readAt, "closed", "buy-paused", null)
-    }
-    // Room left under mintCap (liabilities = ArcoUSD supply) must fit a buy of the threshold size.
-    if (BigInt(reserve.mintCap) - BigInt(reserve.totalLiabilities) < parseUnits(this.deps.env.buyGateMin, 18)) {
-      return this.gateFor(readAt, "closed", "mint-cap", null)
-    }
-    const asset = reserve.assets.find((item) => item.symbol === this.deps.env.buyGateAsset)
-    if (!asset) return this.gateFor(readAt, "closed", "asset-missing", null)
-    const threshold = parseUnits(this.deps.env.buyGateMin, asset.decimals)
-    const open = BigInt(asset.available) >= threshold
-    return this.gateFor(readAt, open ? "open" : "closed", open ? null : "insufficient-buffer", asset.availableHuman)
+  private gateFor(checkedAt: string, status: BuyGate["status"], reason: BuyGate["reason"], available: string | null): BuyGate {
+    return gateOf(this.deps.env, checkedAt, status, reason, available)
   }
+}
 
-  private gateFor(
-    checkedAt: string,
-    status: BuyGate["status"],
-    reason: BuyGate["reason"],
-    available: string | null,
-  ): BuyGate {
-    return {
-      status,
-      reason,
-      asset: this.deps.env.buyGateAsset,
-      available,
-      threshold: this.deps.env.buyGateMin,
-      checkedAt,
-    }
+/** The buy gate over one reserve read (also used by the watcher, docs/operations/arcousd-alerts.md). */
+export function evaluateBuyGate(env: ArcoUSDEnv, reserve: ReserveState, checkedAt: string): BuyGate {
+  if (gateConfigInvalid(env)) return gateOf(env, checkedAt, "closed", "config-invalid", null)
+  // settleFor needs the Reserve (paused / fnPaused(settleFor)) AND ArcoUSD.burn (paused /
+  // fnPaused(burn)): any of the four makes every product buy revert on-chain.
+  if (reserve.reservePaused || reserve.settlementPaused || reserve.arcoUSDPaused || reserve.arcoUSDBurnPaused) {
+    return gateOf(env, checkedAt, "closed", "settlement-paused", null)
   }
+  // The Router's own pause, and the deposit/mint a stablecoin-paid buy goes through first.
+  if (reserve.routerPaused || reserve.depositPaused || reserve.arcoUSDMintPaused) {
+    return gateOf(env, checkedAt, "closed", "buy-paused", null)
+  }
+  // Room left under mintCap (liabilities = ArcoUSD supply) must fit a buy of the threshold size.
+  if (BigInt(reserve.mintCap) - BigInt(reserve.totalLiabilities) < parseUnits(env.buyGateMin, 18)) {
+    return gateOf(env, checkedAt, "closed", "mint-cap", null)
+  }
+  const asset = reserve.assets.find((item) => item.symbol === env.buyGateAsset)
+  if (!asset) return gateOf(env, checkedAt, "closed", "asset-missing", null)
+  const threshold = parseUnits(env.buyGateMin, asset.decimals)
+  const open = BigInt(asset.available) >= threshold
+  return gateOf(env, checkedAt, open ? "open" : "closed", open ? null : "insufficient-buffer", asset.availableHuman)
+}
+
+function gateOf(env: ArcoUSDEnv, checkedAt: string, status: BuyGate["status"], reason: BuyGate["reason"], available: string | null): BuyGate {
+  return { status, reason, asset: env.buyGateAsset, available, threshold: env.buyGateMin, checkedAt }
 }

@@ -218,6 +218,51 @@ model ArcoUSDReserveSnapshot {
   @@schema("arco_evm")
 }
 
+// ArcoUSD watcher alerts (docs/operations/arcousd-alerts.md), one row per rule key, reused across
+// occurrences: PENDING (seen, not yet held for the rule's sustain time) -> OPEN (notified) ->
+// RESOLVED (cleared). Written only by the watcher in the indexer worker; the API reads them.
+model ArcoUSDAlert {
+  id             String    @id @default(cuid())
+  chainId        Int
+  key            String
+  severity       String
+  status         String
+  title          String
+  detail         String
+  // A change re-notifies at once (e.g. which pauses are on); amounts that move stay out of it.
+  fingerprint    String
+  firstSeenAt    DateTime
+  lastSeenAt     DateTime
+  openedAt       DateTime?
+  resolvedAt     DateTime?
+  lastNotifiedAt DateTime?
+  notifyCount    Int       @default(0)
+  // Last delivery per channel: { telegram: { ok, at, error? }, slack: … }.
+  delivery       Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([chainId, key])
+  @@index([chainId, status])
+  @@schema("arco_evm")
+}
+
+// Liveness of the ArcoUSD background jobs ("watcher" now, the phase-3b keeper later): when each
+// last ran, last succeeded, and why it last failed.
+model ArcoUSDHeartbeat {
+  id        String    @id @default(cuid())
+  chainId   Int
+  name      String
+  lastRunAt DateTime
+  lastOkAt  DateTime?
+  lastError String?
+  data      Json?
+  updatedAt DateTime  @updatedAt
+
+  @@unique([chainId, name])
+  @@schema("arco_evm")
+}
+
 // Off-chain per-vault display/config (admin-ia-plan §2): the on-chain registry is immutable
 // deploy output, so display metadata, portfolio-card toggles, pin/hide flags and the admin
 // deposit address live here and are merged into the public catalog. No row => defaults

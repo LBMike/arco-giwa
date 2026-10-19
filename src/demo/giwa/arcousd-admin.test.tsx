@@ -1,24 +1,30 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
-import { ArcoUSDAdminView, ProcessQueueControl } from "./AdminArcoUSD"
+import { AlertsCard, ArcoUSDAdminView, ProcessQueueControl } from "./AdminArcoUSD"
 import { sendPreparedTransactionWithClients } from "./contracts"
 import {
+  agoText,
+  alertBadge,
+  alertMeta,
   amountText,
   arcoUSDAdminTab,
   batchSize,
   bpsText,
   countText,
+  deliveryText,
   durationText,
   gateText,
   headVerdict,
   mintHeadroomUsd,
   pauseRows,
+  payoutsPaused,
   queueFilter,
   usdCompact,
   usdText,
+  watcherStatus,
 } from "./arcousd-admin"
-import type { GiwaArcoUSDFlows, GiwaArcoUSDQueue, GiwaArcoUSDReserve, GiwaArcoUSDSnapshots } from "./types"
+import type { GiwaArcoUSDAlert, GiwaArcoUSDAlerts, GiwaArcoUSDFlows, GiwaArcoUSDQueue, GiwaArcoUSDReserve, GiwaArcoUSDSnapshots } from "./types"
 
 // Admin · ArcoUSD page: the pure helpers and the three views over fixed data.
 
@@ -222,8 +228,11 @@ test("helpers: gate wording, pause list, mint headroom", () => {
   assert.equal(gateText({ ...reserve().gate, status: "open", reason: null }).label, "Open")
   assert.equal(gateText({ ...reserve().gate, status: "inactive", reason: "not-deployed" }).status, "inactive")
   const rows = pauseRows(reserve().reserve!)
-  assert.equal(rows.length, 7)
+  assert.equal(rows.length, 8)
   assert.deepEqual(rows.filter((row) => row.paused).map((row) => row.label), ["Reserve deposit"])
+  // processQueue's own switch (absent from older API builds = running) stops queue payouts.
+  assert.deepEqual(pauseRows(reserve({ queuePaused: true }).reserve!).filter((row) => row.paused).map((row) => row.label), ["Reserve deposit", "Reserve processQueue"])
+  assert.deepEqual([payoutsPaused(reserve().reserve), payoutsPaused(reserve({ queuePaused: true }).reserve), payoutsPaused(null)], [false, true, false])
   assert.equal(mintHeadroomUsd(reserve().reserve!), 8000)
 })
 
@@ -338,4 +347,106 @@ test("ProcessQueueControl: preview is disabled for an empty queue or a bad batch
   assert.match(html, /<button[^>]*disabled=""[^>]*>Preview</)
   assert.match(html, /<button[^>]*disabled=""[^>]*>Sign &amp; send</) // nothing prepared yet
   assert.match(html, /aria-invalid="false"/)
+})
+
+// ── Alerts ─────────────────────────────────────────────────────────────────
+
+const alert = (over: Partial<GiwaArcoUSDAlert>): GiwaArcoUSDAlert => ({
+  key: "pauses",
+  severity: "WARNING",
+  status: "OPEN",
+  title: "Paused: Router buy",
+  detail: "Router buy: fund buys through the Router.",
+  firstSeenAt: "2026-10-19T10:00:00.000Z",
+  lastSeenAt: "2026-10-19T11:59:00.000Z",
+  openedAt: "2026-10-19T10:00:00.000Z",
+  resolvedAt: null,
+  lastNotifiedAt: "2026-10-19T11:45:00.000Z",
+  notifyCount: 1,
+  deliveryErrors: [],
+  ...over,
+})
+
+const alerts = (over: Partial<GiwaArcoUSDAlerts> = {}): GiwaArcoUSDAlerts => ({
+  status: "live",
+  channels: { telegram: true, slack: false },
+  invalidSettings: [],
+  intervalMs: 60_000,
+  watcher: { lastRunAt: "2026-10-19T11:59:20.000Z", lastOkAt: "2026-10-19T11:59:20.000Z", lastError: null, stale: false },
+  alerts: [
+    alert({ key: "reserve:nav", severity: "CRITICAL", title: "MMF NAV unavailable", detail: "A strategy's NAV could not be read.", deliveryErrors: [{ channel: "slack", error: "Slack answered 404: no_service" }] }),
+    alert({}),
+    alert({ key: "indexer:lag", status: "PENDING", title: "ArcoUSD indexer behind", openedAt: null, lastNotifiedAt: null, firstSeenAt: "2026-10-19T11:57:00.000Z" }),
+    alert({ key: "gate:closed", status: "RESOLVED", title: "Fund buys blocked", resolvedAt: "2026-10-19T11:00:00.000Z" }),
+  ],
+  ...over,
+})
+
+test("alert helpers: badges, ages, the watcher's pulse and delivery results", () => {
+  assert.deepEqual(
+    [alertBadge(alert({ severity: "CRITICAL" })), alertBadge(alert({})), alertBadge(alert({ status: "PENDING" })), alertBadge(alert({ status: "RESOLVED" }))],
+    [
+      { label: "Critical", tone: "negative" },
+      { label: "Warning", tone: "attention" },
+      { label: "Pending", tone: "neutral" },
+      { label: "Resolved", tone: "positive" },
+    ],
+  )
+  assert.deepEqual([agoText("2026-10-19T11:59:30.000Z", NOW), agoText("2026-10-19T09:55:00.000Z", NOW), agoText(null, NOW)], ["just now", "2h 5m ago", "—"])
+  assert.equal(alertMeta(alert({}), NOW), "Open 2h 0m · last sent 15m ago")
+  assert.equal(alertMeta(alert({ lastNotifiedAt: null }), NOW), "Open 2h 0m · not sent yet")
+  assert.equal(alertMeta(alert({ status: "PENDING", firstSeenAt: "2026-10-19T11:57:00.000Z" }), NOW), "Seen 3m ago; sent only if it lasts")
+  assert.equal(alertMeta(alert({ status: "RESOLVED", resolvedAt: "2026-10-19T11:00:00.000Z" }), NOW), "Resolved 1h 0m ago")
+
+  assert.deepEqual(watcherStatus(alerts(), NOW), { tone: "positive", text: "The watcher ran just now." })
+  assert.equal(watcherStatus(alerts({ watcher: null }), NOW).tone, "attention")
+  assert.match(watcherStatus(alerts({ watcher: { lastRunAt: "2026-10-19T11:40:00.000Z", lastOkAt: null, lastError: null, stale: true } }), NOW).text, /last ran 20m ago\. The indexer worker may be down\./)
+  assert.match(watcherStatus(alerts({ watcher: { lastRunAt: "2026-10-19T11:59:00.000Z", lastOkAt: null, lastError: "db down", stale: false } }), NOW).text, /last run failed 1m ago: db down/)
+  const unreconciled = watcherStatus(alerts({ watcher: { lastRunAt: "2026-10-19T11:59:30.000Z", lastOkAt: null, lastError: null, stale: false, reconciled: false } }), NOW)
+  assert.deepEqual([unreconciled.tone, /could not compare the queue with the chain/.test(unreconciled.text)], ["attention", true])
+
+  assert.equal(deliveryText({ telegram: { ok: true, at: "" }, slack: { ok: false, at: "", error: "timed out" } }), "Telegram: sent · Slack: failed (timed out)")
+  assert.equal(deliveryText({}), "No channel answered")
+})
+
+test("alerts card: open first, pending and resolved after, channel and send problems, test button", () => {
+  const html = renderToStaticMarkup(<AlertsCard hasAuth alerts={alerts()} onTest={pending} now={NOW} />)
+  const body = text(html)
+  for (const expected of [
+    "Alerts 2 open",
+    "Sends to Telegram",
+    "The watcher ran just now.",
+    "Critical MMF NAV unavailable A strategy's NAV could not be read.",
+    "Slack did not take the last send: Slack answered 404: no_service",
+    "Warning Paused: Router buy",
+    "Pending ArcoUSD indexer behind",
+    "Seen 3m ago; sent only if it lasts",
+    "Resolved Fund buys blocked Resolved 1h 0m ago",
+  ]) {
+    assert.ok(body.includes(expected), expected)
+  }
+  assert.ok(!body.includes("Fund buys blocked Router buy")) // a resolved alert drops its detail
+  assert.match(html, /<button[^>]*>Send test alert</)
+  assert.doesNotMatch(html, /<button[^>]*disabled=""[^>]*>Send test alert</)
+
+  // No channel: recorded only, and the test button explains what to set.
+  const quiet = renderToStaticMarkup(<AlertsCard hasAuth alerts={alerts({ channels: { telegram: false, slack: false }, alerts: [], invalidSettings: ["ARCOUSD_ALERT_SLACK_WEBHOOK_URL"] })} onTest={pending} now={NOW} />)
+  const quietText = text(quiet)
+  assert.match(quietText, /No channel configured: alerts are only recorded here/)
+  assert.match(quietText, /Ignored invalid settings: ARCOUSD_ALERT_SLACK_WEBHOOK_URL/)
+  assert.match(quietText, /Nothing open, pending or resolved in the last 24 hours\./)
+  assert.match(quiet, /<button[^>]*disabled=""[^>]*>Send test alert</)
+
+  // A stopped watcher is called out; without a session the card asks for one.
+  assert.match(text(renderToStaticMarkup(<AlertsCard hasAuth alerts={alerts({ watcher: { lastRunAt: "2026-10-19T11:40:00.000Z", lastOkAt: null, lastError: null, stale: true } })} onTest={pending} now={NOW} />)), /The indexer worker may be down/)
+  assert.match(text(renderToStaticMarkup(<AlertsCard hasAuth={false} alerts={null} onTest={pending} />)), /Sign in as an operator to load alerts\./)
+  assert.match(text(renderToStaticMarkup(<AlertsCard hasAuth alerts={alerts({ status: "not-deployed", watcher: null, alerts: [] })} onTest={pending} />)), /ArcoUSD is not deployed: there is nothing to watch yet\./)
+
+  // The card does not depend on the public reserve read: it stays when that read has nothing.
+  const noReserve = text(page("overview", { reserve: null, overview: { snapshots, days: 30, onDaysChange: noop, alerts: { alerts: alerts(), onTest: pending, now: NOW } } }))
+  assert.match(noReserve, /Alerts 2 open/)
+
+  // On the overview it sits above the totals.
+  const overview = text(page("overview", { overview: { snapshots, days: 30, onDaysChange: noop, alerts: { alerts: alerts(), onTest: pending, now: NOW } } }))
+  assert.ok(overview.indexOf("Alerts 2 open") < overview.indexOf("Total backing"))
 })

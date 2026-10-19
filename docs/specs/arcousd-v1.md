@@ -239,9 +239,12 @@ ParamsUpdated(mintCap, mmfTargetBps, bufferFloorBps, queueMinDelay)
 
 - **상환 목록의 Reserve 회수**: Reserve의 `requestRecall`은 상품 볼트에 일반 상환 요청으로 들어오므로 관리자 상환 목록에서 따로 표시한다. 직접 송금으로 정산한 회수는 `acknowledgeRecallPaid`, fulfill로 처리한 회수는 `claimRecall`이 뒤따라야 한다. 서버는 이 둘을 안전할 때만 만들어 준다(지급 검증 뒤에만 acknowledge, fulfill 뒤에만 claim). 절차는 `docs/admin-console.md`의 "자금 이동 안전장치".
 
+- **감시·대사·알림(3a)**: 인덱서 워커 안에서 1분마다 체인을 읽기만 하는 감시기가 돈다. 담보 부족, NAV 실패, 체인과 인덱서 DB의 대기열 불일치(인덱서가 읽은 블록과 같은 블록에서 비교), T+2 초과, 처리되지 않거나 유동성이 모자란 대기열, 지급 실패, 매수 게이트 닫힘, 발행 상한 임박, MMF 비율 이탈, 일시정지, 인덱서 지연, 처리 안 된 Reserve 회수를 본다. 알림은 `ArcoUSDAlert`에 규칙별로 남고(PENDING → OPEN → RESOLVED), 텔레그램 봇과 슬랙 웹훅으로 보낸다. 이메일은 아직 없다. 콘솔 Overview에 Alerts 카드와 테스트 발송이 있다. 리저브 조회에 `queuePaused`(`fnPaused(processQueue)`)가 추가됐다. 규칙과 설정은 `docs/operations/arcousd-alerts.md`.
+
 아직 하지 않는 것:
 
-- 키퍼·대사·알림(3단계).
+- `processQueue`를 자동으로 돌리는 봇(3b).
+- 알림 이메일.
 
 ## 6. 신뢰 가정
 

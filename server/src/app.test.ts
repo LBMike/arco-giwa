@@ -7,6 +7,8 @@ import { buildApp, type VaultPauseDetail } from "./app.js"
 import { ArcoUSDRecalls, reserveRecallAbi, type RecallChainState, type RecallReader } from "./arcousd/recall.js"
 import type { ArcoUSDRegistryFile } from "./arcousd/registry.js"
 import { ArcoUSDAdmin, processQueueAbi } from "./arcousd/admin.js"
+import { parseArcoUSDAlertEnv } from "./arcousd/alert-config.js"
+import { ArcoUSDAlertsAdmin } from "./arcousd/alerts.js"
 import type { PayoutExpectation, PayoutVerifier } from "./evm/payout-verification.js"
 import { buildDryRunGiwaRegistry } from "./registry/generate.js"
 import { EvmMarketService } from "./services/evm-market-service.js"
@@ -21,6 +23,7 @@ const { sign: signSession } = createRequire(import.meta.url)("jsonwebtoken") as 
 const TEST_SESSION_SECRET = "test-secret-test-secret-test-secret"
 // Vault operator in makeApp's ADMIN_OPERATORS directory (read + write).
 const TEST_OPERATOR_WALLET = "0x00000000000000000000000000000000000000a1"
+const TEST_READER_WALLET = "0x00000000000000000000000000000000000000ad"
 
 // A SIWE session exactly as /api/v1/auth/verify issues it, for the app origin localhost:5173.
 function sessionHeaders(wallet: string) {
@@ -284,6 +287,7 @@ function makeApp(options?: {
   arcoUSDRecalls?: ArcoUSDRecalls
   /** ArcoUSD admin reads + processQueue builder; absent leaves the service out. */
   arcoUSDAdmin?: ArcoUSDAdmin
+  arcoUSDAlerts?: ArcoUSDAlertsAdmin
 }) {
   const prisma = makePrisma()
   const arco = new PrismaArcoService(prisma as PrismaLike)
@@ -317,7 +321,10 @@ function makeApp(options?: {
       authNonceTtlSeconds: 300,
       authJwtSecret: "test-secret-test-secret-test-secret",
       adminOperatorToken: "operator-token",
-      adminOperators: [{ wallet: TEST_OPERATOR_WALLET, operatorId: "test-operator", permissions: ["vault:read", "vault:write"] }],
+      adminOperators: [
+        { wallet: TEST_OPERATOR_WALLET, operatorId: "test-operator", permissions: ["vault:read", "vault:write"] },
+        { wallet: TEST_READER_WALLET, operatorId: "test-reader", permissions: ["vault:read"] },
+      ],
       adminWithdrawAllowlist: options?.withdrawAllowlist ?? [],
       registryPath: "unused",
     },
@@ -354,6 +361,7 @@ function makeApp(options?: {
         : { verifyPayout: async () => ({ ok: true as const }) }),
       ...(options?.arcoUSDRecalls ? { arcoUSDRecalls: options.arcoUSDRecalls } : {}),
       ...(options?.arcoUSDAdmin ? { arcoUSDAdmin: options.arcoUSDAdmin } : {}),
+      ...(options?.arcoUSDAlerts ? { arcoUSDAlerts: options.arcoUSDAlerts } : {}),
     },
   )
   return { app, prisma, registry: fullRegistry }
@@ -2812,3 +2820,60 @@ test("ArcoUSD admin routes: operator-only reads with their status, the queue fil
   const bareTx = await bare.inject({ method: "POST", url: "/api/v1/admin/arcousd/process-queue", headers: OPERATOR, payload: { asset: "tUSDC" } })
   assert.equal(bareTx.statusCode, 409)
 })
+
+test("ArcoUSD alert routes: operator-only view and a test send that names the operator", async () => {
+  const sent: string[] = []
+  const store = {
+    recent: async () => [],
+    heartbeat: async () => ({ lastRunAt: new Date(), lastOkAt: new Date(), lastError: null, data: null }),
+  }
+  const arcoUSDAlerts = new ArcoUSDAlertsAdmin({
+    chainId: 91342,
+    network: "GIWA Sepolia",
+    loadRegistry: () => ({ ...arcoUSDTestRegistry() }),
+    store,
+    env: parseArcoUSDAlertEnv({ ARCOUSD_ALERT_SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXX" }),
+    channels: [{ id: "slack", send: async (text: string) => void sent.push(text) }],
+  })
+  const { app } = makeApp({ arcoUSDAlerts })
+  assert.equal((await app.inject({ method: "GET", url: "/api/v1/admin/arcousd/alerts" })).statusCode, 401)
+  const view = (await app.inject({ method: "GET", url: "/api/v1/admin/arcousd/alerts", headers: OPERATOR })).json()
+  assert.deepEqual([view.status, view.channels, view.watcher.stale], ["live", { telegram: false, slack: true }, false])
+  assert.ok(!JSON.stringify(view).includes("hooks.slack.com"))
+
+  const test1 = await app.inject({ method: "POST", url: "/api/v1/admin/arcousd/alerts/test", headers: OPERATOR })
+  assert.equal(test1.statusCode, 200)
+  assert.equal(test1.json().delivery.slack.ok, true)
+  assert.match(sent[0], new RegExp(`by ${TEST_OPERATOR_WALLET.slice(0, 6)}`, "i"))
+  assert.equal((await app.inject({ method: "POST", url: "/api/v1/admin/arcousd/alerts/test", headers: OPERATOR })).statusCode, 429)
+
+  // A read-only operator sees the alerts but cannot send.
+  const reader = sessionHeaders(TEST_READER_WALLET)
+  assert.equal((await app.inject({ method: "GET", url: "/api/v1/admin/arcousd/alerts", headers: reader })).statusCode, 200)
+  assert.equal((await app.inject({ method: "POST", url: "/api/v1/admin/arcousd/alerts/test", headers: reader })).statusCode, 403)
+  assert.equal(sent.length, 1)
+
+  // Built without the service: not-deployed, and nothing to send to.
+  const bare = makeApp().app
+  const bareView = (await bare.inject({ method: "GET", url: "/api/v1/admin/arcousd/alerts", headers: OPERATOR })).json()
+  assert.deepEqual([bareView.status, bareView.alerts, bareView.channels], ["not-deployed", [], { telegram: false, slack: false }])
+  assert.equal((await bare.inject({ method: "POST", url: "/api/v1/admin/arcousd/alerts/test", headers: OPERATOR })).statusCode, 409)
+})
+
+function arcoUSDTestRegistry(): ArcoUSDRegistryFile {
+  const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}`
+  return {
+    schemaVersion: 1,
+    chainId: 91342,
+    network: "giwa-sepolia",
+    deployed: true,
+    deploymentBlock: 5,
+    arcoUSD: { proxy: addr(0xe1), implementation: addr(0xe2), bytecodeHash: null },
+    reserve: { proxy: addr(0xe5), implementation: addr(0xe3), bytecodeHash: null },
+    lens: { address: addr(0xe4), bytecodeHash: null },
+    testAssets: [],
+    reserveAssets: [{ symbol: "tUSDC", address: addr(0xc1), decimals: 6, minQueued: "1", instantFeeBps: 0, swapFeeBps: 0 }],
+    strategies: [],
+    params: { mintCap: "1", mmfTargetBps: 5000, bufferFloorBps: 3000, queueMinDelay: 600 },
+  } as ArcoUSDRegistryFile
+}

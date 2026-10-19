@@ -23,6 +23,8 @@ export const DEPOSIT_SELECTOR = toFunctionSelector("deposit(address,uint256,addr
 export const ARCOUSD_MINT_SELECTOR = toFunctionSelector("mint(address,uint256)")
 /** ArcoRouter.buy */
 export const ROUTER_BUY_SELECTOR = toFunctionSelector("buy(address,uint256,address,uint256,address,bool)")
+/** Reserve.processQueue: its own pause switch halts Standard-queue payouts. */
+export const PROCESS_QUEUE_SELECTOR = toFunctionSelector("processQueue(address,uint256)")
 
 /** Every ArcoUSDReserve event (indexer). */
 export const reserveEventsAbi = parseAbi([
