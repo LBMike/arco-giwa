@@ -12,6 +12,7 @@ import {
   ARCOUSD_ADMIN_TABS,
   FLOW_WINDOWS,
   QUEUE_FILTERS,
+  agoText,
   alertBadge,
   alertMeta,
   amountText,
@@ -23,13 +24,17 @@ import {
   deliveryText,
   durationText,
   eventLabel,
+  gasText,
   gateText,
   headVerdict,
+  keeperBadge,
+  keeperTxBadge,
   mintHeadroomUsd,
   pauseRows,
   payoutsPaused,
   queueFilter,
   shortAddress,
+  simulationText,
   usdCompact,
   usdText,
   watcherStatus,
@@ -39,6 +44,7 @@ import type {
   GiwaArcoUSDAlertDelivery,
   GiwaArcoUSDAlerts,
   GiwaArcoUSDFlows,
+  GiwaArcoUSDKeeper,
   GiwaArcoUSDProcessQueue,
   GiwaArcoUSDQueue,
   GiwaArcoUSDQueueFilter,
@@ -87,6 +93,13 @@ export default function GiwaAdminArcoUSDPage() {
     queryKey: ["giwa", "arcousd-admin", "alerts"],
     queryFn: () => giwaApi.admin.arcousdAlerts(auth),
     enabled: auth.ready && tab === "overview",
+    refetchInterval: REFRESH_FAST,
+    placeholderData: keepPreviousData,
+  })
+  const keeperQuery = useQuery({
+    queryKey: ["giwa", "arcousd-admin", "keeper"],
+    queryFn: () => giwaApi.admin.arcousdKeeper(auth),
+    enabled: auth.ready && tab === "queue",
     refetchInterval: REFRESH_FAST,
     placeholderData: keepPreviousData,
   })
@@ -146,6 +159,11 @@ export default function GiwaAdminArcoUSDPage() {
         onConnectWallet: () => void wallet.connect(),
         onPrepare: (asset, maxCount) => giwaApi.admin.arcousdProcessQueue(auth, asset, maxCount),
         onSend: sendProcessQueue,
+        keeper: {
+          keeper: keeperQuery.data ?? null,
+          loading: keeperQuery.isLoading,
+          error: keeperQuery.isError ? readableError(keeperQuery.error) : null,
+        },
       }}
       flows={{
         flows: flowsQuery.data ?? null,
@@ -188,7 +206,14 @@ type QueueProps = {
   onConnectWallet: () => void
   onPrepare: (asset: string, maxCount: number) => Promise<GiwaArcoUSDProcessQueue>
   onSend: (prepared: GiwaArcoUSDProcessQueue, onSigned: (hash: string) => void) => Promise<string>
+  keeper?: KeeperProps
   now?: number
+}
+
+type KeeperProps = {
+  keeper: GiwaArcoUSDKeeper | null
+  loading?: boolean
+  error?: string | null
 }
 
 type FlowsProps = {
@@ -628,6 +653,7 @@ function QueueView({
   onConnectWallet,
   onPrepare,
   onSend,
+  keeper,
   now = Date.now(),
 }: QueueProps & { reserve: GiwaArcoUSDReserve | null }) {
   if (loading && !queue) return <LoadingNote>Loading the queue…</LoadingNote>
@@ -648,6 +674,7 @@ function QueueView({
     <div className="space-y-6">
       {error && <ErrorLine>Could not refresh the queue: {error}. Showing the last loaded data.</ErrorLine>}
       {queue.status === "unavailable" && <ErrorLine>The queue is unavailable: {queue.error ?? "unknown error"}</ErrorLine>}
+      {keeper && <KeeperCard {...keeper} now={now} />}
       <p className="text-sm text-[var(--color-arco-text-soft)]">
         Standard redemptions are paid in request order once they are {durationText(queue.queueMinDelay)} old
         {queue.queueMinDelaySource === "registry" ? " (deploy-time value; the live delay could not be read)" : ""} and the Reserve
@@ -729,6 +756,77 @@ function QueueView({
         {queue.truncated && <p className="mt-2 text-[11px] text-[var(--color-arco-muted)]">Showing the first 500 requests.</p>}
       </Card>
     </div>
+  )
+}
+
+/** The queue bot (docs/operations/arcousd-keeper.md): mode, wallet, gas, what it would pay now, its last transaction. */
+export function KeeperCard({ keeper, loading, error, now = Date.now() }: KeeperProps & { now?: number }) {
+  const state = keeper?.keeper ?? null
+  const report = state?.report ?? null
+  const badge = keeperBadge(state, now)
+  const holding = report?.holdUntil && Date.parse(report.holdUntil) > now ? report.holdUntil : null
+  const running = report && report.mode !== "off"
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <CardTitle>Queue bot</CardTitle>
+          {keeper?.status === "live" && <Pill tone={badge.tone}>{badge.label}</Pill>}
+        </div>
+        {report?.address && <AddressLink address={report.address} />}
+      </div>
+      {loading && !keeper ? (
+        <LoadingNote>Loading the queue bot…</LoadingNote>
+      ) : error && !keeper ? (
+        <ErrorLine>Could not load the queue bot: {error}</ErrorLine>
+      ) : keeper?.status === "unavailable" ? (
+        <ErrorLine>The queue bot status is unavailable: {keeper.error ?? "unknown error"}</ErrorLine>
+      ) : !running ? (
+        <p className="mt-2 text-sm text-[var(--color-arco-text-soft)]">
+          {state
+            ? "The queue bot is off. Pay the queue with Preview and Sign & send below."
+            : "The queue bot has not run yet. Until it is set up, pay the queue with Preview and Sign & send below."}
+        </p>
+      ) : (
+        <>
+          {error && <ErrorLine>Could not refresh the queue bot: {error}. Showing the last loaded data.</ErrorLine>}
+          <dl className="mt-3 space-y-2 text-sm">
+            <Row label="Last run" value={`${agoText(state!.lastRunAt, now)}${state!.stale ? " (not running)" : ""}`} attention={state!.stale} />
+            {report!.mode === "live" && (
+              <Row label="Gas" value={`${gasText(report!.gasBalanceWei)}${report!.lowGas ? " (low)" : ""}`} attention={Boolean(report!.lowGas) || report!.canAffordTx === false} />
+            )}
+            <Row label="Now" value={<span className="break-words">{simulationText(report!)}</span>} />
+            {holding && <Row label="Holding" value={`until ${timeText(holding)} (after a reverted transaction)`} attention />}
+            <Row
+              label="Last transaction"
+              value={
+                report!.lastTx ? (
+                  <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                    <Pill tone={keeperTxBadge(report!.lastTx.status).tone}>{keeperTxBadge(report!.lastTx.status).label}</Pill>
+                    <span>
+                      {report!.lastTx.symbol}
+                      {report!.lastTx.paid !== null ? ` · paid ${report!.lastTx.paid}` : ""} · {agoText(report!.lastTx.sentAt, now)}
+                    </span>
+                    <TxLink hash={report!.lastTx.hash} />
+                  </span>
+                ) : (
+                  "—"
+                )
+              }
+            />
+            {report!.pending && (
+              <Row
+                label="Waiting on"
+                value={`nonce ${report!.pending.nonce} for ${durationText((now - Date.parse(report!.pending.since)) / 1000)}${report!.pending.stuck ? " (stuck)" : ""}`}
+                attention={report!.pending.stuck}
+              />
+            )}
+          </dl>
+          {report!.note && <p className="mt-3 text-[11px] text-[var(--color-arco-muted)]">{report!.note}</p>}
+          {state!.lastError && <p className="mt-1 break-words text-[11px] text-[var(--color-arco-down)]">{state!.lastError}</p>}
+        </>
+      )}
+    </Card>
   )
 }
 

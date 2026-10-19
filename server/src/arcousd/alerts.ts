@@ -314,6 +314,8 @@ function toRecord(row: unknown): AlertRecord {
 // ─────────────────────────────── console view ───────────────────────────────
 
 export const WATCHER_HEARTBEAT = "watcher"
+/** Written by the queue keeper (keeper.ts) each round; read by the watcher and the console. */
+export const KEEPER_HEARTBEAT = "keeper"
 const RESOLVED_WINDOW_MS = 24 * 60 * 60 * 1000
 const TEST_COOLDOWN_MS = 30_000
 
@@ -351,6 +353,21 @@ export type AlertsResponse = {
   }
   /** OPEN first (critical before warning), then PENDING, then resolved in the last 24h. */
   readonly alerts: readonly AlertView[]
+}
+
+/** The queue keeper as the console sees it: its last heartbeat (keeper.ts KeeperReport) and liveness. */
+export type KeeperResponse = {
+  readonly status: "live" | "not-deployed" | "unavailable"
+  readonly error?: string
+  /** null: the keeper has never run (its worker is not set up, or never started). */
+  readonly keeper: null | {
+    readonly lastRunAt: string
+    readonly lastOkAt: string | null
+    readonly lastError: string | null
+    /** No run for three of its intervals (at least five minutes) while dry-run or live. */
+    readonly stale: boolean
+    readonly report: Record<string, unknown> | null
+  }
 }
 
 export type AlertTestResult =
@@ -417,6 +434,34 @@ export class ArcoUSDAlertsAdmin {
       }
     } catch (error) {
       return { ...base, status: "unavailable", error: `Alert read failed: ${safeErrorText(error)}` }
+    }
+  }
+
+  async keeper(): Promise<KeeperResponse> {
+    try {
+      if (!deployedArcoUSD(this.deps.loadRegistry(), this.deps.chainId)) return { status: "not-deployed", keeper: null }
+    } catch (error) {
+      return { status: "unavailable", error: `ArcoUSD registry is invalid: ${safeErrorText(error)}`, keeper: null }
+    }
+    if (!this.deps.store) return { status: "unavailable", error: "Alert store is not configured", keeper: null }
+    try {
+      const beat = await this.deps.store.heartbeat(this.deps.chainId, KEEPER_HEARTBEAT)
+      if (!beat) return { status: "live", keeper: null }
+      const report = beat.data && typeof beat.data === "object" && !Array.isArray(beat.data) ? (beat.data as Record<string, unknown>) : null
+      const mode = report?.mode
+      const interval = typeof report?.intervalMs === "number" && report.intervalMs > 0 ? report.intervalMs : 60_000
+      return {
+        status: "live",
+        keeper: {
+          lastRunAt: beat.lastRunAt.toISOString(),
+          lastOkAt: beat.lastOkAt ? beat.lastOkAt.toISOString() : null,
+          lastError: beat.lastError,
+          stale: (mode === "dry-run" || mode === "live") && this.now() - beat.lastRunAt.getTime() > Math.max(5 * 60_000, 3 * interval),
+          report,
+        },
+      }
+    } catch (error) {
+      return { status: "unavailable", error: `Keeper read failed: ${safeErrorText(error)}`, keeper: null }
     }
   }
 

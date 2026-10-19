@@ -2853,8 +2853,14 @@ test("ArcoUSD alert routes: operator-only view and a test send that names the op
   assert.equal((await app.inject({ method: "POST", url: "/api/v1/admin/arcousd/alerts/test", headers: reader })).statusCode, 403)
   assert.equal(sent.length, 1)
 
+  // The keeper's heartbeat view (never run here).
+  const keeper = (await app.inject({ method: "GET", url: "/api/v1/admin/arcousd/keeper", headers: reader })).json()
+  assert.deepEqual(keeper, { status: "live", keeper: { lastRunAt: keeper.keeper.lastRunAt, lastOkAt: keeper.keeper.lastOkAt, lastError: null, stale: false, report: null } })
+  assert.equal((await app.inject({ method: "GET", url: "/api/v1/admin/arcousd/keeper" })).statusCode, 401)
+
   // Built without the service: not-deployed, and nothing to send to.
   const bare = makeApp().app
+  assert.deepEqual((await bare.inject({ method: "GET", url: "/api/v1/admin/arcousd/keeper", headers: OPERATOR })).json(), { status: "not-deployed", keeper: null })
   const bareView = (await bare.inject({ method: "GET", url: "/api/v1/admin/arcousd/alerts", headers: OPERATOR })).json()
   assert.deepEqual([bareView.status, bareView.alerts, bareView.channels], ["not-deployed", [], { telegram: false, slack: false }])
   assert.equal((await bare.inject({ method: "POST", url: "/api/v1/admin/arcousd/alerts/test", headers: OPERATOR })).statusCode, 409)

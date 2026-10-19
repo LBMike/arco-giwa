@@ -454,6 +454,44 @@ export type GiwaArcoUSDAlerts = {
   alerts: GiwaArcoUSDAlert[]
 }
 
+/** The queue keeper's last report (docs/operations/arcousd-keeper.md). */
+export type GiwaArcoUSDKeeperReport = {
+  mode: "off" | "dry-run" | "live"
+  address: string | null
+  intervalMs: number
+  batch: number
+  gasBalanceWei: string | null
+  lowGasWei: string
+  lowGas: boolean | null
+  canAffordTx: boolean | null
+  /** false: this round stopped before asking the chain (waiting on a transaction, paused…). */
+  simulated?: boolean
+  /** What processQueue would pay now, per asset with a backlog. `clearing`: it would first step past
+   *  cancelled / failed entries that fill the batch. */
+  simulations: { symbol: string; paid: number | null; error: string | null; clearing?: boolean }[]
+  lastTx: null | {
+    hash: string
+    symbol: string
+    nonce: number
+    sentAt: string
+    status: "pending" | "success" | "reverted" | "replaced" | "failed"
+    paid: number | null
+    blockNumber: string | null
+    error: string | null
+  }
+  /** hash null: a pending transaction this keeper process did not send. */
+  pending: null | { hash: string | null; nonce: number; since: string; stuck: boolean }
+  /** Simulating only until then, after a reverted transaction. */
+  holdUntil?: string | null
+  note: string | null
+}
+
+export type GiwaArcoUSDKeeper = {
+  status: GiwaArcoUSDStatus
+  error?: string
+  keeper: null | { lastRunAt: string; lastOkAt: string | null; lastError: string | null; stale: boolean; report: GiwaArcoUSDKeeperReport | null }
+}
+
 export type GiwaArcoUSDAlertDelivery = Partial<Record<"telegram" | "slack", { ok: boolean; at: string; error?: string }>>
 
 export type FaucetStatus = {

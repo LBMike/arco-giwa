@@ -1,4 +1,12 @@
-import type { GiwaArcoUSDAlert, GiwaArcoUSDAlertDelivery, GiwaArcoUSDAlerts, GiwaArcoUSDQueue, GiwaArcoUSDReserve } from "./types"
+import type {
+  GiwaArcoUSDAlert,
+  GiwaArcoUSDAlertDelivery,
+  GiwaArcoUSDAlerts,
+  GiwaArcoUSDKeeper,
+  GiwaArcoUSDKeeperReport,
+  GiwaArcoUSDQueue,
+  GiwaArcoUSDReserve,
+} from "./types"
 
 // Pure helpers for the admin ArcoUSD page (AdminArcoUSD.tsx): number formatting, the gate and
 // pause readouts, and the queue head's "can it be paid now" verdict. No React, no I/O.
@@ -244,4 +252,63 @@ export function deliveryText(delivery: GiwaArcoUSDAlertDelivery): string {
 
 export function channelLabel(id: string): string {
   return CHANNEL_LABEL[id] ?? id
+}
+
+// ── Queue keeper ────────────────────────────────────────────────────────────
+
+/**
+ * Mode pill: Off / Dry run / Live, then its trouble the way the watcher judges it: Not running (stale),
+ * Failing (no good round for 10 minutes), or Retrying (the last round failed, the one before was fine).
+ */
+export function keeperBadge(keeper: GiwaArcoUSDKeeper["keeper"], now: number = Date.now()): { label: string; tone: AlertTone } {
+  const mode = keeper?.report?.mode
+  if (!keeper || !mode || mode === "off") return { label: "Off", tone: "neutral" }
+  const name = mode === "live" ? "Live" : "Dry run"
+  if (keeper.stale) return { label: "Not running", tone: "negative" }
+  if (keeper.lastError) {
+    const lastOk = keeper.lastOkAt ? Date.parse(keeper.lastOkAt) : Number.NaN
+    const failing = !Number.isFinite(lastOk) || now - lastOk > 10 * 60_000
+    return failing ? { label: `${name} · failing`, tone: "negative" } : { label: `${name} · retrying`, tone: "attention" }
+  }
+  return mode === "live" ? { label: name, tone: "positive" } : { label: name, tone: "attention" }
+}
+
+/**
+ * "0.0123 ETH" from wei. Gas, not a financial value: up to 4 decimals so a nearly empty wallet does not
+ * read as 0 (the 2-decimal rule is for money shown to customers).
+ */
+export function gasText(wei: string | null | undefined): string {
+  if (!wei || !/^\d+$/.test(wei)) return "—"
+  const value = Number(BigInt(wei)) / 1e18
+  return `${value.toLocaleString("en-US", { maximumFractionDigits: 4 })} ETH`
+}
+
+const TX_STATUS: Record<NonNullable<GiwaArcoUSDKeeperReport["lastTx"]>["status"], { label: string; tone: AlertTone }> = {
+  pending: { label: "Pending", tone: "attention" },
+  success: { label: "Mined", tone: "positive" },
+  reverted: { label: "Reverted", tone: "negative" },
+  replaced: { label: "Replaced", tone: "neutral" },
+  failed: { label: "Failed", tone: "negative" },
+}
+
+export function keeperTxBadge(status: NonNullable<GiwaArcoUSDKeeperReport["lastTx"]>["status"]): { label: string; tone: AlertTone } {
+  return TX_STATUS[status] ?? { label: status, tone: "neutral" }
+}
+
+/** "tUSDC would pay 3 · tUSDT nothing now · tRLUSD failed: …"; "Not checked this round" when it stopped first. */
+export function simulationText(report: Pick<GiwaArcoUSDKeeperReport, "simulations" | "simulated">): string {
+  if (report.simulated === false) return "Not checked this round"
+  const simulations = report.simulations ?? []
+  if (!simulations.length) return "No backlog to check"
+  return simulations
+    .map((item) =>
+      item.error
+        ? `${item.symbol} failed: ${item.error}`
+        : item.paid
+          ? `${item.symbol} would pay ${countText(item.paid, "request")}`
+          : item.clearing
+            ? `${item.symbol} would first step past cancelled or failed entries`
+            : `${item.symbol} nothing payable now`,
+    )
+    .join(" · ")
 }

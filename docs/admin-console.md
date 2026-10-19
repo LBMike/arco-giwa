@@ -89,7 +89,7 @@ Vault 쓰기 작업의 상당수는 서버가 서명 전 트랜잭션을 만들�
 콘솔 화면은 **Vaults → ArcoUSD**(`/vaults/arcousd`, 레거시 `/admin/arcousd`)이고 탭이 셋이다(`?tab=queue`, `?tab=flows`로 바로 열린다).
 
 - **Overview**: 맨 위 **Alerts** 카드는 감시기가 찾은 알림(열린 것, 대기 중인 것, 24시간 안에 해결된 것), 감시기가 마지막으로 돈 시각, 보내는 채널, **Send test alert**(`vault:write`)를 보여 준다(`docs/operations/arcousd-alerts.md`). 그 아래 총 담보, ArcoUSD 발행량, 잉여, MMF 비율(목표·하한)이 있다. 펀드 매수 게이트는 상태와 사유, 정산 버퍼, 기준 금액, 발행 상한까지 남은 양을 함께 보여 준다. 이 밖에 매수·정산 경로와 대기열 지급의 일시정지 8가지, 자산별·MMF 전략별 표, 담보·발행량 추이(7·30·90일), 컨트랙트 주소가 있다. 공개 리저브 조회로 그리므로 알림과 추이 외에는 세션 없이도 보인다.
-- **Queue**: 자산별 카드(대기 건수·금액, 가장 오래된 요청, T+2 초과, 지급 실패, 다음 지급 요청)를 보여 준다. 다음 요청을 지금 낼 수 있는지는 Reserve **잔고** 기준으로 판단한다(Reserve·`processQueue`·ArcoUSD·burn 중 하나라도 일시정지면 "Payouts paused"). 카드마다 `processQueue` 실행 칸이 있다: 건수(1~50)를 넣고 **Preview**(서버 eth_call 미리보기)를 누른 뒤 **Sign & send**(운영자 지갑 서명)를 누른다. `vault:write`가 없으면 잠긴다. 아래에는 상태 필터가 달린 요청 목록이 있다.
+- **Queue**: 맨 위 **Queue bot** 카드는 대기열 처리 봇의 모드(Off / Dry run / Live), 지갑과 가스, 지금 자산별로 몇 건이 지급될지, 마지막 트랜잭션을 보여 준다(`docs/operations/arcousd-keeper.md`). 그 아래 자산별 카드(대기 건수·금액, 가장 오래된 요청, T+2 초과, 지급 실패, 다음 지급 요청)가 있다. 다음 요청을 지금 낼 수 있는지는 Reserve **잔고** 기준으로 판단한다(Reserve·`processQueue`·ArcoUSD·burn 중 하나라도 일시정지면 "Payouts paused"). 카드마다 `processQueue` 실행 칸이 있다: 건수(1~50)를 넣고 **Preview**(서버 eth_call 미리보기)를 누른 뒤 **Sign & send**(운영자 지갑 서명)를 누른다. `vault:write`가 없으면 잠긴다. 아래에는 상태 필터가 달린 요청 목록이 있다.
 - **Flows**: 기간(7·30·90일) 합계, 일별 입금·출금 막대, 일별 수수료, 자산별 표, 결제 자산별 Router 매수, 최근 이벤트를 보여 준다. 항목이 겹친다는 안내가 화면에 있다.
 
 - **`GET /api/v1/admin/arcousd/snapshots?days=30`**: 담보·부채·잉여·MMF 비율·일시정지 추이. 지금부터 `days`×24시간 구간의 스냅샷을 최대 360개 지점으로 줄여 준다(구간마다 마지막 스냅샷, 최신은 항상 포함). 3만 행을 넘으면 오래된 쪽을 버리고 `truncated: true`. `days`는 1~90, 잘못된 값은 30.
@@ -102,7 +102,8 @@ Vault 쓰기 작업의 상당수는 서버가 서명 전 트랜잭션을 만들�
   - 일별·자산별: 입금(수수료 포함 총액), Instant 출금(소각한 ArcoUSD), 대기 요청(맡긴 총액), 대기 지급(지급한 순액), 상품 결제(`settleFor`), Router 매수(결제 자산별), 수수료(입금 수수료 + Instant 수수료 + 대기 지급 때 남는 스왑 수수료).
   - 항목끼리 겹친다. 스테이블코인으로 산 Router 매수 하나가 입금, 상품 결제, Router 매수에 모두 잡힌다(수수료는 한 번만). 항목을 더해 총량을 만들지 않는다.
   - 최근 이벤트 50건(최신 순). 취소·지급 실패·MMF 이동은 목록에만 나오고 합계에는 들어가지 않는다. 2만 행을 넘으면 최신 2만 행만 보고 `truncated: true`.
-- **`POST /api/v1/admin/arcousd/process-queue`** `{ asset, maxCount }`: 서명할 `Reserve.processQueue(asset, maxCount)`. `asset`은 레지스트리의 심볼이나 주소, `maxCount`는 1~50(기본 20). 같은 호출을 eth_call로 돌려 `preview.paid`(지금 지급될 건수)를 함께 준다. 시뮬레이션이 되돌려지면(일시정지 등) 트랜잭션은 그대로 주고 `preview.error`에 이유를 담는다. `processQueue`는 누구나 부를 수 있으므로 서버는 만들기만 한다. 3b 봇 전까지의 수동 경로다.
+- **`POST /api/v1/admin/arcousd/process-queue`** `{ asset, maxCount }`: 서명할 `Reserve.processQueue(asset, maxCount)`. `asset`은 레지스트리의 심볼이나 주소, `maxCount`는 1~50(기본 20). 같은 호출을 eth_call로 돌려 `preview.paid`(지금 지급될 건수)를 함께 준다. 시뮬레이션이 되돌려지면(일시정지 등) 트랜잭션은 그대로 주고 `preview.error`에 이유를 담는다. `processQueue`는 누구나 부를 수 있으므로 서버는 만들기만 한다. 대기열 처리 봇이 꺼져 있거나 멈췄을 때의 수동 경로다.
+- **`GET /api/v1/admin/arcousd/keeper`**: 대기열 처리 봇의 마지막 하트비트. 봇이 한 번도 돌지 않았으면 `keeper: null`. 있으면 마지막 실행·성공 시각, 마지막 오류, `stale`(dry-run·live인데 주기의 세 배, 최소 5분 넘게 돌지 않음), `report`(모드, 지갑, 가스 잔고와 부족 여부, 자산별 미리보기, 마지막 트랜잭션, 기다리는 트랜잭션, 메모).
 - **`GET /api/v1/admin/arcousd/alerts`**: 감시기 알림(인덱서 워커가 `ArcoUSDAlert`에 쓴 것). 열린 것(심각 먼저), PENDING, 24시간 안에 해결된 것 순서이고, 열린 적 없이 사라진 PENDING은 뺀다. 알림마다 상태·등급·제목·설명·처음 본 시각·열린 시각·마지막 발송 시각·발송 횟수·마지막 발송에서 실패한 채널과 이유. 함께 `channels`(`telegram`·`slack` 켜짐 여부, 자격 증명은 없음), 잘못 설정된 `ARCOUSD_ALERT_*` 이름(`invalidSettings`), 감시기 주기, 감시기의 마지막 실행(`watcher.stale`: 주기의 세 배 넘게 돌지 않음)을 준다.
 - **`POST /api/v1/admin/arcousd/alerts/test`**: 설정된 채널마다 테스트 메시지를 보내고 채널별 결과(`delivery`)를 준다. 보낸 운영자 지갑을 메시지에 적는다. 채널이 없으면 409, 30초 안에 다시 보내면 429.
 

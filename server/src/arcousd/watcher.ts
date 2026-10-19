@@ -1,6 +1,6 @@
 import type { ArcoUSDAlertEnv } from "./alert-config.js"
 import type { ArcoUSDAdmin, QueueAssetSummary } from "./admin.js"
-import { applyDelivery, formatDigest, stepAlerts, WATCHER_HEARTBEAT, type ArcoUSDAlertStore } from "./alerts.js"
+import { applyDelivery, formatDigest, KEEPER_HEARTBEAT, stepAlerts, WATCHER_HEARTBEAT, type ArcoUSDAlertStore } from "./alerts.js"
 import type { ArcoUSDEnv } from "./config.js"
 import { deliver, type AlertChannel, type Delivery } from "./notify.js"
 import type { ArcoUSDChainReader, ReserveState } from "./reader.js"
@@ -8,7 +8,7 @@ import type { RecallsSnapshot, RecallView } from "./recall.js"
 import { deployedArcoUSD, type ArcoUSDRegistryFile, type DeployedArcoUSD } from "./registry.js"
 import { safeErrorText } from "./safe-error.js"
 import { evaluateBuyGate } from "./service.js"
-import { evaluateWatch, payoutsPaused, type Finding } from "./watch.js"
+import { evaluateWatch, payoutsPaused, type Finding, type KeeperSeen } from "./watch.js"
 
 // The ArcoUSD watcher (docs/operations/arcousd-alerts.md). Runs inside the indexer worker, after the
 // ArcoUSD indexer's poll, once per ARCOUSD_ALERT_INTERVAL_MS. Each round:
@@ -248,6 +248,17 @@ export class ArcoUSDWatcher {
         this.log({ mode: "recalls-unavailable", error: safeErrorText(error) })
       }
     }
+    let keeper: KeeperSeen | null = null
+    let keeperRead = true
+    try {
+      const beat = await this.deps.store.heartbeat(this.deps.chainId, KEEPER_HEARTBEAT)
+      keeper = beat
+        ? { lastRunAt: beat.lastRunAt, lastOkAt: beat.lastOkAt, lastError: beat.lastError, report: (beat.data && typeof beat.data === "object" ? beat.data : null) as KeeperSeen["report"] }
+        : null
+    } catch {
+      keeperRead = false
+    }
+
     // A recall whose own chain read failed is unknown this round, not settled.
     const unreadRecalls = (recalls ?? []).filter((recall) => recall.error || recall.state === "unknown")
     const readRecalls = recalls ? recalls.filter((recall) => !unreadRecalls.includes(recall)) : null
@@ -267,6 +278,7 @@ export class ArcoUSDWatcher {
       indexer: lagBlocks === null ? null : { lagBlocks },
       lastSnapshotAt,
       recalls: readRecalls,
+      keeper,
     })
 
     // What this round could not see keeps its alerts as they were (stepAlerts `unknown`).
@@ -286,6 +298,7 @@ export class ArcoUSDWatcher {
     }
     if (!snapshotRead || lastSnapshotAt === null) unknown.push(matches(/^indexer:snapshots$/))
     if (lagBlocks === null) unknown.push(matches(/^indexer:lag$/))
+    if (!keeperRead) unknown.push(matches(/^keeper:/))
 
     // "Close to T+2" that became "past T+2" is replaced, not resolved.
     const quiet: KeyTest[] = []

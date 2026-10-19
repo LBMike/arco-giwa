@@ -1016,6 +1016,10 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
 
   app.get("/api/v1/admin/arcousd/alerts", { preHandler: requireOperator }, async () => arcoUSDAlerts().view())
 
+  // The queue keeper's last heartbeat (docs/operations/arcousd-keeper.md): mode, wallet, gas, the last
+  // transaction and what it would pay now. The keeper itself runs in its own worker.
+  app.get("/api/v1/admin/arcousd/keeper", { preHandler: requireOperator }, async () => arcoUSDAlerts().keeper())
+
   // A test message to every configured channel (vault:write; at most one per 30 seconds).
   app.post("/api/v1/admin/arcousd/alerts/test", { preHandler: requireOperator }, async (request, reply) => {
     const result = await arcoUSDAlerts().sendTest(vaultPrincipals.get(request)?.wallet ?? null)
