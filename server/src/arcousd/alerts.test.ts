@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { HttpRequestError } from "viem"
+import { HttpRequestError, maxUint256 } from "viem"
 import type { QueueAssetSummary } from "./admin.js"
 import { parseArcoUSDAlertEnv, type ArcoUSDAlertEnv } from "./alert-config.js"
 import {
@@ -78,6 +78,12 @@ function asset(over: Partial<AssetState> = {}): AssetState {
     queueLength: 0,
     queueHead: 0,
     queueBacklog: 0,
+    minQueued: "1000000",
+    minQueuedHuman: "1",
+    depositCap: maxUint256.toString(),
+    depositCapHuman: null,
+    depositRoom: null,
+    depositRoomHuman: null,
     ...over,
   }
 }

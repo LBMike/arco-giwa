@@ -8,6 +8,7 @@ import {
   getAddress,
   HttpRequestError,
   keccak256,
+  maxUint256,
   parseTransaction,
   recoverTransactionAddress,
   toEventSelector,
@@ -83,6 +84,12 @@ const asset = (symbol: string, address: string, backlog: number): AssetState => 
   queueLength: backlog,
   queueHead: 0,
   queueBacklog: backlog,
+  minQueued: "1000000",
+  minQueuedHuman: "1",
+  depositCap: maxUint256.toString(),
+  depositCapHuman: null,
+  depositRoom: null,
+  depositRoomHuman: null,
 })
 
 function state(over: Partial<ReserveState> = {}): ReserveState {

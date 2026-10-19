@@ -45,7 +45,7 @@ import {
   type SavingsState,
 } from "./savings.js"
 import { ArcoUSDSavingsAdmin, createDistributeSimulator } from "./savings-admin.js"
-import { ArcoUSDSavingsIndexer, SAVINGS_CURSOR, type SavingsIndexerStore, type SavingsSnapshotInput } from "./savings-indexer.js"
+import { ArcoUSDSavingsIndexer, PrismaSavingsIndexerStore, SAVINGS_CURSOR, type SavingsIndexerStore, type SavingsSnapshotInput } from "./savings-indexer.js"
 
 const A = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as `0x${string}`
 const ONE = 10n ** 18n
@@ -479,7 +479,11 @@ test("savings indexer: inert until Savings is listed, then its own cursor from t
   assert.deepEqual([result.fromBlock, result.toBlock, result.indexedEvents, result.snapshot], [150n, 295n, 4, "taken"])
   assert.deepEqual(rpc.requested[0].addresses, [VAULT, DISTRIBUTOR, ZAP])
   assert.deepEqual(store.events.map((event) => event.eventName), ["Deposit", "Seeded", "ZapDeposit", "Distributed"]) // no Transfer
-  assert.equal(store.events.every((event) => !("walletAddress" in (event.args as object))), true)
+  // Only the saver's own action reaches a feed: not the seed, not the distribution.
+  assert.deepEqual(
+    store.events.map((event) => (event.args as Record<string, unknown>).walletAddress ?? null),
+    [null, null, ALICE.toLowerCase(), null],
+  )
   assert.equal(store.cursors.get(`91342:${SAVINGS_CURSOR}`)!.lastBlock, 295n)
   assert.deepEqual([store.snapshots[0].vaultAddress, store.snapshots[0].blockNumber], [VAULT, 290n])
 
@@ -487,6 +491,47 @@ test("savings indexer: inert until Savings is listed, then its own cursor from t
   rpc.latest = 320n
   const next = await poller.pollOnce()
   assert.ok(next.mode === "poll" && next.fromBlock === 296n && next.snapshot === "not-due")
+})
+
+test("savings activity: a Zap action is one row (ZapDeposit → receiver, ZapRedeem → caller); direct vault calls are the owner's", async () => {
+  const rpc = new FakeRpc()
+  const store = new FakeStore()
+  const BOB = A(0xb0b)
+  rpc.logs = [
+    // Alice saves through the Zap for Bob: the vault step (sender = Zap) is nobody's, ZapDeposit is Bob's.
+    log(savingsVaultEventsAbi, VAULT, "Deposit", { sender: ZAP, owner: BOB, assets: ONE, shares: ONE }, 200n, 0),
+    log(savingsZapEventsAbi, ZAP, "ZapDeposit", { caller: ALICE, receiver: BOB, asset: USDC, amount: 1_000_000n, arcoUSDIn: ONE, shares: ONE }, 200n, 1),
+    // Bob leaves through the Zap: the vault's Withdraw (sender = Zap) is nobody's, ZapRedeem is the caller's.
+    log(savingsVaultEventsAbi, VAULT, "Withdraw", { sender: ZAP, receiver: ZAP, owner: BOB, assets: ONE, shares: ONE }, 210n, 0),
+    log(savingsZapEventsAbi, ZAP, "ZapRedeem", { caller: BOB, receiver: ALICE, asset: USDC, shares: ONE, arcoUSDOut: ONE, assetOut: 1_000_000n }, 210n, 1),
+    // Straight to the vault: the owner's, whoever sent it.
+    log(savingsVaultEventsAbi, VAULT, "Deposit", { sender: ALICE, owner: BOB, assets: ONE, shares: ONE }, 220n, 0),
+    log(savingsVaultEventsAbi, VAULT, "Withdraw", { sender: BOB, receiver: ALICE, owner: BOB, assets: ONE, shares: ONE }, 230n, 0),
+    log(savingsVaultEventsAbi, VAULT, "RewardsAdded", { caller: DISTRIBUTOR, amount: ONE, vestingAmount: ONE, vestingPeriod: 86_400n }, 240n, 0),
+  ]
+  await indexer(() => registry(), rpc, store).pollOnce()
+  assert.deepEqual(
+    store.events.map((event) => [event.eventName, (event.args as Record<string, unknown>).walletAddress ?? null]),
+    [
+      ["Deposit", null],
+      ["ZapDeposit", BOB.toLowerCase()],
+      ["Withdraw", null],
+      ["ZapRedeem", BOB.toLowerCase()],
+      ["Deposit", BOB.toLowerCase()],
+      ["Withdraw", BOB.toLowerCase()],
+      ["RewardsAdded", null],
+    ],
+  )
+
+  // The Prisma store rewrites args when an event is indexed again (re-indexing backfills the rules).
+  const upserts: Record<string, any>[] = []
+  const prismaStore = new PrismaSavingsIndexerStore(
+    { evmIndexedEvent: { upsert: async (args: unknown) => void upserts.push(args as Record<string, any>) }, arcoUSDSavingsSnapshot: { upsert: async () => undefined } },
+    {} as never,
+  )
+  await prismaStore.insertIndexedEvent(store.events[1])
+  assert.deepEqual(upserts[0].update, { args: store.events[1].args })
+  assert.equal(upserts[0].where.chainId_txHash_logIndex.logIndex, 1)
 })
 
 test("savings indexer: a reorged cursor block rewinds, and a chain mismatch throws", async () => {

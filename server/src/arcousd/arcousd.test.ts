@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import Fastify from "fastify"
-import { toEventSignature, toFunctionSelector, toFunctionSignature, type AbiEvent, type AbiFunction } from "viem"
+import { maxUint256, toEventSignature, toFunctionSelector, toFunctionSignature, type AbiEvent, type AbiFunction } from "viem"
 import { reserveRecallAbi } from "./recall.js"
 import {
   ARCOUSD_BURN_SELECTOR,
@@ -14,6 +14,8 @@ import {
   lensAbi,
   reserveEventsAbi,
   PROCESS_QUEUE_SELECTOR,
+  REDEEM_SELECTOR,
+  reserveAssetConfigAbi,
   ROUTER_BUY_SELECTOR,
   routerEventsAbi,
   SETTLE_FOR_SELECTOR,
@@ -71,6 +73,11 @@ function state(usdcAvailable: bigint, extra: Partial<ReserveState> = {}): Reserv
         { strategyId: 0n, asset: USDC, productToken: A(9), enabled: true, shares: 10n ** 18n, value: 2n * 10n ** 18n, navOk: true, pendingRecall: 0n, maxAllocation: 10n ** 24n },
       ],
     },
+    new Map([
+      // tUSDC capped at 1,000,000; tUSDT uncapped (the deploy's "max").
+      [USDC.toLowerCase(), { depositCap: 1_000_000_000_000n, minQueued: 1_000_000n }],
+      [USDT.toLowerCase(), { depositCap: maxUint256, minQueued: 2_500_000n }],
+    ]),
     NO_PAUSES,
   )
   return { ...base, ...extra }
@@ -140,6 +147,25 @@ test("reader mapping: symbols, products, human amounts, backlog and surplus", ()
   assert.equal(s.surplus, (10n ** 18n).toString())
   assert.equal(s.totalBackingUsd, "2000")
   assert.deepEqual([s.assets[1].swapFeeBps, s.assets[1].instantFeeBps, s.assets[0].swapFeeBps], [10, 20, 0])
+  // Limits: the queue minimum, the cap and the room left under it (balance 2,505 here); no cap → null.
+  assert.deepEqual(
+    [s.assets[0].minQueued, s.assets[0].minQueuedHuman, s.assets[0].depositCapHuman, s.assets[0].depositRoom, s.assets[0].depositRoomHuman],
+    ["1000000", "1", "1000000", "997495000000", "997495"],
+  )
+  assert.deepEqual(
+    [s.assets[1].minQueuedHuman, s.assets[1].depositCap, s.assets[1].depositCapHuman, s.assets[1].depositRoom, s.assets[1].depositRoomHuman],
+    ["2.5", maxUint256.toString(), null, null, null],
+  )
+  // A balance at or over the cap leaves no room (never negative).
+  const full = toReserveState(
+    deployedArcoUSD(registry(), 91342)!,
+    1n,
+    { totalBacking: 0n, totalLiabilities: 0n, navOk: true, mmfBps: 0n, mmfTargetBps: 0n, bufferFloorBps: 0n, queueMinDelay: 0n, mintCap: 0n, strategies: [],
+      assets: [{ asset: USDC, decimals: 6, depositEnabled: true, redeemEnabled: true, instantFeeBps: 0, swapFeeBps: 0, balance: 7n, queued: 0n, available: 7n, queueLength: 0n, queueHead: 0n }] },
+    new Map([[USDC.toLowerCase(), { depositCap: 5n, minQueued: 0n }]]),
+    NO_PAUSES,
+  )
+  assert.deepEqual([full.assets[0].depositRoom, full.assets[0].depositRoomHuman], ["0", "0"])
 })
 
 test("chain reader: one block for every read, and every pause on the buy path is read", async () => {
@@ -167,6 +193,7 @@ test("chain reader: one block for every read, and every pause on the buy path is
     `${A(3)}:fnPaused:${SETTLE_FOR_SELECTOR}`,
     `${A(3)}:fnPaused:${DEPOSIT_SELECTOR}`,
     `${A(3)}:fnPaused:${PROCESS_QUEUE_SELECTOR}`,
+    `${A(3)}:fnPaused:${REDEEM_SELECTOR}`,
     `${A(3)}:paused:`,
     `${A(5)}:snapshot:${A(3)}`,
   ]
@@ -214,6 +241,23 @@ test("chain reader: one block for every read, and every pause on the buy path is
   assert.equal(headAsked, false)
   assert.ok(calls.every((call) => call.blockNumber === 555n))
   assert.deepEqual([pinned.blockNumber, pinned.queuePaused, pinned.settlementPaused], ["555", true, false])
+
+  // Each Lens asset's limits come from getAssetConfig at the same block; fnPaused(redeem) is read.
+  calls.length = 0
+  const withAsset = { ...snap, assets: [{ asset: USDC, decimals: 6, depositEnabled: true, redeemEnabled: true, instantFeeBps: 0, swapFeeBps: 0, balance: 4_000_000n, queued: 0n, available: 4_000_000n, queueLength: 0n, queueHead: 0n }] }
+  const limitsClient = {
+    getBlockNumber: async () => 888n,
+    readContract: async (args: { address: string; functionName: string; args?: readonly unknown[]; blockNumber?: bigint }) => {
+      calls.push(args)
+      if (args.functionName === "snapshot") return withAsset
+      if (args.functionName === "getAssetConfig") return { supported: true, depositCap: 10_000_000n, minQueued: 1_000_000n }
+      return args.functionName === "fnPaused" && args.address === A(3) && args.args?.[0] === REDEEM_SELECTOR
+    },
+  }
+  const limited = await createArcoUSDChainReader(limitsClient as never)(deployedArcoUSD(registry(), 91342)!)
+  const configRead = calls.find((call) => call.functionName === "getAssetConfig")
+  assert.deepEqual([configRead?.address, configRead?.args?.[0], configRead?.blockNumber], [A(3), USDC, 888n])
+  assert.deepEqual([limited.redeemPaused, limited.assets[0].depositCapHuman, limited.assets[0].depositRoomHuman, limited.assets[0].minQueuedHuman], [true, "10", "6", "1"])
 })
 
 test("buy gate: inactive until deployed, open above the threshold, closed below, paused or unreadable", async () => {
@@ -365,8 +409,16 @@ test("inline ABIs match the compiled ArcoUSD artifacts (no drift)", () => {
     artifact(name)
       .filter((item): item is AbiFunction => item.type === "function")
       .map((fn) => toFunctionSelector(toFunctionSignature(fn)))
+  const assetConfig = reserveAssetConfigAbi.find((item) => item.type === "function") as AbiFunction
+  const compiledAssetConfig = compiledReserve.find((candidate) => candidate.name === "getAssetConfig")
+  assert.ok(compiledAssetConfig, "ArcoUSDReserve has no getAssetConfig")
+  // Struct field names drive decoding: they must match the contract's, in order.
+  const fields = (fn: AbiFunction) => JSON.stringify((fn.outputs[0] as { components?: unknown }).components, ["name", "type"])
+  assert.equal(fields(assetConfig), fields(compiledAssetConfig!))
+  assert.equal(toFunctionSignature(assetConfig), toFunctionSignature(compiledAssetConfig!))
+
   for (const [name, selectors] of [
-    ["ArcoUSDReserve", [SETTLE_FOR_SELECTOR, DEPOSIT_SELECTOR, PROCESS_QUEUE_SELECTOR]],
+    ["ArcoUSDReserve", [SETTLE_FOR_SELECTOR, DEPOSIT_SELECTOR, PROCESS_QUEUE_SELECTOR, REDEEM_SELECTOR]],
     ["ArcoUSD", [ARCOUSD_BURN_SELECTOR, ARCOUSD_MINT_SELECTOR]],
     ["ArcoRouter", [ROUTER_BUY_SELECTOR]],
   ] as const) {

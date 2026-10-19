@@ -11,6 +11,9 @@ import { distributorAbi } from "./arcousd/abi.js"
 import { parseArcoUSDAlertEnv } from "./arcousd/alert-config.js"
 import { ArcoUSDAlertsAdmin } from "./arcousd/alerts.js"
 import { ArcoUSDSavingsAdmin } from "./arcousd/savings-admin.js"
+import { parseArcoUSDEnv } from "./arcousd/config.js"
+import { ArcoUSDRedemptions } from "./arcousd/redemptions.js"
+import { ArcoUSDService } from "./arcousd/service.js"
 import type { PayoutExpectation, PayoutVerifier } from "./evm/payout-verification.js"
 import { buildDryRunGiwaRegistry } from "./registry/generate.js"
 import { EvmMarketService } from "./services/evm-market-service.js"
@@ -292,6 +295,9 @@ function makeApp(options?: {
   arcoUSDAlerts?: ArcoUSDAlertsAdmin
   /** Savings admin reads + distribute builder; absent leaves the service out. */
   arcoUSDSavingsAdmin?: ArcoUSDSavingsAdmin
+  /** Public ArcoUSD routes (reserve, gate) and the wallet redemptions route; absent leaves them out. */
+  arcoUSD?: ArcoUSDService
+  arcoUSDRedemptions?: ArcoUSDRedemptions
 }) {
   const prisma = makePrisma()
   const arco = new PrismaArcoService(prisma as PrismaLike)
@@ -367,6 +373,8 @@ function makeApp(options?: {
       ...(options?.arcoUSDAdmin ? { arcoUSDAdmin: options.arcoUSDAdmin } : {}),
       ...(options?.arcoUSDAlerts ? { arcoUSDAlerts: options.arcoUSDAlerts } : {}),
       ...(options?.arcoUSDSavingsAdmin ? { arcoUSDSavingsAdmin: options.arcoUSDSavingsAdmin } : {}),
+      ...(options?.arcoUSD ? { arcoUSD: options.arcoUSD } : {}),
+      ...(options?.arcoUSDRedemptions ? { arcoUSDRedemptions: options.arcoUSDRedemptions } : {}),
     },
   )
   return { app, prisma, registry: fullRegistry }
@@ -2888,6 +2896,56 @@ function arcoUSDTestRegistry(): ArcoUSDRegistryFile {
     params: { mintCap: "1", mmfTargetBps: 5000, bufferFloorBps: 3000, queueMinDelay: 600 },
   } as ArcoUSDRegistryFile
 }
+
+test("ArcoUSD redemptions route: one wallet's requests; a bad wallet or status is a 400 like /activity", async () => {
+  const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}`
+  const wallet = addr(0xa1)
+  const asked: Record<string, unknown>[] = []
+  const redemptions = new ArcoUSDRedemptions({
+    chainId: 91342,
+    loadRegistry: () => arcoUSDTestRegistry(),
+    store: {
+      byOwner: async (query) => {
+        asked.push(query)
+        return [
+          {
+            requestId: "4", owner: wallet, recipient: wallet, asset: addr(0xc1), arcoUSDAmount: "2000000000000000000", assetAmount: "2000000",
+            status: "QUEUED", requestedAt: new Date("2026-10-20T00:00:00Z"), queuedTxHash: `0x${"ab".repeat(32)}`,
+          },
+        ]
+      },
+      queued: async () => [
+        { requestId: "3", assetAmount: "5000000" },
+        { requestId: "4", assetAmount: "2000000" },
+      ],
+    },
+    now: () => Date.parse("2026-10-20T00:30:00Z"),
+  })
+  const arcoUSD = new ArcoUSDService({ chainId: 91342, env: parseArcoUSDEnv({}), loadRegistry: () => arcoUSDTestRegistry(), read: async () => { throw new Error("rpc down") } })
+  const { app } = makeApp({ arcoUSD, arcoUSDRedemptions: redemptions })
+
+  const ok = await app.inject({ method: "GET", url: `/api/v1/arcousd/redemptions/${getAddress(wallet)}` })
+  assert.equal(ok.statusCode, 200)
+  assert.equal(ok.headers["cache-control"], "no-store")
+  const body = ok.json()
+  assert.deepEqual([body.status, body.wallet, body.filter, body.queueMinDelaySource], ["live", wallet, "open", "registry"]) // reserve unreadable: registry delay
+  assert.deepEqual(body.requests[0].position, { ahead: 1, aheadAssetAmount: "5000000", aheadAssetAmountHuman: "5" })
+  assert.equal(body.requests[0].payableFrom, "2026-10-20T00:10:00.000Z")
+  assert.deepEqual(asked[0].statuses, ["QUEUED", "PAYOUT_FAILED"])
+  assert.equal((await app.inject({ method: "GET", url: `/api/v1/arcousd/redemptions/${wallet}?status=all` })).json().filter, "all")
+
+  // Same 400 shape as the other public wallet routes.
+  const badWallet = await app.inject({ method: "GET", url: "/api/v1/arcousd/redemptions/0x1234" })
+  const activityBad = await app.inject({ method: "GET", url: "/api/v1/activity/0x1234" })
+  assert.deepEqual([badWallet.statusCode, badWallet.json()], [400, { error: "wallet must be a valid EVM address" }])
+  assert.equal(activityBad.statusCode, 400)
+  assert.deepEqual(Object.keys(activityBad.json()), Object.keys(badWallet.json()))
+  const badStatus = await app.inject({ method: "GET", url: `/api/v1/arcousd/redemptions/${wallet}?status=PAID` })
+  assert.deepEqual([badStatus.statusCode, badStatus.json()], [400, { error: "status must be open or all" }])
+
+  // Without the service the route does not exist.
+  assert.equal((await makeApp({ arcoUSD }).app.inject({ method: "GET", url: `/api/v1/arcousd/redemptions/${wallet}` })).statusCode, 404)
+})
 
 test("ArcoUSD Savings admin routes: operator-only view and the distribute() builder", async () => {
   const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}`

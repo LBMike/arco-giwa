@@ -35,6 +35,7 @@ import { ArcoUSDAlertsAdmin, PrismaArcoUSDAlertStore } from "./arcousd/alerts.js
 import { alertChannels } from "./arcousd/notify.js"
 import { readArcoUSDRegistry } from "./arcousd/registry.js"
 import { ArcoUSDService } from "./arcousd/service.js"
+import { ArcoUSDRedemptions, PrismaRedemptionsStore } from "./arcousd/redemptions.js"
 import { ArcoUSDSavingsService, createSavingsChainReader, PrismaSavingsHistoryStore } from "./arcousd/savings.js"
 import { ArcoUSDSavingsAdmin, createDistributeSimulator } from "./arcousd/savings-admin.js"
 
@@ -103,6 +104,13 @@ async function composeServer(
     store: new PrismaArcoUSDAdminStore(prisma),
     simulateProcessQueue: createProcessQueueSimulator(rpcClient),
     // Live delay from the cached reserve read (setParams can change it after deploy).
+    liveQueueMinDelay: async () => (await arcoUSD.reserveState()).reserve?.queueMinDelay ?? null,
+  })
+  // One wallet's Standard redemptions (public, 5s cache) from the indexer's request table.
+  const arcoUSDRedemptions = new ArcoUSDRedemptions({
+    chainId: GIWA_CHAIN_ID,
+    loadRegistry: () => readArcoUSDRegistry(arcoUSDEnv.registryPath),
+    store: new PrismaRedemptionsStore(prisma),
     liveQueueMinDelay: async () => (await arcoUSD.reserveState()).reserve?.queueMinDelay ?? null,
   })
   // Savings (sArcoUSD): public state (15s cache) + share-price history from the savings indexer's
@@ -427,7 +435,7 @@ async function composeServer(
           registryPath: env.registryPath,
         },
         {
-          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD, arcoUSDRecalls, arcoUSDAdmin, arcoUSDAlerts, arcoUSDSavings, arcoUSDSavingsAdmin,
+          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD, arcoUSDRecalls, arcoUSDAdmin, arcoUSDAlerts, arcoUSDSavings, arcoUSDSavingsAdmin, arcoUSDRedemptions,
           resolveStocksOperator: sessions?.resolveOperator,
           stocks: stocks ? {
             service: stocks.service,

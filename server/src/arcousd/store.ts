@@ -1,4 +1,5 @@
 import type { PrismaArcoService } from "../services/prisma-arco-service.js"
+import { upsertIndexedEvent, type IndexedEventDelegate } from "./activity.js"
 import {
   REDEEM_TRANSITION_FROM,
   type ArcoUSDIndexerStore,
@@ -7,14 +8,16 @@ import {
   type ReserveSnapshotInput,
 } from "./indexer.js"
 
-// Prisma-backed ArcoUSD indexer store. Cursor + generic events reuse PrismaArcoService (same
-// tables as the core indexer, different cursor name); the two ArcoUSD tables are written here so
+// Prisma-backed ArcoUSD indexer store. The cursor reuses PrismaArcoService (same table as the core
+// indexer, different cursor name); events go to the same EvmIndexedEvent table, but re-indexing one
+// rewrites its args (activity.ts upsertIndexedEvent); the two ArcoUSD tables are written here so
 // prisma-arco-service.ts stays untouched.
 
-export type PrismaArcoUSDDelegates = {
+export type PrismaArcoUSDDelegates = IndexedEventDelegate & {
   arcoUSDRedeemRequest: {
     upsert(args: unknown): Promise<unknown>
     updateMany(args: unknown): Promise<{ count: number }>
+    findUnique(args: unknown): Promise<{ owner: string } | null>
   }
   arcoUSDReserveSnapshot: {
     upsert(args: unknown): Promise<unknown>
@@ -26,7 +29,7 @@ const TIMESTAMP_COLUMN = { PAID: "paid", PAYOUT_FAILED: "failed", CANCELLED: "ca
 export class PrismaArcoUSDIndexerStore implements ArcoUSDIndexerStore {
   constructor(
     private readonly prisma: PrismaArcoUSDDelegates,
-    private readonly arco: Pick<PrismaArcoService, "getIndexerCursor" | "upsertIndexerCursor" | "insertIndexedEvent">,
+    private readonly arco: Pick<PrismaArcoService, "getIndexerCursor" | "upsertIndexerCursor">,
   ) {}
 
   getCursor(chainId: number, name: string) {
@@ -38,7 +41,17 @@ export class PrismaArcoUSDIndexerStore implements ArcoUSDIndexerStore {
   }
 
   insertIndexedEvent(input: Parameters<ArcoUSDIndexerStore["insertIndexedEvent"]>[0]) {
-    return this.arco.insertIndexedEvent(input)
+    return upsertIndexedEvent(this.prisma, input)
+  }
+
+  async redeemOwner(input: { chainId: number; reserveAddress: string; requestId: string }) {
+    const row = await this.prisma.arcoUSDRedeemRequest.findUnique({
+      where: {
+        chainId_reserveAddress_requestId: { chainId: input.chainId, reserveAddress: input.reserveAddress.toLowerCase(), requestId: input.requestId },
+      },
+      select: { owner: true },
+    })
+    return row ? row.owner.toLowerCase() : null
   }
 
   recordRedeemQueued(input: RedeemQueuedInput) {

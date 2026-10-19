@@ -3,14 +3,17 @@ import type { RawEvmLog } from "../indexer/event-decoder.js"
 import type { GiwaIndexerCursor, GiwaIndexerRpc } from "../indexer/giwa-indexer.js"
 import type { IndexedEventInput, JsonObject } from "../services/types.js"
 import { reserveEventsAbi, routerEventsAbi } from "./abi.js"
+import { reserveEventWallet, withActivityWallet } from "./activity.js"
 import type { ArcoUSDChainReader, ReserveState } from "./reader.js"
 import { deployedArcoUSD, type ArcoUSDRegistryFile, type DeployedArcoUSD } from "./registry.js"
 
 // ArcoUSD indexer (docs/specs/arcousd-v1.md §5). Runs beside the core GIWA indexer with its own
 // cursor ("arcousd") so neither can stall the other:
-//   • every ArcoUSDReserve and ArcoRouter event → EvmIndexedEvent (audit trail; no walletAddress,
-//     so nothing shows up in the portfolio Activity feed — a Router buy reaches the buyer's feed
-//     through the deposit vault's ProductDeposit, attributed to its recipient by the core indexer);
+//   • every ArcoUSDReserve and ArcoRouter event → EvmIndexedEvent. A wallet's own Reserve actions
+//     (convert in and out, queue, cancel, payout) carry `walletAddress` for its portfolio Activity
+//     feed (activity.ts); the steps the Zap and the Router make inside a user action do not (a Router
+//     buy reaches the buyer's feed through the deposit vault's ProductDeposit, attributed to its
+//     recipient by the core indexer), nor does anything operational;
 //   • RedeemQueued/Paid/PayoutFailed/Cancelled → ArcoUSDRedeemRequest, transitions only forward;
 //   • every snapshotIntervalMs, one Lens snapshot → ArcoUSDReserveSnapshot.
 // Inert (no RPC calls) while the ArcoUSD registry is missing or not deployed.
@@ -72,6 +75,8 @@ export type ArcoUSDIndexerStore = {
   recordRedeemQueued(input: RedeemQueuedInput): Promise<unknown>
   /** Applies `to` only from REDEEM_TRANSITION_FROM[to]; returns rows changed (0 = stale/replayed). */
   transitionRedeem(input: RedeemTransitionInput): Promise<number>
+  /** The owner of a recorded request (lowercase), null when it is not in the table. */
+  redeemOwner(input: { chainId: number; reserveAddress: string; requestId: string }): Promise<string | null>
   /** Idempotent per (chainId, reserveAddress, blockNumber). */
   insertSnapshot(input: ReserveSnapshotInput): Promise<unknown>
 }
@@ -181,6 +186,9 @@ export class ArcoUSDIndexer {
     const reserve = deployment.reserveAddress.toLowerCase() as `0x${string}`
     // The deploy executor deploys the Router with the rest, so deploymentBlock covers it too.
     const router = deployment.routerAddress ? (deployment.routerAddress.toLowerCase() as `0x${string}`) : null
+    // The Zap's address as soon as the registry records it (even pending): its Reserve steps are
+    // never a wallet's own row.
+    const activityContracts = { zap: registry.savings?.zap?.address?.toLowerCase() ?? null, router }
     const latestBlock = await this.options.rpc.getBlockNumber()
     const confirmedBlock = latestBlock - BigInt(this.options.confirmations)
     const snapshot = await this.maybeSnapshot(chainId, deployment)
@@ -239,6 +247,15 @@ export class ArcoUSDIndexer {
       const decoded = fromReserve ? decodeReserveLog(log) : decodeRouterLog(log)
       if (!decoded) continue
       const at = await this.blockTime(timestamps, log.blockNumber)
+      let wallet: string | null = null
+      if (fromReserve) {
+        // A payout's event names only the recipient; the row belongs to the request's owner (recorded
+        // from its RedeemQueued, which always comes first).
+        const payout = decoded.eventName === "RedeemPaid" || decoded.eventName === "RedeemPayoutFailed"
+        const requestId = (decoded.args as Record<string, unknown>).requestId
+        const owner = payout && typeof requestId === "string" ? await this.options.store.redeemOwner({ chainId, reserveAddress: reserve, requestId }) : null
+        wallet = reserveEventWallet(decoded.eventName, decoded.args, activityContracts, owner)
+      }
       await this.options.store.insertIndexedEvent({
         chainId,
         contractAddress: address,
@@ -247,7 +264,7 @@ export class ArcoUSDIndexer {
         txHash: log.transactionHash,
         logIndex: log.logIndex,
         eventName: decoded.eventName,
-        args: decoded.args,
+        args: withActivityWallet(decoded.args, wallet),
         removed: log.removed ?? false,
         blockTimestamp: at,
       })

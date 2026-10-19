@@ -14,6 +14,7 @@ import type { ArcoUSDService } from "./arcousd/service.js"
 import type { ArcoUSDRecalls, RecallRow } from "./arcousd/recall.js"
 import { inertArcoUSDAdmin, type ArcoUSDAdmin } from "./arcousd/admin.js"
 import { inertArcoUSDAlerts, type ArcoUSDAlertsAdmin } from "./arcousd/alerts.js"
+import type { ArcoUSDRedemptions } from "./arcousd/redemptions.js"
 import type { ArcoUSDSavingsService } from "./arcousd/savings.js"
 import { inertArcoUSDSavingsAdmin, type ArcoUSDSavingsAdmin } from "./arcousd/savings-admin.js"
 import type { StocksMarketDataPluginOptions } from "./stocks-market-data/index.js"
@@ -133,6 +134,8 @@ export type ArcoAppServices = {
   readonly arcoUSDAlerts?: ArcoUSDAlertsAdmin
   /** sArcoUSD (Savings) public state + history; absent → the savings routes are not registered. */
   readonly arcoUSDSavings?: ArcoUSDSavingsService
+  /** One wallet's Standard redemptions (public; the ArcoUSD indexer's table). */
+  readonly arcoUSDRedemptions?: ArcoUSDRedemptions
   /** Savings admin reads (distributions, flows) and the distribute() builder. */
   readonly arcoUSDSavingsAdmin?: ArcoUSDSavingsAdmin
   readonly stocksMarketClock?: StocksMarketDataPluginOptions["marketClock"]
@@ -1783,7 +1786,9 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     reply.code(400).send({ error: errorMessage(error) })
   })
 
-  if (services.arcoUSD) app.register(arcoUSDPlugin, { service: services.arcoUSD, savings: services.arcoUSDSavings })
+  if (services.arcoUSD) {
+    app.register(arcoUSDPlugin, { service: services.arcoUSD, savings: services.arcoUSDSavings, redemptions: services.arcoUSDRedemptions })
+  }
   if (services.stocks) app.register(stocksPlugin, services.stocks)
   if (services.stocksRuntimeStatus) {
     app.register(stocksRuntimeStatusPlugin, services.stocksRuntimeStatus)

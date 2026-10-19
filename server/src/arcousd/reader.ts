@@ -1,10 +1,12 @@
-import { formatUnits, type PublicClient } from "viem"
+import { formatUnits, maxUint256, type PublicClient } from "viem"
 import {
   ARCOUSD_BURN_SELECTOR,
   ARCOUSD_MINT_SELECTOR,
   DEPOSIT_SELECTOR,
   lensAbi,
   PROCESS_QUEUE_SELECTOR,
+  REDEEM_SELECTOR,
+  reserveAssetConfigAbi,
   reservePauseAbi,
   ROUTER_BUY_SELECTOR,
   SETTLE_FOR_SELECTOR,
@@ -34,6 +36,17 @@ export type AssetState = {
   readonly queueHead: number
   /** Queue entries processQueue has not passed yet (may include cancelled ones). */
   readonly queueBacklog: number
+  /** Smallest payout (asset units) a Standard request may have; below it redeem reverts BelowQueueMinimum. */
+  readonly minQueued: string
+  readonly minQueuedHuman: string
+  /** deposit reverts DepositCap when the Reserve's balance of this asset would exceed it (asset units).
+   *  max uint256 means no cap: then the human amount and the room are null. */
+  readonly depositCap: string
+  readonly depositCapHuman: string | null
+  /** depositCap − balance, floored at 0: the room under the cap only (deposit can still revert on the
+   *  mint cap, a disabled deposit or the peg check); null with no cap. */
+  readonly depositRoom: string | null
+  readonly depositRoomHuman: string | null
 }
 
 export type StrategyState = {
@@ -80,6 +93,9 @@ export type ReserveState = {
   readonly arcoUSDMintPaused: boolean
   /** ArcoRouter.paused() or fnPaused(buy); false while no Router is deployed. */
   readonly routerPaused: boolean
+  /** Reserve.fnPaused(redeem) — every redemption, Instant and Standard (cancelRedeem still works).
+   *  Like depositPaused, only the switch: a redemption also stops while reservePaused. */
+  readonly redeemPaused: boolean
   readonly assets: readonly AssetState[]
   readonly strategies: readonly StrategyState[]
 }
@@ -95,7 +111,7 @@ export function createArcoUSDChainReader(client: Pick<PublicClient, "readContrac
     const fnPausedAt = (address: `0x${string}`, selector: `0x${string}`) =>
       client.readContract({ address, abi: reservePauseAbi, functionName: "fnPaused", args: [selector], blockNumber })
     const router = deployment.routerAddress
-    const [snap, reservePaused, settlementPaused, queuePaused, arcoUSDPaused, arcoUSDBurnPaused, depositPaused, arcoUSDMintPaused, routerPaused, routerBuyPaused] = await Promise.all([
+    const [snap, reservePaused, settlementPaused, queuePaused, arcoUSDPaused, arcoUSDBurnPaused, depositPaused, arcoUSDMintPaused, routerPaused, routerBuyPaused, redeemPaused] = await Promise.all([
       client.readContract({
         address: deployment.lensAddress,
         abi: lensAbi,
@@ -112,8 +128,23 @@ export function createArcoUSDChainReader(client: Pick<PublicClient, "readContrac
       fnPausedAt(deployment.arcoUSDAddress, ARCOUSD_MINT_SELECTOR),
       router ? pausedAt(router) : false,
       router ? fnPausedAt(router, ROUTER_BUY_SELECTOR) : false,
+      fnPausedAt(deployment.reserveAddress, REDEEM_SELECTOR),
     ])
-    return toReserveState(deployment, blockNumber, snap, {
+    // The Lens leaves out the per-asset limits: one getAssetConfig per asset, at the same block.
+    const configs = new Map<string, AssetLimits>()
+    await Promise.all(
+      snap.assets.map(async (asset) => {
+        const config = await client.readContract({
+          address: deployment.reserveAddress,
+          abi: reserveAssetConfigAbi,
+          functionName: "getAssetConfig",
+          args: [asset.asset as `0x${string}`],
+          blockNumber,
+        })
+        configs.set(asset.asset.toLowerCase(), { depositCap: config.depositCap, minQueued: config.minQueued })
+      }),
+    )
+    return toReserveState(deployment, blockNumber, snap, configs, {
       reservePaused: Boolean(reservePaused),
       settlementPaused: Boolean(settlementPaused),
       queuePaused: Boolean(queuePaused),
@@ -122,13 +153,17 @@ export function createArcoUSDChainReader(client: Pick<PublicClient, "readContrac
       depositPaused: Boolean(depositPaused),
       arcoUSDMintPaused: Boolean(arcoUSDMintPaused),
       routerPaused: Boolean(routerPaused) || Boolean(routerBuyPaused),
+      redeemPaused: Boolean(redeemPaused),
     })
   }
 }
 
+/** Reserve.getAssetConfig's limits, keyed by lowercase asset address. */
+export type AssetLimits = { readonly depositCap: bigint; readonly minQueued: bigint }
+
 export type PauseFlags = Pick<
   ReserveState,
-  "reservePaused" | "settlementPaused" | "queuePaused" | "arcoUSDPaused" | "arcoUSDBurnPaused" | "depositPaused" | "arcoUSDMintPaused" | "routerPaused"
+  "reservePaused" | "settlementPaused" | "queuePaused" | "arcoUSDPaused" | "arcoUSDBurnPaused" | "depositPaused" | "arcoUSDMintPaused" | "routerPaused" | "redeemPaused"
 >
 
 export const NO_PAUSES: PauseFlags = {
@@ -140,6 +175,7 @@ export const NO_PAUSES: PauseFlags = {
   depositPaused: false,
   arcoUSDMintPaused: false,
   routerPaused: false,
+  redeemPaused: false,
 }
 
 type LensSnapshot = {
@@ -181,6 +217,7 @@ export function toReserveState(
   deployment: DeployedArcoUSD,
   blockNumber: bigint,
   snap: LensSnapshot,
+  limits: ReadonlyMap<string, AssetLimits>,
   pauses: PauseFlags,
 ): ReserveState {
   const symbolOf = (address: string) =>
@@ -218,6 +255,7 @@ export function toReserveState(
       queueLength: Number(asset.queueLength),
       queueHead: Number(asset.queueHead),
       queueBacklog: Number(asset.queueLength - asset.queueHead),
+      ...limitsOf(asset, limits.get(asset.asset.toLowerCase())),
     })),
     strategies: snap.strategies.map((strategy) => ({
       strategyId: Number(strategy.strategyId),
@@ -232,5 +270,26 @@ export function toReserveState(
       pendingRecall: strategy.pendingRecall.toString(),
       maxAllocation: strategy.maxAllocation.toString(),
     })),
+  }
+}
+
+/** minQueued and the deposit cap with what is left under it (null with no cap). The reader always has
+ *  the limits; without them (a caller passing none) the cap reads 0, so no deposit room is claimed. */
+function limitsOf(
+  asset: { decimals: number; balance: bigint },
+  limits: AssetLimits | undefined,
+): Pick<AssetState, "minQueued" | "minQueuedHuman" | "depositCap" | "depositCapHuman" | "depositRoom" | "depositRoomHuman"> {
+  const decimals = Number(asset.decimals)
+  const minQueued = limits?.minQueued ?? 0n
+  const cap = limits?.depositCap ?? 0n
+  const capped = cap !== maxUint256
+  const room = capped ? (cap > asset.balance ? cap - asset.balance : 0n) : null
+  return {
+    minQueued: minQueued.toString(),
+    minQueuedHuman: formatUnits(minQueued, decimals),
+    depositCap: cap.toString(),
+    depositCapHuman: capped ? formatUnits(cap, decimals) : null,
+    depositRoom: room === null ? null : room.toString(),
+    depositRoomHuman: room === null ? null : formatUnits(room, decimals),
   }
 }

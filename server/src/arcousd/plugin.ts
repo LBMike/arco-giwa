@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify"
+import { parseRedemptionsQuery, type ArcoUSDRedemptions } from "./redemptions.js"
 import type { ArcoUSDSavingsService } from "./savings.js"
 import type { ArcoUSDService } from "./service.js"
 
@@ -6,7 +7,7 @@ import type { ArcoUSDService } from "./service.js"
 // the response says "unavailable" and the buy gate reads "closed".
 export async function arcoUSDPlugin(
   app: FastifyInstance,
-  { service, savings }: { service: ArcoUSDService; savings?: ArcoUSDSavingsService },
+  { service, savings, redemptions }: { service: ArcoUSDService; savings?: ArcoUSDSavingsService; redemptions?: ArcoUSDRedemptions },
 ): Promise<void> {
   app.get("/api/v1/arcousd/reserve", async (_request, reply) => {
     reply.header("Cache-Control", "no-store")
@@ -16,6 +17,15 @@ export async function arcoUSDPlugin(
     reply.header("Cache-Control", "no-store")
     return service.gate()
   })
+  if (redemptions) {
+    // One wallet's Standard redemptions (owner): status, when payable, place in the queue, cancellable.
+    // A bad wallet or status throws → the app's error handler answers 400 { error } (like /activity).
+    app.get<{ Params: { wallet: string }; Querystring: { status?: string } }>("/api/v1/arcousd/redemptions/:wallet", async (request, reply) => {
+      const { wallet, filter } = parseRedemptionsQuery(request.params.wallet, request.query?.status)
+      reply.header("Cache-Control", "no-store")
+      return redemptions.forWallet(wallet, filter)
+    })
+  }
   if (!savings) return
   // sArcoUSD (Savings): vault, vesting, the distributor's next distribution; "not-deployed" until
   // the Savings contracts are in the ArcoUSD registry.
