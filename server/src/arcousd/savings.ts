@@ -25,6 +25,9 @@ const HISTORY_CACHE_MS = 60_000
 const HISTORY_RETRY_MS = 5_000
 /** APR/APY in bps are capped here (an almost empty vault can show absurd rates; also fits INT4). */
 export const MAX_RATE_BPS = 2_147_483_647
+/** distribute() amounts under one cent are not worth a transaction (and read as $0): the keeper skips
+ *  them and the watcher does not call them overdue. */
+export const DISTRIBUTE_MIN_AMOUNT = 10n ** 16n
 /** What the public state says when the distributor's preview() could not be read (detail is logged). */
 export const PREVIEW_UNREADABLE = "preview-unreadable"
 const DEFAULT_DAYS = 30

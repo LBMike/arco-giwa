@@ -18,7 +18,9 @@ import {
   durationText,
   gasText,
   keeperBadge,
+  keeperDistributeText,
   keeperTxBadge,
+  keeperTxText,
   gateText,
   headVerdict,
   mintHeadroomUsd,
@@ -460,7 +462,7 @@ test("alerts card: open first, pending and resolved after, channel and send prob
   assert.ok(overview.indexOf("Alerts 2 open") < overview.indexOf("Total backing"))
 })
 
-// ── Queue bot ───────────────────────────────────────────────────────────────
+// ── Keeper bot ──────────────────────────────────────────────────────────────
 
 const keeperReport = (over: Partial<GiwaArcoUSDKeeperReport> = {}): GiwaArcoUSDKeeperReport => ({
   mode: "live",
@@ -486,7 +488,7 @@ const keeper = (report: GiwaArcoUSDKeeperReport | null, over: Partial<NonNullabl
   keeper: { lastRunAt: "2026-10-19T11:59:30.000Z", lastOkAt: "2026-10-19T11:59:30.000Z", lastError: null, stale: false, report, ...over },
 })
 
-test("queue bot helpers: mode badge, gas with 4 decimals, simulations and transaction states", () => {
+test("keeper bot helpers: mode badge, gas with 4 decimals, simulations and transaction states", () => {
   assert.deepEqual(keeperBadge(null), { label: "Off", tone: "neutral" })
   assert.deepEqual(keeperBadge(keeper(keeperReport({ mode: "off" })).keeper), { label: "Off", tone: "neutral" })
   assert.deepEqual(keeperBadge(keeper(keeperReport()).keeper), { label: "Live", tone: "positive" })
@@ -506,19 +508,20 @@ test("queue bot helpers: mode badge, gas with 4 decimals, simulations and transa
   assert.deepEqual(keeperTxBadge("reverted"), { label: "Reverted", tone: "negative" })
 })
 
-test("queue bot card: live, dry run, off, never run, and its trouble states", () => {
+test("keeper bot card: live, dry run, off, never run, and its trouble states", () => {
   const live = text(renderToStaticMarkup(<KeeperCard keeper={keeper(keeperReport())} now={NOW} />))
-  for (const expected of ["Queue bot Live", "Last run just now", "Gas 0.0485 ETH", "Now tUSDC would pay 3 requests · tUSDT nothing payable now", "Mined tUSDC · paid 3 · 2m ago", "Sent 1 transaction"]) {
+  assert.doesNotMatch(live, /Savings/) // a keeper from before Savings reports no distribute step
+  for (const expected of ["Keeper bot Live", "Last run just now", "Gas 0.0485 ETH", "Now tUSDC would pay 3 requests · tUSDT nothing payable now", "Mined tUSDC · paid 3 · 2m ago", "Sent 1 transaction"]) {
     assert.ok(live.includes(expected), expected)
   }
   const holdingCard = text(renderToStaticMarkup(<KeeperCard keeper={keeper(keeperReport({ holdUntil: "2026-10-19T12:08:00.000Z", simulated: false }))} now={NOW} />))
   assert.match(holdingCard, /Now Not checked this round/)
   assert.match(holdingCard, /Holding until .* \(after a reverted transaction\)/)
   const dry = text(renderToStaticMarkup(<KeeperCard keeper={keeper(keeperReport({ mode: "dry-run", lastTx: null, note: "Dry run: would pay tUSDC" }))} now={NOW} />))
-  assert.match(dry, /Queue bot Dry run/)
+  assert.match(dry, /Keeper bot Dry run/)
   assert.doesNotMatch(dry, /Gas/) // a dry run spends nothing
   assert.match(dry, /Last transaction —/)
-  assert.match(text(renderToStaticMarkup(<KeeperCard keeper={keeper(keeperReport({ mode: "off" }))} now={NOW} />)), /The queue bot is off\. Pay the queue with Preview and Sign (&amp;|&) send below\./)
+  assert.match(text(renderToStaticMarkup(<KeeperCard keeper={keeper(keeperReport({ mode: "off" }))} now={NOW} />)), /The keeper bot is off\. Pay the queue with Preview and Sign (&amp;|&) send below, and distribute Savings yield from the Savings tab\./)
   assert.match(text(renderToStaticMarkup(<KeeperCard keeper={{ status: "live", keeper: null }} now={NOW} />)), /has not run yet/)
 
   const trouble = renderToStaticMarkup(
@@ -532,13 +535,51 @@ test("queue bot card: live, dry run, off, never run, and its trouble states", ()
     />,
   )
   const troubleText = text(trouble)
-  for (const expected of ["Queue bot Not running", "Last run 10m ago (not running)", "Gas 0.0042 ETH (low)", "Waiting on nonce 13 for 15m (stuck)", "Send failed: nonce too low"]) {
+  for (const expected of ["Keeper bot Not running", "Last run 10m ago (not running)", "Gas 0.0042 ETH (low)", "Waiting on nonce 13 for 15m (stuck)", "Send failed: nonce too low"]) {
     assert.ok(troubleText.includes(expected), expected)
   }
 
   // On the Queue tab it sits above the per-asset cards.
   const queuePage = text(page("queue", { queue: { queue, filter: "open", onFilterChange: noop, walletAddress: A(0xee), onConnectWallet: noop, onPrepare: pending, onSend: pending, now: NOW, keeper: { keeper: keeper(keeperReport()) } } }))
-  assert.ok(queuePage.indexOf("Queue bot") < queuePage.indexOf("Standard redemptions are paid"))
+  assert.ok(queuePage.indexOf("Keeper bot") < queuePage.indexOf("Standard redemptions are paid"))
+})
+
+test("keeper bot: its Savings step in words, a distribute transaction, and a distribute hold", () => {
+  const step = (state: NonNullable<GiwaArcoUSDKeeperReport["distribute"]>["state"], over: Partial<NonNullable<GiwaArcoUSDKeeperReport["distribute"]>> = {}) => ({
+    state,
+    nextAt: "2026-10-20T11:00:00.000Z",
+    amountUsd: "12.345678",
+    detail: null,
+    ...over,
+  })
+  assert.equal(keeperDistributeText(null, NOW), "Not checked this round")
+  assert.equal(keeperDistributeText(step("waiting"), NOW), "Due in 23h 0m · $12.35 accrued")
+  assert.equal(keeperDistributeText(step("off", { detail: "x" }), NOW), "Off (ARCOUSD_KEEPER_DISTRIBUTE=off): distribute from the Savings tab")
+  assert.equal(keeperDistributeText(step("not-deployed"), NOW), "Savings is not deployed")
+  assert.equal(keeperDistributeText(step("nothing"), NOW), "Due, nothing to distribute now (under $0.01)")
+  assert.equal(keeperDistributeText(step("ready", { detail: "Dry run: would distribute" }), NOW), "Dry run: would distribute: $12.35")
+  assert.equal(keeperDistributeText(step("sent", { detail: "Distributed", amountUsd: "7.99" }), NOW), "Distributed $7.99")
+  assert.equal(keeperDistributeText(step("sent", { detail: "Sent; waiting for the receipt" }), NOW), "Sent; waiting for the receipt ($12.35)")
+  assert.equal(keeperDistributeText(step("reverts", { detail: "Pausable: paused" }), NOW), "distribute() would revert: Pausable: paused")
+  assert.equal(keeperDistributeText(step("error", { detail: "preview() could not be read: HTTP 503" }), NOW), "Could not check: preview() could not be read: HTTP 503")
+
+  const distributeTx = { hash: `0x${"ab".repeat(32)}`, action: "distribute" as const, symbol: "sArcoUSD", nonce: 13, sentAt: "2026-10-19T11:58:00.000Z", status: "success" as const, paid: null, amountUsd: "7.99", blockNumber: "901", error: null }
+  assert.equal(keeperTxText(distributeTx), "distribute · $7.99")
+  assert.equal(keeperTxText({ ...distributeTx, amountUsd: null }), "distribute")
+  assert.equal(keeperTxText(keeperReport().lastTx!), "tUSDC · paid 3")
+
+  const card = text(
+    renderToStaticMarkup(
+      <KeeperCard
+        keeper={keeper(keeperReport({ lastTx: distributeTx, distribute: step("ready", { detail: "Held after a reverted distribute()" }), distributeHoldUntil: "2026-10-19T12:08:00.000Z" }))}
+        now={NOW}
+      />,
+    ),
+  )
+  for (const expected of ["Savings Held after a reverted distribute(): $12.35", "Mined distribute · $7.99 · 2m ago"]) assert.ok(card.includes(expected), expected)
+  assert.match(card, /Savings held until .* \(after a reverted distribute\(\)\)/)
+  const failing = renderToStaticMarkup(<KeeperCard keeper={keeper(keeperReport({ distribute: step("error", { detail: "socket hang up" }) }))} now={NOW} />)
+  assert.match(text(failing), /Savings Could not check: socket hang up/)
 })
 
 // ─────────────────────────────── Savings ───────────────────────────────

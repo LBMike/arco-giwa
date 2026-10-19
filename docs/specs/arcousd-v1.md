@@ -300,7 +300,7 @@ Reserve의 잉여를 sArcoUSD로 옮기는 유일한 길이다. Reserve는 24KB 
 
 - **감시·대사·알림(3a)**: 인덱서 워커 안에서 1분마다 체인을 읽기만 하는 감시기가 돈다. 담보 부족, NAV 실패, 체인과 인덱서 DB의 대기열 불일치(인덱서가 읽은 블록과 같은 블록에서 비교), T+2 초과, 처리되지 않거나 유동성이 모자란 대기열, 지급 실패, 매수 게이트 닫힘, 발행 상한 임박, MMF 비율 이탈, 일시정지, 인덱서 지연, 처리 안 된 Reserve 회수를 본다. 알림은 `ArcoUSDAlert`에 규칙별로 남고(PENDING → OPEN → RESOLVED), 텔레그램 봇과 슬랙 웹훅으로 보낸다. 이메일은 아직 없다. 콘솔 Overview에 Alerts 카드와 테스트 발송이 있다. 리저브 조회에 `queuePaused`(`fnPaused(processQueue)`)가 추가됐다. 규칙과 설정은 `docs/operations/arcousd-alerts.md`.
 
-- **대기열 처리 봇(3b)**: 별도 워커(`arco-arcousd-keeper`)가 1분마다 대기열이 남은 자산별로 `processQueue`를 eth_call로 미리 돌려 보고, `live`면 1건 이상 지급될 자산에 `processQueue(asset, 20)`을 보낸다. 한 번에 트랜잭션 하나, 영수증 확인 후 다음. `dry-run`은 결과만 기록하고, 기본 `off`. 봇 지갑에는 역할이 없고 가스만 있다(역할이 있는 지갑이면 시작하지 않는다). 서명은 레지스트리 자산에 대한 `processQueue`로만 제한한다. 맨 앞이 취소·실패 항목으로 막혀 있으면 그 항목들을 지나가는 호출도 보낸다. revert 뒤에는 10분간 보내지 않는다. 키는 암호화 키스토어와 비밀번호 Secret File 두 개로만 받는다. MMF 배분·회수는 하지 않는다. 상태는 콘솔 Queue 탭의 Queue bot 카드와 감시기 알림(`keeper:*`)으로 본다. 절차는 `docs/operations/arcousd-keeper.md`.
+- **대기열 처리 봇(3b)**: 별도 워커(`arco-arcousd-keeper`)가 1분마다 대기열이 남은 자산별로 `processQueue`를 eth_call로 미리 돌려 보고, `live`면 1건 이상 지급될 자산에 `processQueue(asset, 20)`을 보낸다. 한 번에 트랜잭션 하나, 영수증 확인 후 다음. `dry-run`은 결과만 기록하고, 기본 `off`. 봇 지갑에는 역할이 없고 가스만 있다(역할이 있는 지갑이면 시작하지 않는다). 서명은 레지스트리 자산에 대한 `processQueue`로만 제한한다. 맨 앞이 취소·실패 항목으로 막혀 있으면 그 항목들을 지나가는 호출도 보낸다. revert 뒤에는 10분간 보내지 않는다. 키는 암호화 키스토어와 비밀번호 Secret File 두 개로만 받는다. MMF 배분·회수는 하지 않는다. 상태는 콘솔 Queue 탭의 Keeper bot 카드(3b 당시 이름 Queue bot)와 감시기 알림(`keeper:*`)으로 본다. 절차는 `docs/operations/arcousd-keeper.md`.
 
 - **sArcoUSD 컨트랙트(4a)**: `SArcoUSD`, `ArcoUSDSavingsDistributor`, `ArcoSavingsZap`(3.13~3.15)과 배포 스크립트 단계. 배포 스크립트가 셋을 배포하고, 분배기에 ArcoUSD `MINTER_ROLE`과 sArcoUSD `REWARDER_ROLE`을 주고, `seed()`로 1 ArcoUSD 시드를 소각 주소에 넣으면서 예치를 연다(배포자에게 ArcoUSD가 없으면 tUSDC 1개를 Reserve에 넣어 만든다). 시드 비용이 모자라면 브로드캐스트가 `preflight`에서 첫 트랜잭션 전에 거부된다(드라이런은 결과만 보여 준다). 파라미터는 레지스트리 `savings.params`(테스트넷 기본값: 반영 기간 1일, 분배 간격 1일, 연율 상한 2000bps, 여유분 50bps). 1~3단계가 이미 배포된 레지스트리에서도 이 단계만 이어서 한다. 서버·인덱서·화면은 4b·4c.
 
@@ -311,10 +311,15 @@ Reserve의 잉여를 sArcoUSD로 옮기는 유일한 길이다. Reserve는 24KB 
   - Savings 인덱서: ArcoUSD 인덱서 옆에서 **자기 커서**(`arcousd-savings`)로 세 컨트랙트의 배포 블록부터 읽는다(Savings를 나중에 배포해도 ArcoUSD 커서가 이미 지나간 블록을 놓치지 않게). sArcoUSD·분배기·Zap 이벤트를 `EvmIndexedEvent`에 남기되(`walletAddress` 없음) sArcoUSD `Transfer`·`Approval`은 뺀다(예치·출금마다 `Deposit`·`Withdraw`가 있다). `ARCOUSD_SNAPSHOT_INTERVAL_MS`마다 `ArcoUSDSavingsSnapshot`(마이그레이션 `20261020000000_arcousd_savings`, 추가만)에 남긴다.
   - 관리자 API `GET /api/v1/admin/arcousd/savings`, `POST /api/v1/admin/arcousd/savings/distribute`와 콘솔 Savings 탭은 `docs/admin-console.md`.
 
+- **Savings 감시와 자동 분배(4b-2)**:
+  - 키퍼 봇이 대기열 다음으로 분배기 `preview()`를 읽고, 분배 시각이 지났고 $0.01 이상이면 `distribute()`를 eth_call로 미리 돌려 본 뒤 `live`에서 보낸다. `ARCOUSD_KEEPER_DISTRIBUTE=off`로 이 일만 끌 수 있다(기본 `on`). 서명 범위에 "레지스트리 분배기의 `distribute()`, calldata 정확히 `0xe4fc6b6d`"만 더했다. `distribute()`가 revert 되면 분배만 10분 쉬고 대기열은 계속한다(대기열 쪽 실패도 분배를 막지 않는다). 봇 지갑이 sArcoUSD(관리자·pauser·rewarder)나 분배기(관리자·pauser) 역할을 가지면 시작하지 않는다.
+  - 감시기가 Savings를 읽는다(`savings:*`, 모두 경고): 읽기 실패, 시드 안 됨, Savings 쪽 일시정지, `preview()` 실패, 분배 지연(분배 시각에서 2시간 넘게 지났는데 $0.01 이상 분배 가능, 10분 유예), 수익 없음(예치자가 있는데 7일 넘게 분배가 없고 mint cap이나 마진 위 잉여 부족 때문일 때, 이유 포함), Savings 인덱서 지연과 스냅샷 지연. 감시기 알림 제목의 "Queue keeper"는 "Keeper"로 바꿨다(키는 그대로).
+  - 콘솔 Queue 탭의 봇 카드 이름을 Keeper bot으로 바꾸고 Savings 줄(이번 회차 분배 확인 결과)과 분배 트랜잭션 표시를 더했다. 절차는 `docs/operations/arcousd-keeper.md`·`docs/operations/arcousd-alerts.md`.
+
 아직 하지 않는 것:
 
 - 알림 이메일.
-- Savings 감시 규칙과 봇의 `distribute()`(4b-2), 고객 화면(4c).
+- 고객 화면(4c): Savings 페이지의 sArcoUSD 계정(Zap 예치·출금), 포트폴리오, 헤더의 ArcoUSD 받기.
 
 ## 6. 신뢰 가정
 

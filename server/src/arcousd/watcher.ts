@@ -5,17 +5,19 @@ import type { ArcoUSDEnv } from "./config.js"
 import { deliver, type AlertChannel, type Delivery } from "./notify.js"
 import type { ArcoUSDChainReader, ReserveState } from "./reader.js"
 import type { RecallsSnapshot, RecallView } from "./recall.js"
-import { deployedArcoUSD, type ArcoUSDRegistryFile, type DeployedArcoUSD } from "./registry.js"
+import { deployedArcoUSD, type ArcoUSDRegistryFile, type DeployedArcoUSD, type DeployedSavings } from "./registry.js"
 import { safeErrorText } from "./safe-error.js"
+import type { SavingsChainReader, SavingsState } from "./savings.js"
 import { evaluateBuyGate } from "./service.js"
-import { evaluateWatch, payoutsPaused, type Finding, type KeeperSeen } from "./watch.js"
+import { evaluateWatch, payoutsPaused, type Finding, type KeeperSeen, type SavingsSeen } from "./watch.js"
 
 // The ArcoUSD watcher (docs/operations/arcousd-alerts.md). Runs inside the indexer worker, after the
 // ArcoUSD indexer's poll, once per ARCOUSD_ALERT_INTERVAL_MS. Each round:
 //   1. reads the Reserve AT THE INDEXER'S LAST BLOCK when the indexer is close to the head and its
 //      poll just completed, so the chain and the indexed queue describe the same moment (else at the
 //      head, and the queue is not reconciled this round);
-//   2. reads the indexed queue, the last snapshot time and the Reserve recalls;
+//   2. reads the indexed queue, the last snapshot time, the Reserve recalls, the keeper's heartbeat and,
+//      once deployed, Savings (sArcoUSD, its distributor, the savings indexer's cursor and snapshots);
 //   3. evaluates the rules (watch.ts), steps the alert book (alerts.ts), sends one digest to every
 //      configured channel, saves the rows and a heartbeat.
 // What a round could not read keeps its alerts as they were (never "resolved" by a failed read), and
@@ -53,6 +55,13 @@ export type ArcoUSDWatcherDeps = {
   readonly admin: Pick<ArcoUSDAdmin, "queue">
   readonly lastSnapshotAt: (deployment: DeployedArcoUSD) => Promise<Date | null>
   readonly recalls?: () => Promise<RecallsSnapshot>
+  /** Savings reads; without them (or before Savings is deployed) no savings rule runs. */
+  readonly savings?: {
+    readonly read: SavingsChainReader
+    /** The savings indexer's cursor ("arcousd-savings"), null before its first poll. */
+    readonly indexedBlock: () => Promise<bigint | null>
+    readonly lastSnapshotAt: (savings: DeployedSavings) => Promise<Date | null>
+  }
   readonly store: ArcoUSDAlertStore
   readonly channels: readonly AlertChannel[]
   readonly now?: () => number
@@ -259,6 +268,8 @@ export class ArcoUSDWatcher {
       keeperRead = false
     }
 
+    const savingsRead = deployment.savings && this.deps.savings ? await this.readSavings(deployment.savings, latest) : null
+
     // A recall whose own chain read failed is unknown this round, not settled.
     const unreadRecalls = (recalls ?? []).filter((recall) => recall.error || recall.state === "unknown")
     const readRecalls = recalls ? recalls.filter((recall) => !unreadRecalls.includes(recall)) : null
@@ -279,6 +290,7 @@ export class ArcoUSDWatcher {
       lastSnapshotAt,
       recalls: readRecalls,
       keeper,
+      savings: savingsRead?.seen ?? null,
     })
 
     // What this round could not see keeps its alerts as they were (stepAlerts `unknown`).
@@ -299,6 +311,14 @@ export class ArcoUSDWatcher {
     if (!snapshotRead || lastSnapshotAt === null) unknown.push(matches(/^indexer:snapshots$/))
     if (lagBlocks === null) unknown.push(matches(/^indexer:lag$/))
     if (!keeperRead) unknown.push(matches(/^keeper:/))
+    if (savingsRead) {
+      const { seen, cursorRead, snapshotRead: savingsSnapshotRead } = savingsRead
+      if (!seen.state) unknown.push(matches(/^savings:(?!read-failed$|indexer-lag$|snapshots$)/))
+      // No preview: what would be distributed is unknown, so "overdue" and "no yield" stay as they were.
+      else if (!seen.state.distributor.preview) unknown.push(matches(/^savings:(overdue|no-yield)$/))
+      if (!cursorRead || seen.lagBlocks === null) unknown.push(matches(/^savings:indexer-lag$/))
+      if (!savingsSnapshotRead || seen.lastSnapshotAt === null) unknown.push(matches(/^savings:snapshots$/))
+    }
 
     // "Close to T+2" that became "past T+2" is replaced, not resolved.
     const quiet: KeyTest[] = []
@@ -309,6 +329,38 @@ export class ArcoUSDWatcher {
       }
     }
     return { findings, pinned, unknown, quiet }
+  }
+
+  /** sArcoUSD and its distributor at the head, the savings indexer's lag and its last snapshot. */
+  private async readSavings(
+    savings: DeployedSavings,
+    latest: bigint | null,
+  ): Promise<{ seen: SavingsSeen; cursorRead: boolean; snapshotRead: boolean }> {
+    const reads = this.deps.savings!
+    let state: SavingsState | null = null
+    let error: string | null = null
+    try {
+      state = await reads.read(savings)
+    } catch (caught) {
+      error = safeErrorText(caught)
+    }
+    let lagBlocks: number | null = null
+    let cursorRead = true
+    try {
+      // No cursor yet: measure from the Savings deploy block (an indexer that never started is behind too).
+      const from = (await reads.indexedBlock()) ?? BigInt(savings.startBlock) - 1n
+      if (latest !== null) lagBlocks = Number(latest > from ? latest - from : 0n)
+    } catch {
+      cursorRead = false
+    }
+    let lastSnapshotAt: Date | null = null
+    let snapshotRead = true
+    try {
+      lastSnapshotAt = await reads.lastSnapshotAt(savings)
+    } catch {
+      snapshotRead = false
+    }
+    return { seen: { state, error, lagBlocks, lastSnapshotAt }, cursorRead, snapshotRead }
   }
 
   private log(line: Record<string, unknown>) {

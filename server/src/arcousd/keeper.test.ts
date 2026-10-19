@@ -1,8 +1,21 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { decodeFunctionData, encodeFunctionData, getAddress, HttpRequestError, keccak256, parseTransaction, recoverTransactionAddress, toEventSelector, type Hex } from "viem"
+import {
+  decodeFunctionData,
+  encodeAbiParameters,
+  encodeEventTopics,
+  encodeFunctionData,
+  getAddress,
+  HttpRequestError,
+  keccak256,
+  parseTransaction,
+  recoverTransactionAddress,
+  toEventSelector,
+  type Hex,
+} from "viem"
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts"
 import { createLocalKeystoreCustody } from "../stocks-signer/custody-local.js"
+import { distributorAbi, distributorEventsAbi } from "./abi.js"
 import { processQueueAbi } from "./admin.js"
 import type { Heartbeat } from "./alerts.js"
 import { KEEPER_DEFAULTS, parseArcoUSDKeeperEnv, type ArcoUSDKeeperEnv } from "./keeper-config.js"
@@ -14,11 +27,13 @@ const A = (n: number) => getAddress(`0x${n.toString(16).padStart(40, "0")}`)
 const RESERVE = A(0xabc)
 const USDC = A(0xc1)
 const USDT = A(0xc2)
+const VAULT = A(0x5a)
+const DISTRIBUTOR = A(0x5b)
 const MIN = 60_000
 const NOW = Date.parse("2026-10-19T12:00:00.000Z")
 const PAID = toEventSelector("RedeemPaid(uint256,address,address,uint256)")
 
-function registry(): ArcoUSDRegistryFile {
+function registry(withSavings = false): ArcoUSDRegistryFile {
   return {
     schemaVersion: 1,
     chainId: 91342,
@@ -35,8 +50,21 @@ function registry(): ArcoUSDRegistryFile {
     ],
     strategies: [],
     params: { mintCap: "1", mmfTargetBps: 5000, bufferFloorBps: 3000, queueMinDelay: 600 },
+    ...(withSavings
+      ? {
+          savings: {
+            vault: { proxy: VAULT, implementation: A(0x50), bytecodeHash: null, blockNumber: 150 },
+            distributor: { address: DISTRIBUTOR, bytecodeHash: null, blockNumber: 151 },
+            zap: { address: A(0x5c), bytecodeHash: null, blockNumber: 152 },
+            seeded: true,
+          },
+        }
+      : {}),
   }
 }
+const withSavings = () => registry(true)
+const DISTRIBUTE = encodeFunctionData({ abi: distributorAbi, functionName: "distribute" })
+const e18 = (n: number) => BigInt(Math.round(n * 100)) * 10n ** 16n
 
 const asset = (symbol: string, address: string, backlog: number): AssetState => ({
   symbol,
@@ -91,6 +119,13 @@ class FakeRpc implements KeeperRpc {
   revert = false
   sendError: Error | null = null
   balanceError: Error | null = null
+  /** distributor.preview(): by default not due for another hour. */
+  preview: { amount: bigint; nextAt: bigint } | Error = { amount: 0n, nextAt: BigInt((NOW + 60 * MIN) / 1000) }
+  distributeSim: { ok: true; amount: bigint } | { ok: false; revert: string } | Error = { ok: true, amount: 0n }
+  previews = 0
+  distributeSims = 0
+  /** ArcoUSD the next mined distribute() reports in its Distributed event. */
+  minted = 0n
   async chainId() {
     return 91342
   }
@@ -107,6 +142,18 @@ class FakeRpc implements KeeperRpc {
     if (value instanceof Error) throw value
     return value
   }
+  async distributorPreview(distributor: string) {
+    assert.equal(getAddress(distributor), DISTRIBUTOR)
+    this.previews++
+    if (this.preview instanceof Error) throw this.preview
+    return this.preview
+  }
+  async simulateDistribute({ distributor }: { distributor: string }) {
+    assert.equal(getAddress(distributor), DISTRIBUTOR)
+    this.distributeSims++
+    if (this.distributeSim instanceof Error) throw this.distributeSim
+    return this.distributeSim
+  }
   async sendRaw(raw: Hex) {
     if (this.sendError) throw this.sendError
     this.sent.push(raw)
@@ -116,10 +163,19 @@ class FakeRpc implements KeeperRpc {
     return keccak256(raw)
   }
   mine(raw: Hex, paid = 2) {
+    const distribute = getAddress(parseTransaction(raw).to!) === DISTRIBUTOR
+    const distributed = {
+      address: DISTRIBUTOR,
+      topics: encodeEventTopics({ abi: distributorEventsAbi, eventName: "Distributed", args: { caller: A(0xee) } }) as Hex[],
+      data: encodeAbiParameters(
+        [{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }, { type: "uint256" }, { type: "uint256" }],
+        [this.minted, e18(1000), e18(990), e18(5), e18(3)],
+      ),
+    }
     this.receipts.set(keccak256(raw), {
       status: this.revert ? "reverted" : "success",
       blockNumber: 1234n,
-      logs: Array.from({ length: this.revert ? 0 : paid }, () => ({ address: RESERVE, topics: [PAID] as Hex[] })),
+      logs: this.revert ? [] : distribute ? [distributed] : Array.from({ length: paid }, () => ({ address: RESERVE, topics: [PAID] as Hex[] })),
     })
     this.latest++
   }
@@ -144,7 +200,7 @@ class Beats {
 }
 
 /** A real local custody (fixed fees + signed-byte checks) over a throwaway key. */
-function realSigner(config: ArcoUSDKeeperEnv) {
+function realSigner(config: ArcoUSDKeeperEnv, loadRegistry: () => ArcoUSDRegistryFile = registry) {
   const account = privateKeyToAccount(generatePrivateKey())
   const custody = createLocalKeystoreCustody({
     signerAddress: account.address,
@@ -163,13 +219,25 @@ function realSigner(config: ArcoUSDKeeperEnv) {
         maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGas),
       }),
   })
-  return guardedKeeperSigner({ address: account.address, loadRegistry: registry, chainId: 91342, signOriginal: (request) => custody.signOriginal(request) })
+  return guardedKeeperSigner({ address: account.address, loadRegistry, chainId: 91342, signOriginal: (request) => custody.signOriginal(request) })
 }
 
-function setup(over: { mode?: "off" | "dry-run" | "live"; state?: () => ReserveState; now?: () => number; signer?: KeeperSigner | null; address?: string } = {}) {
+function setup(
+  over: {
+    mode?: "off" | "dry-run" | "live"
+    state?: () => ReserveState
+    now?: () => number
+    signer?: KeeperSigner | null
+    address?: string
+    /** Savings in the registry (the distribute step runs). */
+    savings?: boolean
+    env?: Record<string, string>
+  } = {},
+) {
   const mode = over.mode ?? "live"
-  const base = parseArcoUSDKeeperEnv({ ARCOUSD_KEEPER_MODE: mode, ARCOUSD_KEEPER_ADDRESS: over.address ?? A(0xee) })
-  const signer = over.signer === undefined ? (mode === "live" ? realSigner(base) : null) : over.signer
+  const loadRegistry = over.savings ? withSavings : registry
+  const base = parseArcoUSDKeeperEnv({ ARCOUSD_KEEPER_MODE: mode, ARCOUSD_KEEPER_ADDRESS: over.address ?? A(0xee), ...over.env })
+  const signer = over.signer === undefined ? (mode === "live" ? realSigner(base, loadRegistry) : null) : over.signer
   const config: ArcoUSDKeeperEnv = signer ? { ...base, address: signer.address } : base
   const rpc = new FakeRpc()
   const beats = new Beats()
@@ -177,7 +245,7 @@ function setup(over: { mode?: "off" | "dry-run" | "live"; state?: () => ReserveS
   const keeper = new ArcoUSDKeeper({
     chainId: 91342,
     config,
-    loadRegistry: registry,
+    loadRegistry,
     readState: async () => {
       reads++
       return (over.state ?? (() => state()))()
@@ -198,7 +266,9 @@ const lastBeat = (beats: Beats) => beats.rows[beats.rows.length - 1]
 
 test("keeper settings: off by default, an address outside off, and refusals by name", () => {
   const defaults = parseArcoUSDKeeperEnv({})
-  assert.deepEqual([defaults.mode, defaults.address, defaults.invalid], ["off", null, []])
+  assert.deepEqual([defaults.mode, defaults.address, defaults.distribute, defaults.invalid], ["off", null, true, []])
+  assert.equal(parseArcoUSDKeeperEnv({ ARCOUSD_KEEPER_DISTRIBUTE: "off" }).distribute, false)
+  assert.deepEqual(parseArcoUSDKeeperEnv({ ARCOUSD_KEEPER_DISTRIBUTE: "yes" }).invalid, ["ARCOUSD_KEEPER_DISTRIBUTE"])
   assert.deepEqual(
     [defaults.intervalMs, defaults.batch, defaults.gasLimit, defaults.maxFeePerGas, defaults.maxPriorityFeePerGas, defaults.lowGasWei],
     [KEEPER_DEFAULTS.intervalMs, 20, 3_000_000n, 1_000_000_000n, 1_000_000n, 10n ** 16n],
@@ -546,8 +616,8 @@ test("a round that stops before asking the chain says so", async () => {
   assert.equal((await dry.keeper.tick()).simulated, true)
 })
 
-test("the keeper wallet must hold no role on the Reserve, ArcoUSD or the Router", async () => {
-  const deployment = { reserveAddress: RESERVE, arcoUSDAddress: A(1), routerAddress: A(6) } as never
+test("the keeper wallet must hold no role on the Reserve, ArcoUSD, the Router or Savings", async () => {
+  const deployment = { reserveAddress: RESERVE, arcoUSDAddress: A(1), routerAddress: A(6) }
   const asked: string[] = []
   const client = {
     readContract: async ({ address, args }: { address: string; args: readonly unknown[] }) => {
@@ -555,8 +625,21 @@ test("the keeper wallet must hold no role on the Reserve, ArcoUSD or the Router"
       return address === RESERVE && args[0] === `0x${"00".repeat(32)}`
     },
   }
-  assert.deepEqual(await keeperHeldRoles(client as never, deployment, A(0xee)), ["Reserve:DEFAULT_ADMIN_ROLE"])
+  assert.deepEqual(await keeperHeldRoles(client as never, deployment as never, A(0xee)), ["Reserve:DEFAULT_ADMIN_ROLE"])
   assert.equal(asked.length, 12) // Reserve 4, ArcoUSD 6, Router 2
+
+  // With Savings: sArcoUSD admin / pauser / rewarder and the distributor's admin / pauser too.
+  asked.length = 0
+  const rewarder = keccak256(new TextEncoder().encode("REWARDER_ROLE"))
+  const savingsClient = {
+    readContract: async ({ address, args }: { address: string; args: readonly unknown[] }) => {
+      asked.push(`${address}:${String(args[0])}`)
+      return (address === VAULT && args[0] === rewarder) || (address === DISTRIBUTOR && args[0] === `0x${"00".repeat(32)}`)
+    },
+  }
+  const savingsDeployment = { ...deployment, savings: { vaultAddress: VAULT, distributorAddress: DISTRIBUTOR } } as never
+  assert.deepEqual(await keeperHeldRoles(savingsClient as never, savingsDeployment, A(0xee)), ["sArcoUSD:REWARDER_ROLE", "SavingsDistributor:DEFAULT_ADMIN_ROLE"])
+  assert.equal(asked.length, 17)
 })
 
 test("live: the hash is recorded before the broadcast, and a dropped transaction is re-broadcast byte for byte", async () => {
@@ -578,4 +661,206 @@ test("live: the hash is recorded before the broadcast, and a dropped transaction
   assert.equal(again.note, "Waiting for the last transaction")
   assert.equal(rpc.sent.length, 2)
   assert.equal(rpc.sent[1], rpc.sent[0]) // the same signed bytes, not a new call
+})
+
+// ─────────────────────────────── Savings: distribute() ───────────────────────────────
+
+const due = (amount: bigint) => ({ amount, nextAt: BigInt((NOW - 5 * MIN) / 1000) })
+
+test("distribute: not deployed, switched off, not due, or under a cent — no dry run and no transaction", async () => {
+  const none = setup()
+  const tick = await none.keeper.tick()
+  assert.deepEqual([tick.distribute?.state, none.rpc.previews], ["not-deployed", 0])
+
+  const off = setup({ savings: true, env: { ARCOUSD_KEEPER_DISTRIBUTE: "off" } })
+  off.rpc.preview = due(e18(5))
+  assert.deepEqual([(await off.keeper.tick()).distribute?.state, off.rpc.previews, off.rpc.sent.length], ["off", 0, 0])
+
+  const early = setup({ savings: true })
+  const waiting = await early.keeper.tick()
+  assert.deepEqual([waiting.ok, waiting.distribute?.state, waiting.distribute?.nextAt, early.rpc.distributeSims], [true, "waiting", new Date(NOW + 60 * MIN).toISOString(), 0])
+
+  const dust = setup({ savings: true })
+  dust.rpc.preview = due(10n ** 16n - 1n)
+  const nothing = await dust.keeper.tick()
+  assert.deepEqual([nothing.ok, nothing.distribute?.state, dust.rpc.distributeSims, dust.rpc.sent.length], [true, "nothing", 0, 0])
+})
+
+test("distribute: a dry run reports what would be minted and never signs", async () => {
+  const { keeper, rpc } = setup({ mode: "dry-run", savings: true })
+  rpc.preview = due(e18(12.5))
+  rpc.distributeSim = { ok: true, amount: e18(12.34) }
+  const tick = await keeper.tick()
+  assert.deepEqual([tick.ok, tick.sent, tick.distribute?.state, tick.distribute?.amountUsd, tick.distribute?.detail], [true, 0, "ready", "12.34", "Dry run: would distribute"])
+  assert.equal(rpc.sent.length, 0)
+})
+
+test("live: the queue first, then distribute() to the registry distributor at the next nonce, minted amount from the receipt", async () => {
+  const { keeper, rpc, signer, beats } = setup({ savings: true })
+  rpc.sims.set(USDC.toLowerCase(), 2n)
+  rpc.preview = due(e18(8))
+  rpc.distributeSim = { ok: true, amount: e18(8) }
+  rpc.minted = e18(7.99)
+  const tick = await keeper.tick()
+  assert.deepEqual([tick.ok, tick.sent, rpc.sent.length, tick.note], [true, 2, 2, "Sent 1 transaction"])
+  const [queue, distribute] = rpc.sent.map((raw) => parseTransaction(raw))
+  assert.deepEqual([getAddress(queue.to!), queue.nonce], [RESERVE, 5])
+  assert.deepEqual([getAddress(distribute.to!), distribute.data, distribute.nonce, distribute.value ?? 0n], [DISTRIBUTOR, DISTRIBUTE, 6, 0n])
+  assert.equal(await recoverTransactionAddress({ serializedTransaction: rpc.sent[1] as never }), signer!.address)
+  assert.deepEqual(
+    [tick.lastTx?.action, tick.lastTx?.symbol, tick.lastTx?.status, tick.lastTx?.paid, tick.lastTx?.amountUsd, tick.lastTx?.asset],
+    ["distribute", "sArcoUSD", "success", null, "7.99", undefined],
+  )
+  assert.deepEqual([tick.distribute?.state, tick.distribute?.amountUsd, tick.distribute?.detail], ["sent", "7.99", "Distributed"])
+  assert.equal((lastBeat(beats).data as { distribute: { state: string } }).distribute.state, "sent")
+})
+
+test("distribute: a dry run that reverts is a reading (the watcher judges it); a chain that cannot be asked is a failure", async () => {
+  const reverts = setup({ savings: true })
+  reverts.rpc.preview = due(e18(3))
+  reverts.rpc.distributeSim = { ok: false, revert: "Pausable: paused" }
+  const paused = await reverts.keeper.tick()
+  assert.deepEqual([paused.ok, paused.distribute?.state, paused.distribute?.detail, reverts.rpc.sent.length], [true, "reverts", "Pausable: paused", 0])
+
+  const down = setup({ savings: true })
+  down.rpc.preview = new HttpRequestError({ url: "https://rpc.example.invalid/SECRETKEY42", status: 503, body: {}, details: "Unavailable" })
+  const failed = await down.keeper.tick()
+  assert.deepEqual([failed.ok, failed.distribute?.state], [false, "error"])
+  assert.match(failed.error ?? "", /^Savings: preview\(\) could not be read: .*rpc\.example\.invalid, HTTP 503/)
+  assert.ok(!JSON.stringify(down.beats.rows).includes("SECRETKEY42"))
+
+  const sim = setup({ savings: true })
+  sim.rpc.preview = due(e18(3))
+  sim.rpc.distributeSim = new Error("socket hang up")
+  assert.match((await sim.keeper.tick()).error ?? "", /distribute\(\) could not be simulated: socket hang up/)
+})
+
+test("live: a reverted distribute() holds Savings distributions for ten minutes; the queue keeps going", async () => {
+  let now = NOW
+  const { keeper, rpc } = setup({ savings: true, now: () => now })
+  rpc.preview = due(e18(3))
+  rpc.distributeSim = { ok: true, amount: e18(3) }
+  rpc.revert = true
+  const reverted = await keeper.tick()
+  assert.deepEqual([reverted.ok, reverted.lastTx?.action, reverted.lastTx?.status], [false, "distribute", "reverted"])
+  assert.match(reverted.error ?? "", /^distribute\(\) reverted .*holding Savings distributions for 10 minutes/)
+  assert.deepEqual([reverted.holdUntil, reverted.distributeHoldUntil], [null, new Date(NOW + 10 * MIN).toISOString()])
+
+  rpc.revert = false
+  now += 5 * MIN
+  rpc.sims.set(USDC.toLowerCase(), 2n)
+  const held = await keeper.tick()
+  assert.equal(held.ok, false) // held is not healthy
+  assert.match(held.error ?? "", /^Holding Savings distributions after a reverted distribute\(\)/)
+  assert.deepEqual([held.sent, held.lastTx?.action, held.distribute?.state], [1, "processQueue", "ready"]) // the queue was paid
+  now += 6 * MIN
+  rpc.sims.clear()
+  const again = await keeper.tick()
+  assert.deepEqual([again.ok, again.lastTx?.action, again.distribute?.state], [true, "distribute", "sent"])
+})
+
+test("live: a distribute() not mined yet blocks the next round; after a restart it is followed from the heartbeat", async () => {
+  const { keeper, rpc, beats } = setup({ savings: true })
+  rpc.preview = due(e18(3))
+  rpc.distributeSim = { ok: true, amount: e18(3) }
+  rpc.mineOnSend = false
+  const sent = await keeper.tick()
+  assert.deepEqual([sent.ok, sent.sent, sent.distribute?.state, sent.pending?.nonce, sent.lastTx?.status], [true, 1, "sent", 5, "pending"])
+  const waiting = await keeper.tick()
+  assert.deepEqual([waiting.note, waiting.distribute, rpc.sent.length], ["Waiting for the last transaction", null, 1])
+
+  // A new process picks it up from the heartbeat (no asset: a distribute) and settles it.
+  const restarted = setup({ savings: true })
+  restarted.beats.previous = { lastRunAt: new Date(NOW - MIN), lastOkAt: null, lastError: null, data: lastBeat(beats).data }
+  const hash = keccak256(rpc.sent[0])
+  restarted.rpc.known.add(hash)
+  restarted.rpc.pending = 6
+  assert.equal((await restarted.keeper.tick()).note, "Waiting for the last transaction")
+  restarted.rpc.minted = e18(2.5)
+  restarted.rpc.mine(rpc.sent[0])
+  restarted.rpc.pending = 6
+  const settled = await restarted.keeper.tick()
+  assert.deepEqual([settled.lastTx?.hash, settled.lastTx?.action, settled.lastTx?.status, settled.lastTx?.amountUsd], [hash, "distribute", "success", "2.5"])
+})
+
+test("live: a distribute() whose revert shows up a round later holds only distributions; the queue is paid that round", async () => {
+  let now = NOW
+  const { keeper, rpc } = setup({ savings: true, now: () => now })
+  rpc.preview = due(e18(3))
+  rpc.distributeSim = { ok: true, amount: e18(3) }
+  rpc.mineOnSend = false
+  await keeper.tick()
+  rpc.revert = true
+  rpc.mine(rpc.sent[0])
+  rpc.revert = false
+  rpc.mineOnSend = true
+  rpc.sims.set(USDC.toLowerCase(), 2n)
+  now += MIN
+  const late = await keeper.tick()
+  assert.equal(late.ok, false)
+  assert.match(late.error ?? "", /^distribute\(\) reverted .*holding Savings distributions for 10 minutes$/) // once, not also "Holding …"
+  assert.deepEqual([late.holdUntil, late.distributeHoldUntil], [null, new Date(NOW + 11 * MIN).toISOString()])
+  assert.deepEqual([late.sent, late.lastTx?.action, late.lastTx?.status, late.distribute?.state], [1, "processQueue", "success", "ready"])
+  assert.equal(parseTransaction(rpc.sent[1]).nonce, 6)
+})
+
+test("live: a queue that cannot be read still leaves Savings checked; a failed queue send does not block distribute()", async () => {
+  let reads = 0
+  const broken = setup({
+    savings: true,
+    state: () => {
+      reads++
+      throw new Error("lens call reverted")
+    },
+  })
+  broken.rpc.preview = due(e18(3))
+  broken.rpc.distributeSim = { ok: true, amount: e18(3) }
+  const tick = await broken.keeper.tick()
+  assert.deepEqual([tick.ok, tick.note, tick.distribute?.state, broken.rpc.sent.length, reads], [false, "Could not check the queue", "sent", 1, 1])
+  assert.match(tick.error ?? "", /^lens call reverted/)
+  assert.equal(parseTransaction(broken.rpc.sent[0]).nonce, 5)
+
+  const flaky = setup({ savings: true })
+  flaky.rpc.sims.set(USDC.toLowerCase(), 2n)
+  flaky.rpc.preview = due(e18(3))
+  flaky.rpc.distributeSim = { ok: true, amount: e18(3) }
+  const send = flaky.rpc.sendRaw.bind(flaky.rpc)
+  let calls = 0
+  flaky.rpc.sendRaw = async (raw: Hex) => {
+    if (calls++ === 0) throw new Error("connection reset")
+    return send(raw)
+  }
+  const after = await flaky.keeper.tick()
+  assert.equal(after.ok, false)
+  assert.match(after.error ?? "", /^Send failed: connection reset/)
+  // The failed processQueue never reached the node, so distribute() reuses its nonce.
+  assert.deepEqual([after.distribute?.state, flaky.rpc.sent.length, parseTransaction(flaky.rpc.sent[0]).nonce, getAddress(parseTransaction(flaky.rpc.sent[0]).to!)], ["sent", 1, 5, DISTRIBUTOR])
+})
+
+test("live: a distribute hold survives a restart", async () => {
+  const { keeper, rpc, beats } = setup({ savings: true })
+  beats.previous = { lastRunAt: new Date(NOW - MIN), lastOkAt: null, lastError: "x", data: { distributeHoldUntil: new Date(NOW + 5 * MIN).toISOString(), lastTx: null } }
+  rpc.preview = due(e18(3))
+  rpc.distributeSim = { ok: true, amount: e18(3) }
+  const held = await keeper.tick()
+  assert.deepEqual([held.ok, held.distributeHoldUntil, rpc.sent.length], [false, new Date(NOW + 5 * MIN).toISOString(), 0])
+})
+
+test("signer: distribute() only to the registry distributor, only its exact calldata", async () => {
+  const signed: unknown[] = []
+  const sign = (loadRegistry: () => ArcoUSDRegistryFile) =>
+    guardedKeeperSigner({ address: A(0xee), loadRegistry, chainId: 91342, signOriginal: async (request) => (signed.push(request), "0x02aa") })
+  const signer = sign(withSavings)
+  const ok = { chainId: 91342 as const, nonce: 1n, to: DISTRIBUTOR, data: DISTRIBUTE, value: 0n as const }
+  assert.equal(await signer.sign(ok), "0x02aa")
+  assert.equal(await signer.sign({ ...ok, to: DISTRIBUTOR.toLowerCase() as `0x${string}` }), "0x02aa")
+  await assert.rejects(signer.sign({ ...ok, data: DISTRIBUTE.toUpperCase().replace("0X", "0x") as Hex }), /Only canonical distribute\(\)/)
+  await assert.rejects(signer.sign({ ...ok, data: `${DISTRIBUTE}00` as Hex }), /Only canonical distribute\(\)/)
+  await assert.rejects(signer.sign({ ...ok, data: encodeFunctionData({ abi: processQueueAbi, functionName: "processQueue", args: [USDC, 20n] }) }), /Only canonical distribute\(\)/)
+  await assert.rejects(signer.sign({ ...ok, to: VAULT }), /Only the ArcoUSD Reserve or the Savings distributor/)
+  await assert.rejects(signer.sign({ ...ok, to: RESERVE }), /Only processQueue/) // distribute() calldata to the Reserve
+  await assert.rejects(signer.sign({ ...ok, value: 1n as 0n }), /value 0/)
+  // Without Savings in the registry the distributor is just another address.
+  await assert.rejects(sign(registry).sign(ok), /Only the ArcoUSD Reserve/)
+  assert.equal(signed.length, 2)
 })

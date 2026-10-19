@@ -1,6 +1,6 @@
 import { getAddress, isAddress } from "viem"
 
-// ArcoUSD queue keeper settings (docs/operations/arcousd-keeper.md). Nothing here is secret: the
+// ArcoUSD keeper settings (docs/operations/arcousd-keeper.md). Nothing here is secret: the
 // keeper's key arrives as two platform secret files (keystore + password), never through the
 // environment. Unlike the alert settings, a bad value here is not papered over with a default:
 // outside `off` the keeper refuses to start (fail closed) and names the variable.
@@ -16,6 +16,7 @@ export type ArcoUSDKeeperEnvKey =
   | "ARCOUSD_KEEPER_MAX_FEE_WEI"
   | "ARCOUSD_KEEPER_PRIORITY_FEE_WEI"
   | "ARCOUSD_KEEPER_LOW_GAS_WEI"
+  | "ARCOUSD_KEEPER_DISTRIBUTE"
 
 export type ArcoUSDKeeperEnv = {
   /** off: idle (default) · dry-run: simulate and report, never sign · live: sign and send. */
@@ -31,6 +32,8 @@ export type ArcoUSDKeeperEnv = {
   readonly maxPriorityFeePerGas: bigint
   /** Below this wallet balance (wei) the watcher warns that the keeper is running out of gas. */
   readonly lowGasWei: bigint
+  /** Also send the Savings distributor's distribute() when it is due (on by default; the mode still decides). */
+  readonly distribute: boolean
   readonly invalid: readonly ArcoUSDKeeperEnvKey[]
 }
 
@@ -98,7 +101,14 @@ export function parseArcoUSDKeeperEnv(env: NodeJS.ProcessEnv): ArcoUSDKeeperEnv 
   if (maxPriorityFeePerGas > maxFeePerGas && !invalid.includes("ARCOUSD_KEEPER_PRIORITY_FEE_WEI")) invalid.push("ARCOUSD_KEEPER_PRIORITY_FEE_WEI")
   const lowGasWei = wei("ARCOUSD_KEEPER_LOW_GAS_WEI", KEEPER_DEFAULTS.lowGasWei, LIMITS.lowGasWei)
 
-  return { mode, address, intervalMs, batch, gasLimit, maxFeePerGas, maxPriorityFeePerGas, lowGasWei, invalid }
+  let distribute = true
+  const rawDistribute = read("ARCOUSD_KEEPER_DISTRIBUTE")
+  if (rawDistribute !== undefined) {
+    if (rawDistribute === "on" || rawDistribute === "off") distribute = rawDistribute === "on"
+    else invalid.push("ARCOUSD_KEEPER_DISTRIBUTE")
+  }
+
+  return { mode, address, intervalMs, batch, gasLimit, maxFeePerGas, maxPriorityFeePerGas, lowGasWei, distribute, invalid }
 }
 
 /** The most one keeper transaction can cost (gas limit × fee ceiling), in wei. */
