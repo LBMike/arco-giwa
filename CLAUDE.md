@@ -48,6 +48,8 @@ inherited at extraction — fix only as a dedicated approved task; never grow th
 - Numbers: financial values show **max 2 decimals, no forced trailing zeros**
   (`6 → 6%`, `28_530_000 → $28.53M`). **Exception:** NAV/share price may show up to
   4 decimals (min 2) — near-par NAV needs sub-cent precision; `par → $1.00`.
+  **Exception:** operational gas balances (admin console, e.g. the queue bot wallet's
+  ETH) may show up to 4 decimals, no forced trailing zeros — a few cents of gas still matter.
 
 ## Routes
 
