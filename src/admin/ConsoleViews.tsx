@@ -303,11 +303,36 @@ export function ConsoleShell({
           ))}
         </nav>
         <main id="admin-main" className="min-w-0 space-y-4">
+          {info.signerWallet && <SignerWalletNotice />}
           {forbidden && <ForbiddenNotice onDismiss={onDismissForbidden} />}
           {children}
         </main>
       </div>
     </ConsoleFrame>
+  )
+}
+
+/**
+ * Signed in with the Stocks signer's wallet (the server says so). Reading and Stocks controls are fine
+ * (signing in is a message, not a transaction), but a transaction sent from this wallet moves the nonce
+ * the signer keeps and stops Stocks until its journal is re-seeded. The ArcoUSD builders refuse it.
+ */
+export function SignerWalletNotice() {
+  return (
+    <div
+      role="note"
+      data-testid="console-signer-wallet"
+      className="flex w-full items-start gap-2 rounded-[var(--radius-card)] border border-[var(--color-arco-down)] bg-[var(--color-arco-surface)] p-3"
+    >
+      <ShieldAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-[var(--color-arco-down)]" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-[var(--color-arco-down)]">This wallet is the Stocks signer</p>
+        <p className="mt-0.5 text-xs leading-5 text-[var(--color-arco-text-soft)]">
+          Do not send transactions from it here. Any transaction from this wallet stops Stocks until the signer journal is re-seeded.
+          Use another operator wallet for on-chain actions. Process queue, Distribute, Top up the buffer and Claim recall refuse this one.
+        </p>
+      </div>
+    </div>
   )
 }
 

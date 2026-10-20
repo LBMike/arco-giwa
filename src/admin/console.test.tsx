@@ -27,10 +27,11 @@ const noop = () => {}
 const actions: GateActions = { connect: noop, switchNetwork: noop, signIn: noop, retry: noop, signOut: noop, disconnect: noop }
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ")
 
-const info = (vault: string[] | null, stocks: string[] | null): AdminSessionInfo => ({
+const info = (vault: string[] | null, stocks: string[] | null, signerWallet = false): AdminSessionInfo => ({
   wallet: WALLET,
   vault: vault ? { operatorId: "vault-op", permissions: vault } : null,
   stocks: stocks ? { operatorId: "stocks-op", permissions: stocks } : null,
+  signerWallet,
 })
 
 const signedOut: GateInput = {
@@ -108,7 +109,13 @@ test("GET /api/v1/admin/session is parsed strictly; a malformed answer grants no
     wallet: WALLET,
     vault: { operatorId: "ops", permissions: ["vault:read"] },
     stocks: null,
+    signerWallet: false,
   })
+  // The signer-wallet flag: only a literal true counts (older servers omit it).
+  assert.equal(parseAdminSession({ wallet: WALLET, vault: null, stocks: null, signerWallet: true }).signerWallet, true)
+  for (const flag of ["true", 1, null, undefined]) {
+    assert.equal(parseAdminSession({ wallet: WALLET, vault: null, stocks: null, signerWallet: flag }).signerWallet, false, String(flag))
+  }
   for (const body of [null, [], {}, { wallet: "nope", vault: null, stocks: null }, { wallet: WALLET, vault: {}, stocks: null }, { wallet: WALLET, vault: null, stocks: { operatorId: "", permissions: [] } },
     { wallet: WALLET, vault: { operatorId: "ops", permissions: "vault:read" }, stocks: null }, { wallet: WALLET, vault: undefined, stocks: null }]) {
     assert.throws(() => parseAdminSession(body), AdminSessionContractError, JSON.stringify(body))
@@ -133,8 +140,8 @@ test("tabs follow the permissions: each group needs its read permission; / opens
   assert.equal(CONSOLE_NAV.flatMap((group) => group.tabs).length, 13)
 })
 
-function shell(vault: string[] | null, stocks: string[] | null, path = "/") {
-  const session = info(vault, stocks)
+function shell(vault: string[] | null, stocks: string[] | null, path = "/", signerWallet = false) {
+  const session = info(vault, stocks, signerWallet)
   return renderToStaticMarkup(
     <MemoryRouter initialEntries={[path]}>
       <ConsoleShell info={session} access={accessOf(session)} expiresAt={Date.UTC(2026, 8, 26, 3, 15)} forbidden={false} onDismissForbidden={noop} onSignOut={noop}>
@@ -160,6 +167,12 @@ test("the signed-in shell shows only the permitted groups, the operator identity
   const stocksOnly = shell(null, ["stocks:read"])
   assert.match(stocksOnly, /href="\/stocks\/held"/)
   assert.doesNotMatch(stocksOnly, /href="\/vaults\//)
+
+  // Signed in with the Stocks signer's wallet: a standing notice on every page; none otherwise.
+  assert.doesNotMatch(both, /console-signer-wallet/)
+  const signer = shell(["vault:read", "vault:write"], ["stocks:read"], "/vaults/arcousd", true)
+  assert.match(signer, /data-testid="console-signer-wallet"/)
+  assert.match(text(signer), /This wallet is the Stocks signer Do not send transactions from it here\. Any transaction from this wallet stops Stocks/)
 })
 
 test("403: a refused request shows a notice, and an unpermitted group shows a panel instead of the page", () => {

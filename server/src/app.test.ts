@@ -6,7 +6,7 @@ import { privateKeyToAccount } from "viem/accounts"
 import { buildApp, type VaultPauseDetail } from "./app.js"
 import { ArcoUSDRecalls, reserveRecallAbi, type RecallChainState, type RecallReader } from "./arcousd/recall.js"
 import type { ArcoUSDRegistryFile } from "./arcousd/registry.js"
-import { ArcoUSDAdmin, processQueueAbi } from "./arcousd/admin.js"
+import { ArcoUSDAdmin, processQueueAbi, reserveDepositAbi, topUpTokenAbi } from "./arcousd/admin.js"
 import { distributorAbi } from "./arcousd/abi.js"
 import { parseArcoUSDAlertEnv } from "./arcousd/alert-config.js"
 import { ArcoUSDAlertsAdmin } from "./arcousd/alerts.js"
@@ -298,6 +298,8 @@ function makeApp(options?: {
   /** Public ArcoUSD routes (reserve, gate) and the wallet redemptions route; absent leaves them out. */
   arcoUSD?: ArcoUSDService
   arcoUSDRedemptions?: ArcoUSDRedemptions
+  /** Wallets whose nonce a service owns (the Stocks signer); absent → none. */
+  signerWallets?: string[]
 }) {
   const prisma = makePrisma()
   const arco = new PrismaArcoService(prisma as PrismaLike)
@@ -375,6 +377,7 @@ function makeApp(options?: {
       ...(options?.arcoUSDSavingsAdmin ? { arcoUSDSavingsAdmin: options.arcoUSDSavingsAdmin } : {}),
       ...(options?.arcoUSD ? { arcoUSD: options.arcoUSD } : {}),
       ...(options?.arcoUSDRedemptions ? { arcoUSDRedemptions: options.arcoUSDRedemptions } : {}),
+      ...(options?.signerWallets ? { signerWallets: options.signerWallets } : {}),
     },
   )
   return { app, prisma, registry: fullRegistry }
@@ -2877,6 +2880,98 @@ test("ArcoUSD alert routes: operator-only view and a test send that names the op
   const bareView = (await bare.inject({ method: "GET", url: "/api/v1/admin/arcousd/alerts", headers: OPERATOR })).json()
   assert.deepEqual([bareView.status, bareView.alerts, bareView.channels], ["not-deployed", [], { telegram: false, slack: false }])
   assert.equal((await bare.inject({ method: "POST", url: "/api/v1/admin/arcousd/alerts/test", headers: OPERATOR })).statusCode, 409)
+})
+
+test("ArcoUSD buffer top-up: approve then deposit from the operator's own wallet, and no ArcoUSD transaction for the Stocks signer", async () => {
+  const reserve = "0x00000000000000000000000000000000000000e5"
+  const usdc = "0x00000000000000000000000000000000000000c1"
+  let allowance = 0n
+  const reads: Record<string, unknown>[] = []
+  const simulated: Record<string, unknown>[] = []
+  const arcoUSDAdmin = new ArcoUSDAdmin({
+    chainId: 91342,
+    loadRegistry: () => arcoUSDTestRegistry(),
+    store: { snapshots: async () => [], redeemRequests: async () => [], events: async () => [] },
+    simulateProcessQueue: async () => ({ paid: 0n, blockNumber: 50n }),
+    readTopUpWallet: async (input) => {
+      reads.push(input)
+      return { balance: 5_000_000_000n, allowance, blockNumber: 60n } // 5,000 tUSDC
+    },
+    simulateDeposit: async (input) => {
+      simulated.push(input)
+      return { arcoUSDOut: 1_000n * 10n ** 18n, blockNumber: 61n }
+    },
+  })
+  const post = (app: ReturnType<typeof makeApp>["app"], url: string, payload: object, headers: Record<string, string> = OPERATOR) =>
+    app.inject({ method: "POST", url, headers, payload })
+  const session = async (app: ReturnType<typeof makeApp>["app"]) =>
+    (await app.inject({ method: "GET", url: "/api/v1/admin/session", headers: OPERATOR })).json()
+
+  const { app } = makeApp({ arcoUSDAdmin })
+  assert.equal((await post(app, "/api/v1/admin/arcousd/buffer-topup", { asset: "tUSDC", amount: "1000" }, {})).statusCode, 401)
+  // A read-only operator cannot build a write.
+  assert.equal((await post(app, "/api/v1/admin/arcousd/buffer-topup", { asset: "tUSDC", amount: "1000" }, sessionHeaders(TEST_READER_WALLET))).statusCode, 403)
+  assert.equal((await session(app)).signerWallet, false)
+
+  // Allowance short: approve(Reserve, amount) then deposit(asset, amount, operator); the deposit is dry-run later.
+  const first = await post(app, "/api/v1/admin/arcousd/buffer-topup", { asset: "tUSDC", amount: "1000" })
+  assert.equal(first.statusCode, 200)
+  const body = first.json()
+  assert.deepEqual(
+    [body.symbol, body.amount, body.amountHuman, body.from.toLowerCase(), body.balanceHuman, body.needsApproval, body.preview],
+    ["tUSDC", "1000000000", "1000", TEST_OPERATOR_WALLET, "5000", true, { afterApproval: true }],
+  )
+  assert.equal(body.ok, undefined)
+  assert.equal(body.transactions.length, 2)
+  const approve = decodeFunctionData({ abi: topUpTokenAbi, data: body.transactions[0].data })
+  assert.deepEqual([body.transactions[0].to.toLowerCase(), approve.functionName, String(approve.args[0]).toLowerCase(), approve.args[1]], [usdc, "approve", reserve, 1_000_000_000n])
+  const deposit = decodeFunctionData({ abi: reserveDepositAbi, data: body.transactions[1].data })
+  assert.deepEqual(
+    [body.transactions[1].to.toLowerCase(), deposit.functionName, String(deposit.args[0]).toLowerCase(), deposit.args[1], String(deposit.args[2]).toLowerCase()],
+    [reserve, "deposit", usdc, 1_000_000_000n, TEST_OPERATOR_WALLET],
+  )
+  assert.equal(body.transactions[1].simulation.status, "not-run")
+  assert.equal(String((reads[0] as { owner: string }).owner).toLowerCase(), TEST_OPERATOR_WALLET)
+  assert.equal(simulated.length, 0)
+
+  // Approved: the deposit alone, dry-run from the operator wallet.
+  allowance = 1_000_000_000n
+  const second = (await post(app, "/api/v1/admin/arcousd/buffer-topup", { asset: "tUSDC", amount: "1000" })).json()
+  assert.deepEqual([second.needsApproval, second.transactions.length, second.preview], [false, 1, { arcoUSDOutHuman: "1000", blockNumber: "61" }])
+  assert.equal(second.transactions[0].simulation.status, "simulated")
+  assert.equal(String((simulated[0] as { from: string }).from).toLowerCase(), TEST_OPERATOR_WALLET)
+
+  // More than the wallet holds, a bad amount, an unknown asset.
+  const short = await post(app, "/api/v1/admin/arcousd/buffer-topup", { asset: "tUSDC", amount: "6000" })
+  assert.deepEqual([short.statusCode, /holds 5,000 tUSDC, less than the 6000 tUSDC of this top-up/.test(short.json().error)], [409, true])
+  for (const payload of [{ asset: "tUSDC", amount: "0" }, { asset: "tUSDC", amount: "1.1234567" }, { asset: "tUSDC" }, { asset: "tDAI", amount: "1" }]) {
+    assert.equal((await post(app, "/api/v1/admin/arcousd/buffer-topup", payload)).statusCode, 400, JSON.stringify(payload))
+  }
+
+  // Signed in with the Stocks signer's wallet: the session says so, and no ArcoUSD builder answers.
+  const guarded = makeApp({ arcoUSDAdmin, signerWallets: [TEST_OPERATOR_WALLET.toUpperCase().replace("0X", "0x")] }).app
+  assert.equal((await session(guarded)).signerWallet, true)
+  const before = reads.length
+  for (const [url, payload] of [
+    ["/api/v1/admin/arcousd/buffer-topup", { asset: "tUSDC", amount: "1000" }],
+    ["/api/v1/admin/arcousd/process-queue", { asset: "tUSDC" }],
+    ["/api/v1/admin/arcousd/savings/distribute", {}],
+  ] as const) {
+    const refused = await post(guarded, url, payload)
+    assert.deepEqual([refused.statusCode, refused.json().code], [409, "SIGNER_WALLET"], url)
+    assert.match(refused.json().error, /Stocks signer/)
+  }
+  assert.equal(reads.length, before) // refused before any chain read
+  // Another operator's wallet is unaffected.
+  const other = makeApp({ arcoUSDAdmin, signerWallets: ["0x00000000000000000000000000000000000000ff"] }).app
+  assert.equal((await post(other, "/api/v1/admin/arcousd/buffer-topup", { asset: "tUSDC", amount: "1000" })).statusCode, 200)
+  assert.equal((await session(other)).signerWallet, false)
+
+  // Without the service the route answers like the other builders.
+  assert.equal((await post(makeApp().app, "/api/v1/admin/arcousd/buffer-topup", { asset: "tUSDC", amount: "1" })).statusCode, 409)
+  // claimRecall is permissionless too: refused for the signer before anything is read.
+  const claim = await post(guarded, "/api/v1/admin/products/acapix/redemptions/1/claim-recall", {})
+  assert.deepEqual([claim.statusCode, claim.json().code], [409, "SIGNER_WALLET"])
 })
 
 function arcoUSDTestRegistry(): ArcoUSDRegistryFile {

@@ -118,7 +118,7 @@ test('a signed-in wallet outside ADMIN_OPERATORS is 403 on every Vault route; /s
   const me = await f.call(SESSION, session(W.stranger));
   assert.equal(me.statusCode, 200);
   assert.equal(me.headers['cache-control'], 'no-store');
-  assert.deepEqual(me.json(), { wallet: W.stranger, vault: null, stocks: null });
+  assert.deepEqual(me.json(), { wallet: W.stranger, vault: null, stocks: null, signerWallet: false });
 });
 
 test('vault:read reads only, vault:write writes only, and both together do both', async t => {
@@ -144,11 +144,12 @@ test('Vault permissions never reach Stocks routes and Stocks permissions never r
   assert.deepEqual(f.calls, []);
   assert.equal((await f.call(STOCKS_READ, session(W.stocks))).statusCode, 200);
   assert.deepEqual((await f.call(SESSION, session(W.stocks))).json(),
-    { wallet: W.stocks, vault: null, stocks: { operatorId: 'stocks-controller', permissions: ['stocks:read', 'stocks:control'] } });
+    { wallet: W.stocks, vault: null, stocks: { operatorId: 'stocks-controller', permissions: ['stocks:read', 'stocks:control'] }, signerWallet: false });
   assert.deepEqual((await f.call(SESSION, session(W.both))).json(), {
     wallet: W.both,
     vault: { operatorId: 'ops-both', permissions: ['vault:read', 'vault:write'] },
     stocks: { operatorId: 'ops-both-stocks', permissions: ['stocks:read'] },
+    signerWallet: false,
   });
 });
 
@@ -169,6 +170,12 @@ test('ADMIN_LEGACY_TOKEN_AUTH=1 accepts the exact token on Vault routes only, ne
   // A presented session is authoritative: an expired one never falls back to the token.
   assert.equal((await f.call(READ, { ...expired(W.full), ...legacy() })).statusCode, 401);
   assert.equal((await f.call(READ, { ...session(W.stranger), ...legacy() })).statusCode, 403);
+  // The token names no wallet: the transactions built for the operator's own wallet to sign refuse it.
+  for (const url of ['/api/v1/admin/arcousd/process-queue', '/api/v1/admin/arcousd/savings/distribute', '/api/v1/admin/arcousd/buffer-topup',
+    '/api/v1/admin/products/acapix/redemptions/1/claim-recall']) {
+    const refused = await f.call({ method: 'POST', url, payload: { asset: 'tUSDC', amount: '1' } }, legacy());
+    assert.deepEqual([refused.statusCode, refused.json().code], [403, 'SESSION_WALLET_REQUIRED'], url);
+  }
 });
 
 test('Vault admin authentication works with the Stocks runtime off', async t => {
@@ -176,7 +183,7 @@ test('Vault admin authentication works with the Stocks runtime off', async t => 
   assert.equal((await f.call(READ, session(W.full))).statusCode, 200);
   assert.equal((await f.call(WRITE, session(W.full))).statusCode, 200);
   assert.deepEqual((await f.call(SESSION, session(W.both))).json(),
-    { wallet: W.both, vault: { operatorId: 'ops-both', permissions: ['vault:read', 'vault:write'] }, stocks: null });
+    { wallet: W.both, vault: { operatorId: 'ops-both', permissions: ['vault:read', 'vault:write'] }, stocks: null, signerWallet: false });
   assert.equal((await f.call(STOCKS_READ, session(W.stocks))).statusCode, 404);
 });
 

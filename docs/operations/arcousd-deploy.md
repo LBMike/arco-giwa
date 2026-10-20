@@ -137,7 +137,8 @@ CONFIRM_GIWA_BROADCAST=I_UNDERSTAND_THIS_BROADCASTS_TO_GIWA \
 ### 브로드캐스트 직전
 
 1. §2 드라이런: `preflight.checks`가 모두 `true`, `deployerCanSeedSavings: true`, `deployerBalanceEth` 확인.
-2. 깨끗한 git 트리에서 §3 명령으로 브로드캐스트한다.
+2. **배포 지갑이 Stocks 서명기 지갑과 같다(`0xFDCf…6F29`).** 배포 트랜잭션이 서명기 지갑의 nonce를 쓰므로 Stocks가 멈춘다. 브로드캐스트 전에 Stocks 거래를 멈추고(Trading control, Unfinished orders 0건), 브로드캐스트 뒤에 서명 기록을 새 nonce로 다시 맞춘다(`stocks_signer` 스키마 보관 후 재생성 → 서명기 `reviewedInitialNonce` 갱신 → `journal.mjs --seed <nonce>` → 서명기·API 재배포, `docs/operations/app-arco-financial-release.md`). 2026-10-20 배포에서 이 절차를 놓쳐 API 재배포가 `SERVER_START_FAILED`로 실패했고, 위 절차로 복구했다.
+3. 깨끗한 git 트리에서 §3 명령으로 브로드캐스트한다.
 
 ### 브로드캐스트 뒤
 
