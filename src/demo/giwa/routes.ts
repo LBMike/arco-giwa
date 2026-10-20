@@ -1,4 +1,6 @@
+/** The root: a visit starts on Savings (the index route redirects there). */
 export const GIWA_PREPROD_ROUTE = "/"
+export const GIWA_HOME_ROUTE = "/home"
 export const GIWA_FUNDS_ROUTE = "/funds"
 export const GIWA_SAVINGS_ROUTE = "/savings"
 export const GIWA_ADMIN_ROUTE = "/admin"

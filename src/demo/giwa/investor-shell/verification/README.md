@@ -52,6 +52,39 @@ http://127.0.0.1:<port>/src/demo/giwa/investor-shell/verification/index.html#/
   - no Dynamic environment ID is set,
   - the admin allowlist is empty.
 
+## Demo wallet (`?wallet=demo`)
+
+Add `?wallet=demo` before the hash to click through the wallet flows: connect, approve, deposit, withdraw (instant or
+requested), Get ArcoUSD (a stablecoin to ArcoUSD and back) and Mint test assets.
+
+```
+http://127.0.0.1:<port>/src/demo/giwa/investor-shell/verification/index.html?wallet=demo#/savings
+```
+
+**Nothing in it is real.** It has no wallet and no keys, sends no transaction, and makes no network request. It is
+made of three parts:
+
+- **Demo wallet** (`demo-wallet.ts`):
+  - It is the page's `window.ethereum`, so the app takes its injected-wallet path.
+  - Connect requests and transaction requests wait in a window at the bottom right (`DemoWalletPanel.tsx`) until you press **Confirm** or **Reject**. Reject is a user rejection (4001).
+  - Auto-confirm answers requests by itself after a moment.
+  - The demo wallet never signs messages, so Stocks sign-in is not part of the demo.
+- **Demo chain** (`demo-chain.ts`) answers the page's GIWA RPC reads in place of the public RPC. It runs the demo
+  wallet's transactions against the captured catalog's addresses and the captured NAV, so amounts match what the
+  page quotes. Its behaviour:
+  - Transactions settle 1.5 s after they are sent.
+  - The demo account starts with 10,000 tUSDC, 5 tWETH, 10,000 tXRP, 0.5 tBTC and 0.05 ETH for gas.
+  - Each vault starts at about $50K, with 10% of it in the instant reserve. A withdrawal larger than the reserve goes to the request path.
+  - Withdrawal requests stay pending, because no operator settles them.
+  - Every Savings coin other than the stablecoin vault's own has a route token (`demo-routes.ts`), named for its coin and chain ("USDT (Ethereum)"); the demo account starts with 10,000 of each.
+  - Get ArcoUSD: each of those coins (and the vault's own) has a converter that mints ArcoUSD one for one and pays the coin back from a 1,000,000 reserve. ArcoUSD is one 18-decimal token, also the coin the Savings route takes.
+  - The demo account's requests answer `/api/v1/redemptions/<wallet>`.
+- **State** lasts for the browser tab (`sessionStorage`) until **Reset demo** in the wallet window. Explorer links in
+  the demo point at hashes that do not exist.
+
+Without `?wallet=demo`, and in connected (`giwa-customer-reads`) mode, none of this loads. The page behaves exactly as
+described below.
+
 ## What is real and what is fixture
 
 | Layer | Real or fixture |
@@ -147,10 +180,10 @@ A blocked `localhost:8080` read that the pages make without a wallet would be a 
 ## Preview-only differences
 
 - **Hash routing is preview-only.** This page is one static file served in Vite's MPA mode, so the route lives in the fragment (`#/funds`). The app uses real paths such as `/funds` and `/stocks?symbol=…`.
-- **Footer links.** Their `#` placeholder links go to Home here, because the hash router owns the fragment.
+- **Footer links.** Their `#` placeholder links go to the root here (it opens Savings), because the hash router owns the fragment.
 - **Routes left out:**
   - the `/app/*` legacy redirects,
-  - the allowlisted `/admin/*` console, since no wallet is allowlisted without an env. Unknown paths such as `#/admin/operations` fall back to Home.
+  - the allowlisted `/admin/*` console, since no wallet is allowlisted without an env. Unknown paths such as `#/admin/operations` fall back to the root, which opens Savings.
 - **`#/admin/stocks`.** It comes with `stocksRoutes`. Its operator sign-in would call `localhost:8080`, which is blocked.
 - **Focus order.** Tab starts in the preview bar. The app's **Skip to content** button is the first stop after it.
 
@@ -179,7 +212,8 @@ never bundled.
 ## Customer demo presentation
 
 The editable preview opens in customer presentation mode by default. The header shows
-Connect Wallet and Mint test assets (inside the menu on mobile), without a Demo badge. It removes
+Connect Wallet (and, with the demo wallet, Get ArcoUSD), without a Demo badge; Mint test assets sits at the bottom of
+the menu (the sidebar's, or the drawer's under its links). It removes
 the verification controls/request log and repeated
 mock-price, fixture, feed-unknown and implementation notes, and removes the visible chart
 observation slider and raw OHLCV table. The chart itself remains keyboard focusable:

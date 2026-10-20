@@ -1,5 +1,5 @@
 import { formatUnits } from "viem"
-import { vaultConfigOf, vaultDisplayName, vaultImageFor } from "./catalog"
+import { tokenSymbolFor, vaultConfigOf, vaultDisplayName, vaultImageFor } from "./catalog"
 import { formatCash, formatQuantity } from "./stocks-investor/display"
 import { orderStatusMeaning } from "./stocks-investor/status"
 import type { StocksActivityEntry } from "./stocks-investor/types"
@@ -118,7 +118,7 @@ function resolveProduct(
   }
   return {
     productId: product.productId,
-    symbol: product.symbol,
+    symbol: tokenSymbolFor(product),
     name: vaultDisplayName(product),
     imageUrl: vaultImageFor(product),
     category: vaultConfigOf(product).category ?? null,

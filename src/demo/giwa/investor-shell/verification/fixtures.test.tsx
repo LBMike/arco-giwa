@@ -166,7 +166,7 @@ test("preview route tree mirrors the investor routes of src/main.tsx with the sa
     new Map([...investorBranch(source).matchAll(/\{ (?:index: true|path: (['"])([^'"]+)\1), element: giwaRoute\(<(\w+) \/>\) \}/g)].map((match) => [match[2] ?? "(index)", match[3]!]))
   const appChildren = children(app)
   const previewChildren = children(preview)
-  assert.deepEqual([...previewChildren.keys()], ["(index)", "funds", "savings", "portfolio", "product/:id"])
+  assert.deepEqual([...previewChildren.keys()], ["home", "funds", "savings", "portfolio", "product/:id"])
   assert.deepEqual([...previewChildren], [...appChildren].filter(([path]) => previewChildren.has(path)))
   assert.deepEqual([...appChildren.keys()].filter((path) => !previewChildren.has(path)), [], "every investor child route of src/main.tsx is in the preview")
   const appModules = lazyModules(app)
@@ -178,6 +178,9 @@ test("preview route tree mirrors the investor routes of src/main.tsx with the sa
   for (const source of [app, preview]) {
     assert.match(source, /\.\.\.stocksRoutes\(giwaRoute\(<GiwaPreprodApp \/>\)\)/)
     assert.match(source, /path: GIWA_PREPROD_ROUTE,\s*element: giwaRoute\(<GiwaPreprodApp \/>\)/)
+    // Both start a visit on Savings, keeping the query.
+    assert.match(source, /\{ index: true, element: <LandingRedirect \/> \}/)
+    assert.match(source, /return <Navigate to=\{`\$\{GIWA_SAVINGS_ROUTE\}\$\{location\.search\}`\} replace \/>/)
     assert.match(source, /\{ path: (['"])\*\1, element: <Navigate to=\{GIWA_PREPROD_ROUTE\} replace \/> \}/)
   }
   assert.match(preview, /createHashRouter\(/)
@@ -198,11 +201,17 @@ test("preview installs the fetch guard before rendering and loads product pages 
     "../../config",
     "../../demo-presentation",
     "../../routes",
+    "../../savings-routes",
     "../../stocks-market/environment",
     "../../stocks-market/fixtures",
     "../../stocks-market/routes",
+    "./DemoWalletPanel",
     "./customer-wallet",
+    "./demo-chain",
+    "./demo-routes",
+    "./demo-wallet",
     "./deployed",
+    "./deployed-giwa.snapshot.json",
     "./fixtures",
     "react",
     "react-dom/client",
@@ -210,6 +219,23 @@ test("preview installs the fetch guard before rendering and loads product pages 
   ])
   const fixtures = read("./fixtures.ts")
   assert.deepEqual([...fixtures.matchAll(/^import (?!type )/gm)], [], "fixtures.ts has type-only imports")
+  // The demo wallet (?wallet=demo) loads with the guard, so its modules may load no product module at runtime, except
+  // the Savings coin list its routes are made from and Get ArcoUSD's coins its converters are made from, leaf modules.
+  const runtimeImports = (path: string) => [...read(path).matchAll(/^import (?!type )(?:[^"]*?\sfrom\s)?"([^"]+)"/gm)].map((match) => match[1]!)
+  for (const path of ["./demo-chain.ts", "./demo-wallet.ts", "./DemoWalletPanel.tsx", "./demo-routes.ts"]) {
+    const runtime = runtimeImports(path)
+    assert.ok(runtime.length > 0, path)
+    const allowed = (spec: string) =>
+      ["viem", "react", "lucide-react"].includes(spec) ||
+      /^\.\/demo-/.test(spec) ||
+      (path === "./demo-routes.ts" && ["../../savings-assets", "../../arcousd-convert"].includes(spec))
+    assert.ok(runtime.every(allowed), `${path} imports ${runtime.join(", ")}`)
+  }
+  // The product modules the preview loads with the guard are leaves: the coin list imports types only, the routes
+  // context React only.
+  assert.deepEqual(runtimeImports("../../savings-assets.ts"), [], "savings-assets.ts has type-only imports")
+  assert.deepEqual(runtimeImports("../../arcousd-convert.ts"), ["./savings-assets"], "arcousd-convert.ts imports the coin list only")
+  assert.deepEqual(runtimeImports("../../savings-routes.ts"), ["react"], "savings-routes.ts imports React only")
 })
 
 test("customer mode forwards real reads and its explicitly configured wallet before fixture responses", () => {

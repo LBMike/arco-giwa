@@ -1,7 +1,7 @@
 import React, { Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
 import { createBrowserRouter, Navigate, RouterProvider, useLocation, useParams, type RouteObject } from 'react-router-dom'
-import { GIWA_ADMIN_OPERATIONS_ROUTE, GIWA_ADMIN_ROUTE, GIWA_PREPROD_ROUTE } from './demo/giwa/routes'
+import { GIWA_ADMIN_OPERATIONS_ROUTE, GIWA_ADMIN_ROUTE, GIWA_PREPROD_ROUTE, GIWA_SAVINGS_ROUTE } from './demo/giwa/routes'
 import { stocksRoutes } from './demo/giwa/stocks-market/routes'
 import { DemoPresentationContext } from './demo/giwa/demo-presentation'
 import { GIWA_ADMIN_CONSOLE_URL, GIWA_CUSTOMER_PRESENTATION } from './demo/giwa/config'
@@ -30,6 +30,12 @@ const GiwaSavingsPage = lazy(() => import('./demo/giwa/SavingsPage'))
 
 function giwaRoute(element: React.ReactNode) {
   return <Suspense fallback={null}>{element}</Suspense>
+}
+
+// A visit starts on Savings: the root opens it, keeping the query (Home lives at /home).
+function LandingRedirect() {
+  const location = useLocation()
+  return <Navigate to={`${GIWA_SAVINGS_ROUTE}${location.search}`} replace />
 }
 
 // Earlier lives of this app served /app/* (and, pre-extraction, /app/giwa-preprod/*).
@@ -74,7 +80,8 @@ const router = createBrowserRouter([
     path: GIWA_PREPROD_ROUTE,
     element: giwaRoute(<GiwaPreprodApp />),
     children: [
-      { index: true, element: giwaRoute(<GiwaHomePage />) },
+      { index: true, element: <LandingRedirect /> },
+      { path: 'home', element: giwaRoute(<GiwaHomePage />) },
       { path: 'funds', element: giwaRoute(<GiwaInvestorPage />) },
       { path: 'savings', element: giwaRoute(<GiwaSavingsPage />) },
       { path: 'portfolio', element: giwaRoute(<GiwaPortfolioPage />) },

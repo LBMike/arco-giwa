@@ -6,7 +6,7 @@ import { GIWA_FOOTER_LINKS } from "./footer-links"
 import { GiwaSidebarNav } from "./GiwaSidebarNav"
 
 // Below-xl menu: a trigger in the top bar that opens a modal LEFT drawer with the shell nav (the
-// desktop sidebar is hidden below xl), the test-funds action (below lg) and the footer links.
+// desktop sidebar is hidden below xl), the footer links and, under them, the test-funds action.
 // Keyboard: focus moves to Close on open, Tab/Shift+Tab stay inside, Escape closes, focus returns to
 // the trigger. Also closes on route change, on backdrop tap, and when the viewport reaches xl.
 const SLIDE_MS = 300
@@ -182,10 +182,6 @@ export function GiwaHeaderMenu({ isAdmin, testFunds }: { isAdmin: boolean; testF
                 {/* Tapping the current page's link changes no route, so close explicitly as well. */}
                 <GiwaSidebarNav isAdmin={isAdmin} onNavigate={close} />
 
-                {testFunds && (
-                  <div className="mt-4 border-t border-[var(--color-arco-border)] px-3 py-4 lg:hidden">{testFunds}</div>
-                )}
-
                 <div className="mt-4 flex flex-col gap-3 border-t border-[var(--color-arco-border)] px-3 py-4">
                   {GIWA_FOOTER_LINKS.map((link) => (
                     <a
@@ -197,6 +193,9 @@ export function GiwaHeaderMenu({ isAdmin, testFunds }: { isAdmin: boolean; testF
                     </a>
                   ))}
                 </div>
+
+                {/* The menu's last item: under Terms of Use and Documentation. */}
+                {testFunds && <div className="border-t border-[var(--color-arco-border)] px-3 py-4">{testFunds}</div>}
               </div>
             </div>
           </div>,

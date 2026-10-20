@@ -2,8 +2,8 @@ import {
   GIWA_ADMIN_ROUTE,
   GIWA_ADMIN_STOCKS_ROUTE,
   GIWA_FUNDS_ROUTE,
+  GIWA_HOME_ROUTE,
   GIWA_PORTFOLIO_ROUTE,
-  GIWA_PREPROD_ROUTE,
   GIWA_SAVINGS_ROUTE,
   GIWA_STOCKS_ROUTE,
 } from "./routes"
@@ -30,7 +30,8 @@ export type InvestorNavSection = {
 }
 
 export const INVESTOR_NAV_SECTIONS: readonly InvestorNavSection[] = [
-  { id: "home", label: null, items: [{ id: "home", label: "Home", to: GIWA_PREPROD_ROUTE }] },
+  // Home has its own route: the root opens Savings, where a visit starts.
+  { id: "home", label: null, items: [{ id: "home", label: "Home", to: GIWA_HOME_ROUTE }] },
   {
     id: "invest",
     label: "Invest",
@@ -68,7 +69,7 @@ export function isNavItemActive(item: Pick<InvestorNavItem, "id">, pathname: str
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname
   switch (item.id) {
     case "home":
-      return path === GIWA_PREPROD_ROUTE
+      return path === GIWA_HOME_ROUTE
     case "savings":
       return within(path, GIWA_SAVINGS_ROUTE)
     case "funds":

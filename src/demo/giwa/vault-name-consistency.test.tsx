@@ -3,11 +3,12 @@ import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { GiwaCatalogTable } from "./components"
+import { buildActivityFeed } from "./activity-feed"
+import { GiwaCatalogTable, GiwaHoldingsTable } from "./components"
 import { ProductDetailView } from "./ProductDetailPage"
 import { GiwaWalletProvider } from "./wallet"
-import { vaultConfigOf } from "./catalog"
-import type { GiwaCatalogItem, GiwaVaultConfig } from "./types"
+import { tokenSymbolFor, vaultConfigOf, vaultDisplayName, vaultImageFor } from "./catalog"
+import type { GiwaActivity, GiwaCatalogItem, GiwaPortfolio, GiwaVaultConfig } from "./types"
 
 // The vault NAME must resolve identically on the products list (GiwaCatalogRow) and the
 // product detail header (ProductDetailView) — both call vaultDisplayName(product) =
@@ -67,4 +68,52 @@ test("displayName NULL → both fall back to the raw symbol", () => {
   const product = vault({}) // no displayName override
   assert.match(renderList(product), /aCAPIX/)
   assert.match(renderDetail(product), /aCAPIX/)
+})
+
+test("the arcoUSD Savings vault's share is shown as sArcoUSD with its own mark, wherever customers see it", () => {
+  // Its contract keeps the symbol arcoUSD; the app presents the savings token, ahead of an image set in Vault Config.
+  const arcoUsd: GiwaCatalogItem = {
+    ...base,
+    productId: "arcousd",
+    symbol: "arcoUSD",
+    name: "Arco USD",
+    vaultConfig: cfg({ kind: "saving", vaultImageUrl: "https://pbs.twimg.com/profile_images/1/arco_400x400.png" }),
+  }
+  assert.equal(tokenSymbolFor(arcoUsd), "sArcoUSD")
+  assert.equal(vaultDisplayName(arcoUsd), "sArcoUSD")
+  assert.equal(vaultImageFor(arcoUsd), "/logos/sarcousd.png")
+  // A display name set in Vault Config still names the vault.
+  assert.equal(vaultDisplayName({ ...arcoUsd, vaultConfig: cfg({ displayName: "Arco Savings" }) }), "Arco Savings")
+
+  // Product page header: the mark and the name.
+  const detail = renderDetail(arcoUsd)
+  assert.match(detail, /<img src="\/logos\/sarcousd\.png" alt="sArcoUSD"/)
+  assert.match(detail, /<h1[^>]*>sArcoUSD<\/h1>/)
+
+  // Portfolio holdings: the row's mark, name and balance.
+  const holdings = renderToStaticMarkup(
+    <GiwaHoldingsTable
+      portfolio={{ walletAddress: "0xabc", chainId: 91342, positions: [{ productId: "arcousd", balance: "999.8", status: "Held" }], redemptions: [] } as unknown as GiwaPortfolio}
+      products={[arcoUsd]}
+    />,
+  )
+  assert.match(holdings, /src="\/logos\/sarcousd\.png"/)
+  assert.match(holdings, />sArcoUSD</)
+  assert.match(holdings, /999\.8 sArcoUSD/)
+  assert.doesNotMatch(holdings, /arcoUSD|twimg/)
+
+  // Activity: a deposit names and counts sArcoUSD.
+  const [row] = buildActivityFeed(
+    [{ txHash: "0x1", blockNumber: 1, eventName: "ProductDeposit", contractAddress: base.depositVaultAddress, blockTimestamp: "2026-10-18T00:00:00Z", args: { sharesOut: "2000000000000000000" } } as unknown as GiwaActivity],
+    [],
+    [arcoUsd],
+  )
+  assert.equal(row!.product.symbol, "sArcoUSD")
+  assert.equal(row!.product.imageUrl, "/logos/sarcousd.png")
+  assert.match(row!.amount, / sArcoUSD$/)
+
+  // Every other token keeps its own symbol and the config-first image.
+  const other = vault({ vaultImageUrl: "/logos/other.png" })
+  assert.equal(tokenSymbolFor(other), "aCAPIX")
+  assert.equal(vaultImageFor(other), "/logos/other.png")
 })

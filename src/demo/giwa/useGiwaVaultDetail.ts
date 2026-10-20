@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { giwaApi } from "./api"
-import { REQUIRED_PAYMENT_ASSET_BY_PRODUCT, vaultConfigOf } from "./catalog"
+import { REQUIRED_PAYMENT_ASSET_BY_PRODUCT, vaultConfigOf, vaultImageFor } from "./catalog"
 import { sliceToBreakdownRow } from "./display-profile"
 import { readTokenBalance } from "./contracts"
 import { useGiwaProductOperation } from "./useGiwaProductOperation"
@@ -12,20 +12,14 @@ import { rateLabel } from "./fund-categories"
 import type { DocLink } from "../data/acapix-detail"
 import { productById, ASSET_MANAGERS, ISSUERS } from "../data/products"
 
-const TOKEN_ICONS: Record<string, string> = {
-  abtc: "/logos/abtc.png",
-  aeth: "/logos/aeth.png",
-  acapix: "/logos/aksia.svg",
-  ibenji: "/logos/ibenji.svg",
-  umint: "/logos/umint.svg",
-}
-
 // Vault-detail data derivation, extracted VERBATIM from ProductDetailView so the product detail
 // page and the Savings page (Phase 4) share ONE source of truth and can't drift. Call it
 // UNCONDITIONALLY as the consumer's first statement (Rules of Hooks) — there is no early return
 // before it. The hook interleave is preserved from the original: paymentDecimals is computed
 // BEFORE the redemption-balance query that depends on it, so the four hooks are NOT hoisted.
-export function useGiwaVaultDetail(product: GiwaCatalogItem) {
+// `history: false` skips the posted-price history read (a product with no price posts, e.g. the sArcoUSD account, whose
+// caller reads its own).
+export function useGiwaVaultDetail(product: GiwaCatalogItem, options: { history?: boolean } = {}) {
   const panel = useGiwaProductOperation(product)
 
   const marketQuery = useQuery({
@@ -39,6 +33,7 @@ export function useGiwaVaultDetail(product: GiwaCatalogItem) {
     queryKey: ["giwa", "price-history", product.productId],
     queryFn: () => giwaApi.priceHistory(GIWA_CHAIN_ID, product.productId),
     ...GIWA_LIVE_REFETCH,
+    enabled: options.history !== false,
   })
 
   // APY: published rate, else implied-from-posts (mirrors the vault list). Price: live
@@ -65,7 +60,8 @@ export function useGiwaVaultDetail(product: GiwaCatalogItem) {
 
   // Config-first identity/content (blank config field → legacy identity). Content the vault has not
   // set (About, fees, portfolio) stays empty: no other product's copy or figures fill the gap.
-  const vaultImage = cfg.vaultImageUrl ?? TOKEN_ICONS[product.productId]
+  // The vault logo resolves as everywhere else (catalog.ts): a presented token's mark, the admin image, the legacy icon.
+  const vaultImage = vaultImageFor(product)
   const issuerLabel = cfg.issuerName ?? ISSUERS[issuerKey]?.label ?? issuerKey
   const issuerLogo = cfg.issuerImageUrl ?? ISSUERS[issuerKey]?.logo
   const managerLabel = cfg.assetManagerName ?? ASSET_MANAGERS[managerKey]?.label ?? managerKey
@@ -93,7 +89,8 @@ export function useGiwaVaultDetail(product: GiwaCatalogItem) {
   const redemptionBalanceQuery = useQuery({
     queryKey: ["giwa", "vault-balance", "redemption", product.productId],
     queryFn: () => readTokenBalance(product.paymentAssetAddress!, product.redemptionVaultAddress!, paymentDecimals),
-    enabled: Boolean(product.paymentAssetAddress && product.redemptionVaultAddress),
+    // On ArcoUSD v1 the redemption contract holds no coin (the Reserve's buffer pays): its caller states the liquidity.
+    enabled: Boolean(product.paymentAssetAddress && product.redemptionVaultAddress) && !product.arcoUSD,
     refetchInterval: 30_000,
   })
   const redemptionBalance = redemptionBalanceQuery.data

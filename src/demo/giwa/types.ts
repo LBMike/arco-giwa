@@ -107,7 +107,22 @@ export type GiwaProduct = {
   vaultConfig?: GiwaVaultConfig | null
   // Partial: older servers omit the whole-vault fields; read it through pauseStateOf().
   pauseState?: Partial<GiwaPauseState> | null
+  /** Client-only: a product the app builds on the ArcoUSD v1 contracts instead of a vault pair (arcousd-live.ts). */
+  arcoUSD?: GiwaArcoUSDTransport | null
 }
+
+/**
+ * How a product built on ArcoUSD v1 moves money (arcousd-live.ts). `reserve`: a stablecoin and ArcoUSD, through
+ * Reserve.deposit and Reserve.redeemInstantOnly. `zap`: a coin (a stablecoin or ArcoUSD) and sArcoUSD, through the
+ * Savings Zap. Both take the coin as `paymentAssetAddress` and run at both vault addresses; a withdrawal is Instant only,
+ * and the contract pulls the token given back, so it needs an allowance like a deposit does. Prices are in the coin per
+ * product token, fees included: `depositPrice` for what a deposit buys, `redeemPrice` for what a withdrawal pays.
+ */
+export type GiwaArcoUSDTransport = Readonly<{
+  kind: "reserve" | "zap"
+  depositPrice: number
+  redeemPrice: number
+}>
 
 // Pause snapshot attached by the catalog (server-side RPC read, no wallet needed, cached
 // ~30s) and returned live by GET /api/v1/admin/pause-state. `*Paused` includes the
@@ -294,6 +309,8 @@ export type GiwaArcoUSDReserve = {
     depositPaused: boolean
     arcoUSDMintPaused: boolean
     routerPaused: boolean
+    /** Reserve.fnPaused(redeem): Instant and Standard withdrawals stop. Absent from older API builds. */
+    redeemPaused?: boolean
     assets: GiwaArcoUSDAssetState[]
     strategies: GiwaArcoUSDStrategyState[]
   }

@@ -130,12 +130,20 @@ export function operationMatchesMode(operation: string, mode: TransferMode): boo
 
 const PENDING_STATUSES = new Set(["REQUESTED", "SETTLING"])
 
-/** This product's withdrawals still waiting for their payout. */
-export function pendingWithdrawals(rows: readonly GiwaRedemption[], productId: string): GiwaRedemption[] {
+/**
+ * This product's withdrawals still waiting for their payout. With a redemption vault, only those requested from it: a
+ * Savings vault paid out in another coin through a route has a redemption vault per coin, and a row is shown with the
+ * coin it pays out in (a row that names no vault is kept).
+ */
+export function pendingWithdrawals(rows: readonly GiwaRedemption[], productId: string, redemptionVault?: string | null): GiwaRedemption[] {
   // Rows come from the indexer API: read defensively, a row without a product or status is not shown.
   const wanted = productId.toLowerCase()
+  const vault = redemptionVault?.toLowerCase() ?? null
   return rows.filter(
-    (row) => String(row.productId ?? "").toLowerCase() === wanted && PENDING_STATUSES.has(String(row.status ?? "").toUpperCase()),
+    (row) =>
+      String(row.productId ?? "").toLowerCase() === wanted &&
+      PENDING_STATUSES.has(String(row.status ?? "").toUpperCase()) &&
+      (vault === null || !row.redemptionVaultAddress || String(row.redemptionVaultAddress).toLowerCase() === vault),
   )
 }
 

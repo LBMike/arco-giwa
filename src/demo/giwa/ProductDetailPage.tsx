@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom"
 import { ArrowLeft } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { giwaApi } from "./api"
-import { isRetiredProduct, vaultDisplayName } from "./catalog"
+import { isRetiredProduct, tokenSymbolFor, vaultDisplayName } from "./catalog"
 import { parseAumToNumber } from "./display-profile"
 import { GiwaInvestPanel, GiwaNetworkIcon } from "./components"
 import { GiwaInvestDock } from "./GiwaInvestDock"
@@ -57,7 +57,7 @@ export function ProductDetailView({ product }: { product: GiwaCatalogItem }) {
 
       <header className="mt-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <BrandMark src={detail.vaultImage} label={product.symbol} size={40} />
+          <BrandMark src={detail.vaultImage} label={tokenSymbolFor(product)} size={40} />
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold text-[var(--color-arco-ink)]">{vaultDisplayName(product)}</h1>
             <span className="rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-2 py-0.5 text-[11px] text-[var(--color-arco-text-soft)]">
