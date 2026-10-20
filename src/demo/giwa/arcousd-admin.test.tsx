@@ -22,6 +22,7 @@ import {
   keeperTxBadge,
   keeperTxText,
   gateText,
+  gateAfterTopUp,
   headVerdict,
   mintHeadroomUsd,
   pauseRows,
@@ -32,6 +33,9 @@ import {
   sharePriceText,
   usdCompact,
   simulationText,
+  TOP_UP_MAX,
+  topUpAmount,
+  topUpAssets,
   usdText,
   watcherStatus,
 } from "./arcousd-admin"
@@ -232,6 +236,53 @@ test("helpers: money (max 2 decimals), basis points, durations, tabs, filters, b
   assert.deepEqual([arcoUSDAdminTab("queue"), arcoUSDAdminTab("nope"), arcoUSDAdminTab(null)], ["queue", "overview", "overview"])
   assert.deepEqual([queueFilter("PAID"), queueFilter("bogus"), queueFilter(null)], ["PAID", "open", "open"])
   assert.deepEqual([batchSize("20"), batchSize("0"), batchSize("51"), batchSize("2.5"), batchSize(" 7 ")], [20, null, null, null, 7])
+})
+
+test("helpers: buffer top-up assets, amount and what it does to the gate", () => {
+  // Deposits-on assets only, the gate's asset first.
+  const assets = reserve({ assets: [asset("tUSDT", A(0xc2), "0", "0", 10), { ...asset("tRLUSD", A(0xc3), "0", "0", 10), depositEnabled: false }, asset("tUSDC", A(0xc1), "0", "0", 0)] })
+  assert.deepEqual(topUpAssets(assets), [
+    { symbol: "tUSDC", decimals: 6 },
+    { symbol: "tUSDT", decimals: 6 },
+  ])
+  assert.deepEqual(
+    [topUpAmount("1000", 6), topUpAmount(" 12.5 ", 6), topUpAmount("0.000001", 6), topUpAmount(String(TOP_UP_MAX), 6)],
+    ["1000", "12.5", "0.000001", String(TOP_UP_MAX)],
+  )
+  assert.equal(topUpAmount(`${TOP_UP_MAX}.000`, 6), `${TOP_UP_MAX}.000`)
+  for (const value of ["", "0", "0.000", "0.0000001", "-1", "1e3", "1,000", ".5", "1.", String(TOP_UP_MAX + 1), `${TOP_UP_MAX}.000001`, "abc"]) {
+    assert.equal(topUpAmount(value, 6), null, value)
+  }
+  // The gate's asset: settleable after = max(0, balance + amount − queued); the mint cap must keep a threshold-sized buy.
+  const gated = (assetOver: Record<string, unknown>, gate: Partial<GiwaArcoUSDReserve["gate"]>, over: Partial<NonNullable<GiwaArcoUSDReserve["reserve"]>> = {}) =>
+    reserve({ assets: [{ ...asset("tUSDC", A(0xc1), "1000000", "1", 0), ...assetOver }, asset("tUSDT", A(0xc2), "0", "0", 10)], ...over }, gate)
+  const short = { status: "closed" as const, reason: "insufficient-buffer" as const, available: "1", threshold: "1000" }
+  assert.deepEqual(gateAfterTopUp(gated({}, short), "tUSDC", 999), { availableAfter: 1000, verdict: "Reaches the threshold: the gate opens on the next reserve read" })
+  assert.deepEqual(gateAfterTopUp(gated({}, short), "tUSDC", 500), { availableAfter: 501, verdict: "Still $499 below the threshold" })
+  // A queue backlog takes its share of the deposit first.
+  const owed = gated({ balanceHuman: "100", queuedHuman: "600", availableHuman: "0" }, { ...short, available: "0" })
+  assert.deepEqual(gateAfterTopUp(owed, "tUSDC", 1000), { availableAfter: 500, verdict: "Still $500 below the threshold" })
+  // Enough buffer, but the ArcoUSD minted would leave less than one threshold-sized buy under the cap.
+  const nearCap = gated({}, short, { mintCap: e18(1_500), totalLiabilities: e18(100) })
+  assert.match(gateAfterTopUp(nearCap, "tUSDC", 1000)!.verdict, /less than one threshold-sized buy would be left under the mint cap: the gate stays closed/)
+  assert.equal(gateAfterTopUp(gated({}, short), "tUSDT", 5000), null) // another asset does not move the gate
+  assert.equal(gateAfterTopUp(gated({}, { status: "inactive", reason: "not-deployed" }), "tUSDC", 5), null)
+  assert.equal(gateAfterTopUp({ ...gated({}, short), reserve: null }, "tUSDC", 5), null)
+  assert.equal(gateAfterTopUp(gated({}, { status: "open", reason: null }), "tUSDC", 5)?.verdict, "The gate is already open")
+  assert.equal(
+    gateAfterTopUp(gated({}, { status: "open", reason: null }, { mintCap: e18(1_500), totalLiabilities: e18(100) }), "tUSDC", 1000)?.verdict,
+    "Leaves less than one threshold-sized buy under the mint cap: the gate would close",
+  )
+  assert.equal(gateAfterTopUp(gated({}, { reason: "buy-paused", available: null }), "tUSDC", 5000)?.verdict, "The gate stays closed: Buys are paused (Router, deposit or mint)")
+})
+
+test("overview: the gate card offers the buffer top-up to operators of a live reserve only", () => {
+  const topUp = { walletAddress: A(0xee), onConnectWallet: noop, onPrepare: pending, onSend: pending }
+  const withTopUp = page("overview", { overview: { snapshots, days: 30, onDaysChange: noop, topUp } })
+  assert.match(withTopUp, /Top up the buffer/)
+  assert.match(withTopUp, /Deposits from your operator wallet into the Reserve \(Reserve\.deposit\)/)
+  assert.doesNotMatch(page("overview"), /Top up the buffer/)
+  assert.doesNotMatch(page("overview", { hasAuth: false, overview: { snapshots, days: 30, onDaysChange: noop, topUp } }), /Top up the buffer/)
 })
 
 test("helpers: gate wording, pause list, mint headroom", () => {

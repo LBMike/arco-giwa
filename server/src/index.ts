@@ -29,7 +29,8 @@ import { readRegistryFile } from "./registry/io.js"
 import { parseArcoUSDEnv } from "./arcousd/config.js"
 import { createArcoUSDChainReader } from "./arcousd/reader.js"
 import { ArcoUSDRecalls, createRecallReader } from "./arcousd/recall.js"
-import { ArcoUSDAdmin, createProcessQueueSimulator, PrismaArcoUSDAdminStore } from "./arcousd/admin.js"
+import { ArcoUSDAdmin, createDepositSimulator, createProcessQueueSimulator, createTopUpWalletReader, PrismaArcoUSDAdminStore } from "./arcousd/admin.js"
+import { stocksSignerWallets } from "./admin-auth/signer-wallets.js"
 import { parseArcoUSDAlertEnv } from "./arcousd/alert-config.js"
 import { ArcoUSDAlertsAdmin, PrismaArcoUSDAlertStore } from "./arcousd/alerts.js"
 import { alertChannels } from "./arcousd/notify.js"
@@ -103,6 +104,9 @@ async function composeServer(
     loadRegistry: () => readArcoUSDRegistry(arcoUSDEnv.registryPath),
     store: new PrismaArcoUSDAdminStore(prisma),
     simulateProcessQueue: createProcessQueueSimulator(rpcClient),
+    readTopUpWallet: createTopUpWalletReader(rpcClient),
+    simulateDeposit: createDepositSimulator(rpcClient),
+    liveReserve: async () => (await arcoUSD.reserveState()).reserve ?? null,
     // Live delay from the cached reserve read (setParams can change it after deploy).
     liveQueueMinDelay: async () => (await arcoUSD.reserveState()).reserve?.queueMinDelay ?? null,
   })
@@ -416,6 +420,8 @@ async function composeServer(
     cursorName: "giwa",
     maxLagBlocks: 100,
   })
+  // The Stocks signer's wallet: the console never builds a transaction for it to sign.
+  const signerWallets = await stocksSignerWallets(envSource, localCustomer)
   const app = await startManagedStocksServer({
     createRuntime: () => configuredStocksRuntime(envSource, env.databaseUrl, localCustomer),
     buildApp: stocks => {
@@ -437,6 +443,7 @@ async function composeServer(
         {
           arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD, arcoUSDRecalls, arcoUSDAdmin, arcoUSDAlerts, arcoUSDSavings, arcoUSDSavingsAdmin, arcoUSDRedemptions,
           resolveStocksOperator: sessions?.resolveOperator,
+          signerWallets,
           stocks: stocks ? {
             service: stocks.service,
             reconciliationCoverage: stocks.reconciliationCoverage,

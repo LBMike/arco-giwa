@@ -424,3 +424,61 @@ export function distributionVerdict(state: GiwaArcoUSDSavingsState, now: number)
   if (zero(preview.rateCap)) return { kind: "nothing", why: "Nothing saved long enough to earn yet" }
   return { kind: "nothing", why: "Nothing to distribute" }
 }
+
+// ── Buffer top-up (Overview › Fund buy gate) ──────────────────────────────
+
+/** The most one top-up may deposit, in whole asset units (the server's typo guard). */
+export const TOP_UP_MAX = 1_000_000
+
+/** The Reserve assets an operator can top up (deposits on), the buy gate's asset first. */
+export function topUpAssets(reserve: GiwaArcoUSDReserve): { symbol: string; decimals: number }[] {
+  const assets = (reserve.reserve?.assets ?? []).filter((asset) => asset.depositEnabled)
+  const gateAsset = reserve.gate.asset
+  return [...assets]
+    .sort((a, b) => Number(b.symbol === gateAsset) - Number(a.symbol === gateAsset))
+    .map(({ symbol, decimals }) => ({ symbol, decimals }))
+}
+
+/** The typed amount (trimmed) when it is positive, has at most `decimals` decimals and is at most TOP_UP_MAX; else null. */
+export function topUpAmount(value: string, decimals: number): string | null {
+  const text = value.trim()
+  const match = /^(\d{1,7})(?:\.(\d+))?$/.exec(text)
+  if (!match) return null
+  const whole = Number(match[1])
+  const fraction = match[2] ?? ""
+  if (fraction.length > decimals) return null
+  const fractionNonZero = /[1-9]/.test(fraction)
+  if (whole > TOP_UP_MAX || (whole === TOP_UP_MAX && fractionNonZero)) return null
+  return whole > 0 || fractionNonZero ? text : null
+}
+
+/**
+ * What the top-up does to the buy gate, for the gate's own asset: the settleable buffer after it, as the
+ * Reserve computes it (max(0, balance + amount − queued); a swap fee stays in the balance), and one line
+ * on the gate, which also needs a threshold-sized buy left under the mint cap after the ArcoUSD minted.
+ * Null for another asset, an inactive gate or an unread reserve.
+ */
+export function gateAfterTopUp(reserve: GiwaArcoUSDReserve, symbol: string, amount: number): { availableAfter: number; verdict: string } | null {
+  const { gate } = reserve
+  const state = reserve.reserve
+  if (gate.status === "inactive" || symbol !== gate.asset || !state) return null
+  const asset = state.assets.find((item) => item.symbol === symbol)
+  if (!asset) return null
+  const availableAfter = Math.max(0, Number(asset.balanceHuman) + amount - Number(asset.queuedHuman))
+  const threshold = Number(gate.threshold)
+  const headroom = mintHeadroomUsd(state)
+  const capShort = headroom !== null && headroom - amount < threshold
+  const verdict =
+    gate.status === "open"
+      ? capShort
+        ? "Leaves less than one threshold-sized buy under the mint cap: the gate would close"
+        : "The gate is already open"
+      : gate.reason !== "insufficient-buffer"
+        ? `The gate stays closed: ${GATE_REASON[gate.reason ?? ""] ?? gate.reason ?? "see above"}`
+        : availableAfter < threshold
+          ? `Still ${usdText(threshold - availableAfter)} below the threshold`
+          : capShort
+            ? "The buffer reaches the threshold, but less than one threshold-sized buy would be left under the mint cap: the gate stays closed"
+            : "Reaches the threshold: the gate opens on the next reserve read"
+  return { availableAfter, verdict }
+}

@@ -40,6 +40,7 @@ import {
   type VaultPauseState,
 } from "./evm/pause-state.js"
 import { siweSessionWallet } from "./admin-auth/session.js"
+import { SESSION_WALLET_CODE, SESSION_WALLET_ERROR, SIGNER_WALLET_CODE, SIGNER_WALLET_ERROR } from "./admin-auth/signer-wallets.js"
 import type { Operator } from "./stocks/contracts.js"
 import {
   buildFulfillRedeemTransaction,
@@ -163,6 +164,9 @@ export type ArcoAppServices = {
   readonly resolveStocksOperator?: (request: FastifyRequest) => Promise<Operator | null>
   /** Admin write audit sink; defaults to one JSON line per write attempt on stdout. */
   readonly adminAudit?: AdminAuditSink
+  /** Wallets whose nonce a service owns (the Stocks signer, lowercase): the console's ArcoUSD
+   *  transaction builders refuse them, and GET /api/v1/admin/session flags them (admin-auth/signer-wallets.ts). */
+  readonly signerWallets?: readonly string[]
 }
 
 // Every /api/v1/admin/* route is recorded with the guard it carries, so a test can prove that
@@ -394,6 +398,16 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
   })
   const vaultPrincipals = new WeakMap<FastifyRequest, AdminPrincipal>()
   const sessionWallets = new WeakMap<FastifyRequest, string>()
+  const signerWallets = new Set((services.signerWallets ?? []).map((wallet) => wallet.toLowerCase()))
+  const isSignerWallet = (wallet: string | null | undefined) => typeof wallet === "string" && signerWallets.has(wallet.toLowerCase())
+  // The permissionless ArcoUSD builders (processQueue, distribute, buffer top-up, claimRecall) build a
+  // transaction for the signed-in operator's wallet to sign: only for a known wallet (a session, not the
+  // legacy token), and never for a wallet whose nonce a service owns.
+  const refuseUnsafeSigner = (request: FastifyRequest, reply: FastifyReply) => {
+    const wallet = vaultPrincipals.get(request)?.wallet
+    if (!wallet) return reply.code(403).send({ error: SESSION_WALLET_ERROR, code: SESSION_WALLET_CODE })
+    return isSignerWallet(wallet) ? reply.code(409).send({ error: SIGNER_WALLET_ERROR, code: SIGNER_WALLET_CODE }) : null
+  }
 
   const requireOperator = adminGuard("vault", async (request: FastifyRequest, reply: FastifyReply) => {
     const decision = await adminAuthority.authorizeVault(request, requiredVaultPermission(request.method))
@@ -620,6 +634,8 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
       wallet,
       vault: adminAuthority.vaultOperator(wallet),
       stocks: stocks ? { operatorId: stocks.operatorId, permissions: [...stocks.permissions] } : null,
+      // A transaction from this wallet would stop Stocks (admin-auth/signer-wallets.ts): the console warns.
+      signerWallet: isSignerWallet(wallet),
     }
   })
 
@@ -1012,10 +1028,33 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     "/api/v1/admin/arcousd/process-queue",
     { preHandler: requireOperator },
     async (request, reply) => {
+      const refused = refuseUnsafeSigner(request, reply)
+      if (refused) return refused
       const body = request.body && typeof request.body === "object" ? request.body : {}
       const result = await arcoUSDAdmin().processQueueTransaction({ asset: body.asset, maxCount: body.maxCount })
       if (!result.ok) return reply.code(result.status).send({ error: result.error })
       return { transaction: result.transaction, symbol: result.symbol, maxCount: result.maxCount, preview: result.preview }
+    },
+  )
+
+  // Unsigned approve (while the allowance is short) + Reserve.deposit for the signed-in operator's
+  // wallet: it tops up the settlement buffer the buy gate checks and receives the ArcoUSD minted.
+  // deposit is permissionless on-chain; the server checks the wallet's balance and dry-runs it.
+  app.post<{ Body: { asset?: unknown; amount?: unknown } }>(
+    "/api/v1/admin/arcousd/buffer-topup",
+    { preHandler: requireOperator },
+    async (request, reply) => {
+      const refused = refuseUnsafeSigner(request, reply)
+      if (refused) return refused
+      const body = request.body && typeof request.body === "object" ? request.body : {}
+      const result = await arcoUSDAdmin().bufferTopUpTransactions({
+        asset: body.asset,
+        amount: body.amount,
+        from: vaultPrincipals.get(request)?.wallet ?? null,
+      })
+      if (!result.ok) return reply.code(result.status).send({ error: result.error })
+      const { ok: _ok, ...topUp } = result
+      return topUp
     },
   )
 
@@ -1030,7 +1069,9 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
   // Unsigned distribute() for the operator's wallet — the manual path beside the keeper. distribute()
   // is permissionless on-chain (it only moves Reserve surplus to savers within its caps); this builds
   // the call and dry-runs it (preview.amountUsd = what it would mint now).
-  app.post("/api/v1/admin/arcousd/savings/distribute", { preHandler: requireOperator }, async (_request, reply) => {
+  app.post("/api/v1/admin/arcousd/savings/distribute", { preHandler: requireOperator }, async (request, reply) => {
+    const refused = refuseUnsafeSigner(request, reply)
+    if (refused) return refused
     const result = await arcoUSDSavingsAdmin().distributeTransaction()
     if (!result.ok) return reply.code(result.status).send({ error: result.error })
     return { transaction: result.transaction, preview: result.preview }
@@ -1739,6 +1780,8 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     "/api/v1/admin/products/:productId/redemptions/:requestId/claim-recall",
     { preHandler: requireOperator },
     async (request, reply) => {
+      const refused = refuseUnsafeSigner(request, reply)
+      if (refused) return refused
       const target = resolveRedemptionTarget(request.params.productId, request.params.requestId)
       if (!target.ok) return reply.code(target.status).send({ error: target.message })
       if (!services.arcoUSDRecalls) return reply.code(503).send({ error: "ArcoUSD recalls are unavailable" })

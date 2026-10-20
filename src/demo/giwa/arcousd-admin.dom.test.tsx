@@ -281,3 +281,180 @@ test("distribute control: preview, sign & send, then spent; a reverting dry run 
     assert.deepEqual(calls, ["prepare", "send", "prepare"])
   })
 })
+
+// ── Buffer top-up (Overview › Fund buy gate) ──────────────────────────────
+
+const TOP_UP_OPERATOR = "0x00000000000000000000000000000000000000ee"
+const topUpReserve = {
+  status: "live",
+  gate: { status: "closed", reason: "insufficient-buffer", asset: "tUSDC", available: "1", threshold: "1000", checkedAt: "2026-10-20T09:00:00Z" },
+  reserve: {
+    mintCap: "10000000000000000000000000", // 10M ArcoUSD
+    totalLiabilities: "1000000000000000000",
+    assets: [
+      { symbol: "tUSDT", decimals: 6, depositEnabled: true, balanceHuman: "0", queuedHuman: "0" },
+      { symbol: "tUSDC", decimals: 6, depositEnabled: true, balanceHuman: "1", queuedHuman: "0" },
+      { symbol: "tRLUSD", decimals: 18, depositEnabled: false, balanceHuman: "0", queuedHuman: "0" },
+    ],
+  },
+}
+const tx = (description: string) => ({ chainId: 91342, to: "0x00000000000000000000000000000000000000e5", value: "0x0", data: "0x", description })
+const topUp = (overrides: Record<string, unknown> = {}) => ({
+  symbol: "tUSDC",
+  asset: "0x00000000000000000000000000000000000000C1",
+  decimals: 6,
+  amount: "1000000000",
+  amountHuman: "1000",
+  from: TOP_UP_OPERATOR,
+  balanceHuman: "1000",
+  needsApproval: false,
+  transactions: [tx("deposit")],
+  preview: { arcoUSDOutHuman: "1000", blockNumber: "61" },
+  ...overrides,
+})
+
+async function typeInto(act: (fn: () => unknown) => Promise<void>, input: HTMLInputElement, value: string) {
+  await act(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!
+    setter.call(input, value)
+    input.dispatchEvent(new window.Event("input", { bubbles: true }))
+  })
+}
+
+test("buffer top-up: approve, check again, then deposit from the operator wallet (set GIWA_HOST_DOM_RUNTIME)", { skip: !runtime }, async () => {
+  await withDom(async ({ doc, React, root, act }) => {
+    const { BufferTopUpControl } = (await import("./AdminArcoUSD")) as AnyModule
+    const calls: string[] = []
+    const approveFirst = topUp({ needsApproval: true, transactions: [tx("approve"), tx("deposit")], preview: { afterApproval: true } })
+    const approved = topUp()
+    let prepares = 0
+    const onPrepare = async (asset: string, amount: string) => {
+      calls.push(`prepare:${asset}:${amount}`)
+      prepares += 1
+      // The first read after the approval still trails: the control asks again.
+      return prepares === 1 ? approveFirst : prepares === 2 ? approveFirst : approved
+    }
+    const onSend = async (sent: { description: string }, onSigned: (hash: string) => void) => {
+      calls.push(`send:${sent.description}`)
+      onSigned(`0x${(sent.description === "approve" ? "aa" : "bb").repeat(32)}`)
+      return "0x"
+    }
+    await act(() =>
+      root.render(
+        React.createElement(BufferTopUpControl, {
+          reserve: topUpReserve,
+          walletAddress: TOP_UP_OPERATOR,
+          onConnectWallet: () => undefined,
+          onPrepare,
+          onSend,
+          wait: async () => undefined,
+        }),
+      ),
+    )
+    // The gate's asset comes first; an asset with deposits off is not offered.
+    const select = doc.querySelector("select") as HTMLSelectElement
+    assert.deepEqual([...select.options].map((option) => option.value), ["tUSDC", "tUSDT"])
+    const input = doc.querySelector("input") as HTMLInputElement
+    assert.equal(button(doc, "Preview").disabled, true)
+    await typeInto(act, input, "1000.1234567") // more decimals than tUSDC has
+    assert.equal(button(doc, "Preview").disabled, true)
+    await typeInto(act, input, "1000")
+    await act(() => button(doc, "Preview").click())
+    await act(tick)
+    const shown = doc.body.textContent ?? ""
+    assert.match(shown, /holds 1,000 tUSDC\. Two signatures: approve 1,000 tUSDC, then the deposit\./)
+    assert.match(shown, /The deposit is checked again once the approval confirms\./)
+    assert.match(shown, /Buffer after: \$1,001 · Reaches the threshold: the gate opens on the next reserve read/)
+    await act(() => button(doc, "Approve & deposit").click())
+    await act(tick)
+    assert.deepEqual(calls, ["prepare:tUSDC:1000", "send:approve", "prepare:tUSDC:1000", "prepare:tUSDC:1000", "send:deposit"])
+    assert.match(doc.body.textContent ?? "", /Deposited\. The gate updates on the next reserve read\. View approval View deposit/)
+    assert.equal(input.value, "")
+  })
+})
+
+test("buffer top-up: the signer wallet is refused, another connected wallet cannot sign, a failed dry run cannot be sent", { skip: !runtime }, async () => {
+  await withDom(async ({ doc, React, root, act }) => {
+    const { BufferTopUpControl } = (await import("./AdminArcoUSD")) as AnyModule
+    let reply: () => Promise<unknown> = async () => {
+      throw new Error("This wallet is the Stocks signer. A transaction from it moves the nonce the signer keeps and stops Stocks until its journal is re-seeded. Sign in with another operator wallet.")
+    }
+    const sent: string[] = []
+    const render = (walletAddress: string) =>
+      act(() =>
+        root.render(
+          React.createElement(BufferTopUpControl, {
+            reserve: topUpReserve,
+            walletAddress,
+            onConnectWallet: () => undefined,
+            onPrepare: () => reply(),
+            onSend: async (transaction: { description: string }) => (sent.push(transaction.description), "0x"),
+            wait: async () => undefined,
+          }),
+        ),
+      )
+    await render(TOP_UP_OPERATOR)
+    await typeInto(act, doc.querySelector("input") as HTMLInputElement, "500")
+    await act(() => button(doc, "Preview").click())
+    await act(tick)
+    assert.match(doc.body.textContent ?? "", /This wallet is the Stocks signer/)
+    assert.equal(button(doc, "Sign & send").disabled, true)
+
+    // Prepared for the signed-in operator, but another wallet is connected.
+    reply = async () => topUp({ amount: "500000000", amountHuman: "500" })
+    await render("0x00000000000000000000000000000000000000f0")
+    await act(() => button(doc, "Preview").click())
+    await act(tick)
+    assert.match(doc.body.textContent ?? "", /The connected wallet is not the signed-in operator wallet 0x0000…00ee\. Switch to it to sign\./)
+    assert.match(doc.body.textContent ?? "", /Still \$499 below the threshold/)
+    assert.equal(button(doc, "Sign & send").disabled, true)
+
+    // A deposit that would revert is shown and cannot be sent.
+    reply = async () => topUp({ preview: { error: "deposit would revert or could not be simulated: FP: fn paused" } })
+    await render(TOP_UP_OPERATOR)
+    await act(() => button(doc, "Preview").click())
+    await act(tick)
+    assert.match(doc.body.textContent ?? "", /FP: fn paused/)
+    assert.equal(button(doc, "Sign & send").disabled, true)
+    assert.deepEqual(sent, [])
+  })
+})
+
+test("buffer top-up: a failed check after the approval says the approval landed and to preview again", { skip: !runtime }, async () => {
+  await withDom(async ({ doc, React, root, act }) => {
+    const { BufferTopUpControl } = (await import("./AdminArcoUSD")) as AnyModule
+    const sent: string[] = []
+    let prepares = 0
+    await act(() =>
+      root.render(
+        React.createElement(BufferTopUpControl, {
+          reserve: topUpReserve,
+          walletAddress: TOP_UP_OPERATOR,
+          onConnectWallet: () => undefined,
+          onPrepare: async () => {
+            prepares += 1
+            if (prepares === 1) return topUp({ needsApproval: true, transactions: [tx("approve"), tx("deposit")], preview: { afterApproval: true } })
+            throw new Error("Could not read the wallet's tUSDC: rpc down")
+          },
+          onSend: async (transaction: { description: string }, onSigned: (hash: string) => void) => {
+            sent.push(transaction.description)
+            onSigned(`0x${"aa".repeat(32)}`)
+            return "0x"
+          },
+          wait: async () => undefined,
+        }),
+      ),
+    )
+    await typeInto(act, doc.querySelector("input") as HTMLInputElement, "1000")
+    await act(() => button(doc, "Preview").click())
+    await act(tick)
+    await act(() => button(doc, "Approve & deposit").click())
+    await act(tick)
+    assert.deepEqual(sent, ["approve"]) // no deposit without a fresh check
+    assert.equal(prepares, 4) // the first preview, then three checks after the approval
+    assert.match(
+      doc.body.textContent ?? "",
+      /Approval confirmed, but the deposit could not be prepared \(Could not read the wallet's tUSDC: rpc down\)\. Preview again to deposit\. View approval/,
+    )
+  })
+})

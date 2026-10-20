@@ -425,6 +425,26 @@ export type GiwaArcoUSDProcessQueue = {
   preview: { paid: number; blockNumber: string } | { error: string }
 }
 
+/**
+ * POST /api/v1/admin/arcousd/buffer-topup: approve (only while the allowance is short) then
+ * Reserve.deposit, both for the signed-in operator's wallet (`from`), which pays the asset and
+ * receives the ArcoUSD minted.
+ */
+export type GiwaArcoUSDBufferTopUp = {
+  symbol: string
+  asset: string
+  decimals: number
+  /** Base units / human. */
+  amount: string
+  amountHuman: string
+  from: string
+  balanceHuman: string
+  needsApproval: boolean
+  transactions: UnsignedAdminTransaction[]
+  /** The deposit dry-run (ArcoUSD minted), after-approval while the allowance is short, or why it failed. */
+  preview: { arcoUSDOutHuman: string; blockNumber: string } | { afterApproval: true } | { error: string }
+}
+
 /** sArcoUSD (Savings) state: GET /api/v1/arcousd/savings (docs/specs/arcousd-v1.md §3.13–3.14). */
 export type GiwaArcoUSDSavingsState = {
   blockNumber: string

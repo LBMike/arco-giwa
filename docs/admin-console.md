@@ -43,14 +43,25 @@ Limits는 종목·방향(매수/매도)마다 새 주문을 받을지와 하루 
 ### `GET /api/v1/admin/session`
 
 ```json
-{ "wallet": "0x…", "vault": { "operatorId": "ops-mike", "permissions": ["vault:read", "vault:write"] }, "stocks": null }
+{ "wallet": "0x…", "vault": { "operatorId": "ops-mike", "permissions": ["vault:read", "vault:write"] }, "stocks": null, "signerWallet": false }
 ```
+
+`signerWallet`은 로그인한 지갑이 Stocks 서명기 지갑일 때 `true`다(아래 "서명기 지갑").
 
 세션이 없거나 만료되면 401이다. 어느 목록에도 없는 지갑은 200에 `vault`·`stocks` 둘 다 `null`이다. 콘솔은 이 응답으로 메뉴를 정한다: Vaults 그룹은 `vault:read`, Stocks 그룹은 `stocks:read`가 있을 때 보이고, `vault:write`·`stocks:control`이 없으면 쓰기 버튼을 비활성화한다. 서버는 경로마다 권한을 다시 검사한다.
 
 ### 온체인 역할
 
 Vault 쓰기 작업의 상당수는 서버가 서명 전 트랜잭션을 만들어 주고 운영자 지갑이 직접 서명해 보낸다. 가격 피드 일부는 처음부터 지갑이 직접 서명한다. 컨트랙트는 서명한 지갑의 역할(예: `FEED_ADMIN_ROLE`)을 따로 검사하므로, `ADMIN_OPERATORS` 권한과 별개로 해당 지갑에 온체인 역할이 있어야 한다. 가격 피드 화면은 연결된 지갑의 역할을 읽어 없으면 이유를 보여 준다.
+
+### 서명기 지갑
+
+Stocks 서명기는 자기 지갑의 다음 nonce를 따로 기록하고, 체인 nonce가 기록과 어긋나면 서명을 멈춘다. 그래서 서명기 지갑에서 다른 트랜잭션이 나가면(콘솔 버튼, 배포 스크립트, ETH 송금 모두) Stocks가 멈추고, 서명 기록을 새 nonce로 다시 맞춰야 한다(`docs/operations/app-arco-financial-release.md`). 지금 서명기 지갑은 GIWA 배포·금고 관리자 지갑과 같은 주소다.
+
+- 서버는 Stocks 설정(`STOCKS_CONFIG_PATH`)의 manifest에서 서명기 주소를 읽는다. Stocks가 꺼져 있어도 읽는다(서명 기록은 그대로 남아 있어 다음 Stocks 시작이 멈추기 때문). 설정이 없으면 해당 지갑이 없다.
+- 이 지갑으로 로그인하면 `GET /api/v1/admin/session`이 `signerWallet: true`를 주고, 콘솔은 모든 화면 위에 경고를 띄운다. 로그인(메시지 서명)과 Stocks 통제처럼 트랜잭션이 아닌 작업은 그대로 쓸 수 있다.
+- 누구나 부를 수 있는 함수의 트랜잭션 생성(`arcousd/process-queue`, `arcousd/savings/distribute`, `arcousd/buffer-topup`, 상품 리딤의 `claim-recall`)은 이 지갑에 409 `{ code: "SIGNER_WALLET" }`로 거부한다. 넷 다 역할이 필요 없으니 다른 운영자 지갑을 `ADMIN_OPERATORS`에 넣어 쓴다. 지갑을 알 수 없는 레거시 공유 토큰으로는 이 넷을 만들 수 없다(403 `SESSION_WALLET_REQUIRED`).
+- Vault 쓰기(가격, 출금, 일시정지, Reserve 회수 확인 `acknowledge-recall` 등)는 온체인 역할이 이 지갑에만 있어 막지 않는다. 경고만 띄운다. 보내야 한다면 Stocks를 멈추고 보낸 뒤 서명 기록을 다시 맞춘다.
 
 ### 자금 이동 안전장치
 
@@ -88,7 +99,7 @@ Vault 쓰기 작업의 상당수는 서버가 서명 전 트랜잭션을 만들�
 
 콘솔 화면은 **Vaults → ArcoUSD**(`/vaults/arcousd`, 레거시 `/admin/arcousd`)이고 탭이 넷이다(`?tab=queue`, `?tab=flows`, `?tab=savings`로 바로 열린다).
 
-- **Overview**: 맨 위 **Alerts** 카드는 감시기가 찾은 알림(열린 것, 대기 중인 것, 24시간 안에 해결된 것), 감시기가 마지막으로 돈 시각, 보내는 채널, **Send test alert**(`vault:write`)를 보여 준다(`docs/operations/arcousd-alerts.md`). 그 아래 총 담보, ArcoUSD 발행량, 잉여, MMF 비율(목표·하한)이 있다. 펀드 매수 게이트는 상태와 사유, 정산 버퍼, 기준 금액, 발행 상한까지 남은 양을 함께 보여 준다. 이 밖에 매수·정산 경로와 대기열 지급의 일시정지 8가지, 자산별·MMF 전략별 표, 담보·발행량 추이(7·30·90일), 컨트랙트 주소가 있다. 공개 리저브 조회로 그리므로 알림과 추이 외에는 세션 없이도 보인다.
+- **Overview**: 맨 위 **Alerts** 카드는 감시기가 찾은 알림(열린 것, 대기 중인 것, 24시간 안에 해결된 것), 감시기가 마지막으로 돈 시각, 보내는 채널, **Send test alert**(`vault:write`)를 보여 준다(`docs/operations/arcousd-alerts.md`). 그 아래 총 담보, ArcoUSD 발행량, 잉여, MMF 비율(목표·하한)이 있다. 펀드 매수 게이트는 상태와 사유, 정산 버퍼, 기준 금액, 발행 상한까지 남은 양을 함께 보여 준다. 운영자에게는 그 카드 안에 **Top up the buffer**가 있다: 자산(예치가 열린 Reserve 자산, 게이트 자산이 먼저)과 금액을 넣고 **Preview**(서버가 지갑 잔고·승인액을 읽고 예치를 미리 돌림) → **Sign & send**. 승인액이 모자라면 approve를 먼저 보내고, 확정 뒤 다시 준비해 예치를 보낸다(서명 두 번). 예치 후 버퍼와 게이트가 열리는지를 미리 보여 준다. 이 밖에 매수·정산 경로와 대기열 지급의 일시정지 8가지, 자산별·MMF 전략별 표, 담보·발행량 추이(7·30·90일), 컨트랙트 주소가 있다. 공개 리저브 조회로 그리므로 알림과 추이 외에는 세션 없이도 보인다.
 - **Queue**: 맨 위 **Keeper bot** 카드는 키퍼 봇의 모드(Off / Dry run / Live), 지갑과 가스, 지금 자산별로 몇 건이 지급될지, Savings 분배 확인 결과(Savings 줄: 다음 분배까지 남은 시간, 분배할 금액, 보냄·revert 이유), 마지막 트랜잭션(대기열 지급 건수 또는 분배 금액)을 보여 준다(`docs/operations/arcousd-keeper.md`). 그 아래 자산별 카드(대기 건수·금액, 가장 오래된 요청, T+2 초과, 지급 실패, 다음 지급 요청)가 있다. 다음 요청을 지금 낼 수 있는지는 Reserve **잔고** 기준으로 판단한다(Reserve·`processQueue`·ArcoUSD·burn 중 하나라도 일시정지면 "Payouts paused"). 카드마다 `processQueue` 실행 칸이 있다: 건수(1~50)를 넣고 **Preview**(서버 eth_call 미리보기)를 누른 뒤 **Sign & send**(운영자 지갑 서명)를 누른다. `vault:write`가 없으면 잠긴다. 아래에는 상태 필터가 달린 요청 목록이 있다.
 - **Flows**: 기간(7·30·90일) 합계, 일별 입금·출금 막대, 일별 수수료, 자산별 표, 결제 자산별 Router 매수, 최근 이벤트를 보여 준다. 항목이 겹친다는 안내가 화면에 있다.
 - **Savings**(sArcoUSD, 스펙 §3.13~3.15): 저축액(반영 중인 수익 제외), 지분 가격(소수 4자리까지), 지금 APY(반영 중인 수익의 연율, 일복리), 기간 실현 APY(지분 가격 상승). **Distribution** 카드는 분배기가 지금 발행할 양과 판정, 잉여·연율 상한·발행 상한까지 남은 양, 마지막 분배(아직 없으면 배포 시각)·다음 분배, 규칙(간격·상한·여유분)을 보여 주고, `distribute()`를 **Preview** → **Sign & send**(`vault:write`)로 보낼 수 있다. 판정은 Ready / Next at … / Nothing to distribute(이유) / NAV unavailable / Unknown(미리보기를 읽지 못함) / Paused(분배기, Reserve, sArcoUSD 전체, sArcoUSD addRewards, ArcoUSD 발행 중 무엇이 멈췄는지)이고, Ready일 때만 Preview가 열린다. 보낸 뒤에는 공개 상태(15초 캐시)가 새 분배를 보여 줄 때까지 Preview가 잠긴다. **Vesting** 카드(반영 중인 수익, 하루 반영량, 이번 반영 기간 끝, 시드, 예치·출금 열림), 스위치 7가지(sArcoUSD deposit·withdraw·addRewards·전체, 분배기, 그리고 `distribute()`를 막는 Reserve 전체·ArcoUSD 발행), 지분 가격·저축액 추이(7·30·90일), 기간 합계(예치·출금·분배·운영자 보충), 분배 목록, 수익 추가 목록(분배기 / 운영자 보충), 예치·출금 목록(Zap 경유 여부), Zap 자산별 사용, 컨트랙트 주소가 이어진다. 시드 전이면 "예치가 닫혀 있다"는 안내가 나온다.
@@ -104,6 +115,7 @@ Vault 쓰기 작업의 상당수는 서버가 서명 전 트랜잭션을 만들�
   - 항목끼리 겹친다. 스테이블코인으로 산 Router 매수 하나가 입금, 상품 결제, Router 매수에 모두 잡힌다(수수료는 한 번만). 항목을 더해 총량을 만들지 않는다.
   - 최근 이벤트 50건(최신 순). 취소·지급 실패·MMF 이동은 목록에만 나오고 합계에는 들어가지 않는다. 2만 행을 넘으면 최신 2만 행만 보고 `truncated: true`.
 - **`POST /api/v1/admin/arcousd/process-queue`** `{ asset, maxCount }`: 서명할 `Reserve.processQueue(asset, maxCount)`. `asset`은 레지스트리의 심볼이나 주소, `maxCount`는 1~50(기본 20). 같은 호출을 eth_call로 돌려 `preview.paid`(지금 지급될 건수)를 함께 준다. 시뮬레이션이 되돌려지면(일시정지 등) 트랜잭션은 그대로 주고 `preview.error`에 이유를 담는다. `processQueue`는 누구나 부를 수 있으므로 서버는 만들기만 한다. 대기열 처리 봇이 꺼져 있거나 멈췄을 때의 수동 경로다.
+- **`POST /api/v1/admin/arcousd/buffer-topup`** `{ asset, amount }`: 로그인한 운영자 지갑이 서명할 거래들. 승인액이 모자랄 때만 `approve(Reserve, amount)`, 그다음 `Reserve.deposit(asset, amount, 운영자 지갑)`. 운영자 지갑이 자산을 내고 발행된 ArcoUSD를 받는다(정산 버퍼가 그만큼 늘어 매수 게이트 기준을 채운다). `asset`은 레지스트리의 심볼이나 주소, `amount`는 자산 단위 소수 문자열(자산 소수 자릿수 이하, 0 초과 100만 이하). 서버가 지갑 잔고와 승인액을 읽어 잔고가 모자라면 409. 승인 전에 공개 리저브 조회로 Reserve가 거절할 예치(예치·발행 일시정지, 자산 예치 꺼짐, 자산 예치 한도, 발행 상한)도 409로 막는다. 승인이 필요 없으면 예치를 eth_call로 돌려 `preview.arcoUSDOutHuman`을 준다(승인이 필요하면 `preview.afterApproval`, 되돌려지면 `preview.error`). `deposit`은 누구나 부를 수 있어 역할이 필요 없다. 응답: `symbol`, `asset`, `decimals`, `amount`(기본 단위), `amountHuman`, `from`, `balanceHuman`, `needsApproval`, `transactions`, `preview`.
 - **`GET /api/v1/admin/arcousd/savings?days=30`**: Savings 인덱서가 쌓은 sArcoUSD·분배기·Zap 이벤트로 본 기간 활동. 합계(예치·출금 금액과 건수, 분배 합계와 횟수, 운영자 보충 — 시드 제외), UTC 달력 기준 일별 예치·출금, 최근 분배 50건(발행량·당시 잉여·연율 상한), 최근 수익 추가 50건(분배기인지 운영자 보충인지), 최근 예치·출금 50건(시드 포함 — 시드는 `Seeded` 이벤트와 같은 트랜잭션의 예치로 가린다, Zap 경유 여부), Zap 자산별 예치·출금 건수와 금액(자산 단위). `days`는 1~90. 2만 행을 넘으면 최신 2만 행만 보고 `truncated: true`.
 - **`POST /api/v1/admin/arcousd/savings/distribute`**: 서명할 `ArcoUSDSavingsDistributor.distribute()`. eth_call로 돌려 `preview.amountUsd`(지금 발행할 양)를 함께 주고, 되돌려지면 트랜잭션은 그대로 주고 `preview.error`에 오류 이름과 뜻을 담는다(`TooSoon`, `ReservePaused`, `NoDepositors`, `NavUnavailable`, `NothingToDistribute`, 또는 `Pausable: paused` 같은 문자열 사유). `distribute()`는 누구나 부를 수 있으므로 서버는 만들기만 한다. Savings가 레지스트리에 없으면 409.
 - **`GET /api/v1/admin/arcousd/keeper`**: 대기열 처리 봇의 마지막 하트비트. 봇이 한 번도 돌지 않았으면 `keeper: null`. 있으면 마지막 실행·성공 시각, 마지막 오류, `stale`(dry-run·live인데 주기의 세 배, 최소 5분 넘게 돌지 않음), `report`(모드, 지갑, 가스 잔고와 부족 여부, 자산별 미리보기, 마지막 트랜잭션, 기다리는 트랜잭션, 메모).

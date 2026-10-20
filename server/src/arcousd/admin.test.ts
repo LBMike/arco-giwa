@@ -3,15 +3,22 @@ import test from "node:test"
 import { decodeFunctionData } from "viem"
 import {
   ArcoUSDAdmin,
+  MAX_TOP_UP_UNITS,
+  parseTopUpAmount,
   PrismaArcoUSDAdminStore,
   processQueueAbi,
+  reserveDepositAbi,
+  topUpTokenAbi,
   STANDARD_TARGET_SECONDS,
   type ArcoUSDAdminStore,
+  type DepositSimulator,
+  type TopUpWalletReader,
   type EventRecord,
   type ProcessQueueSimulator,
   type RedeemRecord,
   type SnapshotRecord,
 } from "./admin.js"
+import type { ReserveState } from "./reader.js"
 import type { ArcoUSDRegistryFile } from "./registry.js"
 
 const A = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as `0x${string}`
@@ -88,6 +95,9 @@ function admin(
     registry?: ArcoUSDRegistryFile | null | (() => ArcoUSDRegistryFile | null)
     simulate?: ProcessQueueSimulator
     liveQueueMinDelay?: () => Promise<number | null>
+    readTopUpWallet?: TopUpWalletReader
+    simulateDeposit?: DepositSimulator
+    liveReserve?: () => Promise<ReserveState | null>
   } = {},
 ) {
   const store = new FakeStore()
@@ -97,6 +107,9 @@ function admin(
     loadRegistry: load as () => ArcoUSDRegistryFile | null,
     store,
     simulateProcessQueue: options.simulate,
+    readTopUpWallet: options.readTopUpWallet,
+    simulateDeposit: options.simulateDeposit,
+    liveReserve: options.liveReserve,
     liveQueueMinDelay: options.liveQueueMinDelay,
     now: () => NOW,
   })
@@ -356,6 +369,150 @@ test("processQueue: validated input, the encoded Reserve call, and a dry-run cou
   assert.ok(paused.ok && paused.transaction.simulation?.status === "failed")
   const noSim = await admin().service.processQueueTransaction({ asset: "tUSDC" })
   assert.ok(noSim.ok && "error" in noSim.preview)
+})
+
+test("buffer top-up: approve only while the allowance is short, deposit to the operator wallet, dry-run once approved", async () => {
+  const OPERATOR = A(0xb0b)
+  let wallet = { balance: 2_500_000_000n, allowance: 0n } // 2,500 tUSDC, nothing approved
+  const reads: Parameters<TopUpWalletReader>[0][] = []
+  const simulated: Parameters<DepositSimulator>[0][] = []
+  const { service } = admin({
+    readTopUpWallet: async (input) => (reads.push(input), { ...wallet, blockNumber: 10n }),
+    simulateDeposit: async (input) => (simulated.push(input), { arcoUSDOut: 998_999_000_000_000_000_000n, blockNumber: 11n }),
+  })
+
+  const first = await service.bufferTopUpTransactions({ asset: "tUSDC", amount: "1000.5", from: OPERATOR.toLowerCase() })
+  assert.ok(first.ok)
+  if (!first.ok) return
+  assert.deepEqual(
+    [first.symbol, first.amount, first.amountHuman, first.balanceHuman, first.needsApproval, first.preview],
+    ["tUSDC", "1000500000", "1000.5", "2500", true, { afterApproval: true }],
+  )
+  assert.equal(first.from.toLowerCase(), OPERATOR.toLowerCase())
+  assert.deepEqual(reads[0], { asset: first.asset, owner: first.from, spender: reads[0].spender })
+  assert.equal(reads[0].spender.toLowerCase(), RESERVE.toLowerCase())
+  const [approve, deposit] = first.transactions
+  const approveCall = decodeFunctionData({ abi: topUpTokenAbi, data: approve.data })
+  assert.deepEqual([approve.to.toLowerCase(), approveCall.functionName, String(approveCall.args[0]).toLowerCase(), approveCall.args[1]], [
+    USDC.toLowerCase(),
+    "approve",
+    RESERVE.toLowerCase(),
+    1_000_500_000n,
+  ])
+  const depositCall = decodeFunctionData({ abi: reserveDepositAbi, data: deposit.data })
+  assert.deepEqual(
+    [deposit.to.toLowerCase(), depositCall.functionName, String(depositCall.args[0]).toLowerCase(), depositCall.args[1], String(depositCall.args[2]).toLowerCase()],
+    [RESERVE.toLowerCase(), "deposit", USDC.toLowerCase(), 1_000_500_000n, OPERATOR.toLowerCase()],
+  )
+  assert.equal(deposit.simulation.status, "not-run")
+  assert.equal(simulated.length, 0) // a deposit without the allowance would revert: dry-run after the approval
+  assert.match(approve.description, /approve/)
+  assert.match(deposit.description, /1000.5 tUSDC into the settlement buffer/)
+
+  // Approved: the deposit alone, dry-run from the operator wallet at the amount.
+  wallet = { balance: 2_500_000_000n, allowance: 1_000_500_000n }
+  const second = await service.bufferTopUpTransactions({ asset: USDC.toLowerCase(), amount: 1000.5, from: OPERATOR })
+  assert.ok(second.ok && !second.needsApproval && second.transactions.length === 1)
+  if (!second.ok) return
+  assert.deepEqual(second.preview, { arcoUSDOutHuman: "998.999", blockNumber: "11" })
+  assert.equal(second.transactions[0].simulation.status, "simulated")
+  assert.deepEqual([simulated[0].amount, simulated[0].from.toLowerCase(), simulated[0].reserve.toLowerCase()], [1_000_500_000n, OPERATOR.toLowerCase(), RESERVE.toLowerCase()])
+
+  // An 18-decimal asset: amounts in its own units.
+  const rlusd = await service.bufferTopUpTransactions({ asset: "tRLUSD", amount: "0.000000000000000001", from: OPERATOR })
+  assert.ok(rlusd.ok && rlusd.amount === "1" && rlusd.decimals === 18)
+
+  // The deposit dry-run fails: the reason is shown and the transaction is marked failed.
+  const reverting = admin({
+    readTopUpWallet: async () => ({ balance: 10n ** 12n, allowance: 10n ** 12n, blockNumber: 1n }),
+    simulateDeposit: async () => Promise.reject(new Error("FP: fn paused")),
+  })
+  const paused = await reverting.service.bufferTopUpTransactions({ asset: "tUSDC", amount: "5", from: OPERATOR })
+  assert.ok(paused.ok && "error" in paused.preview && /FP: fn paused/.test(paused.preview.error))
+  assert.ok(paused.ok && paused.transactions[0].simulation.status === "failed")
+
+  // Refusals: balance, amount, asset, wallet, reads, deployment.
+  const short = await service.bufferTopUpTransactions({ asset: "tUSDC", amount: "2500.000001", from: OPERATOR })
+  assert.ok(!short.ok && short.status === 409 && /holds 2,500 tUSDC, less than the 2500.000001 tUSDC of this top-up/.test(short.error))
+  for (const amount of ["0", "-1", "1e3", "1.1234567", "", " ", "0x10", "10000000", true, null, undefined, [1]]) {
+    const refused = await service.bufferTopUpTransactions({ asset: "tUSDC", amount, from: OPERATOR })
+    assert.ok(!refused.ok && refused.status === 400 && /amount/.test(refused.error), JSON.stringify(amount))
+  }
+  for (const asset of ["tDAI", A(0x99), undefined]) {
+    const refused = await service.bufferTopUpTransactions({ asset, amount: "1", from: OPERATOR })
+    assert.ok(!refused.ok && refused.status === 400 && /asset/.test(refused.error))
+  }
+  for (const from of [null, undefined, "", "0x123"]) {
+    const refused = await service.bufferTopUpTransactions({ asset: "tUSDC", amount: "1", from })
+    assert.ok(!refused.ok && refused.status === 400 && /operator wallet/.test(refused.error))
+  }
+  const noReader = await admin().service.bufferTopUpTransactions({ asset: "tUSDC", amount: "1", from: OPERATOR })
+  assert.ok(!noReader.ok && noReader.status === 503)
+  const readFails = await admin({ readTopUpWallet: async () => Promise.reject(new Error("rpc down")) }).service.bufferTopUpTransactions({
+    asset: "tUSDC",
+    amount: "1",
+    from: OPERATOR,
+  })
+  assert.ok(!readFails.ok && readFails.status === 503 && /rpc down/.test(readFails.error))
+  const noSim = await admin({ readTopUpWallet: async () => ({ balance: 10n ** 9n, allowance: 10n ** 9n, blockNumber: 1n }) }).service.bufferTopUpTransactions({
+    asset: "tUSDC",
+    amount: "1",
+    from: OPERATOR,
+  })
+  assert.ok(noSim.ok && "error" in noSim.preview && noSim.transactions[0].simulation.status === "failed")
+  const notDeployed = await admin({ registry: null }).service.bufferTopUpTransactions({ asset: "tUSDC", amount: "1", from: OPERATOR })
+  assert.ok(!notDeployed.ok && notDeployed.status === 409)
+  const invalid = await admin({ registry: registry({ chainId: 1 }) }).service.bufferTopUpTransactions({ asset: "tUSDC", amount: "1", from: OPERATOR })
+  assert.ok(!invalid.ok && invalid.status === 503)
+})
+
+test("buffer top-up: a deposit the live Reserve would refuse is refused before any approval", async () => {
+  const OPERATOR = A(0xb0b)
+  const live = (over: Partial<ReserveState> = {}, assetOver: Record<string, unknown> = {}) =>
+    ({
+      mintCap: e18(10_000).toString(),
+      totalLiabilities: e18(100).toString(),
+      reservePaused: false,
+      depositPaused: false,
+      arcoUSDPaused: false,
+      arcoUSDMintPaused: false,
+      assets: [{ address: USDC.toLowerCase(), depositEnabled: true, depositRoom: null, ...assetOver }],
+      ...over,
+    }) as unknown as ReserveState
+  const build = (state: ReserveState | null | (() => Promise<ReserveState | null>), amount = "1000") =>
+    admin({
+      readTopUpWallet: async () => ({ balance: 10n ** 12n, allowance: 0n, blockNumber: 1n }),
+      liveReserve: typeof state === "function" ? state : async () => state,
+    }).service.bufferTopUpTransactions({ asset: "tUSDC", amount, from: OPERATOR })
+
+  const ok = await build(live())
+  assert.ok(ok.ok && ok.needsApproval)
+  for (const [state, message] of [
+    [live({ depositPaused: true }), /Deposits are paused \(Reserve deposit\)/],
+    [live({ reservePaused: true, arcoUSDMintPaused: true }), /Deposits are paused \(the Reserve, ArcoUSD mint\)/],
+    [live({}, { depositEnabled: false }), /Deposits of tUSDC are off/],
+    [live({}, { depositRoom: "500000000" }), /Only 500 tUSDC fits under its deposit cap/],
+    [live({ mintCap: e18(1_000).toString(), totalLiabilities: e18(900.5).toString() }), /Only 99.5 ArcoUSD can still be minted under the mint cap/],
+  ] as const) {
+    const refused = await build(state)
+    assert.ok(!refused.ok && refused.status === 409 && message.test(refused.error), String(message))
+  }
+  // Exactly the room left is fine; an unread reserve leaves it to the dry-run after the approval.
+  assert.ok((await build(live({}, { depositRoom: "1000000000" }))).ok)
+  assert.ok((await build(null)).ok)
+  assert.ok((await build(async () => Promise.reject(new Error("rpc down")))).ok)
+})
+
+test("parseTopUpAmount: positive, within the asset's decimals and the per-call cap", () => {
+  assert.equal(parseTopUpAmount("1000", 6), 1_000_000_000n)
+  assert.equal(parseTopUpAmount(" 12.5 ", 6), 12_500_000n)
+  assert.equal(parseTopUpAmount(0.25, 6), 250_000n)
+  assert.equal(parseTopUpAmount("0.000001", 6), 1n)
+  assert.equal(parseTopUpAmount("1", 18), 10n ** 18n)
+  assert.equal(parseTopUpAmount(String(MAX_TOP_UP_UNITS), 6), BigInt(MAX_TOP_UP_UNITS) * 10n ** 6n)
+  for (const value of ["0", "0.0000001", String(MAX_TOP_UP_UNITS + 1), "1.", ".5", "01e2", "-5", "NaN", Number.NaN, Infinity, {}, "1,000"]) {
+    assert.equal(parseTopUpAmount(value, 6), null, String(value))
+  }
 })
 
 test("Prisma admin store: scoped, scalar-only snapshot reads, status/id filters, non-removed events in chain order", async () => {

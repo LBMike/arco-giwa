@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
@@ -43,6 +43,9 @@ import {
   simulationText,
   usdCompact,
   usdText,
+  gateAfterTopUp,
+  topUpAmount,
+  topUpAssets,
   watcherStatus,
   type ArcoUSDAdminTab,
   type DistributionVerdict,
@@ -50,6 +53,7 @@ import {
 import type {
   GiwaArcoUSDAlertDelivery,
   GiwaArcoUSDAlerts,
+  GiwaArcoUSDBufferTopUp,
   GiwaArcoUSDDistribute,
   GiwaArcoUSDSavings,
   GiwaArcoUSDSavingsAdmin,
@@ -61,6 +65,7 @@ import type {
   GiwaArcoUSDQueueFilter,
   GiwaArcoUSDReserve,
   GiwaArcoUSDSnapshots,
+  UnsignedAdminTransaction,
 } from "./types"
 
 // Admin · ArcoUSD (docs/admin-console.md "ArcoUSD 관리자 API"): the reserve at a glance with the
@@ -163,6 +168,19 @@ export default function GiwaAdminArcoUSDPage() {
     return hash
   }
 
+  // One buffer top-up transaction (approve or deposit) from the operator wallet, waited to confirmation.
+  async function sendTopUpTransaction(transaction: UnsignedAdminTransaction, onSigned: (hash: string) => void): Promise<string> {
+    if (!wallet.address) throw new Error("Connect the operator wallet first")
+    const hash = await sendPreparedTransaction(wallet.address, transaction)
+    onSigned(hash)
+    await afterConfirmedReceipt(hash, async () => {
+      await reserveQuery.refetch()
+    })
+    // The public reserve read is cached for 15 s: read it again once that has passed, for the gate.
+    setTimeout(() => void reserveQuery.refetch(), SAVINGS_CACHE_SETTLE_MS)
+    return hash
+  }
+
   async function sendDistribute(prepared: GiwaArcoUSDDistribute, onSigned: (hash: string) => void): Promise<string> {
     if (!wallet.address) throw new Error("Connect the operator wallet first")
     const hash = await sendPreparedTransaction(wallet.address, prepared.transaction)
@@ -194,6 +212,12 @@ export default function GiwaAdminArcoUSDPage() {
           loading: alertsQuery.isLoading,
           error: alertsQuery.isError ? readableError(alertsQuery.error) : null,
           onTest: async () => (await giwaApi.admin.arcousdAlertTest(auth)).delivery,
+        },
+        topUp: {
+          walletAddress: wallet.address ?? null,
+          onConnectWallet: () => void wallet.connect(),
+          onPrepare: (asset, amount) => giwaApi.admin.arcousdBufferTopUp(auth, asset, amount),
+          onSend: sendTopUpTransaction,
         },
       }}
       queue={{
@@ -249,6 +273,16 @@ type OverviewProps = {
   days: number
   onDaysChange: (days: number) => void
   alerts?: AlertsProps
+  /** Buffer top-up in the gate card (operators only). */
+  topUp?: TopUpProps
+}
+
+type TopUpProps = {
+  walletAddress: string | null
+  onConnectWallet: () => void
+  onPrepare: (asset: string, amount: string) => Promise<GiwaArcoUSDBufferTopUp>
+  /** Sends one prepared transaction from the connected wallet and waits for it to confirm. */
+  onSend: (transaction: UnsignedAdminTransaction, onSigned: (hash: string) => void) => Promise<string>
 }
 
 type AlertsProps = {
@@ -416,6 +450,7 @@ function OverviewView({
   days,
   onDaysChange,
   alerts,
+  topUp,
 }: OverviewProps & { reserve: GiwaArcoUSDReserve | null; reserveLoading?: boolean; hasAuth: boolean }) {
   // Alerts come from the operator API, not the public reserve read: they stay up when that read is down.
   const alertsCard = alerts ? <AlertsCard hasAuth={hasAuth} {...alerts} /> : null
@@ -480,6 +515,8 @@ function OverviewView({
             <Row label="Room under the mint cap" value={headroom !== null ? usdText(headroom) : "—"} />
             <Row label="Queue min delay" value={state ? durationText(state.queueMinDelay) : "—"} />
           </dl>
+          {/* Stays mounted through a momentarily unavailable read, so a flow in progress is not cut off. */}
+          {topUp && hasAuth && <BufferTopUpControl reserve={reserve} {...topUp} />}
         </Card>
         <Card>
           <CardTitle>Pauses</CardTitle>
@@ -1060,6 +1097,262 @@ export function ProcessQueueControl({
         {phase === "done" && hash && (
           <p className="text-[var(--color-arco-text-soft)]">
             Sent. <TxLink hash={hash} label="View transaction" />
+          </p>
+        )}
+      </div>
+    </AdminWriteGroup>
+  )
+}
+
+type TopUpPhase =
+  | "idle"
+  | "preparing"
+  | "prepared"
+  | "approving"
+  | "approval-confirming"
+  | "rechecking"
+  | "depositing"
+  | "deposit-confirming"
+  | "done"
+  | "failed"
+
+/** After the approval confirms, the allowance read may trail by a block: ask again a few times. */
+const RECHECK_ATTEMPTS = 3
+const RECHECK_DELAY_MS = 1_500
+
+/**
+ * Preview (server: balance, allowance, deposit dry-run) → Sign & send from the operator wallet:
+ * approve while the allowance is short, then Reserve.deposit. The wallet pays the asset and receives
+ * the ArcoUSD minted; the deposit adds to the Reserve's settlement buffer, which the buy gate checks.
+ */
+export function BufferTopUpControl({
+  reserve,
+  walletAddress,
+  onConnectWallet,
+  onPrepare,
+  onSend,
+  wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+}: TopUpProps & { reserve: GiwaArcoUSDReserve; wait?: (ms: number) => Promise<unknown> }) {
+  // A momentarily unavailable reserve read must not take the form away mid-flow: keep the last assets.
+  const liveAssets = topUpAssets(reserve)
+  const lastAssets = useRef(liveAssets)
+  if (liveAssets.length) lastAssets.current = liveAssets
+  const assets = liveAssets.length ? liveAssets : lastAssets.current
+  const [symbol, setSymbol] = useState(assets[0]?.symbol ?? "")
+  const asset = assets.find((candidate) => candidate.symbol === symbol) ?? assets[0] ?? null
+  const [amountInput, setAmountInput] = useState("")
+  const amount = asset ? topUpAmount(amountInput, asset.decimals) : null
+  // Only the latest preview may land: an older reply (for another amount) is dropped.
+  const previewSeq = useRef(0)
+  const [phase, setPhase] = useState<TopUpPhase>("idle")
+  const [prepared, setPrepared] = useState<GiwaArcoUSDBufferTopUp | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [sent, setSent] = useState<{ label: string; hash: string }[]>([])
+  const busy = ["preparing", "approving", "approval-confirming", "rechecking", "depositing", "deposit-confirming"].includes(phase)
+  // Leaving the page (or the tab) mid-flow stops it: no further wallet request starts once unmounted.
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
+  if (!asset) {
+    return <p className="mt-4 border-t border-[var(--color-arco-border)] pt-3 text-sm text-[var(--color-arco-muted)]">No Reserve asset takes deposits right now.</p>
+  }
+
+  function edited() {
+    setPrepared(null)
+    if (phase === "prepared" || phase === "failed" || phase === "done") setPhase("idle")
+  }
+
+  async function preview() {
+    if (!asset || amount === null) return
+    const seq = ++previewSeq.current
+    setPhase("preparing")
+    setMessage(null)
+    setSent([])
+    try {
+      const reply = await onPrepare(asset.symbol, amount)
+      if (seq !== previewSeq.current) return
+      setPrepared(reply)
+      setPhase("prepared")
+    } catch (error) {
+      if (seq !== previewSeq.current) return
+      setPrepared(null)
+      setPhase("failed")
+      setMessage(readableError(error))
+    }
+  }
+
+  async function send() {
+    if (!prepared) return
+    let current = prepared
+    setMessage(null)
+    setSent([])
+    try {
+      if (current.needsApproval) {
+        setPhase("approving")
+        await onSend(current.transactions[0], (hash) => {
+          setSent([{ label: "approval", hash }])
+          setPhase("approval-confirming")
+        })
+        if (!mounted.current) return
+        setPhase("rechecking")
+        // The approval is on-chain now: whatever happens next, a new Preview needs no second approval.
+        let lastError: unknown = null
+        for (let attempt = 1; attempt <= RECHECK_ATTEMPTS; attempt++) {
+          try {
+            current = await onPrepare(current.symbol, current.amountHuman)
+            lastError = null
+            if (!current.needsApproval) break
+          } catch (error) {
+            lastError = error
+          }
+          if (attempt < RECHECK_ATTEMPTS) await wait(RECHECK_DELAY_MS)
+          if (!mounted.current) return
+        }
+        if (lastError || current.needsApproval) {
+          const why = lastError ? readableError(lastError) : "the allowance still reads short"
+          throw new Error(`Approval confirmed, but the deposit could not be prepared (${why}). Preview again to deposit.`)
+        }
+        setPrepared(current)
+      }
+      if ("error" in current.preview) throw new Error(current.preview.error)
+      if (!mounted.current) return
+      setPhase("depositing")
+      await onSend(current.transactions[current.transactions.length - 1], (hash) => {
+        setSent((list) => [...list, { label: "deposit", hash }])
+        setPhase("deposit-confirming")
+      })
+      setPrepared(null)
+      setAmountInput("")
+      setPhase("done")
+    } catch (error) {
+      setPrepared(null)
+      setPhase("failed")
+      setMessage(readableError(error))
+    }
+  }
+
+  // The server built the transactions for the signed-in operator's wallet: only that wallet may sign them.
+  const otherWallet = prepared !== null && walletAddress !== null && walletAddress.toLowerCase() !== prepared.from.toLowerCase()
+  const sendable = prepared !== null && !("error" in prepared.preview) && !otherWallet
+  const after = prepared ? gateAfterTopUp(reserve, prepared.symbol, Number(prepared.amountHuman)) : null
+  const amountId = "arcousd-topup-amount"
+  const assetId = "arcousd-topup-asset"
+  const links = sent.map((item) => (
+    <span key={item.hash}>
+      {" "}
+      <TxLink hash={item.hash} label={`View ${item.label}`} />
+    </span>
+  ))
+  return (
+    <AdminWriteGroup className="mt-4 border-t border-[var(--color-arco-border)] pt-3">
+      <p className="text-sm font-medium text-[var(--color-arco-ink)]">Top up the buffer</p>
+      <p className="mt-0.5 text-[11px] text-[var(--color-arco-muted)]">
+        Deposits from your operator wallet into the Reserve (Reserve.deposit). The wallet receives the ArcoUSD it mints.
+      </p>
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        {assets.length > 1 && (
+          <div>
+            <label htmlFor={assetId} className="block text-[11px] text-[var(--color-arco-muted)]">
+              Asset
+            </label>
+            <select
+              id={assetId}
+              value={asset.symbol}
+              onChange={(event) => {
+                setSymbol(event.target.value)
+                edited()
+              }}
+              disabled={busy}
+              className={`mt-1 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-2 py-1 text-sm text-[var(--color-arco-ink)] ${FOCUS_RING}`}
+            >
+              {assets.map((item) => (
+                <option key={item.symbol} value={item.symbol}>
+                  {item.symbol}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div>
+          <label htmlFor={amountId} className="block text-[11px] text-[var(--color-arco-muted)]">
+            Amount ({asset.symbol})
+          </label>
+          <input
+            id={amountId}
+            inputMode="decimal"
+            placeholder="1000"
+            value={amountInput}
+            onChange={(event) => {
+              setAmountInput(event.target.value)
+              edited()
+            }}
+            aria-invalid={amountInput.trim() !== "" && amount === null}
+            disabled={busy}
+            className={`mt-1 w-32 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-2 py-1 text-sm tabular-nums text-[var(--color-arco-ink)] ${FOCUS_RING}`}
+          />
+        </div>
+        <SmallButton onClick={() => void preview()} disabled={busy || amount === null}>
+          {phase === "preparing" ? "Previewing…" : "Preview"}
+        </SmallButton>
+        {walletAddress ? (
+          <SmallButton primary onClick={() => void send()} disabled={!sendable || busy}>
+            {phase === "approving" || phase === "depositing"
+              ? "Confirm in wallet…"
+              : phase === "approval-confirming" || phase === "deposit-confirming"
+                ? "Confirming…"
+                : phase === "rechecking"
+                  ? "Checking…"
+                  : prepared?.needsApproval
+                    ? "Approve & deposit"
+                    : "Sign & send"}
+          </SmallButton>
+        ) : (
+          <SmallButton onClick={onConnectWallet}>Connect wallet</SmallButton>
+        )}
+      </div>
+      <div aria-live="polite" className="mt-2 space-y-1 text-[11px]">
+        {prepared && (
+          <>
+            <p className="text-[var(--color-arco-text-soft)]">
+              Wallet {shortAddress(prepared.from)} holds {amountText(prepared.balanceHuman)} {prepared.symbol}.{" "}
+              {prepared.needsApproval
+                ? `Two signatures: approve ${amountText(prepared.amountHuman)} ${prepared.symbol}, then the deposit.`
+                : "One signature: the deposit."}
+            </p>
+            {"arcoUSDOutHuman" in prepared.preview && (
+              <p className="text-[var(--color-arco-text-soft)]">
+                Dry run (block {prepared.preview.blockNumber}): mints {amountText(prepared.preview.arcoUSDOutHuman)} ArcoUSD to this wallet.
+              </p>
+            )}
+            {"afterApproval" in prepared.preview && <p className="text-[var(--color-arco-text-soft)]">The deposit is checked again once the approval confirms.</p>}
+            {"error" in prepared.preview && <p className="text-[var(--color-arco-down)]">{prepared.preview.error}</p>}
+            {after && (
+              <p className="text-[var(--color-arco-text-soft)]">
+                Buffer after: {usdText(after.availableAfter)} · {after.verdict}
+              </p>
+            )}
+            {otherWallet && (
+              <p className="text-[var(--color-arco-down)]">
+                The connected wallet is not the signed-in operator wallet {shortAddress(prepared.from)}. Switch to it to sign.
+              </p>
+            )}
+          </>
+        )}
+        {phase === "failed" && message && (
+          <p className="text-[var(--color-arco-down)]">
+            {message}
+            {links}
+          </p>
+        )}
+        {phase === "done" && (
+          <p className="text-[var(--color-arco-text-soft)]">
+            Deposited. The gate updates on the next reserve read.
+            {links}
           </p>
         )}
       </div>

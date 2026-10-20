@@ -1,5 +1,6 @@
 import { encodeFunctionData, formatUnits, getAddress, isAddress, parseAbi, type Address, type PublicClient } from "viem"
 import { unsignedAdminTransaction, type UnsignedAdminTransaction } from "../evm/admin-transactions.js"
+import type { ReserveState } from "./reader.js"
 import { deployedArcoUSD, type ArcoUSDRegistryFile, type DeployedArcoUSD } from "./registry.js"
 
 // Admin reads over what the ArcoUSD indexer already records (docs/specs/arcousd-v1.md §5), plus
@@ -107,6 +108,88 @@ export function createProcessQueueSimulator(client: Pick<PublicClient, "simulate
     return { paid: result as bigint, blockNumber }
   }
 }
+
+// ─────────────────────────── buffer top-up ───────────────────────────
+// An operator adds a stablecoin to the Reserve's settlement buffer (the buy gate's asset) with a
+// plain Reserve.deposit from their own wallet, which receives the ArcoUSD it mints. Permissionless
+// on-chain: no role is needed, so it never has to be signed by the admin wallet.
+
+export const reserveDepositAbi = parseAbi(["function deposit(address asset, uint256 amount, address recipient) returns (uint256 arcoUSDOut)"])
+export const topUpTokenAbi = parseAbi([
+  "function balanceOf(address account) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+])
+/** The most one top-up may deposit, in whole asset units: a typo guard. */
+export const MAX_TOP_UP_UNITS = 1_000_000
+
+/** The operator wallet's balance of the asset and its allowance to the Reserve, at one block. */
+export type TopUpWalletReader = (input: {
+  asset: Address
+  owner: Address
+  spender: Address
+}) => Promise<{ balance: bigint; allowance: bigint; blockNumber: bigint }>
+
+/** eth_call of Reserve.deposit(asset, amount, from) from `from`: the ArcoUSD it would mint. */
+export type DepositSimulator = (input: {
+  reserve: Address
+  asset: Address
+  amount: bigint
+  from: Address
+}) => Promise<{ arcoUSDOut: bigint; blockNumber: bigint }>
+
+export function createTopUpWalletReader(client: Pick<PublicClient, "readContract" | "getBlockNumber">): TopUpWalletReader {
+  return async ({ asset, owner, spender }) => {
+    const blockNumber = await client.getBlockNumber()
+    const [balance, allowance] = await Promise.all([
+      client.readContract({ address: asset, abi: topUpTokenAbi, functionName: "balanceOf", args: [owner], blockNumber }),
+      client.readContract({ address: asset, abi: topUpTokenAbi, functionName: "allowance", args: [owner, spender], blockNumber }),
+    ])
+    return { balance: balance as bigint, allowance: allowance as bigint, blockNumber }
+  }
+}
+
+export function createDepositSimulator(client: Pick<PublicClient, "simulateContract" | "getBlockNumber">): DepositSimulator {
+  return async ({ reserve, asset, amount, from }) => {
+    const blockNumber = await client.getBlockNumber()
+    const { result } = await client.simulateContract({
+      account: from,
+      address: reserve,
+      abi: reserveDepositAbi,
+      functionName: "deposit",
+      args: [asset, amount, from],
+      blockNumber,
+    })
+    return { arcoUSDOut: result as bigint, blockNumber }
+  }
+}
+
+export type BufferTopUpPreview =
+  /** The deposit dry-run: the ArcoUSD it mints to the operator wallet (less a swap fee on a non-base asset). */
+  | { readonly arcoUSDOutHuman: string; readonly blockNumber: string }
+  /** The allowance is short: the deposit is dry-run when the console prepares it again after the approval. */
+  | { readonly afterApproval: true }
+  | { readonly error: string }
+
+export type BufferTopUpResult =
+  | {
+      readonly ok: true
+      readonly symbol: string
+      /** The asset's address (checksummed). */
+      readonly asset: string
+      readonly decimals: number
+      /** In the asset's base units. */
+      readonly amount: string
+      readonly amountHuman: string
+      /** The operator wallet: it pays the asset, signs every transaction and receives the ArcoUSD. */
+      readonly from: string
+      readonly balanceHuman: string
+      readonly needsApproval: boolean
+      /** approve (only while the allowance is short), then deposit. */
+      readonly transactions: readonly UnsignedAdminTransaction[]
+      readonly preview: BufferTopUpPreview
+    }
+  | { readonly ok: false; readonly status: number; readonly error: string }
 
 // ────────────────────────────── responses ──────────────────────────────
 
@@ -271,6 +354,12 @@ export class ArcoUSDAdmin {
       readonly loadRegistry: () => ArcoUSDRegistryFile | null
       readonly store: ArcoUSDAdminStore
       readonly simulateProcessQueue?: ProcessQueueSimulator
+      /** Buffer top-up reads: the operator wallet's balance and allowance; the deposit dry-run. */
+      readonly readTopUpWallet?: TopUpWalletReader
+      readonly simulateDeposit?: DepositSimulator
+      /** The live reserve (e.g. the cached public read): a top-up the Reserve would refuse is refused
+       *  before the operator signs an approval for it. null / absent / failing → not checked here. */
+      readonly liveReserve?: () => Promise<ReserveState | null>
       /** Live Reserve.queueMinDelay (e.g. from the cached reserve read); null when unread. */
       readonly liveQueueMinDelay?: () => Promise<number | null>
       readonly now?: () => number
@@ -582,6 +671,153 @@ export class ArcoUSDAdmin {
       },
     }
   }
+
+  /**
+   * Why the live Reserve would refuse this deposit now (deposits off or paused, the asset's deposit cap,
+   * the mint cap), or null. Checked before the approval: once approved, the deposit itself is dry-run.
+   */
+  private async reserveRefusal(assetAddress: string, asset: AssetInfo, amount: bigint): Promise<string | null> {
+    let state: ReserveState | null = null
+    try {
+      state = (await this.deps.liveReserve?.()) ?? null
+    } catch {
+      return null // unread: the deposit dry-run after the approval still catches a refusal
+    }
+    if (!state) return null
+    const paused = [
+      state.reservePaused && "the Reserve",
+      state.depositPaused && "Reserve deposit",
+      state.arcoUSDPaused && "ArcoUSD",
+      state.arcoUSDMintPaused && "ArcoUSD mint",
+    ].filter((name): name is string => Boolean(name))
+    if (paused.length) return `Deposits are paused (${paused.join(", ")})`
+    const live = state.assets.find((candidate) => sameAddress(candidate.address, assetAddress))
+    if (live && !live.depositEnabled) return `Deposits of ${asset.symbol} are off in the Reserve`
+    if (live?.depositRoom !== null && live?.depositRoom !== undefined && amount > BigInt(live.depositRoom)) {
+      return `Only ${moneyText(BigInt(live.depositRoom), asset.decimals)} ${asset.symbol} fits under its deposit cap`
+    }
+    // The deposit mints up to the amount in ArcoUSD (18 decimals); the mint cap bounds the supply.
+    const minted = asset.decimals <= 18 ? amount * 10n ** BigInt(18 - asset.decimals) : amount / 10n ** BigInt(asset.decimals - 18)
+    const headroom = BigInt(state.mintCap) - BigInt(state.totalLiabilities)
+    if (minted > headroom) return `Only ${moneyText(headroom > 0n ? headroom : 0n, 18)} ArcoUSD can still be minted under the mint cap`
+    return null
+  }
+
+  /**
+   * Unsigned approve (only while the allowance is short) and Reserve.deposit(asset, amount, from) for
+   * the operator wallet `from`, which pays the asset and receives the ArcoUSD. Checks the wallet's
+   * balance and dry-runs the deposit once nothing is left to approve.
+   */
+  async bufferTopUpTransactions(input: { asset?: unknown; amount?: unknown; from?: string | null }): Promise<BufferTopUpResult> {
+    const current = this.deployment()
+    if (current.status === "not-deployed") return { ok: false, status: 409, error: "ArcoUSD is not deployed" }
+    if (current.status === "unavailable") return { ok: false, status: 503, error: `ArcoUSD registry is invalid: ${current.error}` }
+    const { deployment } = current
+    if (typeof input.from !== "string" || !isAddress(input.from)) {
+      return { ok: false, status: 400, error: "Sign in with an operator wallet: the top-up is paid from, signed by and credited to that wallet" }
+    }
+    const wanted = typeof input.asset === "string" ? input.asset.trim() : ""
+    const asset = [...assetsOf(deployment).values()].find(
+      (candidate) => candidate.symbol === wanted || (isAddress(wanted) && sameAddress(candidate.address, wanted)),
+    )
+    if (!asset) return { ok: false, status: 400, error: "asset must be a Reserve asset symbol or address from the ArcoUSD registry" }
+    const amount = parseTopUpAmount(input.amount, asset.decimals)
+    if (amount === null) {
+      return {
+        ok: false,
+        status: 400,
+        error: `amount must be a positive ${asset.symbol} amount with at most ${asset.decimals} decimals, up to ${MAX_TOP_UP_UNITS.toLocaleString("en-US")}`,
+      }
+    }
+    if (!this.deps.readTopUpWallet) return { ok: false, status: 503, error: "Chain reads are unavailable on this server" }
+    const from = getAddress(input.from) as Address
+    const reserve = getAddress(deployment.reserveAddress) as Address
+    const assetAddress = getAddress(asset.address) as Address
+    let wallet: { balance: bigint; allowance: bigint }
+    try {
+      wallet = await this.deps.readTopUpWallet({ asset: assetAddress, owner: from, spender: reserve })
+    } catch (error) {
+      return { ok: false, status: 503, error: `Could not read the wallet's ${asset.symbol}: ${errorText(error)}` }
+    }
+    const amountHuman = formatUnits(amount, asset.decimals)
+    if (wallet.balance < amount) {
+      return {
+        ok: false,
+        status: 409,
+        error: `The wallet holds ${moneyText(wallet.balance, asset.decimals)} ${asset.symbol}, less than the ${amountHuman} ${asset.symbol} of this top-up`,
+      }
+    }
+    const refusal = await this.reserveRefusal(assetAddress, asset, amount)
+    if (refusal) return { ok: false, status: 409, error: refusal }
+    const needsApproval = wallet.allowance < amount
+    let preview: BufferTopUpPreview
+    if (needsApproval) {
+      preview = { afterApproval: true }
+    } else if (!this.deps.simulateDeposit) {
+      preview = { error: "Simulation unavailable" }
+    } else {
+      try {
+        const simulated = await this.deps.simulateDeposit({ reserve, asset: assetAddress, amount, from })
+        preview = { arcoUSDOutHuman: formatUnits(simulated.arcoUSDOut, 18), blockNumber: simulated.blockNumber.toString() }
+      } catch (error) {
+        preview = { error: `deposit would revert or could not be simulated: ${errorText(error)}` }
+      }
+    }
+    const approve = unsignedAdminTransaction(
+      deployment.chainId,
+      assetAddress,
+      encodeFunctionData({ abi: topUpTokenAbi, functionName: "approve", args: [reserve, amount] }),
+      `${asset.symbol}: let the ArcoUSD Reserve take ${amountHuman} ${asset.symbol} from this wallet (approve)`,
+    )
+    const deposit = unsignedAdminTransaction(
+      deployment.chainId,
+      reserve,
+      encodeFunctionData({ abi: reserveDepositAbi, functionName: "deposit", args: [assetAddress, amount, from] }),
+      `ArcoUSD Reserve: deposit ${amountHuman} ${asset.symbol} into the settlement buffer; this wallet receives the ArcoUSD it mints (deposit)`,
+    )
+    return {
+      ok: true,
+      symbol: asset.symbol,
+      asset: assetAddress,
+      decimals: asset.decimals,
+      amount: amount.toString(),
+      amountHuman,
+      from,
+      balanceHuman: formatUnits(wallet.balance, asset.decimals),
+      needsApproval,
+      preview,
+      transactions: [
+        ...(needsApproval ? [approve] : []),
+        {
+          ...deposit,
+          simulation:
+            "arcoUSDOutHuman" in preview
+              ? { status: "simulated", reason: `eth_call at block ${preview.blockNumber}: mints ${preview.arcoUSDOutHuman} ArcoUSD` }
+              : "error" in preview
+                ? { status: "failed", reason: preview.error }
+                : { status: "not-run", reason: "Dry-run once the approval is confirmed: the console prepares the deposit again then" },
+        },
+      ],
+    }
+  }
+}
+
+/** "1,234.5" (max 2 decimals) for an amount in base units: the display rule for money in errors. */
+function moneyText(amount: bigint, decimals: number): string {
+  return Number(formatUnits(amount, decimals)).toLocaleString("en-US", { maximumFractionDigits: 2 })
+}
+
+/** A positive decimal string (or safe number) in the asset's units, at most MAX_TOP_UP_UNITS; null otherwise. */
+export function parseTopUpAmount(value: unknown, decimals: number): bigint | null {
+  const text = typeof value === "string" ? value.trim() : typeof value === "number" && Number.isFinite(value) ? String(value) : null
+  if (text === null) return null
+  const match = /^(\d{1,7})(?:\.(\d+))?$/.exec(text)
+  if (!match) return null
+  const fraction = match[2] ?? ""
+  if (fraction.length > decimals) return null
+  const amount = BigInt(match[1]) * 10n ** BigInt(decimals) + BigInt(fraction.padEnd(decimals, "0") || "0")
+  if (amount <= 0n || amount > BigInt(MAX_TOP_UP_UNITS) * 10n ** BigInt(decimals)) return null
+  return amount
 }
 
 // ─────────────────────────────── helpers ───────────────────────────────

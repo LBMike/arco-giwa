@@ -43,7 +43,13 @@ export function stocksTabPath(id: StocksTabId): string {
 // ── GET /api/v1/admin/session ─────────────────────────────────────────────
 
 export type OperatorGrant = { readonly operatorId: string; readonly permissions: readonly string[] }
-export type AdminSessionInfo = { readonly wallet: string; readonly vault: OperatorGrant | null; readonly stocks: OperatorGrant | null }
+export type AdminSessionInfo = {
+  readonly wallet: string
+  readonly vault: OperatorGrant | null
+  readonly stocks: OperatorGrant | null
+  /** The server flags a wallet whose nonce a service owns (the Stocks signer): a transaction from it stops Stocks. */
+  readonly signerWallet: boolean
+}
 
 export class AdminSessionContractError extends Error {
   constructor(readonly path: string) {
@@ -65,7 +71,8 @@ export function parseAdminSession(body: unknown): AdminSessionInfo {
   if (body === null || typeof body !== "object" || Array.isArray(body)) throw new AdminSessionContractError("$")
   const root = body as Record<string, unknown>
   if (typeof root.wallet !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(root.wallet)) throw new AdminSessionContractError("$.wallet")
-  return { wallet: root.wallet, vault: grant(root.vault, "$.vault"), stocks: grant(root.stocks, "$.stocks") }
+  // signerWallet is optional (older servers omit it); anything but true reads as false.
+  return { wallet: root.wallet, vault: grant(root.vault, "$.vault"), stocks: grant(root.stocks, "$.stocks"), signerWallet: root.signerWallet === true }
 }
 
 export type ConsoleAccess = {

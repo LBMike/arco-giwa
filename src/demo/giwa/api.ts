@@ -8,6 +8,7 @@ import type {
   GiwaArcoUSDAlerts,
   GiwaArcoUSDKeeper,
   GiwaArcoUSDProcessQueue,
+  GiwaArcoUSDBufferTopUp,
   GiwaArcoUSDQueue,
   GiwaArcoUSDQueueFilter,
   GiwaArcoUSDReserve,
@@ -378,6 +379,12 @@ export const giwaApi = {
       adminJson<GiwaArcoUSDProcessQueue>(auth, `/api/v1/admin/arcousd/process-queue`, {
         method: "POST",
         body: JSON.stringify(maxCount === undefined ? { asset } : { asset, maxCount }),
+      }),
+    // Buffer top-up from the operator's wallet: approve while short, then Reserve.deposit (vault:write).
+    arcousdBufferTopUp: (auth: AdminAuth, asset: string, amount: string) =>
+      adminJson<GiwaArcoUSDBufferTopUp>(auth, `/api/v1/admin/arcousd/buffer-topup`, {
+        method: "POST",
+        body: JSON.stringify({ asset, amount }),
       }),
     // ArcoUSD watcher alerts, and a test message to the configured channels (vault:write).
     arcousdAlerts: (auth: AdminAuth) => adminJson<GiwaArcoUSDAlerts>(auth, `/api/v1/admin/arcousd/alerts`),
