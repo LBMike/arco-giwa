@@ -1,22 +1,27 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import { GIWA_FUNDS_ROUTE, GIWA_PREPROD_ROUTE } from "./routes"
+import { GIWA_FUNDS_ROUTE, GIWA_HOME_ROUTE, GIWA_PREPROD_ROUTE, GIWA_SAVINGS_ROUTE } from "./routes"
 
 // Source guards: main.tsx builds the browser router at module scope (it renders on import), so the
 // route tree is asserted from source, like the provider guard in stocks-host/provider.dom.test.tsx.
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8")
 
-test("route constants: / is Home, /funds is the Funds list", () => {
+test("route constants: / starts on Savings, /home is Home, /funds is the Funds list", () => {
   assert.equal(GIWA_PREPROD_ROUTE, "/")
+  assert.equal(GIWA_HOME_ROUTE, "/home")
+  assert.equal(GIWA_SAVINGS_ROUTE, "/savings")
   assert.equal(GIWA_FUNDS_ROUTE, "/funds")
 })
 
-test("main.tsx: index renders Home, 'funds' renders the Funds page, existing routes and guards unchanged", () => {
+test("main.tsx: index opens Savings (query kept), 'home' renders Home, 'funds' the Funds page, existing routes and guards unchanged", () => {
   const main = read("../../main.tsx")
   assert.match(main, /const GiwaHomePage = lazy\(\(\) => import\('\.\/demo\/giwa\/HomePage'\)\)/)
   assert.match(main, /const GiwaInvestorPage = lazy\(\(\) => import\('\.\/demo\/giwa\/Investor'\)\)/)
-  assert.match(main, /\{ index: true, element: giwaRoute\(<GiwaHomePage \/>\) \}/)
+  assert.match(main, /\{ index: true, element: <LandingRedirect \/> \}/)
+  assert.match(main, /function LandingRedirect\(\) \{\s*const location = useLocation\(\)\s*return <Navigate to=\{`\$\{GIWA_SAVINGS_ROUTE\}\$\{location\.search\}`\} replace \/>/)
+  assert.match(main, /\{ path: 'home', element: giwaRoute\(<GiwaHomePage \/>\) \}/)
+  assert.doesNotMatch(main, /index: true, element: giwaRoute\(<GiwaHomePage \/>\)/)
   assert.match(main, /\{ path: 'funds', element: giwaRoute\(<GiwaInvestorPage \/>\) \}/)
   assert.doesNotMatch(main, /index: true, element: giwaRoute\(<GiwaInvestorPage \/>\)/)
   assert.match(main, /\{ path: 'savings', element: giwaRoute\(<GiwaSavingsPage \/>\) \}/)
@@ -30,7 +35,7 @@ test("main.tsx: index renders Home, 'funds' renders the Funds page, existing rou
   assert.match(main, /<RequireGiwaAdmin><GiwaAdminLayout \/><\/RequireGiwaAdmin>/)
 })
 
-test("links that mean 'the products list' point at /funds; logo links stay on Home", () => {
+test("links that mean 'the products list' point at /funds; logo links go to the root (Savings)", () => {
   for (const file of ["ProductDetailPage.tsx", "PortfolioPage.tsx", "RequireGiwaAdmin.tsx"]) {
     const source = read(`./${file}`)
     assert.match(source, /to=\{GIWA_FUNDS_ROUTE\}/, file)

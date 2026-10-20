@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { giwaApi } from "./api"
-import { REQUIRED_PAYMENT_ASSET_BY_PRODUCT, vaultConfigOf } from "./catalog"
+import { REQUIRED_PAYMENT_ASSET_BY_PRODUCT, vaultConfigOf, vaultImageFor } from "./catalog"
 import { sliceToBreakdownRow } from "./display-profile"
 import { readTokenBalance } from "./contracts"
 import { useGiwaProductOperation } from "./useGiwaProductOperation"
@@ -11,14 +11,6 @@ import { DEPLOYED_FUND_METRICS, metricCaption } from "./listed-funds"
 import { rateLabel } from "./fund-categories"
 import type { DocLink } from "../data/acapix-detail"
 import { productById, ASSET_MANAGERS, ISSUERS } from "../data/products"
-
-const TOKEN_ICONS: Record<string, string> = {
-  abtc: "/logos/abtc.png",
-  aeth: "/logos/aeth.png",
-  acapix: "/logos/aksia.svg",
-  ibenji: "/logos/ibenji.svg",
-  umint: "/logos/umint.svg",
-}
 
 // Vault-detail data derivation, extracted VERBATIM from ProductDetailView so the product detail
 // page and the Savings page (Phase 4) share ONE source of truth and can't drift. Call it
@@ -65,7 +57,8 @@ export function useGiwaVaultDetail(product: GiwaCatalogItem) {
 
   // Config-first identity/content (blank config field → legacy identity). Content the vault has not
   // set (About, fees, portfolio) stays empty: no other product's copy or figures fill the gap.
-  const vaultImage = cfg.vaultImageUrl ?? TOKEN_ICONS[product.productId]
+  // The vault logo resolves as everywhere else (catalog.ts): a presented token's mark, the admin image, the legacy icon.
+  const vaultImage = vaultImageFor(product)
   const issuerLabel = cfg.issuerName ?? ISSUERS[issuerKey]?.label ?? issuerKey
   const issuerLogo = cfg.issuerImageUrl ?? ISSUERS[issuerKey]?.logo
   const managerLabel = cfg.assetManagerName ?? ASSET_MANAGERS[managerKey]?.label ?? managerKey

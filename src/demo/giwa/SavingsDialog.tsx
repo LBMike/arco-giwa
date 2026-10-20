@@ -24,6 +24,7 @@ export function SavingsDialog({
   onClose,
   labelledBy,
   variant = "modal",
+  size = "regular",
   dismissible = true,
   initialFocus,
   children,
@@ -34,6 +35,8 @@ export function SavingsDialog({
   labelledBy: string
   /** "modal": a centred card over a dimmed page. "screen": a full-screen page of its own. */
   variant?: "modal" | "screen"
+  /** The modal's width from sm up: "regular" (760px, the Savings dialogs) or "narrow" (440px, a picker). */
+  size?: "regular" | "narrow"
   /** A press on the dimmed page closes the modal. */
   dismissible?: boolean
   /** Where focus goes on open; the dialog itself when not given. */
@@ -80,7 +83,8 @@ export function SavingsDialog({
     }
   }, [open])
 
-  // Escape + focus trap, in the capture phase on window. Keys that belong to a layer on top are left alone.
+  // Escape + focus trap, in the capture phase on window. Keys that belong to a layer on top are left alone, and so is an
+  // Escape pressed inside a popup of the dialog's own that closes itself first (marked data-escape-layer).
   useEffect(() => {
     if (!open) return
     function onKeyDown(event: KeyboardEvent) {
@@ -88,6 +92,7 @@ export function SavingsDialog({
       if (dialog === null) return
       const active = document.activeElement
       if (active !== null && active !== document.body && !dialog.contains(active) && isOtherLayer(active)) return
+      if (event.key === "Escape" && active !== null && dialog.contains(active) && active.closest("[data-escape-layer]") !== null) return
       if (event.key === "Escape") {
         event.preventDefault()
         event.stopPropagation()
@@ -145,9 +150,9 @@ export function SavingsDialog({
             aria-modal="true"
             aria-labelledby={labelledBy}
             tabIndex={-1}
-            className={`max-h-[92vh] w-full overflow-y-auto overscroll-contain rounded-t-[22px] bg-[var(--color-arco-surface)] outline-none transition-transform duration-200 ease-out motion-reduce:transition-none sm:max-w-[760px] sm:rounded-[22px] ${
-              visible ? "translate-y-0" : "translate-y-3"
-            }`}
+            className={`max-h-[92vh] w-full overflow-y-auto overscroll-contain rounded-t-[22px] bg-[var(--color-arco-surface)] outline-none transition-transform duration-200 ease-out motion-reduce:transition-none sm:rounded-[22px] ${
+              size === "narrow" ? "sm:max-w-[440px]" : "sm:max-w-[760px]"
+            } ${visible ? "translate-y-0" : "translate-y-3"}`}
             style={{ boxShadow: "var(--shadow-control)" }}
           >
             {children}

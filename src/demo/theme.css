@@ -60,15 +60,62 @@
   .arco-demo .arco-live-heartbeat { animation: none; }
 }
 
-/* Savings card: a soft light drifting across the dark card, and the "scroll on" chevrons. */
-.arco-demo .savings-hero-glow {
-  animation: savings-hero-glow 18s ease-in-out infinite alternate;
+/* Savings card: an aurora behind the grid, and the "scroll on" chevrons. The aurora is four soft curtains of light
+   (SavingsHeroCard.tsx), each on its own slow back-and-forth loop; screen blending adds them up as light on the dark
+   card. Translations are shares of each curtain's own box. */
+.arco-demo .savings-aurora-a,
+.arco-demo .savings-aurora-b,
+.arco-demo .savings-aurora-c,
+.arco-demo .savings-aurora-d {
+  opacity: 0.75;
+  mix-blend-mode: screen;
+  will-change: transform;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+.arco-demo .savings-aurora-a { animation-name: savings-aurora-a; animation-duration: 26s; }
+.arco-demo .savings-aurora-b { animation-name: savings-aurora-b; animation-duration: 32s; animation-delay: -9s; }
+.arco-demo .savings-aurora-c { animation-name: savings-aurora-c; animation-duration: 38s; animation-delay: -17s; }
+.arco-demo .savings-aurora-d { animation-name: savings-aurora-d; animation-duration: 21s; animation-delay: -5s; }
+
+@keyframes savings-aurora-a {
+  0% { transform: translate(0, 0) rotate(-14deg) scale(1, 1); }
+  50% { transform: translate(70%, 8%) rotate(-4deg) scale(1.2, 0.9); }
+  100% { transform: translate(150%, -6%) rotate(-18deg) scale(0.9, 1.1); }
+}
+@keyframes savings-aurora-b {
+  0% { transform: translate(0, 0) rotate(16deg) scale(1, 1); }
+  50% { transform: translate(-80%, 10%) rotate(6deg) scale(1.25, 0.95); }
+  100% { transform: translate(-170%, -4%) rotate(20deg) scale(0.9, 1.05); }
+}
+@keyframes savings-aurora-c {
+  0% { transform: translate(-10%, 0) scale(1); }
+  50% { transform: translate(15%, -12%) scale(1.15); }
+  100% { transform: translate(30%, 6%) scale(0.95); }
+}
+@keyframes savings-aurora-d {
+  0% { transform: translate(-120%, 0) rotate(22deg); }
+  100% { transform: translate(260%, 0) rotate(8deg); }
 }
 
-@keyframes savings-hero-glow {
-  0% { transform: translate(-12%, -10%) scale(1); }
-  50% { transform: translate(30%, 8%) scale(1.15); }
-  100% { transform: translate(62%, -6%) scale(1); }
+/* The Crypto Native card (data-savings-tone="cream"): black, with its grid, hairlines, panels and aurora in cream
+   (#E1E0CC, --color-arco-cream) instead of white and blue. Re-scoped here so the card's own styles stay the same. */
+.arco-demo [data-savings-tone="cream"] {
+  --color-savings-on-hero-line: rgba(225, 224, 204, 0.18);
+  --color-savings-on-hero-fill: rgba(225, 224, 204, 0.08);
+  --color-savings-aurora-1: rgba(225, 224, 204, 0.26);
+  --color-savings-aurora-2: rgba(225, 224, 204, 0.13);
+  --color-savings-aurora-3: rgba(225, 224, 204, 0.16);
+  --color-savings-aurora-4: rgba(225, 224, 204, 0.2);
+}
+
+/* On a phone the card is narrow and tall, so the curtains crowd behind its text: fainter there. */
+@media (max-width: 639px) {
+  .arco-demo .savings-aurora-a,
+  .arco-demo .savings-aurora-b,
+  .arco-demo .savings-aurora-c,
+  .arco-demo .savings-aurora-d { opacity: 0.65; }
 }
 
 .arco-demo .savings-chevron {
@@ -80,9 +127,66 @@
   50% { opacity: 0.85; }
 }
 
+/* Savings figures that roll digit by digit, like an odometer (RollingDigits.tsx): a digit that changes slides in from
+   below while the old one leaves through the top as the figure grows, and the other way as it shrinks. Each digit
+   sits in a slot clipped to its own box, so only the moving digits show. */
+.arco-demo .savings-digit-in-up { animation: savings-digit-in-up 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.arco-demo .savings-digit-out-up { animation: savings-digit-out-up 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.arco-demo .savings-digit-in-down { animation: savings-digit-in-down 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.arco-demo .savings-digit-out-down { animation: savings-digit-out-down 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+@keyframes savings-digit-in-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes savings-digit-out-up {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(-100%); opacity: 0; }
+}
+@keyframes savings-digit-in-down {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes savings-digit-out-down {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(100%); opacity: 0; }
+}
+
+/* Savings card "Earning": the green dot beats like a heart, a double beat then a rest, and the first beat of each
+   sends out a halo that fades as it grows (SavingsHeroCard.tsx). */
+.arco-demo .savings-heartbeat-dot {
+  transform-origin: center;
+  animation: savings-heartbeat-dot 1.6s ease-in-out infinite;
+}
+.arco-demo .savings-heartbeat-halo {
+  transform-origin: center;
+  animation: savings-heartbeat-halo 1.6s ease-out infinite;
+}
+
+@keyframes savings-heartbeat-dot {
+  0%, 36%, 100% { transform: scale(1); }
+  9% { transform: scale(1.5); }
+  18% { transform: scale(1); }
+  27% { transform: scale(1.35); }
+}
+@keyframes savings-heartbeat-halo {
+  0% { transform: scale(1); opacity: 0.6; }
+  50%, 100% { transform: scale(3); opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .arco-demo .savings-hero-glow,
-  .arco-demo .savings-chevron { animation: none; }
+  .arco-demo .savings-aurora-a,
+  .arco-demo .savings-aurora-b,
+  .arco-demo .savings-aurora-c,
+  .arco-demo .savings-aurora-d,
+  .arco-demo .savings-chevron,
+  .arco-demo .savings-heartbeat-dot,
+  .arco-demo .savings-heartbeat-halo,
+  .arco-demo .savings-digit-in-up,
+  .arco-demo .savings-digit-in-down { animation: none; }
+  .arco-demo .savings-digit-out-up,
+  .arco-demo .savings-digit-out-down { display: none; }
+  .arco-demo .savings-heartbeat-halo { opacity: 0; }
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -159,7 +263,10 @@
   --color-savings-on-hero-muted: rgba(255, 255, 255, 0.74); /* secondary text on the dark Savings card (>= 4.5:1 under the glow) */
   --color-savings-on-hero-line: rgba(255, 255, 255, 0.16);  /* hairlines, outline button and grid on the dark card */
   --color-savings-on-hero-fill: rgba(255, 255, 255, 0.08);  /* translucent panels on the dark card */
-  --color-savings-hero-glow: rgba(225, 224, 204, 0.2);      /* drifting cream light on the dark card */
+  --color-savings-aurora-1: rgba(37, 99, 235, 0.4);         /* aurora on the dark card: azure curtain */
+  --color-savings-aurora-2: rgba(14, 165, 233, 0.16);       /* aurora: sky curtain */
+  --color-savings-aurora-3: rgba(99, 102, 241, 0.3);        /* aurora: indigo pool */
+  --color-savings-aurora-4: rgba(147, 197, 253, 0.1);       /* aurora: pale ice ribbon */
   --color-savings-tile-hatch: rgba(15, 23, 42, 0.05);       /* diagonal hatch on the Backing / Exposure tiles */
   --color-savings-earn-area: rgba(23, 147, 134, 0.14);      /* simulation earnings area (arco-up @ 14%) */
 
@@ -216,6 +323,7 @@
   --shadow-control: 0 0 0 0.5px var(--color-arco-border);
   --shadow-savings-card: 0 1px 2px rgba(16, 16, 20, 0.05); /* accept-asset selector card (Figma) */
   --shadow-table: 0 3px 4px rgba(0, 0, 0, 0.25);
+  --shadow-savings-popover: 0 12px 32px rgba(16, 16, 20, 0.12), 0 0 0 0.5px var(--color-arco-border); /* Backing tile detail card */
 
   /* containers */
   --container-page: 1200px;

@@ -23,7 +23,7 @@ function activeIds(pathname: string, isAdmin = true): InvestorNavItemId[] {
 test("nav sections and items keep their order, labels and routes", () => {
   assert.equal(GIWA_FUNDS_ROUTE, "/funds")
   assert.deepEqual(shape(false), [
-    { label: null, items: [["Home", "/"]] },
+    { label: null, items: [["Home", "/home"]] },
     { label: "Invest", items: [["Savings", "/savings"], ["Funds", "/funds"], ["Stocks", "/stocks"]] },
     { label: "Manage", items: [["Portfolio", "/portfolio"]] },
   ])
@@ -44,7 +44,9 @@ test("Send stays out of the menu until the feature exists", () => {
 
 test("active matching per path", () => {
   const cases: Array<[string, InvestorNavItemId[]]> = [
-    ["/", ["home"]],
+    ["/home", ["home"]],
+    // The root redirects to Savings; nothing is current on the way.
+    ["/", []],
     ["/funds", ["funds"]],
     ["/product/abc", ["funds"]],
     ["/savings", ["savings"]],

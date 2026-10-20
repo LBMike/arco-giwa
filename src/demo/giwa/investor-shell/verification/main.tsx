@@ -8,32 +8,70 @@
 //   - public GIWA product reads use ./deployed-giwa.snapshot.json; wallet activity remains empty fixture data,
 //   - every other off-origin request (public RPC included) gets a 503 JSON error and is logged as BLOCKED.
 // Market data defaults to synthetic fixtures; ?market=live explicitly reads the same-origin display backend.
-// This page sends no wallet request itself; window.ethereum is whatever the browser provides.
+// This page sends no wallet request itself; window.ethereum is whatever the browser provides, except with ?wallet=demo:
+// then it is the demo wallet (./demo-wallet.ts) and the demo chain answers GIWA RPC (./demo-chain.ts). Nothing real.
 
 import { DemoPresentationContext } from "../../demo-presentation"
 import { StrictMode, Suspense, lazy, useState, useSyncExternalStore, type ReactNode } from "react"
 import { createRoot } from "react-dom/client"
-import { createHashRouter, Navigate, RouterProvider } from "react-router-dom"
+import { createHashRouter, Navigate, RouterProvider, useLocation } from "react-router-dom"
 
 import "../../../../index.css"
 import "../../../theme.css"
 import { ARCO_API_BASE, DYNAMIC_ENVIRONMENT_ID, GIWA_PUBLIC_RPC } from "../../config"
 import { customerWalletRequestAllowed } from "./customer-wallet"
-import { GIWA_PREPROD_ROUTE } from "../../routes"
+import { GIWA_PREPROD_ROUTE, GIWA_SAVINGS_ROUTE } from "../../routes"
 import type { MarketFetch } from "../../stocks-market/contracts"
 import { StocksPageEnvironment } from "../../stocks-market/environment"
 import { fixtureMarketFetch, fixtureTop40MarketFetch } from "../../stocks-market/fixtures"
 import { stocksRoutes } from "../../stocks-market/routes"
 import { previewLegacyReply } from "./fixtures"
 import { deployedLegacyReply, DEPLOYED_CAPTURED_AT, DEPLOYED_SOURCE } from "./deployed"
+import snapshot from "./deployed-giwa.snapshot.json"
+import type { GiwaProduct } from "../../types"
+import type { ArcoUsdConvert } from "../../arcousd-convert"
+import type { SavingsRoute } from "../../savings-assets"
+import { ArcoUsdConvertContext, SavingsRoutesContext } from "../../savings-routes"
+import { demoProducts } from "./demo-chain"
+import { demoArcoUsdConvert, demoSavingsRoutes } from "./demo-routes"
+import { createDemoWallet, DEMO_ACCOUNT, installDemoProvider, type DemoWallet } from "./demo-wallet"
+import { DemoWalletPanel } from "./DemoWalletPanel"
 
-type AnsweredBy = "deployed" | "fixture" | "harness" | "BLOCKED"
+type AnsweredBy = "deployed" | "fixture" | "harness" | "demo" | "BLOCKED"
 type LogEntry = { n: number; method: string; target: string; answeredBy: AnsweredBy; status: number | null; note: string }
 type LogState = { entries: readonly LogEntry[]; total: number; counts: Readonly<Record<AnsweredBy, number>> }
 type MarketMode = "top40" | "pilot" | "unconfigured" | "live"
 
 const ORIGIN = window.location.origin
 const CUSTOMER_READS = document.querySelector('meta[name="giwa-customer-reads"]')?.getAttribute("content") === "true"
+
+function sessionStorageOrNull(): Storage | null {
+  try {
+    return window.sessionStorage
+  } catch {
+    return null
+  }
+}
+// ?wallet=demo: a demo wallet and chain stand in for a real wallet and GIWA Sepolia (./demo-wallet.ts, ./demo-chain.ts).
+// Off by default and in connected mode. The provider becomes window.ethereum before any product module reads it. The
+// demo chain also carries a route for every Savings coin other than a vault's own (./demo-routes.ts), and the pages
+// get those routes, so the demo wallet can deposit and withdraw any of them; a real wallet keeps the vault's own coin.
+// Likewise Get ArcoUSD's converters: the pages get them, so the demo wallet has Get ArcoUSD; a real wallet has none.
+const DEMO_MODE = !CUSTOMER_READS && new URLSearchParams(window.location.search).get("wallet") === "demo"
+const DEMO_CATALOG = snapshot.catalog as unknown as GiwaProduct[]
+const DEMO_PRODUCTS = DEMO_MODE ? demoProducts(DEMO_CATALOG, snapshot.market) : []
+const DEMO_ROUTES = DEMO_MODE ? demoSavingsRoutes(DEMO_CATALOG, DEMO_PRODUCTS) : null
+const DEMO_CONVERT = DEMO_ROUTES !== null ? demoArcoUsdConvert(DEMO_CATALOG, DEMO_PRODUCTS, DEMO_ROUTES) : null
+const DEMO_WALLET: DemoWallet | null = DEMO_MODE
+  ? createDemoWallet(
+      { account: DEMO_ACCOUNT, products: DEMO_PRODUCTS, routes: DEMO_ROUTES?.products ?? [], converters: DEMO_CONVERT?.products ?? [] },
+      sessionStorageOrNull(),
+    )
+  : null
+if (DEMO_WALLET !== null) installDemoProvider(DEMO_WALLET.provider)
+const SAVINGS_ROUTES: readonly SavingsRoute[] = DEMO_ROUTES?.routes ?? []
+const ARCOUSD_CONVERT: ArcoUsdConvert | null = DEMO_CONVERT?.convert ?? null
+
 const MAX_ENTRIES = 300
 const MODE_KEY = "giwa-investor-shell-preview:market-mode"
 
@@ -57,7 +95,7 @@ const RPC_ORIGIN = originOf(GIWA_PUBLIC_RPC)
 
 // ── request log (page-local store) ──────────────────────────────────────────────────────────────────
 
-const EMPTY_LOG: LogState = { entries: [], total: 0, counts: { deployed: 0, fixture: 0, harness: 0, BLOCKED: 0 } }
+const EMPTY_LOG: LogState = { entries: [], total: 0, counts: { deployed: 0, fixture: 0, harness: 0, demo: 0, BLOCKED: 0 } }
 let log = EMPTY_LOG
 const listeners = new Set<() => void>()
 let notifyQueued = false
@@ -121,10 +159,34 @@ function aborted(init?: RequestInit): boolean {
   return init?.signal?.aborted === true
 }
 
+/** Demo mode: the demo chain answers GIWA RPC, and the demo account's withdrawal requests answer the redemptions read. */
+function demoReply(wallet: DemoWallet, url: URL, method: string, init?: RequestInit): Response | null {
+  if (url.origin === RPC_ORIGIN && method === "POST" && typeof init?.body === "string") {
+    record(method, display(url), "demo", 200, rpcNote(init))
+    return new Response(wallet.rpc(init.body), { status: 200, headers: { "content-type": "application/json" } })
+  }
+  if (!LEGACY_BASE || method !== "GET" || !url.href.startsWith(`${LEGACY_BASE}/`)) return null
+  const match = url.href.slice(LEGACY_BASE.length).match(/^\/api\/v1\/redemptions\/([^/?#]+)/)
+  if (!match) return null
+  let rows: ReturnType<DemoWallet["redemptions"]>
+  try {
+    rows = wallet.redemptions(decodeURIComponent(match[1]!))
+  } catch {
+    return null
+  }
+  if (rows === null) return null
+  record(method, display(url), "demo", 200)
+  return json(200, rows)
+}
+
 function guardedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(hrefOf(input), window.location.href)
   const method = methodOf(input, init)
   if (aborted(init)) return Promise.reject(new DOMException("The operation was aborted.", "AbortError"))
+  if (DEMO_WALLET !== null) {
+    const reply = demoReply(DEMO_WALLET, url, method, init)
+    if (reply !== null) return Promise.resolve(reply)
+  }
   // Dynamic owns its login flow. Pass the original request directly, without recording auth data.
   if (CUSTOMER_READS && customerWalletRequestAllowed(url, method, DYNAMIC_ENVIRONMENT_ID)) return nativeFetch(input, init)
   if (CUSTOMER_READS && url.origin === RPC_ORIGIN && url.pathname === "/" && !url.search && method === "POST") {
@@ -216,6 +278,12 @@ function giwaRoute(element: ReactNode) {
   return <Suspense fallback={null}>{element}</Suspense>
 }
 
+// As src/main.tsx: a visit starts on Savings, keeping the query (Home lives at /home).
+function LandingRedirect() {
+  const location = useLocation()
+  return <Navigate to={`${GIWA_SAVINGS_ROUTE}${location.search}`} replace />
+}
+
 // The investor tree of src/main.tsx (fixtures.test.tsx compares the two). Hash routing is preview-only: this page is
 // one static file under Vite's MPA mode. Omitted: the /app/* legacy redirect and the allowlisted /admin console.
 const router = createHashRouter([
@@ -224,7 +292,8 @@ const router = createHashRouter([
     path: GIWA_PREPROD_ROUTE,
     element: giwaRoute(<GiwaPreprodApp />),
     children: [
-      { index: true, element: giwaRoute(<GiwaHomePage />) },
+      { index: true, element: <LandingRedirect /> },
+      { path: "home", element: giwaRoute(<GiwaHomePage />) },
       { path: "funds", element: giwaRoute(<GiwaInvestorPage />) },
       { path: "savings", element: giwaRoute(<GiwaSavingsPage />) },
       { path: "portfolio", element: giwaRoute(<GiwaPortfolioPage />) },
@@ -274,7 +343,7 @@ function RequestLog() {
   return (
     <details className="w-full min-w-0 rounded-[var(--radius-card)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)]" data-testid="investor-shell-request-log">
       <summary className={`cursor-pointer rounded-[var(--radius-card)] px-3 py-2 text-xs font-medium text-[var(--color-arco-ink)] ${FOCUS}`} data-testid="investor-shell-request-counts">
-        Request log · {state.total} total · GIWA snapshot {state.counts.deployed} · fixture {state.counts.fixture} · harness {state.counts.harness} · BLOCKED {state.counts.BLOCKED}
+        Request log · {state.total} total · GIWA snapshot {state.counts.deployed} · fixture {state.counts.fixture} · harness {state.counts.harness} · demo {state.counts.demo} · BLOCKED {state.counts.BLOCKED}
       </summary>
       <div className="border-t border-[var(--color-arco-border)] p-3">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -346,8 +415,13 @@ function PreviewPage() {
     <>
       {debug && <PreviewBar mode={mode} onMode={choose} />}
       <DemoPresentationContext.Provider value={!debug}>
-        <PreviewApp key={mode} mode={mode} />
+        <SavingsRoutesContext.Provider value={SAVINGS_ROUTES}>
+          <ArcoUsdConvertContext.Provider value={ARCOUSD_CONVERT}>
+            <PreviewApp key={mode} mode={mode} />
+          </ArcoUsdConvertContext.Provider>
+        </SavingsRoutesContext.Provider>
       </DemoPresentationContext.Provider>
+      {DEMO_WALLET !== null && <DemoWalletPanel wallet={DEMO_WALLET} />}
     </>
   )
 }

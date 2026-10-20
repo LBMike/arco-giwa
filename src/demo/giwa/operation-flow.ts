@@ -1,12 +1,13 @@
 // Savings and Funds in the transaction modal: the steps one press of Invest or Redeem runs (an approval first when the
 // vault may not take the payment asset yet, then the operation itself), the words each step and the result screen use,
-// and the runner that moves the steps along. Savings reads as a deposit, Funds as an investment, and each operation has
-// its own words. Pure: no React, no wallet, no contracts (the hook passes the wallet calls in).
+// and the runner that moves the steps along. Savings reads as a deposit, Funds as an investment, Get ArcoUSD as a
+// conversion (either way), and each operation has its own words. Pure: no React, no wallet, no contracts (the hook
+// passes the wallet calls in).
 
 import type { ProductOperation } from "./operation-routing"
 
 export type FlowOperation = Exclude<ProductOperation, "claimRedeem">
-export type OperationKind = "savings" | "funds"
+export type OperationKind = "savings" | "funds" | "convert"
 export type OperationStepId = "approve" | "submit"
 export type OperationStepState = "upcoming" | "wallet" | "processing" | "done" | "failed"
 
@@ -134,6 +135,13 @@ const WORDS: Readonly<Record<OperationKind, Readonly<Record<FlowOperation, Words
     redeemInstant: { title: "Review redemption", payCaption: "You redeem", confirm: "Confirm redemption", pending: "Redemption pending…", success: "Redemption complete!" },
     requestRedeem: { title: "Review redemption request", payCaption: "You redeem", confirm: "Confirm redemption request", pending: "Redemption request pending…", success: "Redemption requested" },
   },
+  // Get ArcoUSD: a stablecoin to ArcoUSD (deposit) or back (instant redemption), the same words either way.
+  convert: {
+    deposit: { title: "Review conversion", payCaption: "You convert", confirm: "Confirm conversion", pending: "Conversion pending…", success: "Conversion complete!" },
+    requestDeposit: { title: "Review conversion request", payCaption: "You convert", confirm: "Confirm conversion request", pending: "Conversion request pending…", success: "Conversion requested" },
+    redeemInstant: { title: "Review conversion", payCaption: "You convert", confirm: "Confirm conversion", pending: "Conversion pending…", success: "Conversion complete!" },
+    requestRedeem: { title: "Review conversion request", payCaption: "You convert", confirm: "Confirm conversion request", pending: "Conversion request pending…", success: "Conversion requested" },
+  },
 }
 
 function knownApy(text: string | null): text is string {
@@ -143,6 +151,10 @@ function knownApy(text: string | null): text is string {
 /** The result screen's line: Savings talks about the yield, Funds about the shares held, a redemption about the payout. */
 export function operationResultMessage(review: OperationReview, outcome: Exclude<OperationOutcome, { kind: "failed" }>): string {
   const { kind, operation, pay, receive } = review
+  if (kind === "convert") {
+    if (outcome.kind === "requested") return `Your ${receive.symbol} arrives in your wallet once the conversion is processed.`
+    return outcome.received === null ? `Your ${receive.symbol} is in your wallet.` : `${outcome.received} ${receive.symbol} is in your wallet.`
+  }
   if (outcome.kind === "requested") {
     if (operation === "requestDeposit") {
       return kind === "savings"
@@ -199,7 +211,7 @@ export type OperationFlowView = Readonly<{
 export function operationFlowView(flow: OperationFlow): OperationFlowView {
   const { review, outcome } = flow
   const words = WORDS[review.kind][review.operation]
-  const place = review.kind === "savings" ? "savings account" : "fund"
+  const place = review.kind === "savings" ? "savings account" : review.kind === "convert" ? "converter" : "fund"
   const pay = review.pay.symbol
   const steps = flow.steps.map((step): OperationStepView =>
     step.id === "approve"

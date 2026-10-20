@@ -10,6 +10,8 @@ const accounts = ["USDC", "RLUSD", "ETH", "XRP"].map(symbol => ({ key: `real:${s
 test("Savings categories isolate the listed stablecoins and crypto-native assets", () => {
   assert.deepEqual(accounts.filter(a => savingsAssetCategory(a.symbol) === "stablecoins").map(a => a.symbol), ["USDC", "RLUSD"])
   assert.deepEqual(accounts.filter(a => savingsAssetCategory(a.symbol) === "crypto-native").map(a => a.symbol), ["ETH", "XRP"])
+  // Every coin the Savings deposit takes is a stablecoin.
+  assert.deepEqual(["USDC", "USDT", "RLUSD", "ArcoUSD"].map(savingsAssetCategory), ["stablecoins", "stablecoins", "stablecoins", "stablecoins"])
 })
 test("explicit category wins and cross-category selection resets to a matching enabled account", () => {
   const category = savingsCategoryFromSearch(new URLSearchParams("category=stablecoins&asset=ETH&account=real:ETH:ETH"))

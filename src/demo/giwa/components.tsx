@@ -1,5 +1,5 @@
 import { assetLabel } from "./asset-label"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -36,7 +36,7 @@ import type {
   UiPhase,
 } from "./types"
 import { explorerTx, useGiwaWallet } from "./wallet"
-import { vaultConfigOf, vaultDisplayName } from "./catalog"
+import { tokenSymbolFor, vaultConfigOf, vaultDisplayName, vaultImageFor } from "./catalog"
 import { formatPercentFromBps, parseAumToNumber } from "./display-profile"
 import { compareNullLast } from "./sort"
 import { buildActivityFeed, type ActivityRow } from "./activity-feed"
@@ -184,13 +184,6 @@ function shortAddr(address: string | null | undefined) {
 
 function tokenIcon(productId: string) {
   return TOKEN_ICONS[productId.toLowerCase()]
-}
-
-// Config-first product-token / vault image: admin vaultImageUrl → legacy token icon →
-// (undefined → BrandMark letter fallback). Single source shared by the list row and the
-// swap panel so the product-token logo always agrees; built-ins (null config) → legacy icon.
-function vaultImageFor(product: Pick<GiwaCatalogItem, "productId" | "vaultConfig">): string | undefined {
-  return vaultConfigOf(product).vaultImageUrl ?? tokenIcon(product.productId)
 }
 
 export function paymentAssetIcon(symbol: string) {
@@ -489,7 +482,11 @@ function formatRemaining(ms: number): string {
   return `${minutes}m`
 }
 
-export function TestFundsButton({ admin = false }: { admin?: boolean }) {
+/**
+ * Mint test assets. It sits at the bottom of the menus (the drawer's and the desktop sidebar's), full width, and its
+ * notice opens above it there (`inMenu`).
+ */
+export function TestFundsButton({ admin = false, inMenu = false }: { admin?: boolean; inMenu?: boolean }) {
   const wallet = useGiwaWallet()
   const queryClient = useQueryClient()
   const catalogQuery = useQuery({ queryKey: ["giwa", "catalog"], queryFn: giwaApi.catalog, enabled: !admin })
@@ -578,13 +575,17 @@ export function TestFundsButton({ admin = false }: { admin?: boolean }) {
         type="button"
         disabled={busy || catalogQuery.isLoading}
         onClick={() => void mintFunds()}
-        className="inline-flex h-12 items-center gap-2 rounded-md border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-4 text-sm font-medium text-[var(--color-arco-ink)] shadow-[var(--shadow-control)] disabled:opacity-60"
+        className={`inline-flex h-12 items-center gap-2 rounded-md border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-4 text-sm font-medium text-[var(--color-arco-ink)] shadow-[var(--shadow-control)] disabled:opacity-60${inMenu ? " w-full justify-center" : ""}`}
       >
         {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowDown className="size-4" />}
         {phase === "confirming" ? "Confirming" : "Mint test assets"}
       </button>
       {(cooldownNotice || message || balances.length > 0) && (
-        <div className="absolute inset-x-0 top-[calc(100%+8px)] z-50 rounded-[var(--radius-card)] lg:left-auto lg:w-[280px] bg-[var(--color-arco-surface)] p-3 text-xs shadow-[var(--shadow-table)]">
+        <div
+          className={`absolute inset-x-0 z-50 rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-3 text-xs shadow-[var(--shadow-table)] ${
+            inMenu ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)] lg:left-auto lg:w-[280px]"
+          }`}
+        >
           {cooldownNotice && <p className="text-[var(--color-arco-ink)]">{cooldownNotice}</p>}
           {message && <p className={phase === "failed" ? "text-red-700" : "text-[var(--color-arco-text-soft)]"}>{message}</p>}
           {balances.length > 0 && (
@@ -611,14 +612,15 @@ export function useGiwaIsAdmin(): boolean {
 
 // Top bar of the investor shell. Below xl it carries the menu trigger + logo (the sidebar is hidden);
 // the nav itself lives in GiwaSidebarNav. Height stays 76px at every width: SectionNav (top-[76px])
-// and the invest panel (top-[104px]) stick beneath it.
-export function GiwaHeader({ admin = false }: { admin?: boolean }) {
+// and the invest panel (top-[104px]) stick beneath it. `action` sits at the top right, after the wallet (the shell
+// passes Get ArcoUSD; GetArcoUsd.tsx imports the Savings screens, which import this module).
+export function GiwaHeader({ admin = false, action }: { admin?: boolean; action?: ReactNode }) {
   const isAdmin = useGiwaIsAdmin()
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-arco-border)] bg-[var(--color-arco-page-80)] backdrop-blur">
       <div className="mx-auto flex min-h-[76px] w-full max-w-[1512px] items-center justify-between gap-3 px-4 md:px-8">
         <div className="flex items-center gap-2 xl:hidden">
-          <GiwaHeaderMenu isAdmin={isAdmin} testFunds={admin ? undefined : <TestFundsButton admin={admin} />} />
+          <GiwaHeaderMenu isAdmin={isAdmin} testFunds={admin ? undefined : <TestFundsButton admin={admin} inMenu />} />
           <Link
             to={GIWA_PREPROD_ROUTE}
             aria-label="Arco home"
@@ -632,12 +634,8 @@ export function GiwaHeader({ admin = false }: { admin?: boolean }) {
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <GiwaWalletButton />
-          {/* Mint test assets: top bar from lg; below lg it lives in the menu drawer. */}
-          {!admin && (
-            <div className="hidden lg:block">
-              <TestFundsButton admin={admin} />
-            </div>
-          )}
+          {/* Mint test assets lives at the bottom of the menus: the drawer's (below xl) and the sidebar's (xl up). */}
+          {action}
         </div>
       </div>
     </header>
@@ -1966,7 +1964,7 @@ export function GiwaHoldingsTable({
         {positions.length ? (
           positions.map((position, index) => {
             const product = products.find((item) => item.productId === positionProductId(position))
-            const symbol = product?.symbol ?? String(positionValue(position, "symbol") ?? "Product")
+            const symbol = product ? tokenSymbolFor(product) : String(positionValue(position, "symbol") ?? "Product")
             // Config-first identity — same resolvers as the products vault list (GiwaCatalogRow).
             const config = product ? vaultConfigOf(product) : undefined
             // A holding outside the GIWA catalog (a Stocks token) names itself: displayName, categoryLabel, imageUrl.

@@ -52,16 +52,31 @@ export function vaultConfigOf(product: Pick<GiwaCatalogItem, "vaultConfig">): Gi
   return { ...VAULT_CONFIG_DEFAULTS, ...(product.vaultConfig ?? {}) }
 }
 
-// Config-first vault logo: admin-set image, else the legacy per-product icon, else undefined
-// (letter fallback). Shared by the vault list, holdings, and the portfolio Activity feed so
-// their vault identity resolves identically and can't drift.
-export function vaultImageFor(product: Pick<GiwaCatalogItem, "productId" | "vaultConfig">): string | undefined {
-  return vaultConfigOf(product).vaultImageUrl ?? tokenIcon(product.productId)
+// Tokens the app presents under another symbol and mark than their contract's own. The arcoUSD Savings vault's
+// share grows in price with the yield, so it is shown as the savings token sArcoUSD, with that token's mark. The
+// contract keeps its symbol (arcoUSD): wallets and explorers still show that one.
+const PRESENTED_TOKENS: Readonly<Record<string, Readonly<{ symbol: string; image: string }>>> = {
+  arcousd: { symbol: "sArcoUSD", image: "/logos/sarcousd.png" },
 }
 
-// Config-first vault name: admin displayName, else the product symbol.
-export function vaultDisplayName(product: Pick<GiwaCatalogItem, "symbol" | "vaultConfig">): string {
-  return vaultConfigOf(product).displayName ?? product.symbol
+const presentedToken = (product: Pick<GiwaCatalogItem, "productId">) => PRESENTED_TOKENS[product.productId.toLowerCase()]
+
+/** A product token's symbol as customers see it: the contract's own, or the one it is presented as (sArcoUSD). */
+export function tokenSymbolFor(product: Pick<GiwaCatalogItem, "productId" | "symbol">): string {
+  return presentedToken(product)?.symbol ?? product.symbol
+}
+
+// Config-first vault logo: admin-set image, else the legacy per-product icon, else undefined
+// (letter fallback). A token presented under another symbol shows that token's mark ahead of both.
+// Shared by the vault list, holdings, and the portfolio Activity feed so their vault identity
+// resolves identically and can't drift.
+export function vaultImageFor(product: Pick<GiwaCatalogItem, "productId" | "vaultConfig">): string | undefined {
+  return presentedToken(product)?.image ?? vaultConfigOf(product).vaultImageUrl ?? tokenIcon(product.productId)
+}
+
+// Config-first vault name: admin displayName, else the token's symbol as customers see it.
+export function vaultDisplayName(product: Pick<GiwaCatalogItem, "productId" | "symbol" | "vaultConfig">): string {
+  return vaultConfigOf(product).displayName ?? tokenSymbolFor(product)
 }
 
 const PAUSE_STATE_DEFAULTS: GiwaPauseState = {

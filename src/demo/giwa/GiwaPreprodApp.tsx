@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react"
 import { PanelLeftClose } from "lucide-react"
 import { Link, Outlet } from "react-router-dom"
-import { GiwaHeader, useGiwaIsAdmin } from "./components"
+import { GiwaHeader, TestFundsButton, useGiwaIsAdmin } from "./components"
+import { GetArcoUsdButton } from "./GetArcoUsd"
 import { Footer } from "../components/Footer"
 import { GIWA_FOOTER_LINKS } from "./footer-links"
 import { GiwaSidebarNav } from "./GiwaSidebarNav"
@@ -79,13 +80,20 @@ export function GiwaPreprodApp({ admin = false }: { admin?: boolean }) {
           <div id="giwa-desktop-sidebar-nav" className={sidebarCollapsed ? "pt-2" : "pt-4"}>
             <GiwaSidebarNav isAdmin={isAdmin} compact={sidebarCollapsed} />
           </div>
+          {/* Mint test assets at the sidebar's bottom (the drawer has it under its links); the icon rail leaves it out. */}
+          {!admin && !sidebarCollapsed && (
+            <div className="mt-auto border-t border-[var(--color-arco-border)] px-3 pt-4">
+              <TestFundsButton inMenu />
+            </div>
+          )}
         </div>
       </aside>
       {/* A page may publish --giwa-dock-space for a fixed bottom bar of its own (the Stocks NVDA dock): the room is kept
           here, after the footer, because the bar covers the bottom of the viewport and padding inside <main> would leave
           the footer under it. Unset on every other page, so the shell is unchanged. */}
       <div className="flex min-h-screen min-w-0 flex-col pb-[var(--giwa-dock-space,0px)]">
-        <GiwaHeader admin={admin} />
+        {/* Get ArcoUSD at the top right, where there are converters (the demo wallet's chain). */}
+        <GiwaHeader admin={admin} action={admin ? undefined : <GetArcoUsdButton />} />
         <main
           ref={mainRef}
           id="giwa-main"

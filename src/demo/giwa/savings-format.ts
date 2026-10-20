@@ -1,6 +1,7 @@
 // Number and date wording for the Savings page. Money follows the app rule: at most 2 decimals, no forced trailing
-// zeros ("$1,000", "$6,975.45", "$2.5"). The live balance is the one place that always shows cents, followed by a few
-// extra digits that tick with the yield (see balanceParts).
+// zeros ("$1,000", "$6,975.45", "$2.5"). Two balances always show their decimals because they move: the live balance
+// (cents, then a few digits that tick with the yield; see balanceParts) and the savings token balance that rolls to its
+// new figure on the deposit / withdraw screen (see rollingAmount).
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const
 
@@ -17,6 +18,22 @@ export function tokenAmount(value: number, maxDecimals = 4): string {
   const factor = 10 ** maxDecimals
   const cut = Math.trunc(value * factor) / factor
   return cut.toLocaleString("en-US", { maximumFractionDigits: maxDecimals })
+}
+
+/** How many decimals a rolling amount keeps: as many as `tokenAmount` shows of its final figure, and at least two. */
+export function rollingDecimals(target: number, maxDecimals = 4): number {
+  const text = tokenAmount(target, maxDecimals)
+  const point = text.indexOf(".")
+  return Math.max(2, point === -1 ? 0 : text.length - point - 1)
+}
+
+/** A token amount that rolls: `tokenAmount` (cut, grouped) padded to `decimals` so the digits keep their places. */
+export function rollingAmount(value: number, decimals: number): string {
+  const text = tokenAmount(value, decimals)
+  if (text === "—") return text
+  const point = text.indexOf(".")
+  const shown = point === -1 ? 0 : text.length - point - 1
+  return shown >= decimals ? text : `${text}${point === -1 ? "." : ""}${"0".repeat(decimals - shown)}`
 }
 
 /** A typed decimal with thousands separators, kept as typed otherwise: "1234.5" → "1,234.5", "0." → "0.". */

@@ -4,7 +4,7 @@ export const SAVINGS_CATEGORIES = [
   { id: "crypto-native", label: "Crypto Native" },
 ] as const
 export type SavingsCategory = typeof SAVINGS_CATEGORIES[number]["id"]
-const STABLECOINS = new Set(["USDC", "RLUSD", "USDT", "DAI", "USDE", "USDS", "PYUSD", "EURC"])
+const STABLECOINS = new Set(["USDC", "RLUSD", "USDT", "ARCOUSD", "DAI", "USDE", "USDS", "PYUSD", "EURC"])
 export function savingsAssetCategory(symbol: string): SavingsCategory {
   return STABLECOINS.has(symbol.toUpperCase()) ? "stablecoins" : "crypto-native"
 }

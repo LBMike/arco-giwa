@@ -43,9 +43,11 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
 
   const { GiwaPreprodApp } = await import("./GiwaPreprodApp")
   const { GiwaWalletProvider } = await import("./wallet")
+  const { ArcoUsdConvertContext } = await import("./savings-routes")
   t.after(() => { t.diagnostic(`Dynamic wallet-book requests answered offline: ${sdkAssetCalls.length}; other requests: ${fetchCalls.length}`) })
 
-  async function mount(path: string) {
+  // `convert`: Get ArcoUSD's converters, as the preview's demo wallet provides them (none by default, as in the app).
+  async function mount(path: string, convert: import("./arcousd-convert").ArcoUsdConvert | null = null) {
     const element = document.createElement("div"); document.body.append(element)
     const root = createRoot(element)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
@@ -53,10 +55,10 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
     const probe: { pathname: string; navigate: NavigateFunction | null } = { pathname: "", navigate: null }
     function Probe() { probe.pathname = useLocation().pathname; probe.navigate = useNavigate(); return null }
     await act(async () => {
-      root.render(<StrictMode><QueryClientProvider client={client}><GiwaWalletProvider><MemoryRouter initialEntries={[path]}>
+      root.render(<StrictMode><QueryClientProvider client={client}><GiwaWalletProvider><ArcoUsdConvertContext.Provider value={convert}><MemoryRouter initialEntries={[path]}>
         <Probe />
         <Routes><Route element={<GiwaPreprodApp />}><Route path="*" element={<p>page body</p>} /></Route></Routes>
-      </MemoryRouter></GiwaWalletProvider></QueryClientProvider></StrictMode>)
+      </MemoryRouter></ArcoUsdConvertContext.Provider></GiwaWalletProvider></QueryClientProvider></StrictMode>)
       await flush()
     })
     const trigger = element.querySelector<HTMLButtonElement>('button[aria-label="Open menu"]')!
@@ -82,7 +84,7 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
 
   await t.test("sidebar links carry aria-current for the active route; no Send row", async () => {
     const m = await mount("/funds")
-    const cases: Array<[string, string]> = [["/funds", "Funds"], ["/product/abc", "Funds"], ["/stocks", "Stocks"], ["/admin/stocks", "Stocks"], ["/", "Home"], ["/savings", "Savings"], ["/portfolio", "Portfolio"]]
+    const cases: Array<[string, string]> = [["/funds", "Funds"], ["/product/abc", "Funds"], ["/stocks", "Stocks"], ["/admin/stocks", "Stocks"], ["/home", "Home"], ["/savings", "Savings"], ["/portfolio", "Portfolio"]]
     for (const [path, label] of cases) {
       await m.go(path)
       assert.deepEqual(currentLabels(m.sidebar()), [label], path)
@@ -244,5 +246,52 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
     assert.equal(window.localStorage.getItem(storageKey), "0")
     await restored.unmount()
     window.localStorage.removeItem(storageKey)
+  })
+
+  await t.test("Mint test assets: out of the top bar, the drawer's last item under its links, the expanded sidebar's bottom", async () => {
+    const storageKey = "giwa-investor-sidebar-collapsed"
+    window.localStorage.removeItem(storageKey)
+    const m = await mount("/savings")
+    const mint = (scope: ParentNode) => [...scope.querySelectorAll("button")].filter((node) => node.textContent?.includes("Mint test assets"))
+    assert.deepEqual(mint(m.element.querySelector("header")!), [], "not in the top bar")
+    const aside = m.element.querySelector("aside")!
+    const inSidebar = mint(aside)
+    assert.equal(inSidebar.length, 1)
+    assert.ok(aside.querySelector('nav[aria-label="Main"]')!.compareDocumentPosition(inSidebar[0]!) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING, "under the sidebar's nav")
+    // Full width, and its notice opens above it.
+    assert.match(inSidebar[0]!.className, /w-full justify-center/)
+
+    await m.open()
+    const focusable = [...m.dialog()!.querySelectorAll<HTMLElement>(FOCUSABLE)]
+    const docs = focusable.findIndex((node) => node.textContent === "Documentation")
+    assert.ok(docs > 0, "the drawer lists Documentation")
+    assert.ok(focusable[docs + 1]?.textContent?.includes("Mint test assets"), "right under Documentation")
+    assert.equal(focusable.length, docs + 2, "the drawer's last item")
+    key(m.dialog()!, "Escape")
+    await m.settle()
+
+    // The icon rail leaves it out; expanding brings it back.
+    await act(async () => { aside.querySelector<HTMLButtonElement>('button[aria-label="Collapse sidebar"]')!.click(); await flush() })
+    assert.deepEqual(mint(aside), [])
+    await act(async () => { aside.querySelector<HTMLButtonElement>('button[aria-label="Expand sidebar"]')!.click(); await flush() })
+    assert.equal(mint(aside).length, 1)
+    // No converters, no Get ArcoUSD (the app today).
+    assert.equal(m.element.querySelector("header")!.textContent?.includes("Get ArcoUSD"), false)
+    assert.equal(fetchCalls.length, 0)
+    await m.unmount()
+    window.localStorage.removeItem(storageKey)
+  })
+
+  await t.test("Get ArcoUSD ends the top bar, after the wallet, where there are converters", async () => {
+    const converter = { option: "usdc-giwa", token: "0x0000000000000000000000000000000000000010", converter: "0x0000000000000000000000000000000000000020" } as const
+    const m = await mount("/savings", { token: "0x00000000000000000000000000000000000000a1", priceFeed: "0x00000000000000000000000000000000000000a2", converters: [converter] })
+    const bar = m.element.querySelector("header")!.querySelector(".ml-auto")!
+    const last = bar.lastElementChild as HTMLElement
+    assert.equal(last.tagName, "BUTTON")
+    assert.equal(last.textContent, "Get ArcoUSD")
+    assert.equal(last.getAttribute("aria-haspopup"), "dialog")
+    assert.equal(last.querySelector("img")!.getAttribute("src"), "/logos/arcousd.png")
+    assert.equal(fetchCalls.length, 0, "nothing is read before the first press")
+    await m.unmount()
   })
 })

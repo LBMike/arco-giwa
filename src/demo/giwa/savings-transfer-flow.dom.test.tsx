@@ -123,8 +123,8 @@ test("savings transfer screen: one press, one transaction; nothing new while one
     const dialog = () => w.document.querySelector('[role="dialog"]') as HTMLElement | null
     const button = (label: string) =>
       [...(dialog()?.querySelectorAll("button") ?? [])].find((item) => item.textContent?.trim() === label) as HTMLButtonElement | undefined
-    const type = async (value: string) => {
-      const input = dialog()!.querySelector('input[aria-label="Amount in USDC"]') as HTMLInputElement
+    const type = async (value: string, label = "Amount in USDC") => {
+      const input = dialog()!.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement
       const setter = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, "value")!.set!
       await act(async () => {
         setter.call(input, value)
@@ -143,14 +143,46 @@ test("savings transfer screen: one press, one transaction; nothing new while one
     assert.deepEqual(calls.amounts, [""])
     assert.equal(button("Enter an Amount")?.disabled, true)
 
-    // Amount → Review → Approve and Deposit: exactly one transaction, with what the screen showed.
+    // The screen is as wide as the Savings dialogs, its two cards side by side from md up.
+    const classes = () => [...dialog()!.querySelectorAll("div")].map((element) => element.className)
+    assert.ok(classes().some((name) => name.includes("max-w-[760px]")), "760px column")
+    assert.ok(classes().some((name) => name.includes("md:grid-cols-2")), "side-by-side cards")
+
+    // The savings token balance shows what is held, then rolls to what it will be after the deposit (here at once: the
+    // test DOM has no animation frames): 40 held + 100 bought at a price of 1. Screen readers get the settled figure.
+    const rolling = () => dialog()!.querySelector("[data-rolling-balance]")?.textContent
+    assert.equal(rolling(), "40.00")
     await type("100")
+    assert.equal(rolling(), "140.00")
+    assert.match(dialog()!.textContent ?? "", /Balance after this deposit 140\.00/)
+    // A deposit shows what it earns (100 at 4.79%); what a withdrawal stops earning is the withdraw screen's.
+    assert.match(dialog()!.textContent ?? "", /Earn ~4\.79 USDC\/year/)
+    assert.doesNotMatch(dialog()!.textContent ?? "", /If you withdraw now/)
+
+    // The arcoUSD it buys (+100) rolls digit by digit: in from below as it appears and grows, down as it shrinks.
+    const payout = () => dialog()!.querySelector("[data-rolling-digits]")
+    assert.equal(payout()?.textContent, "100")
+    assert.equal(payout()?.querySelectorAll(".savings-digit-in-up").length, 3)
+    await type("60")
+    assert.ok(payout()?.querySelector(".savings-digit-in-down"), "a smaller figure rolls in from above")
+    assert.ok(payout()?.querySelector(".savings-digit-out-down"), "the old digit leaves through the bottom")
+    await type("100")
+    assert.ok(payout()?.querySelector(".savings-digit-in-up"), "a larger one from below again")
+
+    // Amount → Review → Approve and Deposit: exactly one transaction, with what the screen showed.
     await press("Review")
     await press("Approve and Deposit")
     assert.equal(calls.starts.length, 1)
     assert.equal(calls.starts[0]!.operation, "deposit")
     assert.deepEqual([calls.starts[0]!.pay.amount, calls.starts[0]!.pay.symbol, calls.starts[0]!.receive.symbol], ["100", "USDC", "arcoUSD"])
     assert.match(dialog()!.textContent ?? "", /Approve USDC in your wallet/)
+    // The step in progress shows its coin (USDC, for the approval) with the GIWA badge and a ring turning around them;
+    // the steps still to come do not turn.
+    const approveStep = dialog()!.querySelector('[data-step="approve"]')!
+    assert.ok(approveStep.querySelector("[data-step-spinner].animate-spin"), "a turning ring")
+    assert.ok(approveStep.querySelector('img[alt="USDC"]'), "the coin being approved")
+    assert.ok(approveStep.querySelector('img[alt="GIWA"]'), "with the GIWA badge")
+    assert.equal(dialog()!.querySelector('[data-step="submit"] [data-step-spinner]'), null)
 
     // Closed while the approval is in flight: it is reported as left running, approval only.
     const close = dialog()!.querySelector('button[aria-label="Close"]') as HTMLButtonElement
@@ -176,6 +208,26 @@ test("savings transfer screen: one press, one transaction; nothing new while one
     await press("Switch to GIWA")
     assert.equal(calls.switches, 1)
     assert.equal(calls.starts.length, 1, "nothing sent on the wrong network")
+
+    // Withdrawing rolls the same balance down instead: 40 held − 15 withdrawn.
+    await act(async () => root.render(h(Harness, { open: false, mode: "withdraw" })))
+    await act(async () => patchHook({ phase: "ready" }))
+    await act(async () => root.render(h(Harness, { open: true, mode: "withdraw" })))
+    assert.equal(rolling(), "40.00")
+    assert.doesNotMatch(dialog()!.textContent ?? "", /If you withdraw now/, "nothing forgone before an amount")
+    await type("15", "Amount in arcoUSD")
+    assert.equal(rolling(), "25.00")
+    assert.match(dialog()!.textContent ?? "", /Balance after this withdrawal 25\.00/)
+    // What the withdrawal stops earning: the 15 USDC it pays out, at 4.79% a year.
+    assert.match(dialog()!.textContent ?? "", /If you withdraw now, you stop earning~0\.71 USDC\/year/)
+    // As on the deposit screen, the Arco SAVINGS row with the current APY heads the card on the right, once: after the
+    // amount, right above what is forgone.
+    const withdrawText = dialog()!.textContent ?? ""
+    assert.equal(withdrawText.split("Current APY").length - 1, 1, "one APY row")
+    assert.ok(withdrawText.indexOf("Current APY") < withdrawText.indexOf("If you withdraw now"))
+    const amountInput = dialog()!.querySelector('input[aria-label="Amount in arcoUSD"]')!
+    const apyRow = [...dialog()!.querySelectorAll("span")].find((element) => element.textContent?.startsWith("Current APY"))!
+    assert.ok(amountInput.compareDocumentPosition(apyRow) & w.Node.DOCUMENT_POSITION_FOLLOWING, "APY row in the card after the amount")
 
     await act(async () => root.unmount())
   } finally {
