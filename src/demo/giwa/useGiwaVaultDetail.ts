@@ -17,7 +17,9 @@ import { productById, ASSET_MANAGERS, ISSUERS } from "../data/products"
 // UNCONDITIONALLY as the consumer's first statement (Rules of Hooks) — there is no early return
 // before it. The hook interleave is preserved from the original: paymentDecimals is computed
 // BEFORE the redemption-balance query that depends on it, so the four hooks are NOT hoisted.
-export function useGiwaVaultDetail(product: GiwaCatalogItem) {
+// `history: false` skips the posted-price history read (a product with no price posts, e.g. the sArcoUSD account, whose
+// caller reads its own).
+export function useGiwaVaultDetail(product: GiwaCatalogItem, options: { history?: boolean } = {}) {
   const panel = useGiwaProductOperation(product)
 
   const marketQuery = useQuery({
@@ -31,6 +33,7 @@ export function useGiwaVaultDetail(product: GiwaCatalogItem) {
     queryKey: ["giwa", "price-history", product.productId],
     queryFn: () => giwaApi.priceHistory(GIWA_CHAIN_ID, product.productId),
     ...GIWA_LIVE_REFETCH,
+    enabled: options.history !== false,
   })
 
   // APY: published rate, else implied-from-posts (mirrors the vault list). Price: live
@@ -86,7 +89,8 @@ export function useGiwaVaultDetail(product: GiwaCatalogItem) {
   const redemptionBalanceQuery = useQuery({
     queryKey: ["giwa", "vault-balance", "redemption", product.productId],
     queryFn: () => readTokenBalance(product.paymentAssetAddress!, product.redemptionVaultAddress!, paymentDecimals),
-    enabled: Boolean(product.paymentAssetAddress && product.redemptionVaultAddress),
+    // On ArcoUSD v1 the redemption contract holds no coin (the Reserve's buffer pays): its caller states the liquidity.
+    enabled: Boolean(product.paymentAssetAddress && product.redemptionVaultAddress) && !product.arcoUSD,
     refetchInterval: 30_000,
   })
   const redemptionBalance = redemptionBalanceQuery.data

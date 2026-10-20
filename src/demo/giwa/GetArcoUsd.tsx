@@ -1,7 +1,7 @@
 // Get ArcoUSD, at the top right of every page: converts a stablecoin to ArcoUSD one for one, or ArcoUSD back to a
 // stablecoin, on the Savings transfer screen titled Convert. Shown only where there are converters
-// (ArcoUsdConvertContext): the demo wallet's chain; the app has none yet. The screen loads on the first press, so the
-// shell every page shares carries only this button.
+// (ArcoUsdConvertContext): the live ArcoUSD v1 Reserve (arcousd-live-context.tsx), or a preview's demo chain. The screen
+// loads on the first press, so the shell every page shares carries only this button.
 
 import { Suspense, lazy, useContext, useState } from "react"
 import { ARCOUSD_OPTION } from "./arcousd-convert"

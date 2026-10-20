@@ -27,7 +27,7 @@ const convert: ArcoUsdConvert = {
 test("Get ArcoUSD's coins: every Savings stablecoin but ArcoUSD, which is GIWA's, at 18 decimals", () => {
   assert.deepEqual(
     CONVERT_OPTIONS.map((option) => option.key),
-    ["usdc-ethereum", "usdc-giwa", "usdt-ethereum", "rlusd-ethereum", "rlusd-xrpl"],
+    ["usdc-ethereum", "usdc-giwa", "usdt-ethereum", "usdt-giwa", "rlusd-ethereum", "rlusd-xrpl", "rlusd-giwa"],
   )
   assert.deepEqual(
     [ARCOUSD_OPTION.key, ARCOUSD_OPTION.symbol, ARCOUSD_OPTION.chain, ARCOUSD_OPTION.decimals, ARCOUSD_OPTION.logo],

@@ -1,13 +1,13 @@
 // Get ArcoUSD: a stablecoin converts to ArcoUSD one for one, and ArcoUSD back to a stablecoin. A converter on GIWA
 // takes each coin: its deposit mints ArcoUSD for the coin, its instant redemption pays the coin back for ArcoUSD. The
-// app is given the converters (ArcoUsdConvertContext, savings-routes.ts); without them there is no Get ArcoUSD. Only the
-// demo wallet's chain has them so far.
+// app is given the converters (ArcoUsdConvertContext, savings-routes.ts); without them there is no Get ArcoUSD. The
+// demo wallet's chain has a vault pair per coin; the app has the ArcoUSD v1 Reserve for every coin (arcousd-live.ts).
 //
 // Leaf module (type-only imports, and the leaf savings-assets.ts): the investor shell preview's demo routes load it
 // before the page's fetch guard.
 
 import { SAVINGS_ASSET_OPTIONS, savingsOptionKey, type SavingsAssetChoice, type SavingsAssetOption } from "./savings-assets"
-import type { GiwaCatalogItem, HexAddress } from "./types"
+import type { GiwaArcoUSDTransport, GiwaCatalogItem, GiwaPauseState, HexAddress } from "./types"
 
 /** ArcoUSD on GIWA: what a conversion gives, or takes back. */
 export const ARCOUSD_OPTION: SavingsAssetOption = SAVINGS_ASSET_OPTIONS.find((option) => option.key === savingsOptionKey("ArcoUSD", "giwa"))!
@@ -22,13 +22,19 @@ export type ArcoUsdConverter = Readonly<{
   token: HexAddress
   /** Mints ArcoUSD for the coin (deposit) and pays the coin back for ArcoUSD (instant redemption). */
   converter: HexAddress
+  /** The ArcoUSD v1 Reserve as the converter: how it moves money, priced with this coin's fees. Absent on a vault pair. */
+  arcoUSD?: GiwaArcoUSDTransport
+  /** What converting back to this coin can take at once, in the coin (the Reserve's free buffer). Absent: not limited here. */
+  instantLiquidity?: number | null
+  /** Which way the converter is paused now (the Reserve's switches and this coin's). Absent: read from no one. */
+  pauseState?: Partial<GiwaPauseState>
 }>
 
 export type ArcoUsdConvert = Readonly<{
   /** The ArcoUSD token. 18 decimals, as the operation hook reads the token a vault mints. */
   token: HexAddress
-  /** Prices every conversion at one for one. */
-  priceFeed: HexAddress
+  /** Prices every conversion at one for one. None for the Reserve, whose converters carry their own prices. */
+  priceFeed: HexAddress | null
   converters: readonly ArcoUsdConverter[]
 }>
 
@@ -63,7 +69,8 @@ export function convertProduct(convert: ArcoUsdConvert, option: SavingsAssetOpti
     redemptionVaultAddress: converter.converter,
     priceFeedAddress: convert.priceFeed,
     vaultConfig: null,
-    pauseState: null,
+    pauseState: converter.pauseState ?? null,
+    ...(converter.arcoUSD !== undefined ? { arcoUSD: converter.arcoUSD } : {}),
   }
 }
 

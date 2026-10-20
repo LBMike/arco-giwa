@@ -5,7 +5,7 @@
 //
 // Leaf module (type-only imports): the investor shell preview's demo wallet loads it before the page's fetch guard.
 
-import type { GiwaCatalogItem, HexAddress } from "./types"
+import type { GiwaArcoUSDTransport, GiwaCatalogItem, GiwaPauseState, HexAddress } from "./types"
 
 export type SavingsChainId = "ethereum" | "xrpl" | "giwa"
 
@@ -22,14 +22,15 @@ export function chainName(chain: SavingsChainId): string {
 export type SavingsCoin = Readonly<{ symbol: string; name: string; logo: string; decimals: number; chains: readonly SavingsChainId[] }>
 
 /**
- * The stablecoins, each on the chains it is issued on: USDC on Ethereum and GIWA (not on XRPL), USDT only on Ethereum,
- * RLUSD on Ethereum and XRPL, ArcoUSD on GIWA.
+ * The stablecoins, each on the chains it is issued on: USDC on Ethereum and GIWA (not on XRPL), USDT on Ethereum and
+ * GIWA, RLUSD on Ethereum, XRPL and GIWA, ArcoUSD on GIWA. On GIWA each is the test coin the ArcoUSD Reserve takes
+ * (tUSDC, tUSDT, tRLUSD).
  * The Stablecoins tab stacks them in this order (SavingsTabs.tsx).
  */
 export const SAVINGS_COINS: readonly SavingsCoin[] = [
   { symbol: "USDC", name: "USD Coin", logo: "/logos/usdc.svg", decimals: 6, chains: ["ethereum", "giwa"] },
-  { symbol: "USDT", name: "Tether USD", logo: "/logos/usdt.png", decimals: 6, chains: ["ethereum"] },
-  { symbol: "RLUSD", name: "Ripple USD", logo: "/logos/rlusd.png", decimals: 18, chains: ["ethereum", "xrpl"] },
+  { symbol: "USDT", name: "Tether USD", logo: "/logos/usdt.png", decimals: 6, chains: ["ethereum", "giwa"] },
+  { symbol: "RLUSD", name: "Ripple USD", logo: "/logos/rlusd.png", decimals: 18, chains: ["ethereum", "xrpl", "giwa"] },
   // 18 decimals: ArcoUSD is also what a conversion mints (arcousd-convert.ts), read as the operation hook reads a token.
   { symbol: "ArcoUSD", name: "Arco USD", logo: "/logos/arcousd.png", decimals: 18, chains: ["giwa"] },
 ]
@@ -79,6 +80,15 @@ export type SavingsRoute = Readonly<{
   token: HexAddress
   depositVault: HexAddress
   redemptionVault: HexAddress
+  /** A route on ArcoUSD v1 (arcousd-live.ts): how it moves money, priced for this coin. Absent on a vault-pair route. */
+  arcoUSD?: GiwaArcoUSDTransport
+  /**
+   * What a withdrawal in this coin can take at once, in the coin, when the route says (an ArcoUSD v1 route: the Reserve's
+   * free buffer; null when no buffer limits it). Absent: the coin held by the route's redemption contract.
+   */
+  instantLiquidity?: number | null
+  /** Which way the route is paused now, when it says (an ArcoUSD v1 route). Absent: the vault's own pause state. */
+  pauseState?: Partial<GiwaPauseState>
 }>
 
 export function routeFor(routes: readonly SavingsRoute[], vault: Pick<GiwaCatalogItem, "productId">, option: string): SavingsRoute | null {
@@ -94,6 +104,8 @@ export function productThroughRoute(vault: GiwaCatalogItem, option: SavingsAsset
     paymentAsset: { symbol: option.symbol, name: option.name, decimals: option.decimals, tokenAddress: route.token },
     depositVaultAddress: route.depositVault,
     redemptionVaultAddress: route.redemptionVault,
+    ...(route.arcoUSD !== undefined ? { arcoUSD: route.arcoUSD } : {}),
+    ...(route.pauseState !== undefined ? { pauseState: route.pauseState } : {}),
   }
 }
 

@@ -288,11 +288,19 @@ test("demo routes: every other Savings coin, in and out through the vault's own 
   const { products: routes, routes: pageRoutes } = demoSavingsRoutes(snapshot.catalog as unknown as GiwaProduct[], products)
   assert.deepEqual(
     pageRoutes.map((route) => `${route.vault}:${route.option}`),
-    ["arcousd:usdc-ethereum", "arcousd:usdt-ethereum", "arcousd:rlusd-ethereum", "arcousd:rlusd-xrpl", "arcousd:arcousd-giwa"],
+    [
+      "arcousd:usdc-ethereum",
+      "arcousd:usdt-ethereum",
+      "arcousd:usdt-giwa",
+      "arcousd:rlusd-ethereum",
+      "arcousd:rlusd-xrpl",
+      "arcousd:rlusd-giwa",
+      "arcousd:arcousd-giwa",
+    ],
   )
   assert.deepEqual(
     routes.map((route) => route.payment.symbol),
-    ["USDC (Ethereum)", "USDT (Ethereum)", "RLUSD (Ethereum)", "RLUSD (XRPL)", "ArcoUSD (GIWA)"],
+    ["USDC (Ethereum)", "USDT (Ethereum)", "USDT (GIWA)", "RLUSD (Ethereum)", "RLUSD (XRPL)", "RLUSD (GIWA)", "ArcoUSD (GIWA)"],
   )
   // The pages and the chain agree on every route's coin and contracts; each mints the vault's own shares at its price.
   for (const [index, route] of routes.entries()) {
@@ -357,7 +365,7 @@ test("Get ArcoUSD: each coin converts to ArcoUSD one for one at its converter an
   // A converter for every coin the stablecoin vault takes but ArcoUSD; the pages and the chain agree on each.
   assert.deepEqual(
     demo.convert.converters.map((entry) => entry.option),
-    ["usdc-ethereum", "usdc-giwa", "usdt-ethereum", "rlusd-ethereum", "rlusd-xrpl"],
+    ["usdc-ethereum", "usdc-giwa", "usdt-ethereum", "usdt-giwa", "rlusd-ethereum", "rlusd-xrpl", "rlusd-giwa"],
   )
   for (const [index, product] of demo.products.entries()) {
     const page = demo.convert.converters[index]!

@@ -73,7 +73,14 @@ export default function ArcoUsdConvertScreen({ convert, open, onClose }: { conve
       open={open}
       mode={direction === "in" ? "deposit" : "withdraw"}
       onClose={onClose}
-      detail={{ panel, market: { productId: product.productId, ...PEG }, instantLiquidityUsd: null, baseUsd: PEG.baseUsd, vaultImage: undefined }}
+      detail={{
+        panel,
+        market: { productId: product.productId, ...PEG },
+        // Back to a coin on the Reserve takes at most its free buffer in that coin (a dollar each).
+        instantLiquidityUsd: direction === "out" ? (converter.instantLiquidity ?? null) : null,
+        baseUsd: PEG.baseUsd,
+        vaultImage: undefined,
+      }}
       paySymbol={coin.symbol}
       payIcon={coin.logo}
       payChain={coin.chain}

@@ -40,7 +40,7 @@ const choice = (key: string, available: boolean, balance: number | null): Saving
 test("coin options: each stablecoin on the chains it is issued on; a vault paid in tUSDC takes USDC on GIWA", () => {
   assert.deepEqual(
     SAVINGS_ASSET_OPTIONS.map((entry) => `${entry.symbol} ${entry.chainName}`),
-    ["USDC Ethereum", "USDC GIWA", "USDT Ethereum", "RLUSD Ethereum", "RLUSD XRPL", "ArcoUSD GIWA"],
+    ["USDC Ethereum", "USDC GIWA", "USDT Ethereum", "USDT GIWA", "RLUSD Ethereum", "RLUSD XRPL", "RLUSD GIWA", "ArcoUSD GIWA"],
   )
   assert.deepEqual(
     SAVINGS_ASSET_OPTIONS.map((entry) => [entry.key, entry.logo]),
@@ -48,12 +48,17 @@ test("coin options: each stablecoin on the chains it is issued on; a vault paid 
       ["usdc-ethereum", "/logos/usdc.svg"],
       ["usdc-giwa", "/logos/usdc.svg"],
       ["usdt-ethereum", "/logos/usdt.png"],
+      ["usdt-giwa", "/logos/usdt.png"],
       ["rlusd-ethereum", "/logos/rlusd.png"],
       ["rlusd-xrpl", "/logos/rlusd.png"],
+      ["rlusd-giwa", "/logos/rlusd.png"],
       ["arcousd-giwa", "/logos/arcousd.png"],
     ],
   )
   assert.equal(nativeSavingsOption("tUSDC")?.key, "usdc-giwa")
+  // The ArcoUSD Reserve's other test coins are GIWA's too.
+  assert.equal(nativeSavingsOption("tUSDT")?.key, "usdt-giwa")
+  assert.equal(nativeSavingsOption("tRLUSD")?.key, "rlusd-giwa")
   // A crypto-native vault takes no stablecoin: it keeps its single coin and no picker.
   assert.equal(nativeSavingsOption("tWETH"), null)
   assert.equal(nativeSavingsOption("tXRP"), null)

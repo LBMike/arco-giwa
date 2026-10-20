@@ -11,13 +11,15 @@ import {
   readPriceFeedState,
   readTokenBalance,
   receivedTokenAmount,
+  submitArcoUSDOperation,
   submitProductOperation,
   submitRouterBuy,
   toBaseUnits,
   waitForSuccessfulReceipt,
 } from "./contracts"
 import { pauseStateOf } from "./catalog"
-import { fundBuyRoute, isFundProduct, RESERVE_REFILL_NOTICE, selectedPayAsset } from "./arcousd-buy"
+import { fundBuyRoute, isFundProduct, RESERVE_REFILL_NOTICE, selectedPayAsset, type FundBuyRoute } from "./arcousd-buy"
+import { withdrawalApproval } from "./arcousd-live"
 import { GIWA_LIVE_REFETCH } from "./config"
 import { vaultAddressForOperation, type ProductOperation } from "./operation-routing"
 import {
@@ -34,6 +36,8 @@ import type { GiwaCatalogItem, HexAddress, UiPhase } from "./types"
 import { useGiwaWallet } from "./wallet"
 
 const DEFAULT_OPERATION: ProductOperation = "deposit"
+
+const DIRECT_ROUTE: FundBuyRoute = { kind: "direct" }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
@@ -85,6 +89,9 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
 
   const walletEnabled = Boolean(wallet.address)
   const paymentDecimals = product.paymentAsset?.decimals ?? 18
+  // A product on the ArcoUSD v1 contracts (Get ArcoUSD on the Reserve, the sArcoUSD account through the Zap): its own
+  // calls and prices, Instant withdrawals only, and an allowance for the token a withdrawal gives back.
+  const live = product.arcoUSD ?? null
 
   // ArcoUSD: a fund the ArcoRouter may buy is paid with any Reserve stablecoin or ArcoUSD, through
   // the Router (which then holds the allowance), and is blocked while the buy gate is closed. Any
@@ -94,11 +101,11 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     queryFn: () => giwaApi.arcousd.reserve(),
     ...GIWA_LIVE_REFETCH,
   })
-  const route = useMemo(() => fundBuyRoute(product, reserveQuery.data), [product, reserveQuery.data])
+  const route = useMemo(() => (live !== null ? DIRECT_ROUTE : fundBuyRoute(product, reserveQuery.data)), [live, product, reserveQuery.data])
   // Until the first answer a fund's route is unknown: its buy waits ("Loading…") instead of
   // assuming the direct path. If the API cannot answer at all there is no Router address to use,
   // so the fund keeps the direct vault deposit (which never touches the Reserve).
-  const routeUnknown = isFundProduct(product) && reserveQuery.isPending
+  const routeUnknown = live === null && isFundProduct(product) && reserveQuery.isPending
   const [payAssetKey, setPayAssetKey] = useState<string | null>(null)
   const payAsset = selectedPayAsset(route, payAssetKey)
   const routed = route.kind === "router"
@@ -134,18 +141,26 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     queryFn: () => readTokenBalance(product.productTokenAddress!, wallet.address!, 18),
     enabled: Boolean(wallet.address && product.productTokenAddress),
   })
+  // What the approval step covers: the coin a deposit pays, for the vault (or Router) that pulls it; on ArcoUSD v1 also
+  // the product token a withdrawal gives back, for the Reserve or Zap that pulls it.
+  const redeemApproval = withdrawalApproval(product, operation)
+  const approvesRedeem = redeemApproval !== null
+  const approvalToken: HexAddress | null = redeemApproval !== null ? redeemApproval.token : payToken
+  const approvalSpender: HexAddress | null = redeemApproval !== null ? redeemApproval.spender : spender
+  const approvalDecimals = approvesRedeem ? 18 : payDecimals
   // Shared between the query and the post-approve setQueryData — MUST stay identical, or the
   // cache write after approval is silently ignored and the stale-read guard stops working.
-  const allowanceQueryKey = ["giwa", "allowance", wallet.address, payToken, spender]
+  const allowanceQueryKey = ["giwa", "allowance", wallet.address, approvalToken, approvalSpender]
   const allowanceQuery = useQuery({
     queryKey: allowanceQueryKey,
-    queryFn: () => readAllowance(payToken!, wallet.address!, spender!, payDecimals),
-    enabled: Boolean(wallet.address && payToken && spender),
+    queryFn: () => readAllowance(approvalToken!, wallet.address!, approvalSpender!, approvalDecimals),
+    enabled: Boolean(wallet.address && approvalToken && approvalSpender),
   })
   const greenlistEnforcedQuery = useQuery({
     queryKey: ["giwa", "greenlist-enforced", product.productTokenAddress],
     queryFn: () => readGreenlistEnforced(product.productTokenAddress!),
-    enabled: Boolean(product.productTokenAddress),
+    // ArcoUSD and sArcoUSD have no greenlist.
+    enabled: Boolean(product.productTokenAddress) && live === null,
     retry: 0,
   })
   const priceFeedQuery = useQuery({
@@ -153,16 +168,24 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     queryFn: () => readPriceFeedState(product.priceFeedAddress!),
     enabled: Boolean(product.priceFeedAddress),
   })
-  const sharePrice = priceFeedQuery.data ? fromAnswer(priceFeedQuery.data.answer) : null
-
   const usesPaymentAmount = operation === "deposit" || operation === "requestDeposit"
+  // On ArcoUSD v1 the price is the transport's, fees included, for the side in use; else the feed's NAV.
+  const sharePrice =
+    live !== null
+      ? usesPaymentAmount
+        ? live.depositPrice
+        : live.redeemPrice
+      : priceFeedQuery.data
+        ? fromAnswer(priceFeedQuery.data.answer)
+        : null
   const amountDecimals = usesPaymentAmount ? payDecimals : 18
   const amountBase = useMemo(() => toBaseUnits(amount, amountDecimals), [amount, amountDecimals])
   const activeVault = vaultAddressForOperation(product, operation)
-  const allowanceRequired = Boolean(usesPaymentAmount && allowanceQuery.data && spender && allowanceQuery.data.raw < amountBase)
+  const approvalNeeded = usesPaymentAmount || approvesRedeem
+  const allowanceRequired = Boolean(approvalNeeded && allowanceQuery.data && approvalSpender && allowanceQuery.data.raw < amountBase)
   // Not read yet (e.g. right after switching the pay asset): the flow approves rather than skip a
   // step the buy may need.
-  const allowanceUnknown = Boolean(usesPaymentAmount && wallet.address && payToken && spender && allowanceQuery.data === undefined)
+  const allowanceUnknown = Boolean(approvalNeeded && wallet.address && approvalToken && approvalSpender && allowanceQuery.data === undefined)
 
   const phase: UiPhase =
     wallet.phase === "disconnected" || wallet.phase === "wrong-network" || wallet.phase === "missing-gas"
@@ -194,6 +217,8 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
 
   async function refreshReads() {
     await wallet.refreshBalance()
+    // ArcoUSD v1 moves the Reserve's buffer and the Savings figures: the next reads must not be the cached ones.
+    if (live !== null) void queryClient.invalidateQueries({ queryKey: ["giwa", "arcousd"] })
     await Promise.all([
       allowanceQuery.refetch(),
       paymentBalanceQuery.refetch(),
@@ -219,7 +244,7 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
   // (bounded: ~8 tries x 750ms, then proceed without a cache write).
   async function waitForAllowanceAtLeast(minimum: bigint) {
     for (let attempt = 0; attempt < 8; attempt++) {
-      const allowance = await readAllowance(payToken!, wallet.address!, spender!, payDecimals)
+      const allowance = await readAllowance(approvalToken!, wallet.address!, approvalSpender!, approvalDecimals)
       if (allowance.raw >= minimum) return allowance
       await sleep(750)
     }
@@ -233,14 +258,14 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     setSuccessLabel(null)
     setTxHashes([])
     try {
-      if (!payToken || !spender) throw new Error("Registry address is missing")
+      if (!approvalToken || !approvalSpender) throw new Error("Registry address is missing")
       setOperationPhase("approving")
       // Unlimited approval: one approve covers every future deposit into this vault (or, for a
-      // Router fund, every buy paid in this asset).
+      // Router fund, every buy paid in this asset; on ArcoUSD v1, every withdrawal through this contract).
       const hash = await approveVault({
         account: wallet.address,
-        token: payToken,
-        vault: spender,
+        token: approvalToken,
+        vault: approvalSpender,
         amount: maxUint256,
       })
       setTxHashes([hash])
@@ -279,13 +304,15 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
               depositVault: requiredAddress(product.depositVaultAddress, "Deposit vault"),
               request: nextOperation === "requestDeposit",
             })
-          : await submitProductOperation({
-              account,
-              product,
-              operation: nextOperation,
-              amount: amountBase,
-              requestId: BigInt(nextRequestId || "0"),
-            })
+          : live !== null
+            ? await submitArcoUSDOperation({ account, product, operation: nextOperation, amount: amountBase })
+            : await submitProductOperation({
+                account,
+                product,
+                operation: nextOperation,
+                amount: amountBase,
+                requestId: BigInt(nextRequestId || "0"),
+              })
       setTxHashes([hash])
       onSent?.()
       const receipt = await waitForReceipts([hash])
@@ -325,7 +352,7 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     flowSeq.current = id
     closedFlow.current = null
     flowPayKey.current = payAsset?.key ?? null
-    const withApproval = (allowanceRequired || allowanceUnknown) && buying
+    const withApproval = (allowanceRequired || allowanceUnknown) && (buying || withdrawalApproval(product, review.operation) !== null)
     setFlow({ id, review, steps: initialOperationSteps(withApproval), outcome: null, open: true })
     void runOperationFlow({
       approve: withApproval ? (onSent) => approveDepositVault(onSent) : null,
@@ -391,6 +418,8 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     // ArcoRouter fund buys: the pay-asset choices (empty when not routed), the selected one and
     // its balance.
     routed,
+    // ArcoUSD v1: withdrawals are Instant only (no request when the buffer is short).
+    instantOnly: live !== null,
     payAssets: route.kind === "router" ? route.payAssets : [],
     payAsset,
     payBalance: routed ? (payBalanceQuery.data ?? "--") : undefined,

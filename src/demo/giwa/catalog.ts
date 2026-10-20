@@ -57,6 +57,8 @@ export function vaultConfigOf(product: Pick<GiwaCatalogItem, "vaultConfig">): Gi
 // contract keeps its symbol (arcoUSD): wallets and explorers still show that one.
 const PRESENTED_TOKENS: Readonly<Record<string, Readonly<{ symbol: string; image: string }>>> = {
   arcousd: { symbol: "sArcoUSD", image: "/logos/sarcousd.png" },
+  // The ArcoUSD v1 sArcoUSD account that takes the arcoUSD vault's place on the Savings page (arcousd-live.ts).
+  sarcousd: { symbol: "sArcoUSD", image: "/logos/sarcousd.png" },
 }
 
 const presentedToken = (product: Pick<GiwaCatalogItem, "productId">) => PRESENTED_TOKENS[product.productId.toLowerCase()]

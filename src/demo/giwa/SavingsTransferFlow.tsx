@@ -508,7 +508,13 @@ export function SavingsTransferFlow({
   const payoutUsd = !deposit && quote !== null && baseUsd !== null ? quote * baseUsd : null
   const liquidityShort = payoutUsd !== null && instantLiquidityUsd !== null && payoutUsd > instantLiquidityUsd
   const liquidityInPay = instantLiquidityUsd !== null && baseUsd !== null && baseUsd > 0 ? instantLiquidityUsd / baseUsd : null
-  const operation: FlowOperation = deposit ? "deposit" : liquidityShort ? "requestRedeem" : "redeemInstant"
+  // ArcoUSD v1 pays withdrawals Instant only: a short buffer stops the withdrawal instead of turning it into a request.
+  const instantOnly = panel.instantOnly === true
+  const operation: FlowOperation = deposit ? "deposit" : liquidityShort && !instantOnly ? "requestRedeem" : "redeemInstant"
+  const shortNotice =
+    !deposit && liquidityShort && instantOnly
+      ? `Instant liquidity is ${liquidityInPay !== null ? tokenAmount(liquidityInPay, 2) : "—"} ${paySymbol}. ${convert !== undefined ? "Convert" : "Withdraw"} up to that amount, or try again later.`
+      : null
   const sendSymbol = deposit ? paySymbol : tokenSymbol
   const sendIcon = deposit ? payIcon : tokenIcon
   const sendChain: SavingsChainId = deposit ? payChain : "giwa"
@@ -532,7 +538,7 @@ export function SavingsTransferFlow({
   const flow = startedFlow !== null && panel.flow !== null && panel.flow.id >= startedFlow ? panel.flow : null
   const view = flow !== null ? operationFlowView(flow) : null
   const synced = !resetPending && operationMatchesMode(panel.operation, mode)
-  const cta = transferCta({ phase: panel.phase, amount: panel.amount, balance, decimals, paused: Boolean(panel.pausedNotice), synced })
+  const cta = transferCta({ phase: panel.phase, amount: panel.amount, balance, decimals, paused: Boolean(panel.pausedNotice) || shortNotice !== null, synced })
 
   // The savings token balance as it will be after this transfer: plus what the deposit buys, minus what is withdrawn.
   // Only for an amount entered on this screen: one left from before never rolls in as the screen opens.
@@ -630,7 +636,7 @@ export function SavingsTransferFlow({
     cta.action !== "review"
       ? cta.label
       : convert !== undefined
-        ? deposit && panel.allowanceRequired
+        ? panel.allowanceRequired
           ? "Approve and Convert"
           : "Convert"
         : deposit
@@ -639,7 +645,10 @@ export function SavingsTransferFlow({
           : "Deposit"
         : operation === "requestRedeem"
           ? "Request withdrawal"
-          : "Withdraw"
+          : // On ArcoUSD v1 a withdrawal hands its token back to the Zap, which needs an allowance first.
+            panel.allowanceRequired
+            ? "Approve and Withdraw"
+            : "Withdraw"
 
   return (
     <SavingsDialog open={open} onClose={close} labelledBy={titleId} variant="screen" initialFocus={inputRef}>
@@ -791,11 +800,12 @@ export function SavingsTransferFlow({
                     </p>
                   )}
 
-                  {!deposit && liquidityShort && !panel.pausedNotice && (
+                  {!deposit && liquidityShort && !instantOnly && !panel.pausedNotice && (
                     <Notice>
                       {`Instant liquidity is ${liquidityInPay !== null ? tokenAmount(liquidityInPay, 2) : "—"} ${paySymbol}. This withdrawal is processed as a request: your ${tokenSymbol} is redeemed now and the ${paySymbol} follows after processing (${timeline}).`}
                     </Notice>
                   )}
+                  {shortNotice !== null && !panel.pausedNotice && <Notice>{shortNotice}</Notice>}
                   {panel.pausedNotice && <Notice>{panel.pausedNotice}</Notice>}
 
                   <button type="button" disabled={cta.disabled} onClick={runCta} className={`${PRIMARY} mt-5`}>

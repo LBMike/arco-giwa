@@ -541,6 +541,84 @@ export function encodedRouterBuy(args: { payAsset: HexAddress; amount: bigint; d
   })
 }
 
+// ArcoUSD v1 (docs/specs/arcousd-v1.md §3.2, §3.15): Get ArcoUSD on the Reserve, the sArcoUSD account through the Zap.
+// With their custom errors, so a revert reads as its name (InsufficientLiquidity, DepositDisabled…) instead of a selector.
+// The Zap passes the Reserve's and sArcoUSD's errors through.
+const ARCOUSD_RESERVE_ERRORS = [
+  "error BelowQueueMinimum()",
+  "error Blacklisted()",
+  "error BufferFloor()",
+  "error Depeg()",
+  "error DepositCap()",
+  "error DepositDisabled()",
+  "error InsufficientLiquidity()",
+  "error MinOut()",
+  "error MintCap()",
+  "error NavUnavailable()",
+  "error RedeemDisabled()",
+  "error UnsupportedAsset()",
+  "error ZeroAddress()",
+  "error ZeroAmount()",
+] as const
+const arcoUSDReserveAbi = parseAbi([
+  "function deposit(address asset, uint256 amount, address recipient) returns (uint256 arcoUSDOut)",
+  "function redeemInstantOnly(address asset, uint256 arcoUSDAmount, address recipient, uint256 minAssetOut) returns (uint256 assetPaid)",
+  ...ARCOUSD_RESERVE_ERRORS,
+])
+const arcoSavingsZapAbi = parseAbi([
+  "function deposit(address asset, uint256 amount, uint256 minShares, address receiver) returns (uint256 shares)",
+  "function redeem(uint256 shares, address asset, uint256 minAssetOut, address receiver) returns (uint256 assetOut)",
+  ...ARCOUSD_RESERVE_ERRORS,
+  "error InvalidRecipient()",
+  "error NotReserveAsset()",
+  "error NoDepositors()",
+  "error MinSharesViolation()",
+])
+
+export type ArcoUSDOperationCall = Readonly<{ address: HexAddress; abi: Abi; functionName: string; args: readonly unknown[] }>
+
+/**
+ * The call a product on ArcoUSD v1 (`product.arcoUSD`) makes for `operation`. The coin is the product's payment asset; a
+ * deposit takes `amount` of it, a withdrawal gives back `amount` of the product token (ArcoUSD or sArcoUSD) and is Instant
+ * only (Reserve.redeemInstantOnly; the Zap's redeem is Instant only too). What comes out goes to the account. Same
+ * testnet zero slippage floor as the vault deposits.
+ */
+export function arcoUSDOperationCall(args: {
+  account: HexAddress
+  product: GiwaCatalogItem
+  operation: ProductOperation
+  amount: bigint
+}): ArcoUSDOperationCall {
+  const transport = args.product.arcoUSD
+  if (!transport) throw new Error("This product is not on ArcoUSD")
+  const coin = args.product.paymentAssetAddress
+  if (!coin) throw new Error("Payment token address is missing")
+  if (args.operation !== "deposit" && args.operation !== "redeemInstant") {
+    throw new Error("Only instant deposits and withdrawals are available here")
+  }
+  const deposit = args.operation === "deposit"
+  const to = deposit ? args.product.depositVaultAddress : args.product.redemptionVaultAddress
+  if (!to) throw new Error("Vault address is missing from the registry")
+  if (transport.kind === "reserve") {
+    return deposit
+      ? { address: to, abi: arcoUSDReserveAbi, functionName: "deposit", args: [coin, args.amount, args.account] }
+      : { address: to, abi: arcoUSDReserveAbi, functionName: "redeemInstantOnly", args: [coin, args.amount, args.account, TESTNET_ZERO_SLIPPAGE_FLOOR] }
+  }
+  return deposit
+    ? { address: to, abi: arcoSavingsZapAbi, functionName: "deposit", args: [coin, args.amount, TESTNET_ZERO_SLIPPAGE_FLOOR, args.account] }
+    : { address: to, abi: arcoSavingsZapAbi, functionName: "redeem", args: [args.amount, coin, TESTNET_ZERO_SLIPPAGE_FLOOR, args.account] }
+}
+
+/** Send arcoUSDOperationCall's call (simulated first, like every other write). */
+export async function submitArcoUSDOperation(args: {
+  account: HexAddress
+  product: GiwaCatalogItem
+  operation: ProductOperation
+  amount: bigint
+}) {
+  return simulateAndWrite({ account: args.account, ...arcoUSDOperationCall(args) })
+}
+
 declare global {
   interface Window {
     ethereum?: {
