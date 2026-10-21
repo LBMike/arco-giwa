@@ -178,14 +178,14 @@ function listed(names: readonly string[], last: "or" | "and"): string {
 }
 
 /**
- * The (?) beside "Stablecoin swap fee": which coins pay it and that it is a third-party infrastructure fee, from the
- * Reserve's own fees.
+ * The (?) beside "Stablecoin swap fee": which coins pay it and that it goes to third-party infrastructure (the product
+ * owner's wording), from the Reserve's own fees.
  */
 export function stablecoinSwapFeeTip(payAssets: readonly PayAssetOption[]): string {
   const charged = payAssets.filter((asset) => !asset.isArcoUSD && asset.swapFeeBps > 0)
   const free = payAssets.filter((asset) => asset.isArcoUSD || !(asset.swapFeeBps > 0)).map((asset) => asset.label)
-  const whose = "This fee is charged by third-party stablecoin infrastructure."
-  if (charged.length === 0) return "No stablecoin currently has a swap fee. A swap fee, when set, is charged by third-party stablecoin infrastructure."
+  const whose = "This fee goes to the third-party infrastructure that swaps the stablecoin."
+  if (charged.length === 0) return "No stablecoin currently has a swap fee. A swap fee, when set, goes to the third-party infrastructure that swaps the stablecoin."
   const sameFee = charged.every((asset) => asset.swapFeeBps === charged[0].swapFeeBps)
   const pays = sameFee
     ? `Paying with ${listed(charged.map((asset) => asset.label), "or")} includes a ${swapFeeText(charged[0].swapFeeBps)} swap fee.`

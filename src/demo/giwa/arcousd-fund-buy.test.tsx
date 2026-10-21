@@ -181,7 +181,7 @@ test("the token picker's rows: the Router's coins on GIWA with their balances, e
 })
 
 test("the swap fee's (?) names the coins that pay it, from the Reserve's fees, and says who charges it", () => {
-  const whose = "This fee is charged by third-party stablecoin infrastructure."
+  const whose = "This fee goes to the third-party infrastructure that swaps the stablecoin."
   assert.equal(
     stablecoinSwapFeeTip(PAY_ASSETS),
     `Paying with USDT or RLUSD includes a 0.1% swap fee. USDC and ArcoUSD have no swap fee. ${whose}`,
@@ -197,7 +197,7 @@ test("the swap fee's (?) names the coins that pay it, from the Reserve's fees, a
   )
   assert.equal(
     stablecoinSwapFeeTip([USDC, { ...USDT, swapFeeBps: 0 }, ARCO]),
-    "No stablecoin currently has a swap fee. A swap fee, when set, is charged by third-party stablecoin infrastructure.",
+    "No stablecoin currently has a swap fee. A swap fee, when set, goes to the third-party infrastructure that swaps the stablecoin.",
   )
 })
 
