@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { maxUint256 } from "viem"
 import { giwaApi } from "./api"
 import {
@@ -18,7 +18,7 @@ import {
   waitForSuccessfulReceipt,
 } from "./contracts"
 import { pauseStateOf } from "./catalog"
-import { fundBuyRoute, isFundProduct, RESERVE_REFILL_NOTICE, selectedPayAsset, type FundBuyRoute } from "./arcousd-buy"
+import { fundBuyRoute, fundPayChoices, isFundProduct, RESERVE_REFILL_NOTICE, selectedPayAsset, type FundBuyRoute } from "./arcousd-buy"
 import { withdrawalApproval } from "./arcousd-live"
 import { GIWA_LIVE_REFETCH } from "./config"
 import { vaultAddressForOperation, type ProductOperation } from "./operation-routing"
@@ -135,6 +135,14 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     queryKey: ["giwa", "payment-balance-one", wallet.address, payToken],
     queryFn: () => readTokenBalance(payToken!, wallet.address!, payDecimals),
     enabled: Boolean(routed && wallet.address && payToken),
+  })
+  // Every Router pay asset's balance, for the token picker's rows (the selected one shares its read with the query above).
+  const payAssetBalances = useQueries({
+    queries: (route.kind === "router" ? route.payAssets : []).map((asset) => ({
+      queryKey: ["giwa", "payment-balance-one", wallet.address, asset.address],
+      queryFn: () => readTokenBalance(asset.address, wallet.address!, asset.decimals),
+      enabled: Boolean(wallet.address),
+    })),
   })
   const productBalanceQuery = useQuery({
     queryKey: ["giwa", "product-balance", wallet.address, product.productTokenAddress],
@@ -423,6 +431,15 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     payAssets: route.kind === "router" ? route.payAssets : [],
     payAsset,
     payBalance: routed ? (payBalanceQuery.data ?? "--") : undefined,
+    // The same choices as the token picker's rows (every coin on every chain; the Router's on GIWA available).
+    payChoices:
+      route.kind === "router"
+        ? fundPayChoices(route.payAssets, (asset) => {
+            const raw = payAssetBalances[route.payAssets.indexOf(asset)]?.data
+            const balance = raw != null ? Number(raw) : Number.NaN
+            return Number.isFinite(balance) ? balance : null
+          })
+        : [],
     onPayAssetChange: (key: string) => {
       setPayAssetKey(key)
       setOperationError(null)

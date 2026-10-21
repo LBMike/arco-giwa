@@ -52,8 +52,16 @@ import { DEPLOYED_FUND_METRICS, metricCaption, type ListedFund } from "./listed-
 import { CATEGORY_TITLES, categoryTitle } from "./fund-categories"
 import { ASSET_MANAGERS, ISSUERS, aumLabel, apyLabel, productById } from "../data/products"
 import { GiwaMultiSelect } from "./GiwaMultiSelect"
-import { PayAssetSelect } from "./PayAssetSelect"
-import { amountAfterSwapFee, swapFeeText, type PayAssetOption } from "./arcousd-buy"
+import { SavingsAssetPicker } from "./SavingsAssetPicker"
+import type { SavingsAssetChoice } from "./savings-assets"
+import {
+  amountAfterSwapFee,
+  payAssetForOption,
+  payAssetLogo,
+  payAssetOptionKey,
+  stablecoinSwapFee,
+  type PayAssetOption,
+} from "./arcousd-buy"
 import {
   AmountBlock,
   AmountField,
@@ -1267,8 +1275,18 @@ function GiwaCatalogRow({
 }
 
 // Expandable Transaction Fees content (Instant Fees). Config-first per fee, formatted with the
-// shared percent rule; a fee the vault has not set shows "—".
-function GiwaFeeBreakdown({ mintingBps, redemptionBps }: { mintingBps: number | null; redemptionBps: number | null }) {
+// shared percent rule; a fee the vault has not set shows "—". A Router buy adds the stablecoin swap
+// fee of the coin it pays with (`swapFee`), with a "?" that says which coins pay it and who charges it.
+function GiwaFeeBreakdown({
+  mintingBps,
+  redemptionBps,
+  swapFee = null,
+}: {
+  mintingBps: number | null
+  redemptionBps: number | null
+  swapFee?: { bps: number; help: string } | null
+}) {
+  const [swapHelpOpen, setSwapHelpOpen] = useState(false)
   const rows = [
     { label: "Instant Minting", value: mintingBps != null ? formatPercentFromBps(mintingBps) : "—" },
     { label: "Instant Redemption", value: redemptionBps != null ? formatPercentFromBps(redemptionBps) : "—" },
@@ -1289,6 +1307,28 @@ function GiwaFeeBreakdown({ mintingBps, redemptionBps }: { mintingBps: number | 
             <span className="tabular-nums text-[var(--color-arco-ink)]">{fee.value}</span>
           </div>
         ))}
+        {swapFee && (
+          // The "?" is the panel's help badge (InfoRow `help`): hover shows the text, a press opens it below the row.
+          <div className="border-t border-[var(--color-arco-border)] py-2 pl-3 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-1.5 text-[var(--color-arco-text-soft)]">
+                Stablecoin swap fee
+                <button
+                  type="button"
+                  title={swapFee.help}
+                  aria-label="About Stablecoin swap fee"
+                  aria-expanded={swapHelpOpen}
+                  onClick={() => setSwapHelpOpen((current) => !current)}
+                  className="inline-flex size-5 items-center justify-center rounded-md bg-[var(--color-arco-chip)] text-xs font-medium text-[var(--color-arco-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-arco-ink)]"
+                >
+                  ?
+                </button>
+              </span>
+              <span className="tabular-nums text-[var(--color-arco-ink)]">{formatPercentFromBps(swapFee.bps)}</span>
+            </div>
+            {swapHelpOpen ? <p className="mt-1.5 text-xs leading-5 text-[var(--color-arco-text-soft)]">{swapFee.help}</p> : null}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1365,6 +1405,7 @@ export function GiwaInvestPanel({
   payAssets = [],
   payAsset = null,
   payBalance,
+  payChoices = [],
   onPayAssetChange,
   onOperationChange,
   onAmountChange,
@@ -1415,6 +1456,8 @@ export function GiwaInvestPanel({
   payAssets?: readonly PayAssetOption[]
   payAsset?: PayAssetOption | null
   payBalance?: string
+  // The token picker's rows ("Select a token"): every coin on every chain, the Router's pay assets on GIWA available.
+  payChoices?: readonly SavingsAssetChoice[]
   onPayAssetChange?: (key: string) => void
   onOperationChange: (operation: "deposit" | "requestDeposit" | "redeemInstant" | "requestRedeem" | "claimRedeem") => void
   onAmountChange: (amount: string) => void
@@ -1437,6 +1480,13 @@ export function GiwaInvestPanel({
   const busy = ["approving", "simulating", "submitting", "confirming"].includes(phase)
   // Router fund buy with a chosen pay asset (invest side only; redeem always pays the fund's asset).
   const routedPay = routed && tab === "invest" && payAsset ? payAsset : null
+  // The pay asset is picked in the Savings token picker, opened from the "You pay" token chip.
+  const [payPickerOpen, setPayPickerOpen] = useState(false)
+  const payPicker = routedPay !== null && payAssets.length > 1 && onPayAssetChange !== undefined && payChoices.length > 0
+  // A picker that goes away (the Redeem tab, a route change) does not come back open by itself.
+  useEffect(() => {
+    if (!payPicker) setPayPickerOpen(false)
+  }, [payPicker])
   const paySymbol = tab === "redeem" ? product.symbol : routedPay ? routedPay.label : assetLabel(product.paymentAssetSymbol)
   const receiveSymbol = tab === "redeem" ? assetLabel(product.paymentAssetSymbol) : product.symbol
   const side: "invest" | "redeem" = tab === "redeem" ? "redeem" : "invest"
@@ -1447,9 +1497,9 @@ export function GiwaInvestPanel({
   // ArcoUSD). For tBTC/tWETH/tXRP we show the value in the payment-asset symbol instead — a real
   // USD figure would need an FX oracle (out of scope).
   const isUsd = routedPay !== null || product.paymentAssetSymbol === "tUSDC"
-  const payIconFor = (option: PayAssetOption) => (
-    <GiwaBrandMark src={paymentAssetIcon(option.symbol)} label={option.label} size={18} />
-  )
+  // A pay asset's mark is the token picker's (USDT, RLUSD and ArcoUSD have their own there).
+  const payIconSrc = (option: PayAssetOption) => payAssetLogo(option) ?? paymentAssetIcon(option.symbol)
+  const payIconFor = (option: PayAssetOption) => <GiwaBrandMark src={payIconSrc(option)} label={option.label} size={18} />
   const topBalance = tab === "redeem" ? productBalance : routedPay ? (payBalance ?? "--") : paymentBalance
   const receiveBalance = tab === "redeem" ? paymentBalance : productBalance
   const canMax = topBalance !== "--" && Number.isFinite(Number(topBalance)) && Number(topBalance) > 0
@@ -1517,7 +1567,7 @@ export function GiwaInvestPanel({
 
   // What the modal shows while it runs: the amounts, symbols and marks exactly as the panel shows them at the press.
   function review(next: FlowOperation): OperationReview {
-    const payIcon = tab === "redeem" ? vaultImageFor(product) : paymentAssetIcon(routedPay ? routedPay.symbol : product.paymentAssetSymbol)
+    const payIcon = tab === "redeem" ? vaultImageFor(product) : routedPay ? payIconSrc(routedPay) : paymentAssetIcon(product.paymentAssetSymbol)
     const receiveIcon = tab === "redeem" ? paymentAssetIcon(product.paymentAssetSymbol) : vaultImageFor(product)
     return {
       kind: savings ? "savings" : "funds",
@@ -1577,18 +1627,19 @@ export function GiwaInvestPanel({
                       : <GiwaBrandMark src={paymentAssetIcon(product.paymentAssetSymbol)} label={assetLabel(product.paymentAssetSymbol)} size={18} />
                 }
                 symbolControl={
-                  routedPay && payAssets.length > 1 && onPayAssetChange ? (
-                    <PayAssetSelect
-                      options={payAssets.map((option) => ({
-                        key: option.key,
-                        label: option.label,
-                        icon: payIconFor(option),
-                        note: option.swapFeeBps > 0 ? `${swapFeeText(option.swapFeeBps)} fee` : "No fee",
-                      }))}
-                      selected={routedPay.key}
-                      onSelect={onPayAssetChange}
+                  payPicker ? (
+                    <button
+                      type="button"
+                      aria-haspopup="dialog"
+                      aria-label={`Pay with: ${routedPay.label}`}
                       disabled={busy}
-                    />
+                      onClick={() => setPayPickerOpen(true)}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] py-1 pl-1 pr-2 text-sm font-medium text-[var(--color-arco-ink)] disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
+                    >
+                      {payIconFor(routedPay)}
+                      {routedPay.label}
+                      <ChevronDown aria-hidden="true" className="size-3.5 text-[var(--color-arco-muted)]" />
+                    </button>
                   ) : undefined
                 }
                 value={amount}
@@ -1641,8 +1692,6 @@ export function GiwaInvestPanel({
                       value={instantLiquidityUsd != null ? aumLabel(instantLiquidityUsd) : "—"}
                     />
                   )}
-                  {/* Router buy: the Reserve's swap fee for a non-base stablecoin (USDT, RLUSD). */}
-                  {routedPay && <InfoRow label="Swap fee" value={swapFeeText(routedPay.swapFeeBps)} />}
                   {/* Redeem tab: same redemption-vault liquidity, shown in the payment asset to match
                       the request-fallback notice ("Instant liquidity is <X> tUSDC"). */}
                   {tab === "redeem" && (
@@ -1664,6 +1713,8 @@ export function GiwaInvestPanel({
                     <GiwaFeeBreakdown
                       mintingBps={cfg.feeInstantMintingBps}
                       redemptionBps={cfg.feeInstantRedemptionBps}
+                      // Router buy: the Reserve's swap fee for the coin paid with (USDT, RLUSD; none for USDC, ArcoUSD).
+                      swapFee={routedPay ? stablecoinSwapFee(routedPay, payAssets) : null}
                     />
                   </InfoRow>
                 </>
@@ -1714,6 +1765,20 @@ export function GiwaInvestPanel({
             )}
           </div>
         </div>
+      )}
+      {payPicker && (
+        <SavingsAssetPicker
+          open={payPickerOpen}
+          onClose={() => setPayPickerOpen(false)}
+          choices={payChoices}
+          selected={payAssetOptionKey(routedPay) ?? ""}
+          onSelect={(key) => {
+            setPayPickerOpen(false)
+            const next = payAssetForOption(payAssets, key)
+            // While a transaction runs the asset cannot change (the panel must keep naming what is in flight).
+            if (next !== null && next.key !== routedPay.key && !busy) onPayAssetChange(next.key)
+          }}
+        />
       )}
     </div>
   )

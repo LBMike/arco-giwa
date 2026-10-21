@@ -1,6 +1,6 @@
-// Admin · ArcoUSD processQueue control and the fund-buy pay-asset dropdown in React DOM:
-// Preview → Sign & send (with the confirming step), a refused preview, and the dropdown's open /
-// choose / Escape behaviour inside its themed portal.
+// Admin · ArcoUSD processQueue control in React DOM: Preview → Sign & send (with the confirming
+// step) and a refused preview. (The fund-buy pay asset is picked in the Savings token picker:
+// fund-pay-picker.dom.test.tsx.)
 //
 // Gated like the other DOM tests: set GIWA_HOST_DOM_RUNTIME to an existing jsdom package.json.
 
@@ -155,36 +155,6 @@ test("processQueue control: a refused preview shows the server's reason and send
     assert.match(doc.body.textContent ?? "", /ArcoUSD is not deployed/)
     assert.equal(button(doc, "Sign & send").disabled, true)
     assert.equal(sent, 0)
-  })
-})
-
-test("pay-asset dropdown: opens in a themed portal, chooses, and Escape returns focus (set GIWA_HOST_DOM_RUNTIME)", { skip: !runtime }, async () => {
-  await withDom(async ({ doc, React, root, act }) => {
-    const { PayAssetSelect } = (await import("./PayAssetSelect")) as AnyModule
-    const chosen: string[] = []
-    const options = [
-      { key: "usdc", label: "USDC", note: "No fee" },
-      { key: "usdt", label: "USDT", note: "0.1% fee" },
-    ]
-    await act(() => root.render(React.createElement(PayAssetSelect, { options, selected: "usdc", onSelect: (key: string) => chosen.push(key) })))
-    const trigger = doc.querySelector('button[aria-haspopup="menu"]') as HTMLButtonElement
-    await act(() => trigger.click())
-    const menu = doc.querySelector('[role="menu"]') as HTMLElement
-    assert.ok(menu, "menu opened")
-    assert.ok(menu.parentElement?.classList.contains("arco-demo"), "the portal is wrapped in the theme scope")
-    assert.equal(doc.activeElement?.getAttribute("aria-checked"), "true") // focus on the selected option
-    const items = [...menu.querySelectorAll('[role="menuitemradio"]')] as HTMLButtonElement[]
-    await act(() => items[1].click())
-    assert.deepEqual(chosen, ["usdt"])
-    assert.equal(doc.querySelector('[role="menu"]'), null)
-    assert.equal(doc.activeElement, trigger)
-
-    await act(() => trigger.click())
-    await act(() => {
-      doc.querySelector('[role="menu"]')!.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
-    })
-    assert.equal(doc.querySelector('[role="menu"]'), null)
-    assert.equal(doc.activeElement, trigger)
   })
 })
 
