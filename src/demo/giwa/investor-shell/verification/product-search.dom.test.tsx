@@ -18,6 +18,7 @@ test("header search opens, filters, navigates by keyboard and closes on Escape/o
     const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query")
     const { GiwaProductSearch } = await import("../../GiwaProductSearch")
     const { StocksPageEnvironment } = await import("../../stocks-market/environment")
+    const { GiwaFeaturesContext } = await import("../../features")
     const { fixtureTop40MarketFetch } = await import("../../stocks-market/fixtures")
     const { giwaApi } = await import("../../api")
     const { default: snapshot } = await import("./deployed-giwa.snapshot.json")
@@ -26,9 +27,11 @@ test("header search opens, filters, navigates by keyboard and closes on Escape/o
     giwaApi.market = async () => snapshot.market
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
     const root = createRoot(w.document.getElementById("root")!)
+    let active = root
     const fetcher = fixtureTop40MarketFetch()
     let failStocks = false
-    const environment = { apiBase: "https://fixture.invalid", fetch: (url: string, init: RequestInit) => failStocks ? Promise.reject(new Error("offline")) : fetcher(url, init) }
+    let stockReads = 0
+    const environment = { apiBase: "https://fixture.invalid", fetch: (url: string, init: RequestInit) => { stockReads += 1; return failStocks ? Promise.reject(new Error("offline")) : fetcher(url, init) } }
     const tick = async () => { await new Promise(resolve => setTimeout(resolve, 30)) }
     const key = async (el: Element, value: string) => { await act(async () => { el.dispatchEvent(new w.KeyboardEvent("keydown", { key: value, bubbles: true })); await tick() }) }
     const click = async (el: Element | null) => { assert.ok(el); await act(async () => { (el as HTMLElement).click(); await tick() }) }
@@ -38,10 +41,12 @@ test("header search opens, filters, navigates by keyboard and closes on Escape/o
     const button = (name: string) => Array.from(w.document.querySelectorAll("button")).find((el: any) => el.textContent === name) as HTMLElement
     function Route() { const location = useLocation(); return h("output", { id: "route" }, location.pathname + location.search) }
     try {
-      await act(async () => root.render(h(QueryClientProvider, { client }, h(StocksPageEnvironment.Provider, { value: environment }, h(MemoryRouter, null, h(GiwaProductSearch), h(Route))))))
+      // With Stocks shown (the app hides them now: features.ts; that case is at the end).
+      await act(async () => root.render(h(QueryClientProvider, { client }, h(GiwaFeaturesContext.Provider, { value: { home: true, stocks: true } }, h(StocksPageEnvironment.Provider, { value: environment }, h(MemoryRouter, null, h(GiwaProductSearch), h(Route)))))))
       await key(w.document.body, "/")
       await act(tick)
-      assert.equal(options().length, 48)
+      // 12 Savings and Funds (deployed and listed) + 40 Stocks.
+      assert.equal(options().length, 52)
       assert.equal(w.document.activeElement, field())
       await click(button("Stocks"))
       assert.equal(options().length, 40)
@@ -66,7 +71,7 @@ test("header search opens, filters, navigates by keyboard and closes on Escape/o
       await click(w.document.querySelector('[aria-label="Show product search results"]'))
       await input("")
       await click(button("Funds"))
-      assert.equal(options().length, 4)
+      assert.equal(options().length, 8)
       assert.match(w.document.body.textContent!, /Stocks are temporarily unavailable/)
       await click(options().find(el => el.textContent!.includes("auMINT"))!)
       assert.equal(w.document.getElementById("route")!.textContent, "/product/umint")
@@ -74,7 +79,25 @@ test("header search opens, filters, navigates by keyboard and closes on Escape/o
       await input("ETH")
       await click(options().find(el => el.textContent!.includes("ETH Savings"))!)
       assert.equal(w.document.getElementById("route")!.textContent, "/savings?asset=ETH&account=real%3Aaeth%3AETH")
-    } finally { await act(async () => root.unmount()); client.clear(); Object.assign(giwaApi, original) }
+
+      // As the app ships: Stocks hidden. No Stocks tab, label or results, and nothing is read for them.
+      await act(async () => root.unmount())
+      const hiddenRoot = createRoot(w.document.getElementById("root")!)
+      active = hiddenRoot
+      failStocks = false
+      stockReads = 0
+      await act(async () => hiddenRoot.render(h(QueryClientProvider, { client }, h(StocksPageEnvironment.Provider, { value: environment }, h(MemoryRouter, null, h(GiwaProductSearch), h(Route))))))
+      assert.equal(field().getAttribute("placeholder"), "Search savings and funds…")
+      assert.equal(field().getAttribute("aria-label"), "Search savings and funds")
+      await click(w.document.querySelector('[aria-label="Show product search results"]'))
+      await act(tick)
+      assert.deepEqual(Array.from(w.document.querySelectorAll('[aria-label="Product categories"] button')).map((el: any) => el.textContent), ["All", "Savings", "Funds"])
+      assert.equal(options().length, 12)
+      await input("tesla")
+      assert.equal(options().length, 0)
+      assert.doesNotMatch(w.document.body.textContent!, /Stocks are temporarily unavailable/)
+      assert.equal(stockReads, 0)
+    } finally { await act(async () => active.unmount()); client.clear(); Object.assign(giwaApi, original) }
   } finally {
     dom.window.close()
     for (const key of Object.keys(globals)) { if (previous[key]) Object.defineProperty(globalThis, key, previous[key]!); else Reflect.deleteProperty(globalThis, key) }

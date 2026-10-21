@@ -44,6 +44,8 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
   const { GiwaPreprodApp } = await import("./GiwaPreprodApp")
   const { GiwaWalletProvider } = await import("./wallet")
   const { ArcoUsdConvertContext } = await import("./savings-routes")
+  // The nav mechanics are tested over the whole menu; the shipped switch (features.ts) is tested in investor-nav.test.tsx.
+  const { GiwaFeaturesContext } = await import("./features")
   t.after(() => { t.diagnostic(`Dynamic wallet-book requests answered offline: ${sdkAssetCalls.length}; other requests: ${fetchCalls.length}`) })
 
   // `convert`: Get ArcoUSD's converters, as the preview's demo wallet provides them (none by default, as in the app).
@@ -58,10 +60,10 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
     const probe: { pathname: string; navigate: NavigateFunction | null } = { pathname: "", navigate: null }
     function Probe() { probe.pathname = useLocation().pathname; probe.navigate = useNavigate(); return null }
     await act(async () => {
-      root.render(<StrictMode><QueryClientProvider client={client}><GiwaWalletProvider><ArcoUsdConvertContext.Provider value={convert}><MemoryRouter initialEntries={[path]}>
+      root.render(<StrictMode><QueryClientProvider client={client}><GiwaWalletProvider><ArcoUsdConvertContext.Provider value={convert}><GiwaFeaturesContext.Provider value={{ home: true, stocks: true }}><MemoryRouter initialEntries={[path]}>
         <Probe />
         <Routes><Route element={<GiwaPreprodApp />}><Route path="*" element={<p>page body</p>} /></Route></Routes>
-      </MemoryRouter></ArcoUsdConvertContext.Provider></GiwaWalletProvider></QueryClientProvider></StrictMode>)
+      </MemoryRouter></GiwaFeaturesContext.Provider></ArcoUsdConvertContext.Provider></GiwaWalletProvider></QueryClientProvider></StrictMode>)
       await flush()
     })
     const trigger = element.querySelector<HTMLButtonElement>('button[aria-label="Open menu"]')!

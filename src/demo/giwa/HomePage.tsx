@@ -1,6 +1,6 @@
-import { useMemo, type ReactNode } from "react"
+import { useContext, useMemo, type ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "react-router-dom"
+import { Link, Navigate } from "react-router-dom"
 import { ArrowRight } from "lucide-react"
 import { giwaApi } from "./api"
 import { vaultDisplayName, vaultImageFor } from "./catalog"
@@ -12,14 +12,22 @@ import { DEPLOYED_FUND_METRICS, listedFundsForCatalog } from "./listed-funds"
 import { GIWA_FUNDS_ROUTE, GIWA_SAVINGS_ROUTE } from "./routes"
 import { BrandMark } from "../components/BrandMark"
 import { StocksHomeList } from "./stocks-market/StocksHomeList"
+import { GiwaFeaturesContext } from "./features"
 
 const FOCUS =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
 const CARD = `flex h-full flex-col rounded-[var(--radius-strategy)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-6 transition-colors hover:bg-[var(--color-arco-surface-muted)] ${FOCUS}`
 
-// Investor Home: entry cards for Savings and Funds (counts from the same catalog/market queries,
-// so the cache is shared with those pages) and the Stocks list.
+// The Home route: the page, or Savings while Home is hidden (features.ts). The address stays.
 export default function GiwaHomePage() {
+  const { home } = useContext(GiwaFeaturesContext)
+  return home ? <GiwaHomeContent /> : <Navigate to={GIWA_SAVINGS_ROUTE} replace />
+}
+
+// Investor Home: entry cards for Savings and Funds (counts from the same catalog/market queries,
+// so the cache is shared with those pages) and the Stocks list (while Stocks are shown).
+function GiwaHomeContent() {
+  const { stocks: withStocks } = useContext(GiwaFeaturesContext)
   const catalogQuery = useQuery({ queryKey: ["giwa", "catalog"], queryFn: giwaApi.catalog, ...GIWA_LIVE_REFETCH })
   const marketQuery = useQuery({
     queryKey: ["giwa", "market", GIWA_CHAIN_ID],
@@ -109,7 +117,7 @@ export default function GiwaHomePage() {
         </div>
       </section>
 
-      <StocksHomeList withHighlights />
+      {withStocks && <StocksHomeList withHighlights />}
     </div>
   )
 }

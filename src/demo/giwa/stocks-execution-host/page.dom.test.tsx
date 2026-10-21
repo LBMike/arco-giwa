@@ -97,7 +97,8 @@ test("real /stocks page drives the wallet execution host end to end (set GIWA_HO
       const element = document.createElement("div")
       document.body.append(element)
       const root = createRoot(element)
-      const router = createMemoryRouter(stocksRoutes(h(Outlet)), { initialEntries: ["/stocks"] })
+      // With Stocks shown (the app hides them now: features.ts).
+      const router = createMemoryRouter(stocksRoutes(h(Outlet), { home: true, stocks: true }), { initialEntries: ["/stocks"] })
       const signIn = harness.signInDependencies()
       // A shorter session only rewrites the fixture verify response's expiresIn; the token and every other request are unchanged.
       const dependencies = options.sessionSeconds === undefined

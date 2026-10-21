@@ -8,6 +8,7 @@ import { countLabel, fundsProductsOf, homeSavingsSummary } from "./home"
 import { vaultConfigOf } from "./catalog"
 import { GIWA_CHAIN_ID } from "./config"
 import { StocksPageEnvironment } from "./stocks-market/environment"
+import { GiwaFeaturesContext, type GiwaFeatures } from "./features"
 import type { GiwaMarketEntry } from "./api"
 import type { GiwaAcceptAsset, GiwaCatalogItem, GiwaVaultConfig } from "./types"
 
@@ -65,19 +66,33 @@ test("homeSavingsSummary counts selectable accounts and coming-soon entries from
   assert.equal(countLabel(0, "product", "products"), "0 products")
 })
 
-function renderHome(seed: (client: QueryClient) => void) {
+// Home and Stocks shown unless a case says otherwise (the app hides both now: features.ts).
+function renderHome(seed: (client: QueryClient) => void, features: GiwaFeatures = { home: true, stocks: true }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false } } })
   seed(client)
   return renderToStaticMarkup(
     <QueryClientProvider client={client}>
-      <StocksPageEnvironment.Provider value={{ apiBase: null }}>
-        <MemoryRouter initialEntries={["/"]}>
-          <GiwaHomePage />
-        </MemoryRouter>
-      </StocksPageEnvironment.Provider>
+      <GiwaFeaturesContext.Provider value={features}>
+        <StocksPageEnvironment.Provider value={{ apiBase: null }}>
+          <MemoryRouter initialEntries={["/"]}>
+            <GiwaHomePage />
+          </MemoryRouter>
+        </StocksPageEnvironment.Provider>
+      </GiwaFeaturesContext.Provider>
     </QueryClientProvider>,
   )
 }
+
+test("Home hidden (as the app ships): the route renders no page, it opens Savings; Stocks hidden: no Stocks section", () => {
+  const seed = (client: QueryClient) => {
+    client.setQueryData(["giwa", "catalog"], [])
+    client.setQueryData(["giwa", "market", GIWA_CHAIN_ID], [])
+  }
+  assert.equal(renderHome(seed, { home: false, stocks: false }), "")
+  const withoutStocks = renderHome(seed, { home: true, stocks: false })
+  assert.match(withoutStocks, /<h1/)
+  assert.doesNotMatch(withoutStocks, /Stocks/)
+})
 
 function linkText(html: string, href: string): string {
   const match = html.match(new RegExp(`<a[^>]*href="${href}"[^>]*>(.*?)</a>`))

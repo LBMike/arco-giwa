@@ -5,6 +5,7 @@ import { ArrowUp, Wallet } from "lucide-react"
 import { giwaApi, type GiwaMarketEntry, type GiwaPriceHistory } from "./api"
 import { readShareSupply, readTokenBalance } from "./contracts"
 import { ArcoUsdLiveContext, ArcoUsdLiveFailedContext, ArcoUsdLivePendingContext } from "./arcousd-live-context"
+import { GiwaFeaturesContext } from "./features"
 import { liveSavingsHistory } from "./arcousd-live"
 import { positionUsdValue } from "./usd-prices"
 import { GiwaActivityTable, GiwaHoldingsTable, type HoldingPriceCell } from "./components"
@@ -17,7 +18,7 @@ import {
   allocationOf, carriedBackTo, CATEGORY_LABEL, flatPriceHistory, formatValueChange, historyStart, PORTFOLIO_VIEWS, productPortfolioCategory, stockPriceHistory,
   valueChange, withCurrentPrice, type AllocationSlice, type ChangeLabel, type PortfolioCategory, type PortfolioView,
 } from "./portfolio-view"
-import { STOCK_DISPLAY, useStocksActivity, useStocksHolding, type StocksHolding } from "./portfolio-stocks"
+import { STOCK_DISPLAY, useStocksActivity, useStocksHolding, type StocksActivity, type StocksHolding } from "./portfolio-stocks"
 import { nextSort, sortByNumericKey } from "./sort"
 import { GIWA_CHAIN_ID } from "./config"
 import { GIWA_FUNDS_ROUTE, GIWA_SAVINGS_ROUTE, GIWA_STOCKS_ROUTE } from "./routes"
@@ -59,6 +60,9 @@ type PortfolioRow = {
 type SortKey = "balance" | "delta" | "deposit" | "apy"
 
 const STOCK_ROW_ID = `stocks:${STOCK_DISPLAY.symbol}`
+// Stocks hidden (features.ts): no Stocks are read, so the page has none to show anywhere.
+const NO_STOCKS: StocksHolding = { status: "ready", units: 0, price: null, priceSettled: true, closes: null, closesSettled: true }
+const NO_STOCK_TRADES: StocksActivity = { status: "ready", entries: [] }
 // ArcoUSD v1 (arcousd-live.ts): the wallet's ArcoUSD and sArcoUSD are not catalog products, so their rows name
 // themselves like the Stocks row. Both are listed under Savings, where they are got and deposited.
 const ARCOUSD_ROW = { id: "arcousd:ArcoUSD", symbol: "ArcoUSD", label: CATEGORY_LABEL.savings, imageUrl: "/logos/arcousd.png" } as const
@@ -177,11 +181,14 @@ export default function GiwaPortfolioPage() {
     enabled: Boolean(wallet.address),
   })
 
-  // The wallet's NVDA, read on GIWA like the balances above (no Stocks sign-in).
-  const stocks = useStocksHolding(wallet.address ?? null)
-  const stock: StocksHolding = stocks.holding
+  // The wallet's NVDA, read on GIWA like the balances above (no Stocks sign-in). With Stocks hidden nothing is read and
+  // the page shows no Stocks: no view, tile, row, Net Worth line or trades.
+  const { stocks: withStocks } = useContext(GiwaFeaturesContext)
+  const stocks = useStocksHolding(wallet.address ?? null, { enabled: withStocks })
+  const stock: StocksHolding = withStocks ? stocks.holding : NO_STOCKS
   // The third Activity stream: the wallet's Stocks trades and their GIWA transactions (public, no sign-in).
-  const stocksActivity = useStocksActivity(wallet.address ?? null)
+  const stocksActivityRead = useStocksActivity(wallet.address ?? null, { enabled: withStocks })
+  const stocksActivity = withStocks ? stocksActivityRead : { ...stocksActivityRead, activity: NO_STOCK_TRADES }
   const stockTrades = stocksActivity.activity.status === "ready" ? stocksActivity.activity.entries : []
 
   const history = historyQuery.isSuccess ? historyQuery.data : {}
@@ -412,7 +419,8 @@ export default function GiwaPortfolioPage() {
     emptyLabel: chartEmpty ?? "No net rate history yet",
   }
 
-  const allocation = allocationOf(rows)
+  const allocation = allocationOf(rows).filter((slice) => withStocks || slice.category !== "stocks")
+  const views = PORTFOLIO_VIEWS.filter((option) => withStocks || option.id !== "stocks")
   const viewRows = view === "all" ? rows : rows.filter((row) => row.category === view)
 
   // Sort rows upstream (numeric values live here) so positions/depositUsd/apyValues/priceCells
@@ -495,7 +503,7 @@ export default function GiwaPortfolioPage() {
       ) : (
         <EmptyState
           title="No holdings yet"
-          body="Deposit into Savings or Funds, or buy Stocks, to start building your portfolio."
+          body={withStocks ? "Deposit into Savings or Funds, or buy Stocks, to start building your portfolio." : "Deposit into Savings or Funds to start building your portfolio."}
           action={<Link to={GIWA_FUNDS_ROUTE} className={LINK_BUTTON}>Browse products</Link>}
         />
       )
@@ -522,7 +530,7 @@ export default function GiwaPortfolioPage() {
               {headerChange.text} · {activeRange}
             </span>
           )}
-          <span className="text-[11px] text-[var(--color-arco-muted)]">Savings, Funds and Stocks at current prices</span>
+          <span className="text-[11px] text-[var(--color-arco-muted)]">{withStocks ? "Savings, Funds and Stocks at current prices" : "Savings and Funds at current prices"}</span>
           {partialNote && <span className="text-[11px] text-[var(--color-arco-muted)]">{partialNote}</span>}
         </div>
         <div
@@ -570,7 +578,7 @@ export default function GiwaPortfolioPage() {
         {tab === "portfolio" ? (
           <>
             <div role="group" aria-label="Portfolio products" className="inline-flex max-w-full flex-wrap rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] p-0.5 text-sm">
-              {PORTFOLIO_VIEWS.map((option) => (
+              {views.map((option) => (
                 <button
                   key={option.id}
                   type="button"
@@ -589,7 +597,7 @@ export default function GiwaPortfolioPage() {
           </>
         ) : (
           activityError || (activityKnown && stocksActivityError && activityRows.length === 0) ? <EmptyState title="Activity could not be loaded" body="Your transaction history has not been confirmed. Use Refresh to try again." />
-            : !activityKnown ? <EmptyState title="Loading your activity…" body="Checking transactions, redemption requests and Stocks trades." />
+            : !activityKnown ? <EmptyState title="Loading your activity…" body={withStocks ? "Checking transactions, redemption requests and Stocks trades." : "Checking transactions and redemption requests."} />
               : <>
                 {stocksActivityError ? <p role="status" className="mb-3 text-sm text-[var(--color-arco-text-soft)]" data-testid="stocks-activity-unavailable">Stocks trades could not be loaded. Use Refresh to try again.</p> : null}
                 <GiwaActivityTable rows={activityRows} />
@@ -612,7 +620,7 @@ function AllocationTiles({
   onSelect: (view: PortfolioView) => void
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-3" data-testid="portfolio-allocation">
+    <div className={`grid gap-3 ${slices.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-3"}`} data-testid="portfolio-allocation">
       {slices.map((slice) => {
         const label = CATEGORY_LABEL[slice.category]
         const { value, detail } = tileText(slice, stock)

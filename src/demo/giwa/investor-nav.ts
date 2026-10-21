@@ -7,6 +7,7 @@ import {
   GIWA_SAVINGS_ROUTE,
   GIWA_STOCKS_ROUTE,
 } from "./routes"
+import { GIWA_FEATURES, type GiwaFeatures } from "./features"
 
 // Investor shell navigation model, shared by the desktop sidebar and the mobile drawer. Pure (no
 // React) so ordering, labels and active matching are unit-tested without rendering.
@@ -54,11 +55,13 @@ export const INVESTOR_NAV_SECTIONS: readonly InvestorNavSection[] = [
 // VISIBILITY only (allowlisted wallets); the admin routes keep their own guard.
 export const INVESTOR_NAV_ADMIN_ITEM: InvestorNavItem = { id: "admin", label: "Admin", to: GIWA_ADMIN_ROUTE }
 
-export function investorNavSections(isAdmin: boolean): InvestorNavSection[] {
+/** The menu as shown: hidden sections (features.ts) leave it, and a section left with no items goes with them. */
+export function investorNavSections(isAdmin: boolean, features: GiwaFeatures = GIWA_FEATURES): InvestorNavSection[] {
+  const shown = (item: InvestorNavItem) => (item.id !== "home" || features.home) && (item.id !== "stocks" || features.stocks)
   return INVESTOR_NAV_SECTIONS.map((section) => ({
     ...section,
-    items: section.id === "manage" && isAdmin ? [...section.items, INVESTOR_NAV_ADMIN_ITEM] : [...section.items],
-  }))
+    items: [...section.items.filter(shown), ...(section.id === "manage" && isAdmin ? [INVESTOR_NAV_ADMIN_ITEM] : [])],
+  })).filter((section) => section.items.length > 0)
 }
 
 function within(pathname: string, base: string) {
