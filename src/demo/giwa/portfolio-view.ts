@@ -116,3 +116,24 @@ export function stockPriceHistory(
   if (points.length && price !== null && price > 0 && now !== null && points[points.length - 1].t < now) points = [...points, { t: now, close: price }]
   return { productId: id, apy: null, points: points.map((c) => ({ t: c.t, navBase: c.close, navUsd: c.close })) }
 }
+
+/**
+ * A price history carried back to `from` at its first price, so a line that started later than the others (sArcoUSD's
+ * short history) does not show up as a jump in Net Worth where it begins. Unchanged when it already starts by `from`.
+ */
+export function carriedBackTo(history: GiwaPriceHistory, from: number | null): GiwaPriceHistory {
+  if (from === null || history.points.length === 0) return history
+  const first = history.points.reduce((a, b) => (b.t < a.t ? b : a))
+  if (first.t <= from) return history
+  return { ...history, points: [{ t: from, navBase: first.navBase, navUsd: first.navUsd }, ...history.points] }
+}
+
+/**
+ * A holding at a fixed price (ArcoUSD at its dollar) as a Net Worth line: that price from `from` (where the other lines
+ * start) to `now`; at `now` alone when nothing else has history yet. Without `now` the line is empty.
+ */
+export function flatPriceHistory(id: string, price: number, options: { from: number | null; now: number | null }): GiwaPriceHistory {
+  const { from, now } = options
+  const times = now === null ? [] : from !== null && from < now ? [from, now] : [now]
+  return { productId: id, apy: null, points: times.map((t) => ({ t, navBase: price, navUsd: price })) }
+}

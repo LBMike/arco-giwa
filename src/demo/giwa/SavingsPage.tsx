@@ -12,7 +12,7 @@ import {
   liveSavingsVault,
   REPLACED_SAVINGS_PRODUCT_ID,
 } from "./arcousd-live"
-import { ArcoUsdLiveContext, ArcoUsdLivePendingContext } from "./arcousd-live-context"
+import { ArcoUsdLiveContext, ArcoUsdLiveFailedContext, ArcoUsdLivePendingContext } from "./arcousd-live-context"
 import { assetLabel } from "./asset-label"
 import { tokenSymbolFor } from "./catalog"
 import { AllocationTreemap } from "./AllocationTreemap"
@@ -52,6 +52,7 @@ export default function GiwaSavingsPage() {
   // tabs, its own contracts and figures. The arcoUSD vault keeps its product page.
   const live = useContext(ArcoUsdLiveContext)
   const livePending = useContext(ArcoUsdLivePendingContext)
+  const liveFailed = useContext(ArcoUsdLiveFailedContext)
   const liveVault = useMemo(() => {
     const base = (catalogQuery.data ?? []).find((product) => product.productId === REPLACED_SAVINGS_PRODUCT_ID)
     return live !== null && base !== undefined ? liveSavingsVault(base, live) : null
@@ -77,8 +78,10 @@ export default function GiwaSavingsPage() {
   }, [accounts, category, selectedAccount, selectedAsset])
 
   // First load only: background refetches are isFetching, not isLoading, so they never re-skeleton. The first ArcoUSD
-  // reads are waited for too, so the stablecoin account never opens on the vault the sArcoUSD account replaces.
-  const loading = catalogQuery.isLoading || marketQuery.isLoading || livePending
+  // reads are waited for too, so the stablecoin account never opens on the vault the sArcoUSD account replaces; when
+  // they keep failing the page says so (and keeps asking) instead of loading forever.
+  const liveUnread = livePending && liveFailed !== null
+  const loading = catalogQuery.isLoading || marketQuery.isLoading || (livePending && !liveUnread)
 
   return (
     <div className="w-full">
@@ -86,6 +89,8 @@ export default function GiwaSavingsPage() {
       <div className="mx-auto w-full max-w-[912px]">
         {loading ? (
           <SavingsSkeleton />
+        ) : liveUnread ? (
+          <SavingsLoadError onRetry={liveFailed!.retry} />
         ) : accounts.length === 0 ? (
           <SavingsEmptyState />
         ) : (
@@ -321,6 +326,22 @@ function SavingsDetail({ vault, tone }: { vault: GiwaCatalogItem; tone: SavingsH
 }
 
 // Shown before any saving vault / accept-asset is configured (first run) so the page never looks broken.
+function SavingsLoadError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div role="alert" className="rounded-[22px] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-8 text-center">
+      <p className="text-sm font-medium text-[var(--color-arco-ink)]">Savings could not be loaded</p>
+      <p className="mt-1 text-sm text-[var(--color-arco-muted)]">We keep checking. Try again in a moment.</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-4 inline-flex items-center justify-center rounded-[var(--radius-control)] border border-[var(--color-arco-border)] px-4 py-2 text-sm font-medium text-[var(--color-arco-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
+      >
+        Try again
+      </button>
+    </div>
+  )
+}
+
 function SavingsEmptyState() {
   return (
     <div className="rounded-[22px] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-8 text-center">

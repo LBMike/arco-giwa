@@ -33,6 +33,8 @@ export const ROUTER_BUY_SELECTOR = toFunctionSelector("buy(address,uint256,addre
 export const PROCESS_QUEUE_SELECTOR = toFunctionSelector("processQueue(address,uint256)")
 /** Reserve.redeem: its switch halts every redemption, Instant and Standard (the Zap's Instant-only one too). */
 export const REDEEM_SELECTOR = toFunctionSelector("redeem(address,uint256,address,uint256)")
+/** Reserve.redeemInstantOnly: its own switch halts Instant-only redemptions (Get ArcoUSD back to a coin, the Savings Zap). */
+export const REDEEM_INSTANT_ONLY_SELECTOR = toFunctionSelector("redeemInstantOnly(address,uint256,address,uint256)")
 
 /** Every ArcoUSDReserve event (indexer). */
 export const reserveEventsAbi = parseAbi([

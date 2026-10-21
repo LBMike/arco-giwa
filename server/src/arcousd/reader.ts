@@ -5,6 +5,7 @@ import {
   DEPOSIT_SELECTOR,
   lensAbi,
   PROCESS_QUEUE_SELECTOR,
+  REDEEM_INSTANT_ONLY_SELECTOR,
   REDEEM_SELECTOR,
   reserveAssetConfigAbi,
   reservePauseAbi,
@@ -96,6 +97,9 @@ export type ReserveState = {
   /** Reserve.fnPaused(redeem) — every redemption, Instant and Standard (cancelRedeem still works).
    *  Like depositPaused, only the switch: a redemption also stops while reservePaused. */
   readonly redeemPaused: boolean
+  /** Reserve.fnPaused(redeemInstantOnly) — Instant-only redemptions (the app's withdrawals and conversions back to a
+   *  coin, the Savings Zap). They also stop while redeemPaused or reservePaused. */
+  readonly redeemInstantOnlyPaused: boolean
   readonly assets: readonly AssetState[]
   readonly strategies: readonly StrategyState[]
 }
@@ -111,7 +115,7 @@ export function createArcoUSDChainReader(client: Pick<PublicClient, "readContrac
     const fnPausedAt = (address: `0x${string}`, selector: `0x${string}`) =>
       client.readContract({ address, abi: reservePauseAbi, functionName: "fnPaused", args: [selector], blockNumber })
     const router = deployment.routerAddress
-    const [snap, reservePaused, settlementPaused, queuePaused, arcoUSDPaused, arcoUSDBurnPaused, depositPaused, arcoUSDMintPaused, routerPaused, routerBuyPaused, redeemPaused] = await Promise.all([
+    const [snap, reservePaused, settlementPaused, queuePaused, arcoUSDPaused, arcoUSDBurnPaused, depositPaused, arcoUSDMintPaused, routerPaused, routerBuyPaused, redeemPaused, redeemInstantOnlyPaused] = await Promise.all([
       client.readContract({
         address: deployment.lensAddress,
         abi: lensAbi,
@@ -129,6 +133,7 @@ export function createArcoUSDChainReader(client: Pick<PublicClient, "readContrac
       router ? pausedAt(router) : false,
       router ? fnPausedAt(router, ROUTER_BUY_SELECTOR) : false,
       fnPausedAt(deployment.reserveAddress, REDEEM_SELECTOR),
+      fnPausedAt(deployment.reserveAddress, REDEEM_INSTANT_ONLY_SELECTOR),
     ])
     // The Lens leaves out the per-asset limits: one getAssetConfig per asset, at the same block.
     const configs = new Map<string, AssetLimits>()
@@ -154,6 +159,7 @@ export function createArcoUSDChainReader(client: Pick<PublicClient, "readContrac
       arcoUSDMintPaused: Boolean(arcoUSDMintPaused),
       routerPaused: Boolean(routerPaused) || Boolean(routerBuyPaused),
       redeemPaused: Boolean(redeemPaused),
+      redeemInstantOnlyPaused: Boolean(redeemInstantOnlyPaused),
     })
   }
 }
@@ -163,7 +169,7 @@ export type AssetLimits = { readonly depositCap: bigint; readonly minQueued: big
 
 export type PauseFlags = Pick<
   ReserveState,
-  "reservePaused" | "settlementPaused" | "queuePaused" | "arcoUSDPaused" | "arcoUSDBurnPaused" | "depositPaused" | "arcoUSDMintPaused" | "routerPaused" | "redeemPaused"
+  "reservePaused" | "settlementPaused" | "queuePaused" | "arcoUSDPaused" | "arcoUSDBurnPaused" | "depositPaused" | "arcoUSDMintPaused" | "routerPaused" | "redeemPaused" | "redeemInstantOnlyPaused"
 >
 
 export const NO_PAUSES: PauseFlags = {
@@ -176,6 +182,7 @@ export const NO_PAUSES: PauseFlags = {
   arcoUSDMintPaused: false,
   routerPaused: false,
   redeemPaused: false,
+  redeemInstantOnlyPaused: false,
 }
 
 type LensSnapshot = {

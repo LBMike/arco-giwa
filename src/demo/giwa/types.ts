@@ -311,6 +311,8 @@ export type GiwaArcoUSDReserve = {
     routerPaused: boolean
     /** Reserve.fnPaused(redeem): Instant and Standard withdrawals stop. Absent from older API builds. */
     redeemPaused?: boolean
+    /** Reserve.fnPaused(redeemInstantOnly): Instant-only withdrawals stop (the app's). Absent from older API builds. */
+    redeemInstantOnlyPaused?: boolean
     assets: GiwaArcoUSDAssetState[]
     strategies: GiwaArcoUSDStrategyState[]
   }
