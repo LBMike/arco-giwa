@@ -1,7 +1,8 @@
 import { lazy, Suspense, type ReactNode } from "react"
-import type { RouteObject } from "react-router-dom"
+import { Navigate, type RouteObject } from "react-router-dom"
 import { GIWA_ADMIN_CONSOLE_URL } from "../config"
-import { GIWA_ADMIN_STOCKS_ROUTE, GIWA_STOCKS_ROUTE } from "../routes"
+import { GIWA_FEATURES, type GiwaFeatures } from "../features"
+import { GIWA_ADMIN_STOCKS_ROUTE, GIWA_SAVINGS_ROUTE, GIWA_STOCKS_ROUTE } from "../routes"
 const StocksPage = lazy(() => import("./StocksPages").then(module => ({ default: module.StocksPage })))
 // Pure, so a build with VITE_ADMIN_CONSOLE_URL, which never routes to it, leaves the page and its chunk out.
 const StocksAdminPage = /* @__PURE__ */ lazy(() => import("./StocksAdminPage").then(module => ({ default: module.StocksAdminPage })))
@@ -10,7 +11,9 @@ const StocksAdminPage = /* @__PURE__ */ lazy(() => import("./StocksAdminPage").t
  * at build time (VITE_ADMIN_CONSOLE_URL) there is no /admin/stocks here: the customer app sends it to the console with
  * the rest of /admin.
  */
-export function stocksRoutes(shell: ReactNode): RouteObject[] {
+export function stocksRoutes(shell: ReactNode, features: GiwaFeatures = GIWA_FEATURES): RouteObject[] {
+  // Stocks hidden (features.ts): the address stays and opens Savings; no Stocks page or Stocks admin here.
+  if (!features.stocks) return [{ path: GIWA_STOCKS_ROUTE, element: <Navigate to={GIWA_SAVINGS_ROUTE} replace /> }]
   const stocks: RouteObject = { path: GIWA_STOCKS_ROUTE, element: shell, children: [{ index: true, element: <Suspense fallback={<p role="status">Loading Stocks…</p>}><StocksPage /></Suspense> }] }
   return GIWA_ADMIN_CONSOLE_URL
     ? [stocks]

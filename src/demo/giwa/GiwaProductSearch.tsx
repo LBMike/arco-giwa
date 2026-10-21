@@ -9,6 +9,7 @@ import { buildSearchProducts, filterSearchProducts, SEARCH_CATEGORIES, type Sear
 import { createMarketClient } from "./stocks-market/client"
 import { StocksPageEnvironment, usePageApiBase } from "./stocks-market/environment"
 import { useOwnedRead } from "./stocks-market/useOwnedRead"
+import { GiwaFeaturesContext } from "./features"
 
 /** The header owns the width; the popup follows the 448px reference and stays inside narrow viewports. */
 export function GiwaProductSearch() {
@@ -20,6 +21,8 @@ export function GiwaProductSearch() {
   const trigger = useRef<HTMLButtonElement>(null)
   const location = useLocation()
   const id = useId()
+  // Hidden Stocks (features.ts) leave the search: its label, its tab and its results.
+  const { stocks: withStocks } = useContext(GiwaFeaturesContext)
   const close = useCallback((restore = false) => {
     setOpen(false)
     if (restore) (window.matchMedia("(min-width: 640px)").matches ? input.current : trigger.current)?.focus()
@@ -47,7 +50,7 @@ export function GiwaProductSearch() {
     <div className={`${open ? "fixed left-3 right-3 top-[68px] block" : "hidden"} sm:relative sm:inset-auto sm:block`}>
       <div className="flex h-9 w-full items-center gap-2 rounded-lg border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-3 focus-within:border-[var(--color-arco-muted)]">
         <button type="button" aria-label="Show product search results" onClick={() => { setOpen(true); input.current?.focus() }} className="shrink-0 text-[var(--color-arco-muted)]"><Search size={16} /></button>
-        <input ref={input} aria-label="Search savings, funds, and stocks" aria-expanded={open} aria-controls={`${id}-results`} autoComplete="off" value={query} placeholder="Search savings, funds, stocks…" onClick={() => setOpen(true)} onChange={event => { setQuery(event.target.value); setOpen(true) }} onKeyDown={event => { if (!open && (event.key === "Enter" || event.key === "ArrowDown")) { event.preventDefault(); setOpen(true) } }} className="min-w-0 flex-1 bg-transparent text-[13px] text-[var(--color-arco-ink)] outline-none placeholder:text-[var(--color-arco-muted)]" />
+        <input ref={input} aria-label={withStocks ? "Search savings, funds, and stocks" : "Search savings and funds"} aria-expanded={open} aria-controls={`${id}-results`} autoComplete="off" value={query} placeholder={withStocks ? "Search savings, funds, stocks…" : "Search savings and funds…"} onClick={() => setOpen(true)} onChange={event => { setQuery(event.target.value); setOpen(true) }} onKeyDown={event => { if (!open && (event.key === "Enter" || event.key === "ArrowDown")) { event.preventDefault(); setOpen(true) } }} className="min-w-0 flex-1 bg-transparent text-[13px] text-[var(--color-arco-ink)] outline-none placeholder:text-[var(--color-arco-muted)]" />
         {open ? <button type="button" aria-label={query ? "Clear search" : "Close search"} onClick={() => { if (query) { setQuery(""); input.current?.focus() } else close(true) }} className="text-[var(--color-arco-muted)]"><X size={14} /></button> : <kbd className="rounded border border-[var(--color-arco-border)] px-1 text-[11px] text-[var(--color-arco-muted)]">/</kbd>}
       </div>
       {open && <SearchResults id={`${id}-results`} query={query} category={category} onCategory={setCategory} input={input} close={() => close()} />}
@@ -62,7 +65,11 @@ function SearchResults({ id, query, category, onCategory, input, close }: {
   const catalog = useQuery({ queryKey: ["giwa", "catalog"], queryFn: giwaApi.catalog })
   const market = useQuery({ queryKey: ["giwa", "market", GIWA_CHAIN_ID], queryFn: () => giwaApi.market(GIWA_CHAIN_ID) })
   const environment = useContext(StocksPageEnvironment)
-  const apiBase = usePageApiBase()
+  const { stocks: withStocks } = useContext(GiwaFeaturesContext)
+  const pageApiBase = usePageApiBase()
+  // Hidden Stocks: nothing is read for them, and no "Stocks are temporarily unavailable" note.
+  const apiBase = withStocks ? pageApiBase : null
+  const categories = withStocks ? SEARCH_CATEGORIES : SEARCH_CATEGORIES.filter(tab => tab !== "Stocks")
   const client = useMemo(() => apiBase ? createMarketClient(apiBase, environment.fetch) : null, [apiBase, environment.fetch])
   const loadCatalog = useCallback((signal: AbortSignal) => client ? client.catalog(signal) : Promise.resolve(null), [client])
   const stocks = useOwnedRead(apiBase ?? "disabled", loadCatalog)
@@ -98,8 +105,8 @@ function SearchResults({ id, query, category, onCategory, input, close }: {
     return () => { field?.removeAttribute("aria-activedescendant"); field?.removeAttribute("role"); field?.removeAttribute("aria-autocomplete") }
   }, [active, results.length, input, id])
   const grouped = category === "All" && !query.trim()
-  const loading = catalog.isLoading || stocks.phase === "loading"
-  const stockError = stocks.phase === "error" || (stocks.phase === "ready" && !stocks.value?.data)
+  const loading = catalog.isLoading || (withStocks && stocks.phase === "loading")
+  const stockError = withStocks && (stocks.phase === "error" || (stocks.phase === "ready" && !stocks.value?.data))
   const row = (product: SearchProduct, compact = false) => {
     const index = results.indexOf(product)
     return <Link id={`${id}-${index}`} key={product.id} role="option" aria-selected={index === active} to={product.href} onClick={close} onMouseEnter={() => setActive(index)} title={compact ? product.name : undefined} className={`flex items-center rounded-lg px-2 py-1 text-left outline-none ${compact ? "min-h-8 gap-1.5 bg-[var(--color-arco-page)]" : "min-h-11 gap-2.5"} hover:bg-[var(--color-arco-chip)] focus-visible:bg-[var(--color-arco-chip)] ${index === active ? "bg-[var(--color-arco-chip)]" : ""}`}>
@@ -109,9 +116,9 @@ function SearchResults({ id, query, category, onCategory, input, close }: {
     </Link>
   }
   return <section aria-label="Product search" className="absolute left-0 top-11 w-full overflow-hidden rounded-lg border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] shadow-xl">
-    <div aria-label="Product categories" className="flex gap-5 border-b border-[var(--color-arco-border)] px-3 pt-2">{SEARCH_CATEGORIES.map(tab => <button key={tab} type="button" aria-pressed={category === tab} onClick={() => onCategory(tab)} className={`border-b-2 pb-2.5 pt-1 text-[13px] font-medium ${category === tab ? "border-[var(--color-arco-ink)] text-[var(--color-arco-ink)]" : "border-transparent text-[var(--color-arco-muted)]"}`}>{tab}</button>)}</div>
+    <div aria-label="Product categories" className="flex gap-5 border-b border-[var(--color-arco-border)] px-3 pt-2">{categories.map(tab => <button key={tab} type="button" aria-pressed={category === tab} onClick={() => onCategory(tab)} className={`border-b-2 pb-2.5 pt-1 text-[13px] font-medium ${category === tab ? "border-[var(--color-arco-ink)] text-[var(--color-arco-ink)]" : "border-transparent text-[var(--color-arco-muted)]"}`}>{tab}</button>)}</div>
     <div ref={list} id={id} role="listbox" aria-label="Listed products" className="max-h-[min(620px,calc(100dvh-204px))] sm:max-h-[min(620px,calc(100dvh-158px))] overflow-y-auto overscroll-contain p-3">
-      {grouped ? SEARCH_CATEGORIES.filter(tab => tab !== "All").map(tab => {
+      {grouped ? categories.filter(tab => tab !== "All").map(tab => {
         const entries = results.filter(product => product.category === tab)
         return entries.length ? <div key={tab} role="group" aria-label={tab} className="mb-5 last:mb-0"><div className="mb-2 flex items-center gap-2 px-2 text-xs font-medium text-[var(--color-arco-muted)]">{tab}<span className="text-[10px]">{entries.length}</span></div><div className="flex flex-wrap gap-2">{entries.map(product => row(product, true))}</div></div> : null
       }) : <div className="grid gap-0.5">{results.map(product => row(product))}</div>}

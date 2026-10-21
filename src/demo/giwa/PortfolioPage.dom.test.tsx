@@ -44,6 +44,7 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
   const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query")
   const { default: Portfolio } = await import("./PortfolioPage")
   const { ArcoUsdLiveContext, ArcoUsdLiveFailedContext, ArcoUsdLivePendingContext } = await import("./arcousd-live-context")
+  const { GiwaFeaturesContext } = await import("./features")
   const { giwaApi, normalizeCatalog } = await import("./api")
   const { default: snapshot } = await import("./investor-shell/verification/deployed-giwa.snapshot.json")
   const catalog = normalizeCatalog(snapshot.catalog).filter(product => product.productTokenAddress)
@@ -65,20 +66,23 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
     giwaApi.activity = async () => []
     giwaApi.redemptions = async () => []
   }
-  async function mount(live: unknown = null, status: { pending?: boolean; failed?: { retry: () => void } | null } = {}) {
+  // Stocks shown unless a case hides them (the app's switch, features.ts).
+  async function mount(live: unknown = null, status: { pending?: boolean; failed?: { retry: () => void } | null; stocks?: boolean } = {}) {
     const element = document.createElement("div"); document.body.append(element)
     const root = createRoot(element)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
     const render = async () => {
       await act(async () => root.render(
         <QueryClientProvider client={client}>
-          <ArcoUsdLivePendingContext.Provider value={status.pending ?? false}>
-            <ArcoUsdLiveFailedContext.Provider value={status.failed ?? null}>
-              <ArcoUsdLiveContext.Provider value={live as never}>
-                <MemoryRouter><Portfolio /></MemoryRouter>
-              </ArcoUsdLiveContext.Provider>
-            </ArcoUsdLiveFailedContext.Provider>
-          </ArcoUsdLivePendingContext.Provider>
+          <GiwaFeaturesContext.Provider value={{ home: true, stocks: status.stocks ?? true }}>
+            <ArcoUsdLivePendingContext.Provider value={status.pending ?? false}>
+              <ArcoUsdLiveFailedContext.Provider value={status.failed ?? null}>
+                <ArcoUsdLiveContext.Provider value={live as never}>
+                  <MemoryRouter><Portfolio /></MemoryRouter>
+                </ArcoUsdLiveContext.Provider>
+              </ArcoUsdLiveFailedContext.Provider>
+            </ArcoUsdLivePendingContext.Provider>
+          </GiwaFeaturesContext.Provider>
         </QueryClientProvider>,
       ))
       await settle()
@@ -327,6 +331,38 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
       // From 10 × 1 + 100 × 1.01 + 50 = $161 to 10 × 1 + 100 × 1.02 + 50 = $162: the share-price gain, not a $101 jump.
       assert.match(m.part("net-worth-change") ?? "", /^\+\$1\.00 \(\+0\.62%\) · /)
     } finally { giwaApi.arcousd = arcousd; await m.close() }
+  })
+
+  await t.test("Stocks hidden (as the app ships): no Stocks view, tile, row or trades, even with NVDA held", async () => {
+    reset()
+    giwaApi.catalog = async () => [saving, fund]
+    giwaApi.market = async () => [
+      { productId: saving.productId, navBase: 1, navUsd: 1, baseUsd: 1, apy: 5, impliedApy: null },
+      { productId: fund.productId, navBase: 2, navUsd: 2, baseUsd: 1, apy: 8, impliedApy: null },
+    ]
+    boundary.balance = async (token) => token === saving.productTokenAddress ? "3" : "4"
+    boundary.stocks = () => ({ status: "ready", units: 0.5, price: { value: 200, changePct: 1.5, at: Math.floor(Date.now() / 1000) }, priceSettled: true, closes: [], closesSettled: true })
+    boundary.stocksActivity = () => ({ status: "ready", entries: [BUY] })
+    const m = await mount(null, { stocks: false })
+    try {
+      const views = [...m.element.querySelectorAll('[aria-label="Portfolio products"] button')].map((button) => button.textContent)
+      assert.deepEqual(views, ["All Portfolio", "Savings", "Funds"])
+      const tiles = m.part("portfolio-allocation") ?? ""
+      assert.match(tiles, /Savings\$3\.0027\.27% · 1 holding/); assert.match(tiles, /Funds\$8\.0072\.73% · 1 holding/); assert.doesNotMatch(tiles, /Stocks/)
+      assert.doesNotMatch(m.text(), /NVDA|NVIDIA/)
+      assert.match(m.text(), /Net Worth\$11/)
+      assert.match(m.text(), /Savings and Funds at current prices/); assert.doesNotMatch(m.text(), /and Stocks at current prices/)
+      await m.click("Activity")
+      assert.doesNotMatch(m.text(), /NVDA|Stocks trades could not be loaded/)
+    } finally { await m.close() }
+    // Nothing held: the empty state does not offer Stocks.
+    reset(); boundary.stocks = () => ({ status: "error" })
+    const empty = await mount(null, { stocks: false })
+    try {
+      assert.match(empty.text(), /No holdings yet/)
+      assert.match(empty.text(), /Deposit into Savings or Funds to start building your portfolio\./)
+      assert.doesNotMatch(empty.text(), /buy Stocks|Stocks holdings could not be confirmed/)
+    } finally { await empty.close() }
   })
 
   await t.test("ArcoUSD v1 without a live Savings: ArcoUSD alone, nothing read for sArcoUSD", async () => {

@@ -51,9 +51,11 @@ export function dailyClosesOf(chart: { data: Chart | null }): DailyClose[] {
     .filter((c) => Number.isFinite(c.t) && Number.isFinite(c.close))
 }
 
-export function useStocksHolding(account: string | null): { holding: StocksHolding; fetching: boolean; refresh(): Promise<unknown> } {
+/** `enabled: false` (Stocks hidden, features.ts) reads nothing; the caller then shows no Stocks. */
+export function useStocksHolding(account: string | null, options: { enabled?: boolean } = {}): { holding: StocksHolding; fetching: boolean; refresh(): Promise<unknown> } {
   const environment = useContext(StocksPageEnvironment)
-  const apiBase = usePageApiBase()
+  const pageApiBase = usePageApiBase()
+  const apiBase = options.enabled === false ? null : pageApiBase
   const clients = useMemo(() => {
     if (!apiBase) return null
     try {
@@ -161,9 +163,11 @@ export type StocksActivity =
   | { status: "ready"; entries: StocksActivityEntry[] }
 
 /** The connected wallet's Stocks trades (Buy, Sell, held payments), newest first, with their GIWA transactions. */
-export function useStocksActivity(account: string | null): { activity: StocksActivity; fetching: boolean; refresh(): Promise<unknown> } {
+/** `enabled: false` (Stocks hidden, features.ts) reads nothing; the caller then shows no Stocks trades. */
+export function useStocksActivity(account: string | null, options: { enabled?: boolean } = {}): { activity: StocksActivity; fetching: boolean; refresh(): Promise<unknown> } {
   const environment = useContext(StocksPageEnvironment)
-  const apiBase = usePageApiBase()
+  const pageApiBase = usePageApiBase()
+  const apiBase = options.enabled === false ? null : pageApiBase
   const query = useQuery({
     queryKey: ["giwa", "stocks-activity", apiBase, account],
     queryFn: ({ signal }) => readStocksActivity({ apiBase: apiBase!, wallet: account!, fetch: environment.fetch, signal }),

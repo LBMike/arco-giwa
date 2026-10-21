@@ -5,16 +5,20 @@ import { MemoryRouter } from "react-router-dom"
 import { GiwaSidebarNav } from "./GiwaSidebarNav"
 import { INVESTOR_NAV_SECTIONS, investorNavSections, isNavItemActive, type InvestorNavItemId } from "./investor-nav"
 import { GIWA_FUNDS_ROUTE } from "./routes"
+import { GIWA_FEATURES, GiwaFeaturesContext, type GiwaFeatures } from "./features"
 
-function shape(isAdmin: boolean) {
-  return investorNavSections(isAdmin).map((section) => ({
+// The whole menu (every section shown); the app's own switch (features.ts) is tested on its own below.
+const ALL: GiwaFeatures = { home: true, stocks: true }
+
+function shape(isAdmin: boolean, features: GiwaFeatures = ALL) {
+  return investorNavSections(isAdmin, features).map((section) => ({
     label: section.label,
     items: section.items.map((item) => [item.label, item.to]),
   }))
 }
 
 function activeIds(pathname: string, isAdmin = true): InvestorNavItemId[] {
-  return investorNavSections(isAdmin)
+  return investorNavSections(isAdmin, ALL)
     .flatMap((section) => section.items)
     .filter((item) => isNavItemActive(item, pathname))
     .map((item) => item.id)
@@ -27,6 +31,17 @@ test("nav sections and items keep their order, labels and routes", () => {
     { label: "Invest", items: [["Savings", "/savings"], ["Funds", "/funds"], ["Stocks", "/stocks"]] },
     { label: "Manage", items: [["Portfolio", "/portfolio"]] },
   ])
+})
+
+test("hidden sections leave the menu: Home's whole section, Stocks from Invest (the app hides both now)", () => {
+  assert.deepEqual(GIWA_FEATURES, { home: false, stocks: false })
+  assert.deepEqual(shape(false, GIWA_FEATURES), [
+    { label: "Invest", items: [["Savings", "/savings"], ["Funds", "/funds"]] },
+    { label: "Manage", items: [["Portfolio", "/portfolio"]] },
+  ])
+  assert.deepEqual(investorNavSections(false), investorNavSections(false, GIWA_FEATURES))
+  assert.deepEqual(shape(true, GIWA_FEATURES)[1], { label: "Manage", items: [["Portfolio", "/portfolio"], ["Admin", "/admin"]] })
+  assert.deepEqual(shape(false, { home: true, stocks: false })[0], { label: null, items: [["Home", "/home"]] })
 })
 
 test("Admin item appears only for allowlisted wallets, at the end of Manage", () => {
@@ -66,9 +81,11 @@ test("active matching per path", () => {
 
 test("GiwaSidebarNav renders links with aria-current and no Send row", () => {
   const html = renderToStaticMarkup(
-    <MemoryRouter initialEntries={["/product/abc"]}>
-      <GiwaSidebarNav isAdmin={false} />
-    </MemoryRouter>,
+    <GiwaFeaturesContext.Provider value={ALL}>
+      <MemoryRouter initialEntries={["/product/abc"]}>
+        <GiwaSidebarNav isAdmin={false} />
+      </MemoryRouter>
+    </GiwaFeaturesContext.Provider>,
   )
   assert.match(html, /<nav aria-label="Main"/)
   for (const name of ["Home", "Invest", "Manage"]) assert.match(html, new RegExp(`<ul aria-label="${name}"`))
@@ -81,9 +98,11 @@ test("GiwaSidebarNav renders links with aria-current and no Send row", () => {
 
 test("compact desktop nav keeps named icon links and has no Send row", () => {
   const html = renderToStaticMarkup(
-    <MemoryRouter initialEntries={["/product/abc"]}>
-      <GiwaSidebarNav isAdmin={false} compact />
-    </MemoryRouter>,
+    <GiwaFeaturesContext.Provider value={ALL}>
+      <MemoryRouter initialEntries={["/product/abc"]}>
+        <GiwaSidebarNav isAdmin={false} compact />
+      </MemoryRouter>
+    </GiwaFeaturesContext.Provider>,
   )
   for (const name of ["Home", "Savings", "Funds", "Stocks", "Portfolio"]) {
     assert.ok(html.includes(`aria-label="${name}"`), `${name} needs an icon-link name`)
@@ -92,4 +111,22 @@ test("compact desktop nav keeps named icon links and has no Send row", () => {
   assert.doesNotMatch(html, />Send<\/span>|aria-label="Send"/)
   assert.doesNotMatch(html, /aria-label="Savings categories"/)
   assert.doesNotMatch(html, /href="\/send"/)
+})
+
+test("GiwaSidebarNav as the app ships it: no Home or Stocks, and the compact rail starts without a divider", () => {
+  const render = (compact: boolean) =>
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/savings"]}>
+        <GiwaSidebarNav isAdmin={false} compact={compact} />
+      </MemoryRouter>,
+    )
+  for (const compact of [false, true]) {
+    const html = render(compact)
+    assert.doesNotMatch(html, /href="\/home"|href="\/stocks"|aria-label="Home"|aria-label="Stocks"|>Home<|>Stocks</, String(compact))
+    assert.match(html, /href="\/savings"/)
+    assert.match(html, /href="\/funds"/)
+    assert.match(html, /href="\/portfolio"/)
+  }
+  // Compact: one divider, between Invest and Manage.
+  assert.equal(render(true).match(/h-px bg-\[var\(--color-arco-border\)\]/g)?.length, 1)
 })

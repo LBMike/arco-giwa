@@ -1,7 +1,9 @@
+import { useContext } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { ChartCandlestick, ChartPie, ChevronDown, ChevronRight, House, Layers, PiggyBank, Send, ShieldCheck, type LucideIcon } from "lucide-react"
 import { SAVINGS_CATEGORIES, savingsCategoryFromSearch, savingsCategoryPath } from "./savings-category"
 import { investorNavSections, isNavItemActive, type InvestorNavItemId } from "./investor-nav"
+import { GiwaFeaturesContext } from "./features"
 
 // Investor shell navigation (desktop sidebar from xl, mobile drawer below). Routes are real links
 // with aria-current; Send has no route and renders as a disabled, non-focusable row.
@@ -23,12 +25,14 @@ const FOCUS =
 export function GiwaSidebarNav({ isAdmin, onNavigate, compact = false }: { isAdmin: boolean; onNavigate?: () => void; compact?: boolean }) {
   const { pathname, search } = useLocation()
   const savingsCategory = savingsCategoryFromSearch(new URLSearchParams(search))
+  const features = useContext(GiwaFeaturesContext)
   return (
     <nav aria-label="Main" className={`flex flex-col ${compact ? "gap-2" : "gap-5"}`}>
-      {investorNavSections(isAdmin).map((section) => (
+      {investorNavSections(isAdmin, features).map((section, index) => (
         <div key={section.id} className="space-y-1">
           {compact && section.label ? (
-            <div aria-hidden="true" className="mx-2 my-2 h-px bg-[var(--color-arco-border)]" />
+            // A divider between sections only (with Home hidden, Invest comes first).
+            index > 0 && <div aria-hidden="true" className="mx-2 my-2 h-px bg-[var(--color-arco-border)]" />
           ) : section.label && (
             <p aria-hidden="true" className="px-3 text-xs uppercase tracking-wide text-[var(--color-arco-chip-ink)]">
               {section.label}
