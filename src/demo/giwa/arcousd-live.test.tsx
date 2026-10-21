@@ -155,6 +155,9 @@ test("live ArcoUSD: each Reserve test coin is its GIWA row, with its fees and fr
   assert.deepEqual([state.depositPaused, state.redeemPaused], [false, false])
   const paused = arcoUsdLive(reserveRead({ arcoUSDMintPaused: true, redeemPaused: true }), undefined)!
   assert.deepEqual([paused.depositPaused, paused.redeemPaused], [true, true])
+  // The app withdraws with redeemInstantOnly: its own switch stops withdrawals too (an older API leaves it out).
+  assert.equal(arcoUsdLive(reserveRead({ redeemInstantOnlyPaused: true }), undefined)!.redeemPaused, true)
+  assert.equal(arcoUsdLive(reserveRead({ redeemInstantOnlyPaused: undefined }), undefined)!.redeemPaused, false)
 })
 
 test("live ArcoUSD: Savings once sArcoUSD is live, seeded and on the same ArcoUSD", () => {

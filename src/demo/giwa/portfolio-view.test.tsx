@@ -3,7 +3,7 @@ import test from "node:test"
 import type { GiwaPriceHistory } from "./api"
 import { buildNetWorthSeries } from "./portfolio-series"
 import {
-  allocationOf, formatValueChange, historyStart, productPortfolioCategory, stockPriceHistory, valueChange, withCurrentPrice,
+  allocationOf, flatPriceHistory, formatValueChange, historyStart, productPortfolioCategory, stockPriceHistory, valueChange, withCurrentPrice,
 } from "./portfolio-view"
 import type { GiwaCatalogItem } from "./types"
 
@@ -67,4 +67,19 @@ test("stock closes start where the vault line starts, end at the live price and 
   assert.deepEqual(series, [
     { ts: 100, value: 210 }, { ts: 150, value: 230 }, { ts: 200, value: 231 }, { ts: 250, value: 251 }, { ts: 300, value: 262 },
   ])
+})
+
+test("a holding at a fixed price (ArcoUSD) is a flat Net Worth line from where the others start to now", () => {
+  const line = flatPriceHistory("arcousd:ArcoUSD", 1, { from: 100, now: 300 })
+  assert.deepEqual(line, { productId: "arcousd:ArcoUSD", apy: null, points: [{ t: 100, navBase: 1, navUsd: 1 }, { t: 300, navBase: 1, navUsd: 1 }] })
+  // Nothing else has history yet: today alone. No "now" (prices not read): no line.
+  assert.deepEqual(flatPriceHistory("a", 1, { from: null, now: 300 }).points.map((p) => p.t), [300])
+  assert.deepEqual(flatPriceHistory("a", 1, { from: 400, now: 300 }).points.map((p) => p.t), [300])
+  assert.deepEqual(flatPriceHistory("a", 1, { from: 100, now: null }).points, [])
+  // 50 ArcoUSD next to a vault line: the sum carries the 50 dollars at every point.
+  const series = buildNetWorthSeries([
+    { shares: 10, history: history([[100, 1], [300, 1.1]]) },
+    { shares: 50, history: flatPriceHistory("a", 1, { from: 100, now: 300 }) },
+  ])
+  assert.deepEqual(series.map((point) => Number(point.value.toFixed(6))), [60, 61])
 })

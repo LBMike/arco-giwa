@@ -1,9 +1,11 @@
-import { useState, type ReactNode } from "react"
+import { useContext, useState, type ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { ArrowUp, Wallet } from "lucide-react"
 import { giwaApi, type GiwaMarketEntry, type GiwaPriceHistory } from "./api"
 import { readShareSupply, readTokenBalance } from "./contracts"
+import { ArcoUsdLiveContext, ArcoUsdLiveFailedContext, ArcoUsdLivePendingContext } from "./arcousd-live-context"
+import { liveSavingsHistory } from "./arcousd-live"
 import { positionUsdValue } from "./usd-prices"
 import { GiwaActivityTable, GiwaHoldingsTable, type HoldingPriceCell } from "./components"
 import { buildActivityFeed } from "./activity-feed"
@@ -12,7 +14,7 @@ import { GiwaTwoMetricChartCard, pctLabel, type ChartMetric } from "./TwoMetricC
 import { apyChangePct, defaultRange, filterByRange, priceReturnPct, type ChartRange } from "./detail-charts"
 import { buildNetRateSeries, buildNetWorthSeries } from "./portfolio-series"
 import {
-  allocationOf, CATEGORY_LABEL, formatValueChange, historyStart, PORTFOLIO_VIEWS, productPortfolioCategory, stockPriceHistory,
+  allocationOf, carriedBackTo, CATEGORY_LABEL, flatPriceHistory, formatValueChange, historyStart, PORTFOLIO_VIEWS, productPortfolioCategory, stockPriceHistory,
   valueChange, withCurrentPrice, type AllocationSlice, type ChangeLabel, type PortfolioCategory, type PortfolioView,
 } from "./portfolio-view"
 import { STOCK_DISPLAY, useStocksActivity, useStocksHolding, type StocksHolding } from "./portfolio-stocks"
@@ -57,6 +59,10 @@ type PortfolioRow = {
 type SortKey = "balance" | "delta" | "deposit" | "apy"
 
 const STOCK_ROW_ID = `stocks:${STOCK_DISPLAY.symbol}`
+// ArcoUSD v1 (arcousd-live.ts): the wallet's ArcoUSD and sArcoUSD are not catalog products, so their rows name
+// themselves like the Stocks row. Both are listed under Savings, where they are got and deposited.
+const ARCOUSD_ROW = { id: "arcousd:ArcoUSD", symbol: "ArcoUSD", label: CATEGORY_LABEL.savings, imageUrl: "/logos/arcousd.png" } as const
+const SARCOUSD_ROW = { id: "arcousd:sArcoUSD", symbol: "sArcoUSD", label: CATEGORY_LABEL.savings, imageUrl: "/logos/sarcousd.png" } as const
 const SEGMENT_ACTIVE = "bg-[var(--color-arco-surface)] font-medium text-[var(--color-arco-ink)] shadow-[var(--shadow-control)]"
 const SEGMENT_IDLE = "text-[var(--color-arco-muted)]"
 const LINK_BUTTON =
@@ -111,9 +117,40 @@ export default function GiwaPortfolioPage() {
     queryFn: () => readHoldings(products, wallet.address as HexAddress),
     enabled: Boolean(wallet.address && products.length),
   })
-  const holdingsKnown = catalogQuery.isSuccess && (products.length === 0 || holdingsQuery.isSuccess)
-  const holdingsError = catalogQuery.isError || (products.length > 0 && holdingsQuery.isError)
+  // ArcoUSD v1, when the app reads it live: the wallet's ArcoUSD and sArcoUSD (18 decimals each). Until the ArcoUSD reads
+  // have answered the holdings are not known (no confirmed zero); reads that keep failing are a holdings error.
+  const live = useContext(ArcoUsdLiveContext)
+  const livePending = useContext(ArcoUsdLivePendingContext)
+  const liveFailed = useContext(ArcoUsdLiveFailedContext)
+  const liveSavings = live?.savings ?? null
+  const arcoUSDQuery = useQuery({
+    queryKey: ["giwa", "portfolio-arcousd", wallet.address, live?.arcoUSD ?? null, liveSavings?.sArcoUSD ?? null],
+    queryFn: async () => {
+      const account = wallet.address as HexAddress
+      const [arcoUSD, sArcoUSD] = await Promise.all([
+        readTokenBalance(live!.arcoUSD, account, 18),
+        liveSavings !== null ? readTokenBalance(liveSavings.sArcoUSD, account, 18) : Promise.resolve("0"),
+      ])
+      return { arcoUSD: Number(arcoUSD), sArcoUSD: Number(sArcoUSD) }
+    },
+    enabled: Boolean(wallet.address && live),
+  })
+  // sArcoUSD's share-price history: the 24h change and its Net Worth line (the Savings page reads the same).
+  const savingsHistoryQuery = useQuery({
+    queryKey: ["giwa", "arcousd", "savings-history"],
+    queryFn: () => giwaApi.arcousd.savingsHistory(),
+    enabled: liveSavings !== null && positive(arcoUSDQuery.data?.sArcoUSD) > 0,
+    refetchInterval: 60_000,
+  })
+  const sArcoUSDHistory = liveSavingsHistory(savingsHistoryQuery.data)
+
+  const arcoUSDKnown = !livePending && (live === null || arcoUSDQuery.isSuccess)
+  const holdingsKnown = catalogQuery.isSuccess && (products.length === 0 || holdingsQuery.isSuccess) && arcoUSDKnown
+  const holdingsError =
+    catalogQuery.isError || (products.length > 0 && holdingsQuery.isError) || (livePending && liveFailed !== null) || (live !== null && arcoUSDQuery.isError)
   const rawHoldings = holdingsKnown ? holdingsQuery.data ?? [] : []
+  const arcoUSDUnits = holdingsKnown && live !== null ? positive(arcoUSDQuery.data?.arcoUSD) : 0
+  const sArcoUSDUnits = holdingsKnown && liveSavings !== null ? positive(arcoUSDQuery.data?.sArcoUSD) : 0
   const heldIds = rawHoldings.map((h) => h.product.productId)
 
   const historyQuery = useQuery({
@@ -153,12 +190,17 @@ export default function GiwaPortfolioPage() {
   const activityRows = activityKnown ? buildActivityFeed(activityQuery.data, redemptionsQuery.data, products, stockTrades) : []
   // Stocks trades that could not be read are said so; with nothing else to show that is an unconfirmed history.
   const stocksActivityError = stocksActivity.activity.status === "error"
-  const refreshing = [catalogQuery, holdingsQuery, marketQuery, historyQuery, activityQuery, redemptionsQuery].some(query => query.isFetching) || stocks.fetching || stocksActivity.fetching
+  const refreshing =
+    [catalogQuery, holdingsQuery, marketQuery, historyQuery, activityQuery, redemptionsQuery, arcoUSDQuery, savingsHistoryQuery].some(query => query.isFetching) ||
+    stocks.fetching || stocksActivity.fetching
   const refresh = () => {
     void Promise.allSettled([
       catalogQuery.refetch(), marketQuery.refetch(), activityQuery.refetch(), redemptionsQuery.refetch(), stocks.refresh(), stocksActivity.refresh(),
       ...(products.length ? [holdingsQuery.refetch()] : []),
       ...(heldIds.length ? [historyQuery.refetch()] : []),
+      ...(live !== null && wallet.address ? [arcoUSDQuery.refetch()] : []),
+      ...(liveFailed !== null ? [Promise.resolve(liveFailed.retry())] : []),
+      ...(liveSavings !== null ? [savingsHistoryQuery.refetch()] : []),
     ])
   }
 
@@ -191,6 +233,17 @@ export default function GiwaPortfolioPage() {
   }
   const stockUnits = stock.status === "ready" ? stock.units : 0
   const stockPrice = stock.status === "ready" ? stock.price : null
+  const sArcoUSDPrice = liveSavings?.sharePrice ?? null
+  const sArcoUSDDelta = priceChange24hPct(sArcoUSDHistory?.points ?? [])
+  const ownRow = (row: typeof ARCOUSD_ROW | typeof SARCOUSD_ROW, units: number) => ({
+    productId: row.id,
+    balance: trimShares(units),
+    status: "Held",
+    symbol: row.symbol,
+    displayName: row.symbol,
+    categoryLabel: row.label,
+    imageUrl: row.imageUrl,
+  })
   const rows: PortfolioRow[] = [
     ...holdings.map((h) => ({
       key: h.product.productId,
@@ -203,6 +256,34 @@ export default function GiwaPortfolioPage() {
       priceCell: priceCellOf(h.navBase, h.delta24h),
       position: { productId: h.product.productId, balance: trimShares(h.shares), status: "Held" },
     })),
+    // sArcoUSD at its share price (ArcoUSD per share, a dollar each) and the rate the distributor pays now.
+    ...(sArcoUSDUnits > 0
+      ? [{
+          key: SARCOUSD_ROW.id,
+          category: "savings" as const,
+          sortName: SARCOUSD_ROW.symbol,
+          units: sArcoUSDUnits,
+          usd: sArcoUSDPrice !== null ? sArcoUSDUnits * sArcoUSDPrice : null,
+          apy: liveSavings?.apyPercent ?? null,
+          delta24h: sArcoUSDDelta,
+          priceCell: priceCellOf(sArcoUSDPrice, sArcoUSDDelta),
+          position: ownRow(SARCOUSD_ROW, sArcoUSDUnits),
+        }]
+      : []),
+    // ArcoUSD at its dollar peg: no yield, no price movement to show.
+    ...(arcoUSDUnits > 0
+      ? [{
+          key: ARCOUSD_ROW.id,
+          category: "savings" as const,
+          sortName: ARCOUSD_ROW.symbol,
+          units: arcoUSDUnits,
+          usd: arcoUSDUnits,
+          apy: null,
+          delta24h: null,
+          priceCell: null,
+          position: ownRow(ARCOUSD_ROW, arcoUSDUnits),
+        }]
+      : []),
     ...(stockUnits > 0
       ? [{
           key: STOCK_ROW_ID,
@@ -248,8 +329,8 @@ export default function GiwaPortfolioPage() {
           ? "Partial — some asset prices are unavailable"
           : null
 
-  // Blended APY weights only holdings that HAVE an APY — never diluted by null-APY products.
-  const apyHoldings = holdings.filter((h) => h.apy != null && h.usd != null)
+  // Blended APY weights only holdings that HAVE an APY — never diluted by null-APY products (ArcoUSD included).
+  const apyHoldings = rows.filter((h) => h.category !== "stocks" && h.apy != null && h.usd != null)
   const apyWeight = apyHoldings.reduce((sum, h) => sum + (h.usd as number), 0)
   const blendedApy =
     apyHoldings.length > 0 && apyWeight > 0
@@ -259,30 +340,50 @@ export default function GiwaPortfolioPage() {
   // Net Worth: current shares × each vault's price history, ending at today's price, plus the NVDA holding at its
   // daily closes (from where the vault line starts) and live price. Net Rate stays the yield-bearing vaults only.
   const marketAt = marketQuery.isSuccess ? Math.floor(marketQuery.dataUpdatedAt / 1000) : null
-  const vaultLines = holdings.map((h) => ({
-    shares: h.shares,
-    history: withCurrentPrice(history[h.product.productId], { navUsd: h.navUsd, navBase: marketByProduct.get(h.product.productId)?.navBase ?? null }, marketAt),
-  }))
+  // Where the chart starts: the held vaults' price histories, sArcoUSD's included. The other lines are drawn from there.
+  const heldSArcoUSDHistory = sArcoUSDUnits > 0 ? sArcoUSDHistory : undefined
+  const chartStart = historyStart([...heldIds.map((id) => history[id]), heldSArcoUSDHistory])
+  const vaultLines = [
+    ...holdings.map((h) => ({
+      shares: h.shares,
+      history: withCurrentPrice(history[h.product.productId], { navUsd: h.navUsd, navBase: marketByProduct.get(h.product.productId)?.navBase ?? null }, marketAt),
+    })),
+    // sArcoUSD's history is younger than the other vaults': its first share price is carried back to where they start
+    // (no jump where it begins). Without history yet it is drawn flat at today's share price.
+    ...(sArcoUSDUnits > 0 && sArcoUSDPrice !== null
+      ? [{
+          shares: sArcoUSDUnits,
+          history: heldSArcoUSDHistory !== undefined && heldSArcoUSDHistory.points.length > 0
+            ? withCurrentPrice(carriedBackTo(heldSArcoUSDHistory, chartStart), { navUsd: sArcoUSDPrice, navBase: sArcoUSDPrice }, marketAt)
+            : flatPriceHistory(SARCOUSD_ROW.id, sArcoUSDPrice, { from: chartStart, now: marketAt }),
+        }]
+      : []),
+  ]
   const stockLine =
     stock.status === "ready" && stock.units > 0 && stock.closes
       ? [{
           shares: stock.units,
           history: stockPriceHistory(STOCK_ROW_ID, stock.closes, {
-            from: historyStart(heldIds.map((id) => history[id])),
+            from: chartStart,
             price: stock.price?.value ?? null,
             now: stock.price?.at ?? null,
           }),
         }]
       : []
-  const netWorthSeries = buildNetWorthSeries([...vaultLines, ...stockLine])
+  // ArcoUSD holds a dollar each over the whole chart (from where the other lines start, NVDA's included).
+  const arcoUSDLine =
+    arcoUSDUnits > 0
+      ? [{ shares: arcoUSDUnits, history: flatPriceHistory(ARCOUSD_ROW.id, 1, { from: historyStart([...vaultLines, ...stockLine].map((line) => line.history)), now: marketAt }) }]
+      : []
+  const netWorthSeries = buildNetWorthSeries([...vaultLines, ...arcoUSDLine, ...stockLine])
   const activeRange = range ?? defaultRange(netWorthSeries)
   const rangeChange = valueChange(filterByRange(netWorthSeries, activeRange, now))
   const headerChange = netWorthLabel !== "—" && rangeChange ? formatValueChange(rangeChange) : null
 
   const stockLineLoading = stock.status === "loading" || (stock.status === "ready" && stock.units > 0 && !stock.closesSettled)
-  const chartEmpty = holdingsError || historyQuery.isError
+  const chartEmpty = holdingsError || historyQuery.isError || (sArcoUSDUnits > 0 && savingsHistoryQuery.isError)
     ? "Portfolio history could not be loaded"
-    : !holdingsKnown || (heldIds.length > 0 && !historyQuery.isSuccess) || stockLineLoading
+    : !holdingsKnown || (heldIds.length > 0 && !historyQuery.isSuccess) || (sArcoUSDUnits > 0 && savingsHistoryQuery.isPending) || stockLineLoading
       ? "Loading portfolio history…"
       : null
   const netWorthMetric: ChartMetric = {
@@ -301,7 +402,10 @@ export default function GiwaPortfolioPage() {
   const netRateMetric: ChartMetric = {
     key: "netrate",
     label: "Net Rate",
-    series: buildNetRateSeries(holdings.map((h) => ({ shares: h.shares, history: history[h.product.productId] }))),
+    series: buildNetRateSeries([
+      ...holdings.map((h) => ({ shares: h.shares, history: history[h.product.productId] })),
+      ...(sArcoUSDUnits > 0 ? [{ shares: sArcoUSDUnits, history: heldSArcoUSDHistory }] : []),
+    ]),
     headline: blendedApy != null ? pctLabel(blendedApy) : "—",
     valueFormat: pctLabel,
     delta: apyChangePct,
@@ -548,6 +652,11 @@ function tileText(slice: AllocationSlice, stock: StocksHolding): { value: string
   const detail = slice.count === 0 ? "No holdings" : slice.count === 1 ? "1 holding" : `${slice.count} holdings`
   if (slice.count > 0 && slice.usd === 0 && !slice.complete) return { value: "—", detail }
   return { value: money(slice.usd), detail }
+}
+
+/** A balance read as a number, or 0 when it is not a positive finite one. */
+function positive(value: number | undefined): number {
+  return value !== undefined && Number.isFinite(value) && value > 0 ? value : 0
 }
 
 function trimPct(n: number): string {

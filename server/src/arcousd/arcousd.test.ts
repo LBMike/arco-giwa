@@ -14,6 +14,7 @@ import {
   lensAbi,
   reserveEventsAbi,
   PROCESS_QUEUE_SELECTOR,
+  REDEEM_INSTANT_ONLY_SELECTOR,
   REDEEM_SELECTOR,
   reserveAssetConfigAbi,
   ROUTER_BUY_SELECTOR,
@@ -194,6 +195,7 @@ test("chain reader: one block for every read, and every pause on the buy path is
     `${A(3)}:fnPaused:${DEPOSIT_SELECTOR}`,
     `${A(3)}:fnPaused:${PROCESS_QUEUE_SELECTOR}`,
     `${A(3)}:fnPaused:${REDEEM_SELECTOR}`,
+    `${A(3)}:fnPaused:${REDEEM_INSTANT_ONLY_SELECTOR}`,
     `${A(3)}:paused:`,
     `${A(5)}:snapshot:${A(3)}`,
   ]
@@ -258,6 +260,19 @@ test("chain reader: one block for every read, and every pause on the buy path is
   const configRead = calls.find((call) => call.functionName === "getAssetConfig")
   assert.deepEqual([configRead?.address, configRead?.args?.[0], configRead?.blockNumber], [A(3), USDC, 888n])
   assert.deepEqual([limited.redeemPaused, limited.assets[0].depositCapHuman, limited.assets[0].depositRoomHuman, limited.assets[0].minQueuedHuman], [true, "10", "6", "1"])
+  assert.equal(limited.redeemInstantOnlyPaused, false)
+
+  // fnPaused(redeemInstantOnly) is read on its own: it stops the app's withdrawals while redeem stays open.
+  const instantOnlyClient = {
+    ...limitsClient,
+    readContract: async (args: { address: string; functionName: string; args?: readonly unknown[]; blockNumber?: bigint }) => {
+      if (args.functionName === "snapshot") return withAsset
+      if (args.functionName === "getAssetConfig") return { supported: true, depositCap: 10_000_000n, minQueued: 1_000_000n }
+      return args.functionName === "fnPaused" && args.address === A(3) && args.args?.[0] === REDEEM_INSTANT_ONLY_SELECTOR
+    },
+  }
+  const instantOnly = await createArcoUSDChainReader(instantOnlyClient as never)(deployedArcoUSD(registry(), 91342)!)
+  assert.deepEqual([instantOnly.redeemPaused, instantOnly.redeemInstantOnlyPaused], [false, true])
 })
 
 test("buy gate: inactive until deployed, open above the threshold, closed below, paused or unreadable", async () => {

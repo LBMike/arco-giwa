@@ -43,6 +43,7 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
   const { MemoryRouter } = await import("react-router-dom")
   const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query")
   const { default: Portfolio } = await import("./PortfolioPage")
+  const { ArcoUsdLiveContext, ArcoUsdLiveFailedContext, ArcoUsdLivePendingContext } = await import("./arcousd-live-context")
   const { giwaApi, normalizeCatalog } = await import("./api")
   const { default: snapshot } = await import("./investor-shell/verification/deployed-giwa.snapshot.json")
   const catalog = normalizeCatalog(snapshot.catalog).filter(product => product.productTokenAddress)
@@ -64,11 +65,24 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
     giwaApi.activity = async () => []
     giwaApi.redemptions = async () => []
   }
-  async function mount() {
+  async function mount(live: unknown = null, status: { pending?: boolean; failed?: { retry: () => void } | null } = {}) {
     const element = document.createElement("div"); document.body.append(element)
     const root = createRoot(element)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-    const render = async () => { await act(async () => root.render(<QueryClientProvider client={client}><MemoryRouter><Portfolio /></MemoryRouter></QueryClientProvider>)); await settle() }
+    const render = async () => {
+      await act(async () => root.render(
+        <QueryClientProvider client={client}>
+          <ArcoUsdLivePendingContext.Provider value={status.pending ?? false}>
+            <ArcoUsdLiveFailedContext.Provider value={status.failed ?? null}>
+              <ArcoUsdLiveContext.Provider value={live as never}>
+                <MemoryRouter><Portfolio /></MemoryRouter>
+              </ArcoUsdLiveContext.Provider>
+            </ArcoUsdLiveFailedContext.Provider>
+          </ArcoUsdLivePendingContext.Provider>
+        </QueryClientProvider>,
+      ))
+      await settle()
+    }
     const click = async (name: string) => {
       const button = [...element.querySelectorAll("button")].find(button => button.textContent === name)
       assert.ok(button, `Missing ${name}`); await act(async () => button.click()); await settle()
@@ -241,6 +255,90 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
       assert.equal(m.text().split("+$1.00 (+10.00%) · All").length, 3, "the header and the chart headline agree")
       await m.click("7D")
       assert.equal(m.part("net-worth-change"), "$0.00 (0.00%) · 7D")
+    } finally { await m.close() }
+  })
+
+  await t.test("ArcoUSD v1: the wallet's ArcoUSD and sArcoUSD are Savings rows, at the dollar peg and the share price", async () => {
+    reset()
+    const ARCO = "0x3d6Cb251d6aA62591ce9f6a13781a6dC590411Da", SARCO = "0xcAEF04FeA7f9c2561dbCA95E39a6b06043df30Fd"
+    const live = {
+      arcoUSD: ARCO, reserve: "0x4942711396B53df5b02fD8065E77FA2c9D27512F", assets: [], depositPaused: false, redeemPaused: false,
+      savings: { sArcoUSD: SARCO, zap: "0xf4554ea97218645cF2EB209Cd540BD91321ba1E1", sharePrice: 1.02, apyPercent: 4.5, depositsOpen: true, withdrawalsOpen: true },
+    }
+    const day = 86_400_000, now = Date.now()
+    const point = (ago: number, sharePrice: string) => ({ takenAt: new Date(now - ago).toISOString(), blockNumber: "1", sharePrice, totalAssetsUsd: "1000", aprBps: 450 })
+    const arcousd = giwaApi.arcousd
+    giwaApi.arcousd = { ...arcousd, savingsHistory: async () => ({ status: "live", chainId: 91342, days: 30, total: 2, sampled: false, truncated: false, points: [point(2 * day, "1.01"), point(day / 2, "1.02")], realizedApyBps: 450 }) } as typeof arcousd
+    // The catalog vault holds nothing; the wallet has 50 ArcoUSD and 100 sArcoUSD.
+    boundary.balance = async (token) => (token === ARCO ? "50" : token === SARCO ? "100" : "0")
+    const m = await mount(live)
+    try {
+      assert.ok(m.text().includes("100 sArcoUSD") && m.text().includes("50 ArcoUSD"), m.text())
+      // 100 × 1.02 + 50 × 1 = $152 under Savings; Net Rate is sArcoUSD's 4.5% (ArcoUSD, like NVDA, has no rate to blend).
+      assert.match(m.part("portfolio-allocation") ?? "", /Savings\$152\.00100% · 2 holdings/)
+      assert.match(m.text(), /\$102\.00/); assert.match(m.text(), /\$50\.00/)
+      assert.match(m.text(), /Net Rate4\.5%APY/)
+      // sArcoUSD's price cell: its share price and the change over the last day (1.01 two days ago → 1.02).
+      assert.match(m.text(), /100 sArcoUSD1\.02 \(\+0\.99%\)\$102\.004\.5%/)
+      // ArcoUSD: no price movement or rate to show, valued at its dollar.
+      assert.match(m.text(), /50 ArcoUSD—\$50\.00—/)
+      await m.click("Funds")
+      assert.ok(!m.text().includes("sArcoUSD") && !m.text().includes("50 ArcoUSD"))
+      await m.click("Savings")
+      assert.ok(m.text().includes("100 sArcoUSD") && m.text().includes("50 ArcoUSD"))
+      // An unread ArcoUSD balance is not a confirmed zero.
+      boundary.balance = async (token) => { if (token === ARCO) throw new Error("rpc"); return "0" }
+      await m.click("Refresh")
+      assert.match(m.text(), /Holdings could not be loaded/)
+    } finally { giwaApi.arcousd = arcousd; await m.close() }
+  })
+
+  await t.test("ArcoUSD v1 reads not answered yet are loading, reads that keep failing are an error with Refresh", async () => {
+    reset(); boundary.balance = async () => "0"
+    const pending = await mount(null, { pending: true })
+    try {
+      assert.match(pending.text(), /Loading your holdings/); assert.doesNotMatch(pending.text(), /No holdings yet|\$0\.00/)
+    } finally { await pending.close() }
+    let retried = 0
+    const failed = await mount(null, { pending: true, failed: { retry: () => { retried += 1 } } })
+    try {
+      assert.match(failed.text(), /Holdings could not be loaded/); assert.doesNotMatch(failed.text(), /No holdings yet/)
+      await failed.click("Refresh")
+      assert.equal(retried, 1)
+    } finally { await failed.close() }
+  })
+
+  await t.test("Net Worth: sArcoUSD's younger history is carried back, so it does not jump where it starts", async () => {
+    reset()
+    const ARCO = "0x3d6Cb251d6aA62591ce9f6a13781a6dC590411Da", SARCO = "0xcAEF04FeA7f9c2561dbCA95E39a6b06043df30Fd"
+    const live = {
+      arcoUSD: ARCO, reserve: "0x4942711396B53df5b02fD8065E77FA2c9D27512F", assets: [], depositPaused: false, redeemPaused: false,
+      savings: { sArcoUSD: SARCO, zap: "0xf4554ea97218645cF2EB209Cd540BD91321ba1E1", sharePrice: 1.02, apyPercent: 4.5, depositsOpen: true, withdrawalsOpen: true },
+    }
+    const day = 86_400, now = Math.floor(Date.now() / 1000)
+    // The catalog vault: 10 shares at a flat $1 for ten days. sArcoUSD: 100 shares, history from two days ago only.
+    giwaApi.priceHistory = async (_chain, productId) => ({ productId, apy: 5, points: [{ t: now - 10 * day, navBase: 1, navUsd: 1 }, { t: now - day, navBase: 1, navUsd: 1 }] })
+    const point = (ago: number, sharePrice: string) => ({ takenAt: new Date((now - ago) * 1000).toISOString(), blockNumber: "1", sharePrice, totalAssetsUsd: "1000", aprBps: 450 })
+    const arcousd = giwaApi.arcousd
+    giwaApi.arcousd = { ...arcousd, savingsHistory: async () => ({ status: "live", chainId: 91342, days: 30, total: 2, sampled: false, truncated: false, points: [point(2 * day, "1.01"), point(day / 2, "1.02")], realizedApyBps: 450 }) } as typeof arcousd
+    boundary.balance = async (token) => (token === SARCO ? "100" : token === ARCO ? "50" : "10")
+    const m = await mount(live)
+    try {
+      // From 10 × 1 + 100 × 1.01 + 50 = $161 to 10 × 1 + 100 × 1.02 + 50 = $162: the share-price gain, not a $101 jump.
+      assert.match(m.part("net-worth-change") ?? "", /^\+\$1\.00 \(\+0\.62%\) · /)
+    } finally { giwaApi.arcousd = arcousd; await m.close() }
+  })
+
+  await t.test("ArcoUSD v1 without a live Savings: ArcoUSD alone, nothing read for sArcoUSD", async () => {
+    reset()
+    const ARCO = "0x3d6Cb251d6aA62591ce9f6a13781a6dC590411Da"
+    const read: string[] = []
+    boundary.balance = async (token) => { read.push(token); return token === ARCO ? "7" : "0" }
+    const m = await mount({ arcoUSD: ARCO, reserve: "0x4942711396B53df5b02fD8065E77FA2c9D27512F", assets: [], depositPaused: false, redeemPaused: false, savings: null })
+    try {
+      assert.ok(m.text().includes("7 ArcoUSD"), m.text())
+      assert.ok(!m.text().includes("sArcoUSD"))
+      assert.ok(read.includes(ARCO))
     } finally { await m.close() }
   })
 })

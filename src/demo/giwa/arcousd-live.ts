@@ -66,7 +66,7 @@ export type ArcoUsdLive = Readonly<{
   assets: readonly ArcoUsdLiveAsset[]
   /** Deposits stop everywhere (a Reserve pause, its deposit switch, ArcoUSD paused or not minting). */
   depositPaused: boolean
-  /** Withdrawals stop everywhere (a Reserve pause, its redeem switch, ArcoUSD paused or not burning). */
+  /** Withdrawals stop everywhere (a Reserve pause, its redeem or redeemInstantOnly switch, ArcoUSD paused or not burning). */
   redeemPaused: boolean
   /** Null until sArcoUSD is live and seeded. */
   savings: ArcoUsdLiveSavings | null
@@ -120,7 +120,9 @@ export function arcoUsdLive(reserve: GiwaArcoUSDReserve | null | undefined, savi
     reserve: reserveAddress,
     assets,
     depositPaused: state.reservePaused || state.depositPaused || state.arcoUSDPaused || state.arcoUSDMintPaused,
-    redeemPaused: state.reservePaused || state.redeemPaused === true || state.arcoUSDPaused || state.arcoUSDBurnPaused,
+    // The app withdraws with redeemInstantOnly, which follows the redeem switch and its own.
+    redeemPaused:
+      state.reservePaused || state.redeemPaused === true || state.redeemInstantOnlyPaused === true || state.arcoUSDPaused || state.arcoUSDBurnPaused,
     savings: liveSavings(savings, arcoUSD),
   }
 }
