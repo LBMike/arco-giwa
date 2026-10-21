@@ -156,7 +156,7 @@ test("fund pay asset: the chip opens the token picker, a GIWA coin switches it, 
     const swapRow = () => help().closest("div.border-t") as HTMLElement
     assert.ok(help(), "the swap fee row has a ? badge")
     assert.match(swapRow().textContent ?? "", /Stablecoin swap fee\s*\?\s*0\.1%/)
-    const tip = "Paying with USDT or RLUSD includes a 0.1% swap fee. USDC and ArcoUSD have no swap fee. This fee is charged by third-party stablecoin infrastructure."
+    const tip = "Paying with USDT or RLUSD includes a 0.1% swap fee. USDC and ArcoUSD have no swap fee. This fee goes to the third-party infrastructure that swaps the stablecoin."
     assert.equal(help().getAttribute("title"), tip) // shown on hover
     assert.equal(help().getAttribute("aria-expanded"), "false")
     await click(help()) // a press shows it under the row (touch screens)
