@@ -54,8 +54,13 @@ export type ArcoUsdLiveSavings = Readonly<{
   zap: HexAddress
   /** ArcoUSD per sArcoUSD. */
   sharePrice: number
-  /** The rate the distributor pays now, in percent. */
+  /**
+   * The rate the account shows, in percent: the one being paid while a distribution vests, else the distributor's
+   * yearly cap (what a distribution pays once the Reserve's surplus covers it).
+   */
   apyPercent: number | null
+  /** The rate being paid now, in percent (0 between distributions): what the balance grows at. */
+  paidApyPercent: number | null
   depositsOpen: boolean
   withdrawalsOpen: boolean
 }>
@@ -135,14 +140,29 @@ function liveSavings(savings: GiwaArcoUSDSavings | null | undefined, arcoUSD: He
   // The Savings read must name the same ArcoUSD as the Reserve read.
   if (!sArcoUSD || !zap || sharePrice === null || !(sharePrice > 0) || checksum(savings.contracts.arcoUSD) !== arcoUSD) return null
   const apyBps = savings.savings.currentApyBps
+  const paidApyPercent = Number.isFinite(apyBps) ? apyBps / 100 : null
   return {
     sArcoUSD,
     zap,
     sharePrice,
-    apyPercent: Number.isFinite(apyBps) ? apyBps / 100 : null,
+    apyPercent: paidApyPercent !== null && paidApyPercent > 0 ? paidApyPercent : (capApyPercent(savings.savings) ?? paidApyPercent),
+    paidApyPercent,
     depositsOpen: savings.savings.depositsOpen,
     withdrawalsOpen: savings.savings.withdrawalsOpen,
   }
+}
+
+/**
+ * The distributor's yearly cap as an APY (compounded daily, like the paid rate), in percent; null when distributions
+ * cannot run (the distributor, the Reserve, ArcoUSD minting or sArcoUSD rewards paused) or an older API leaves it out.
+ */
+function capApyPercent(state: NonNullable<GiwaArcoUSDSavings["savings"]>): number | null {
+  const distributor = state.distributor
+  if (!distributor || distributor.paused || distributor.reservePaused || distributor.arcoUSDMintPaused || state.rewardsPaused) return null
+  const aprBps = distributor.maxAprBps
+  if (!Number.isFinite(aprBps) || aprBps <= 0) return null
+  // The server's dailyCompoundedBps: whole basis points.
+  return Math.round((Math.pow(1 + aprBps / BPS / 365, 365) - 1) * BPS) / 100
 }
 
 /**
