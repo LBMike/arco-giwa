@@ -157,9 +157,9 @@ function ApyDetails({ open, onClose, apyText, series, now }: { open: boolean; on
   )
 }
 
-/** A change in percentage points: up to two decimals, no trailing zeros ("0.8pp", "0pp"). */
-export function ppLabel(points: number): string {
-  return `${Number(points.toFixed(2))}pp`
+/** The APY's change (the difference of two APYs) in percent: up to two decimals, no trailing zeros ("0.8%", "0%"). */
+export function apyChangeLabel(change: number): string {
+  return `${Number(change.toFixed(2))}%`
 }
 
 /** "Oct 9, 2026" for a unix time in seconds. */
@@ -194,9 +194,14 @@ export function SavingsStatsRow({ apyText, history, tvlText }: { apyText: string
             <p className="mt-1 flex items-baseline gap-1.5">
               <span className="text-2xl font-medium tabular-nums text-[var(--color-arco-ink)]">{pointed ? pctLabel(pointed.value) : apyText}</span>
               {change !== null && (
-                <span className="inline-flex items-center gap-0.5 text-xs tabular-nums text-[var(--color-arco-text-soft)]">
+                // Up (0 included) in green, down in red: the text tokens readable at this size on the light card.
+                <span
+                  className={`inline-flex items-center gap-0.5 text-xs tabular-nums ${
+                    change < 0 ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-up-text)]"
+                  }`}
+                >
                   {change < 0 ? <ArrowDownRight aria-hidden="true" className="size-3" /> : <ArrowUpRight aria-hidden="true" className="size-3" />}
-                  {ppLabel(Math.abs(change))}
+                  {apyChangeLabel(Math.abs(change))}
                 </span>
               )}
             </p>
