@@ -1,7 +1,7 @@
 // The figures under the Savings card: APY (with a sparkline and a details view of its history) and TVL.
 
-import { useId, useMemo, useState } from "react"
-import { ChartLine, Lock, Maximize2, X } from "lucide-react"
+import { useId, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { ArrowDownRight, ArrowUpRight, ChartLine, Lock, Maximize2, X } from "lucide-react"
 import type { GiwaPriceHistory } from "./api"
 import { buildApySeries, defaultRange, filterByRange, toChartPoints, type ChartRange, type RawPoint } from "./detail-charts"
 import { GiwaPortfolioChart } from "./PortfolioChart"
@@ -14,9 +14,8 @@ const SPARK_W = 400
 const SPARK_H = 40
 const SECONDS_PER_DAY = 86_400
 
-/** The step line of the sparkline, in a SPARK_W × SPARK_H box; null with fewer than two points. */
-export function sparklinePath(points: readonly RawPoint[]): { d: string; end: { x: number; y: number } } | null {
-  if (points.length < 2) return null
+/** The sparkline's box coordinates for a series (two points or more). */
+function sparklineScale(points: readonly RawPoint[]) {
   const first = points[0]!.ts
   const span = points[points.length - 1]!.ts - first
   const values = points.map((point) => point.value)
@@ -25,6 +24,13 @@ export function sparklinePath(points: readonly RawPoint[]): { d: string; end: { 
   const pad = 4
   const x = (ts: number) => (span > 0 ? ((ts - first) / span) * SPARK_W : SPARK_W)
   const y = (value: number) => (high > low ? pad + (1 - (value - low) / (high - low)) * (SPARK_H - pad * 2) : SPARK_H / 2)
+  return { first, span, x, y }
+}
+
+/** The step line of the sparkline, in a SPARK_W × SPARK_H box; null with fewer than two points. */
+export function sparklinePath(points: readonly RawPoint[]): { d: string; end: { x: number; y: number } } | null {
+  if (points.length < 2) return null
+  const { x, y } = sparklineScale(points)
   let d = `M0 ${y(points[0]!.value).toFixed(2)}`
   for (let i = 1; i < points.length; i += 1) {
     const point = points[i]!
@@ -35,12 +41,48 @@ export function sparklinePath(points: readonly RawPoint[]): { d: string; end: { 
   return { d, end }
 }
 
-function Sparkline({ points }: { points: readonly RawPoint[] }) {
+/**
+ * Where a pointer `ratio` of the way across the box (0 to 1) sits on the step line: the point whose step covers that
+ * moment, and the dot's place (at the pointer, on that step). Null with fewer than two points.
+ */
+export function sparklinePointAt(points: readonly RawPoint[], ratio: number): { index: number; x: number; y: number } | null {
+  if (points.length < 2) return null
+  const { first, span, y } = sparklineScale(points)
+  const at = Math.min(1, Math.max(0, Number.isFinite(ratio) ? ratio : 1))
+  const ts = first + at * span
+  let index = 0
+  for (let i = 1; i < points.length && points[i]!.ts <= ts; i += 1) index = i
+  return { index, x: at * SPARK_W, y: y(points[index]!.value) }
+}
+
+/** The month's APY as a step line. Pointing at it moves the dot along the line and reports the point under it. */
+function Sparkline({ points, onHover }: { points: readonly RawPoint[]; onHover: (index: number | null) => void }) {
   const gradientId = useId()
+  const [dot, setDot] = useState<{ x: number; y: number } | null>(null)
   const path = sparklinePath(points)
   if (path === null) return null
+  const point = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const box = event.currentTarget.getBoundingClientRect()
+    const at = sparklinePointAt(points, box.width > 0 ? (event.clientX - box.left) / box.width : 1)
+    if (at === null) return
+    setDot({ x: at.x, y: at.y })
+    onHover(at.index)
+  }
+  const leave = () => {
+    setDot(null)
+    onHover(null)
+  }
+  const shown = dot ?? path.end
   return (
-    <div aria-hidden="true" className="relative h-10 min-w-0 flex-1">
+    // Decorative for screen readers (APY Details has the full chart); scrubbed with a mouse, pen or finger.
+    <div
+      aria-hidden="true"
+      onPointerMove={point}
+      onPointerDown={point}
+      onPointerLeave={leave}
+      onPointerCancel={leave}
+      className="relative h-10 min-w-0 flex-1 cursor-crosshair touch-pan-y"
+    >
       <svg viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full overflow-visible">
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
@@ -52,7 +94,7 @@ function Sparkline({ points }: { points: readonly RawPoint[] }) {
       </svg>
       <span
         className="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-[var(--radius-pill)] bg-[var(--color-arco-chart-5)] ring-2 ring-[var(--color-arco-surface)]"
-        style={{ left: "100%", top: `${(path.end.y / SPARK_H) * 100}%` }}
+        style={{ left: `${(shown.x / SPARK_W) * 100}%`, top: `${(shown.y / SPARK_H) * 100}%` }}
       />
     </div>
   )
@@ -115,6 +157,16 @@ function ApyDetails({ open, onClose, apyText, series, now }: { open: boolean; on
   )
 }
 
+/** A change in percentage points: up to two decimals, no trailing zeros ("0.8pp", "0pp"). */
+export function ppLabel(points: number): string {
+  return `${Number(points.toFixed(2))}pp`
+}
+
+/** "Oct 9, 2026" for a unix time in seconds. */
+function dayLabel(ts: number): string {
+  return new Date(ts * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+}
+
 export function SavingsStatsRow({ apyText, history, tvlText }: { apyText: string; history: GiwaPriceHistory | undefined; tvlText: string }) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [now] = useState(() => Math.floor(Date.now() / 1000))
@@ -124,6 +176,10 @@ export function SavingsStatsRow({ apyText, history, tvlText }: { apyText: string
     const month = series.filter((point) => point.ts >= now - 30 * SECONDS_PER_DAY)
     return month.length >= 2 ? month : series
   }, [series, now])
+  // Pointing at the sparkline: the APY at that point, its date, and its change since the line's first point.
+  const [hovered, setHovered] = useState<number | null>(null)
+  const pointed = hovered !== null ? (recent[hovered] ?? null) : null
+  const change = recent.length >= 2 ? (pointed ?? recent[recent.length - 1]!).value - recent[0]!.value : null
 
   return (
     <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] rounded-[22px] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)]">
@@ -135,10 +191,23 @@ export function SavingsStatsRow({ apyText, history, tvlText }: { apyText: string
               APY
               <SavingsInfoTip label="About APY" text="The yearly rate implied by the price posted for this savings account, compounding included." />
             </p>
-            <p className="mt-1 text-2xl font-medium tabular-nums text-[var(--color-arco-ink)]">{apyText}</p>
+            <p className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-2xl font-medium tabular-nums text-[var(--color-arco-ink)]">{pointed ? pctLabel(pointed.value) : apyText}</span>
+              {change !== null && (
+                <span className="inline-flex items-center gap-0.5 text-xs tabular-nums text-[var(--color-arco-text-soft)]">
+                  {change < 0 ? <ArrowDownRight aria-hidden="true" className="size-3" /> : <ArrowUpRight aria-hidden="true" className="size-3" />}
+                  {ppLabel(Math.abs(change))}
+                </span>
+              )}
+            </p>
           </div>
-          <Sparkline points={recent} />
+          <Sparkline points={recent} onHover={setHovered} />
         </div>
+        {pointed && (
+          <span className="pointer-events-none absolute right-5 top-4 text-[11px] tabular-nums text-[var(--color-arco-text-soft)] sm:right-6">
+            {dayLabel(pointed.ts)}
+          </span>
+        )}
         <button
           type="button"
           onClick={() => setDetailsOpen(true)}

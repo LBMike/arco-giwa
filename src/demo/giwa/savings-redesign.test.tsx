@@ -26,7 +26,7 @@ import {
 import { SavingsHeroCard, type SavingsHeroProps } from "./SavingsHeroCard"
 import { niceTicks, simulateSavings } from "./savings-simulation"
 import { SavingsSimulation } from "./SavingsSimulation"
-import { SavingsStatsRow, sparklinePath } from "./SavingsStatsRow"
+import { ppLabel, SavingsStatsRow, sparklinePath, sparklinePointAt } from "./SavingsStatsRow"
 import { SavingsTabs } from "./SavingsTabs"
 import {
   amountForPercent,
@@ -275,6 +275,24 @@ test("sparkline: a step line across the box ending at the latest value", () => {
   const path = sparklinePath([{ ts: 0, value: 3 }, { ts: 10, value: 4 }])!
   assert.match(path.d, /^M0 36\.00 H400\.00 V4\.00 H400$/)
   assert.deepEqual(path.end, { x: 400, y: 4 })
+})
+
+test("sparkline pointer: the point whose step covers the pointer, the dot at the pointer on that step", () => {
+  const points = [{ ts: 0, value: 3 }, { ts: 10, value: 3.5 }, { ts: 20, value: 4 }]
+  assert.equal(sparklinePointAt([{ ts: 0, value: 3 }], 0.5), null)
+  assert.deepEqual(sparklinePointAt(points, 0), { index: 0, x: 0, y: 36 })
+  // Just before the second point's moment the first step still holds; at it, the second.
+  assert.deepEqual(sparklinePointAt(points, 0.49), { index: 0, x: 196, y: 36 })
+  assert.deepEqual(sparklinePointAt(points, 0.5), { index: 1, x: 200, y: 20 })
+  // Past either edge it stays on the line.
+  assert.deepEqual(sparklinePointAt(points, 1.4), { index: 2, x: 400, y: 4 })
+  assert.deepEqual(sparklinePointAt(points, -1), { index: 0, x: 0, y: 36 })
+})
+
+test("change in percentage points: up to two decimals, no trailing zeros", () => {
+  assert.equal(ppLabel(0.8), "0.8pp")
+  assert.equal(ppLabel(0), "0pp")
+  assert.equal(ppLabel(0.123), "0.12pp")
 })
 
 // ── markup ────────────────────────────────────────────────────────────────
@@ -548,6 +566,16 @@ test("figures row: APY and TVL", () => {
   assert.match(html, />\$12\.4K</)
   assert.match(html, /APY Details/)
   assert.doesNotMatch(html, /Users/)
+  // With a history: the change over the line beside the APY (no date until the line is pointed at).
+  const history = {
+    productId: "sarcousd",
+    apy: null,
+    points: [0, 1, 2].map((day) => ({ t: Math.floor(Date.now() / 1000) - (2 - day) * 86_400, navBase: 1, navUsd: 1, apy: [3.8, 4.2, 4.6][day] })),
+  }
+  const withLine = renderToStaticMarkup(<SavingsStatsRow apyText="4.6%" history={history} tvlText="$1K" />)
+  assert.match(withLine, />4\.6%</)
+  assert.match(withLine, /0\.8pp/)
+  assert.doesNotMatch(withLine, /, 20\d\d</)
 })
 
 test("savings card: with several coins to deposit, what is available is their total, the coins held stacked beside it", () => {
