@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "fs"
 import path from "path"
 import { BigNumber, Contract, ContractReceipt, ContractTransaction, Signer, utils } from "ethers"
 import { ethers, network, upgrades } from "hardhat"
+import { mergeActiveProducts, registryExtraProducts } from "./deploy-plan"
 import { loadRegistry, registryFilePath, writeRegistry } from "./deploy-registry"
 import { EXPECTED_GIWA_DEPLOYER } from "./keystore-constants"
 
@@ -148,7 +149,10 @@ async function main() {
   }
 
   const registryPath = registryFilePath(repoRoot())
-  const registry = loadRegistry(registryPath, EXPECTED_GIWA_DEPLOYER as `0x${string}`, repoRoot(), "cancun")
+  // The built-in products plus the extras the registry already records (beqty, arcousd): without them the load replays
+  // their deployment records and stops with "Unknown product", and a write would drop them from the file.
+  const products = mergeActiveProducts(registryExtraProducts(JSON.parse(readFileSync(registryPath, "utf8"))), [])
+  const registry = loadRegistry(registryPath, EXPECTED_GIWA_DEPLOYER as `0x${string}`, repoRoot(), "cancun", products)
   if (registry.products.length < REQUIRED_PRODUCT_COUNT) {
     throw new Error(`Expected at least ${REQUIRED_PRODUCT_COUNT} products, got ${registry.products.length}`)
   }
@@ -326,15 +330,21 @@ async function txOverrides(gas: number) {
 
 async function confirmedReceipt(tx: ContractTransaction | undefined, label: string): Promise<ContractReceipt> {
   if (!tx) throw new Error(`Missing transaction object for ${label}`)
+  let timer: NodeJS.Timeout | undefined
   const timeout = new Promise<never>((_resolve, reject) => {
-    setTimeout(
+    timer = setTimeout(
       () => reject(new Error(`Timed out waiting for ${label} (${tx.hash}). Inspect the explorer before resuming.`)),
       TX_TIMEOUT_MS,
     )
   })
-  const receipt = await Promise.race([tx.wait(1), timeout])
-  if (receipt.status !== 1) throw new Error(`${label} reverted (${tx.hash})`)
-  return receipt
+  try {
+    const receipt = await Promise.race([tx.wait(1), timeout])
+    if (receipt.status !== 1) throw new Error(`${label} reverted (${tx.hash})`)
+    return receipt
+  } finally {
+    // A pending timer would keep the script running for the rest of the timeout after its last transaction.
+    clearTimeout(timer)
+  }
 }
 
 async function codeHash(address: string): Promise<`0x${string}`> {
