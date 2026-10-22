@@ -161,10 +161,34 @@ test("live ArcoUSD: each Reserve test coin is its GIWA row, with its fees and fr
 })
 
 test("live ArcoUSD: Savings once sArcoUSD is live, seeded and on the same ArcoUSD", () => {
-  assert.deepEqual(live().savings, { sArcoUSD: SARCOUSD, zap: ZAP, sharePrice: 1.02, apyPercent: 4.5, depositsOpen: true, withdrawalsOpen: true })
+  assert.deepEqual(live().savings, { sArcoUSD: SARCOUSD, zap: ZAP, sharePrice: 1.02, apyPercent: 4.5, paidApyPercent: 4.5, depositsOpen: true, withdrawalsOpen: true })
   assert.equal(arcoUsdLive(reserveRead(), savingsRead({ seeded: false }))!.savings, null)
   assert.equal(arcoUsdLive(reserveRead(), { ...savingsRead(), status: "not-deployed" })!.savings, null)
   assert.equal(arcoUsdLive(reserveRead(), savingsRead({}, TUSDC))!.savings, null)
+})
+
+test("the shown rate: the paid one while a distribution vests, else the distributor's cap; the balance grows at the paid one", () => {
+  const distributor = (patch: Record<string, unknown> = {}) =>
+    ({ paused: false, reservePaused: false, arcoUSDMintPaused: false, maxAprBps: 450, ...patch }) as unknown as NonNullable<GiwaArcoUSDSavings["savings"]>["distributor"]
+  const rates = (patch: Partial<NonNullable<GiwaArcoUSDSavings["savings"]>>) => {
+    const savings = arcoUsdLive(reserveRead(), savingsRead(patch))!.savings!
+    return [savings.apyPercent, savings.paidApyPercent]
+  }
+  // Between distributions: 4.5% a year compounded daily, in whole basis points (the server's paid rate does the same).
+  assert.deepEqual(rates({ currentApyBps: 0, distributor: distributor() }), [4.6, 0])
+  assert.deepEqual(rates({ currentApyBps: 0, distributor: distributor({ maxAprBps: 2000 }) }), [22.13, 0])
+  // While one vests, the paid rate, whatever the cap.
+  assert.deepEqual(rates({ currentApyBps: 312, distributor: distributor() }), [3.12, 3.12])
+  // Nothing can be distributed: the paid rate (0).
+  for (const stopped of [{ paused: true }, { reservePaused: true }, { arcoUSDMintPaused: true }, { maxAprBps: 0 }]) {
+    assert.deepEqual(rates({ currentApyBps: 0, distributor: distributor(stopped) }), [0, 0], JSON.stringify(stopped))
+  }
+  assert.deepEqual(rates({ currentApyBps: 0, rewardsPaused: true, distributor: distributor() }), [0, 0])
+  // An older API without the distributor: the paid rate.
+  assert.deepEqual(rates({ currentApyBps: 0 }), [0, 0])
+  // The account's market entry shows the cap.
+  const market = liveSavingsMarket(arcoUsdLive(reserveRead(), savingsRead({ currentApyBps: 0, distributor: distributor() }))!.savings!)
+  assert.equal(market.apy, 4.6)
 })
 
 test("prices, fees included: the Reserve one for one, the Zap at the share price", () => {

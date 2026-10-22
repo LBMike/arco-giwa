@@ -267,7 +267,7 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
     const ARCO = "0x3d6Cb251d6aA62591ce9f6a13781a6dC590411Da", SARCO = "0xcAEF04FeA7f9c2561dbCA95E39a6b06043df30Fd"
     const live = {
       arcoUSD: ARCO, reserve: "0x4942711396B53df5b02fD8065E77FA2c9D27512F", assets: [], depositPaused: false, redeemPaused: false,
-      savings: { sArcoUSD: SARCO, zap: "0xf4554ea97218645cF2EB209Cd540BD91321ba1E1", sharePrice: 1.02, apyPercent: 4.5, depositsOpen: true, withdrawalsOpen: true },
+      savings: { sArcoUSD: SARCO, zap: "0xf4554ea97218645cF2EB209Cd540BD91321ba1E1", sharePrice: 1.02, apyPercent: 4.5, paidApyPercent: 4.5, depositsOpen: true, withdrawalsOpen: true },
     }
     const day = 86_400_000, now = Date.now()
     const point = (ago: number, sharePrice: string) => ({ takenAt: new Date(now - ago).toISOString(), blockNumber: "1", sharePrice, totalAssetsUsd: "1000", aprBps: 450 })
@@ -317,7 +317,7 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
     const ARCO = "0x3d6Cb251d6aA62591ce9f6a13781a6dC590411Da", SARCO = "0xcAEF04FeA7f9c2561dbCA95E39a6b06043df30Fd"
     const live = {
       arcoUSD: ARCO, reserve: "0x4942711396B53df5b02fD8065E77FA2c9D27512F", assets: [], depositPaused: false, redeemPaused: false,
-      savings: { sArcoUSD: SARCO, zap: "0xf4554ea97218645cF2EB209Cd540BD91321ba1E1", sharePrice: 1.02, apyPercent: 4.5, depositsOpen: true, withdrawalsOpen: true },
+      savings: { sArcoUSD: SARCO, zap: "0xf4554ea97218645cF2EB209Cd540BD91321ba1E1", sharePrice: 1.02, apyPercent: 4.5, paidApyPercent: 4.5, depositsOpen: true, withdrawalsOpen: true },
     }
     const day = 86_400, now = Math.floor(Date.now() / 1000)
     // The catalog vault: 10 shares at a flat $1 for ten days. sArcoUSD: 100 shares, history from two days ago only.
