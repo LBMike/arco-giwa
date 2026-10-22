@@ -58,6 +58,29 @@ test("buildApySeries clamps an in-window but absurd jump to the display bound", 
   assert.equal(series[0].value, 1000)
 })
 
+test("buildApySeries: a history that states the rate at each point (sArcoUSD snapshots) is plotted as stated", () => {
+  // Five minutes apart, far too close to read a rate from the price, and every point is kept.
+  const stated: GiwaPriceHistory = {
+    productId: "sarcousd",
+    apy: null,
+    points: [
+      { t: 600, navBase: 1.0001, navUsd: 1.0001, apy: 4.6 },
+      { t: 0, navBase: 1, navUsd: 1, apy: 0 },
+      { t: 300, navBase: 1, navUsd: 1, apy: 0 },
+      { t: 900, navBase: 1.0002, navUsd: 1.0002, apy: 5000 },
+    ],
+  }
+  assert.deepEqual(buildApySeries(stated), [
+    { ts: 0, value: 0 },
+    { ts: 300, value: 0 },
+    { ts: 600, value: 4.6 },
+    { ts: 900, value: 1000 },
+  ])
+  // A history where some point leaves the rate out is read from the price, as before.
+  const mixed: GiwaPriceHistory = { ...stated, points: [{ t: 0, navBase: 1, navUsd: 1, apy: 0 }, { t: 365 * DAY, navBase: 1.02, navUsd: 1.02 }] }
+  assert.deepEqual(buildApySeries(mixed), [{ ts: 365 * DAY, value: 2 }])
+})
+
 test("buildApySeries: clean daily-cadence fixture yields the per-interval APY (2% over 365d)", () => {
   const series = buildApySeries(history([{ t: 0, navBase: 1 }, { t: 365 * DAY, navBase: 1.02 }]))
   assert.equal(series.length, 1)
