@@ -52,12 +52,20 @@ function dailyDrips(): number {
 }
 
 async function waitFor(tx: ContractTransaction, label: string) {
-  const receipt = await Promise.race([
-    tx.wait(1),
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${label}: no receipt after ${TX_TIMEOUT_MS / 1000}s (${tx.hash})`)), TX_TIMEOUT_MS)),
-  ])
-  if (receipt.status !== 1) throw new Error(`${label} reverted: ${tx.hash}`)
-  return receipt
+  let timer: NodeJS.Timeout | undefined
+  try {
+    const receipt = await Promise.race([
+      tx.wait(1),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label}: no receipt after ${TX_TIMEOUT_MS / 1000}s (${tx.hash})`)), TX_TIMEOUT_MS)
+      }),
+    ])
+    if (receipt.status !== 1) throw new Error(`${label} reverted: ${tx.hash}`)
+    return receipt
+  } finally {
+    // A pending timer would keep the script running for the rest of the timeout after "Done."
+    clearTimeout(timer)
+  }
 }
 
 async function main() {
