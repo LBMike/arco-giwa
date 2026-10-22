@@ -10,6 +10,7 @@ import { stocksPlugin, type StocksPluginOptions } from "./stocks/plugin.js"
 import { stocksSubmissionsPlugin, type StocksSubmissionsPluginOptions } from "./stocks-submissions/plugin.js"
 import { stocksMarketDataPlugin, type StocksMarketDataService } from "./stocks-market-data/index.js"
 import { arcoUSDPlugin } from "./arcousd/plugin.js"
+import { scrubUrls } from "./arcousd/safe-error.js"
 import type { ArcoUSDService } from "./arcousd/service.js"
 import type { ArcoUSDRecalls, RecallRow } from "./arcousd/recall.js"
 import { inertArcoUSDAdmin, type ArcoUSDAdmin } from "./arcousd/admin.js"
@@ -317,8 +318,9 @@ function parseChainId(value: string | undefined): number {
   return chainId
 }
 
+// Sent back to the caller: a chain read's error quotes the RPC URL, whose path carries the provider key.
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return scrubUrls(error instanceof Error ? error.message : String(error))
 }
 
 function httpJsonReplacer(_key: string, value: unknown) {

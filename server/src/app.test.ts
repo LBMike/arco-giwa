@@ -300,6 +300,8 @@ function makeApp(options?: {
   arcoUSDRedemptions?: ArcoUSDRedemptions
   /** Wallets whose nonce a service owns (the Stocks signer); absent → none. */
   signerWallets?: string[]
+  /** The market's USD rates read; defaults to fixed rates. */
+  fetchRates?: () => Promise<{ USDC: number; BTC: number; ETH: number; XRP: number } | null>
 }) {
   const prisma = makePrisma()
   const arco = new PrismaArcoService(prisma as PrismaLike)
@@ -316,7 +318,7 @@ function makeApp(options?: {
   const market = new EvmMarketService({
     arco,
     loadRegistry: () => fullRegistry,
-    fetchRates: async () => ({ USDC: 1, BTC: 60000, ETH: 3000, XRP: 0.5 }),
+    fetchRates: options?.fetchRates ?? (async () => ({ USDC: 1, BTC: 60000, ETH: 3000, XRP: 0.5 })),
   })
   const monitoring = new EvmMonitoringService({
     arco,
@@ -393,6 +395,22 @@ test("public routes and readiness do not require admin credentials", async () =>
   assert.equal(ready.statusCode, 200)
   assert.equal(catalog.statusCode, 200)
   assert.ok(catalog.json().length >= 6)
+})
+
+test("a chain read's error goes back without the RPC URL, whose path carries the provider key", async () => {
+  const { app } = makeApp({
+    fetchRates: async () => {
+      throw new Error(
+        'HTTP request failed.\n\nURL: https://giwa-sepolia.g.alchemy.com/v2/SECRET-KEY-123\nRequest body: {"method":"eth_call"}\n\nDetails: over rate limit',
+      )
+    },
+  })
+  const response = await app.inject({ method: "GET", url: "/api/v1/evm/market/91342" })
+  assert.equal(response.statusCode, 400)
+  const { error } = response.json() as { error: string }
+  assert.ok(!error.includes("SECRET-KEY-123"), error)
+  assert.ok(error.includes("https://giwa-sepolia.g.alchemy.com/…"), error)
+  assert.ok(error.startsWith("HTTP request failed."), error)
 })
 
 test("catalog route serializes BigInt-backed registry rows as decimal strings", async () => {

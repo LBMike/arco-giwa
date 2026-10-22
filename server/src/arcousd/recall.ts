@@ -1,6 +1,7 @@
 import { encodeFunctionData, getAddress, isAddress, parseAbi, type Address, type PublicClient } from "viem"
 import { unsignedAdminTransaction, type UnsignedAdminTransaction } from "../evm/admin-transactions.js"
 import { deployedArcoUSD, type ArcoUSDRegistryFile, type DeployedArcoUSD } from "./registry.js"
+import { scrubUrls } from "./safe-error.js"
 
 // ArcoUSD Reserve recalls in the vault-admin redemption flow (docs/specs/arcousd-v1.md §3.7).
 //
@@ -106,7 +107,8 @@ const READ_CONCURRENCY = 4
 const sameAddress = (a: string | undefined | null, b: string | undefined | null) =>
   Boolean(a && b && a.toLowerCase() === b.toLowerCase())
 
-const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
+// Without RPC URLs: their path carries the provider key.
+const errorText = (error: unknown) => scrubUrls(error instanceof Error ? error.message : String(error))
 
 export function createRecallReader(client: Pick<PublicClient, "readContract" | "getBlockNumber">): RecallReader {
   return {
