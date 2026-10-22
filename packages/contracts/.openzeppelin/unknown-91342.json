@@ -1596,89 +1596,89 @@
             "label": "productToken",
             "offset": 0,
             "slot": "351",
-            "type": "t_contract(IProductToken)4938",
-            "contract": "ArcoRedemptionVault",
-            "src": "contracts/vaults/ArcoRedemptionVault.sol:40"
+            "type": "t_contract(IProductToken)18256",
+            "contract": "ArcoRedemptionVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoRedemptionVaultLiveLayout.sol:42"
           },
           {
             "label": "paymentToken",
             "offset": 0,
             "slot": "352",
-            "type": "t_contract(IERC20MetadataUpgradeable)1507",
-            "contract": "ArcoRedemptionVault",
-            "src": "contracts/vaults/ArcoRedemptionVault.sol:41"
+            "type": "t_contract(IERC20MetadataUpgradeable)2543",
+            "contract": "ArcoRedemptionVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoRedemptionVaultLiveLayout.sol:43"
           },
           {
             "label": "productPriceFeed",
             "offset": 0,
             "slot": "353",
-            "type": "t_contract(IDataFeed)4916",
-            "contract": "ArcoRedemptionVault",
-            "src": "contracts/vaults/ArcoRedemptionVault.sol:42"
+            "type": "t_contract(IDataFeed)18234",
+            "contract": "ArcoRedemptionVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoRedemptionVaultLiveLayout.sol:44"
           },
           {
             "label": "paymentPriceFeed",
             "offset": 0,
             "slot": "354",
-            "type": "t_contract(IDataFeed)4916",
-            "contract": "ArcoRedemptionVault",
-            "src": "contracts/vaults/ArcoRedemptionVault.sol:43"
+            "type": "t_contract(IDataFeed)18234",
+            "contract": "ArcoRedemptionVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoRedemptionVaultLiveLayout.sol:45"
           },
           {
             "label": "paymentDecimals",
             "offset": 20,
             "slot": "354",
             "type": "t_uint8",
-            "contract": "ArcoRedemptionVault",
-            "src": "contracts/vaults/ArcoRedemptionVault.sol:44"
+            "contract": "ArcoRedemptionVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoRedemptionVaultLiveLayout.sol:46"
           },
           {
             "label": "minimumRedeem",
             "offset": 0,
             "slot": "355",
             "type": "t_uint256",
-            "contract": "ArcoRedemptionVault",
-            "src": "contracts/vaults/ArcoRedemptionVault.sol:45"
+            "contract": "ArcoRedemptionVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoRedemptionVaultLiveLayout.sol:47"
           },
           {
             "label": "vaultRedeemAllowance",
             "offset": 0,
             "slot": "356",
             "type": "t_uint256",
-            "contract": "ArcoRedemptionVault",
-            "src": "contracts/vaults/ArcoRedemptionVault.sol:46"
+            "contract": "ArcoRedemptionVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoRedemptionVaultLiveLayout.sol:48"
           },
           {
             "label": "redeemedByVault",
             "offset": 0,
             "slot": "357",
             "type": "t_uint256",
-            "contract": "ArcoRedemptionVault",
-            "src": "contracts/vaults/ArcoRedemptionVault.sol:47"
+            "contract": "ArcoRedemptionVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoRedemptionVaultLiveLayout.sol:49"
           },
           {
             "label": "reservedAssets",
             "offset": 0,
             "slot": "358",
             "type": "t_uint256",
-            "contract": "ArcoRedemptionVault",
-            "src": "contracts/vaults/ArcoRedemptionVault.sol:48"
+            "contract": "ArcoRedemptionVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoRedemptionVaultLiveLayout.sol:50"
           },
           {
             "label": "nextRequestId",
             "offset": 0,
             "slot": "359",
             "type": "t_uint256",
-            "contract": "ArcoRedemptionVault",
-            "src": "contracts/vaults/ArcoRedemptionVault.sol:49"
+            "contract": "ArcoRedemptionVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoRedemptionVaultLiveLayout.sol:51"
           },
           {
             "label": "redemptionRequests",
             "offset": 0,
             "slot": "360",
-            "type": "t_mapping(t_uint256,t_struct(RedemptionRequest)5714_storage)",
-            "contract": "ArcoRedemptionVault",
-            "src": "contracts/vaults/ArcoRedemptionVault.sol:51"
+            "type": "t_mapping(t_uint256,t_struct(RedemptionRequest)20538_storage)",
+            "contract": "ArcoRedemptionVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoRedemptionVaultLiveLayout.sol:53"
           }
         ],
         "types": {
@@ -1706,15 +1706,15 @@
             "label": "bytes4",
             "numberOfBytes": "4"
           },
-          "t_contract(IDataFeed)4916": {
+          "t_contract(IDataFeed)18234": {
             "label": "contract IDataFeed",
             "numberOfBytes": "20"
           },
-          "t_contract(IERC20MetadataUpgradeable)1507": {
+          "t_contract(IERC20MetadataUpgradeable)2543": {
             "label": "contract IERC20MetadataUpgradeable",
             "numberOfBytes": "20"
           },
-          "t_contract(IProductToken)4938": {
+          "t_contract(IProductToken)18256": {
             "label": "contract IProductToken",
             "numberOfBytes": "20"
           },
@@ -1730,12 +1730,12 @@
             "label": "mapping(bytes4 => bool)",
             "numberOfBytes": "32"
           },
-          "t_mapping(t_uint256,t_struct(RedemptionRequest)5714_storage)": {
-            "label": "mapping(uint256 => struct ArcoRedemptionVault.RedemptionRequest)",
+          "t_mapping(t_uint256,t_struct(RedemptionRequest)20538_storage)": {
+            "label": "mapping(uint256 => struct ArcoRedemptionVaultLiveLayout.RedemptionRequest)",
             "numberOfBytes": "32"
           },
-          "t_struct(RedemptionRequest)5714_storage": {
-            "label": "struct ArcoRedemptionVault.RedemptionRequest",
+          "t_struct(RedemptionRequest)20538_storage": {
+            "label": "struct ArcoRedemptionVaultLiveLayout.RedemptionRequest",
             "members": [
               {
                 "label": "sender",
@@ -2459,89 +2459,89 @@
             "label": "productToken",
             "offset": 0,
             "slot": "351",
-            "type": "t_contract(IProductToken)3392",
-            "contract": "ArcoDepositVault",
-            "src": "contracts/vaults/ArcoDepositVault.sol:39"
+            "type": "t_contract(IProductToken)18256",
+            "contract": "ArcoDepositVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoDepositVaultLiveLayout.sol:42"
           },
           {
             "label": "paymentToken",
             "offset": 0,
             "slot": "352",
-            "type": "t_contract(IERC20MetadataUpgradeable)894",
-            "contract": "ArcoDepositVault",
-            "src": "contracts/vaults/ArcoDepositVault.sol:40"
+            "type": "t_contract(IERC20MetadataUpgradeable)2543",
+            "contract": "ArcoDepositVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoDepositVaultLiveLayout.sol:43"
           },
           {
             "label": "productPriceFeed",
             "offset": 0,
             "slot": "353",
-            "type": "t_contract(IDataFeed)3370",
-            "contract": "ArcoDepositVault",
-            "src": "contracts/vaults/ArcoDepositVault.sol:41"
+            "type": "t_contract(IDataFeed)18234",
+            "contract": "ArcoDepositVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoDepositVaultLiveLayout.sol:44"
           },
           {
             "label": "paymentPriceFeed",
             "offset": 0,
             "slot": "354",
-            "type": "t_contract(IDataFeed)3370",
-            "contract": "ArcoDepositVault",
-            "src": "contracts/vaults/ArcoDepositVault.sol:42"
+            "type": "t_contract(IDataFeed)18234",
+            "contract": "ArcoDepositVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoDepositVaultLiveLayout.sol:45"
           },
           {
             "label": "paymentDecimals",
             "offset": 20,
             "slot": "354",
             "type": "t_uint8",
-            "contract": "ArcoDepositVault",
-            "src": "contracts/vaults/ArcoDepositVault.sol:43"
+            "contract": "ArcoDepositVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoDepositVaultLiveLayout.sol:46"
           },
           {
             "label": "minimumDeposit",
             "offset": 0,
             "slot": "355",
             "type": "t_uint256",
-            "contract": "ArcoDepositVault",
-            "src": "contracts/vaults/ArcoDepositVault.sol:44"
+            "contract": "ArcoDepositVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoDepositVaultLiveLayout.sol:47"
           },
           {
             "label": "maxSupplyCap",
             "offset": 0,
             "slot": "356",
             "type": "t_uint256",
-            "contract": "ArcoDepositVault",
-            "src": "contracts/vaults/ArcoDepositVault.sol:45"
+            "contract": "ArcoDepositVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoDepositVaultLiveLayout.sol:48"
           },
           {
             "label": "vaultMintAllowance",
             "offset": 0,
             "slot": "357",
             "type": "t_uint256",
-            "contract": "ArcoDepositVault",
-            "src": "contracts/vaults/ArcoDepositVault.sol:46"
+            "contract": "ArcoDepositVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoDepositVaultLiveLayout.sol:49"
           },
           {
             "label": "mintedByVault",
             "offset": 0,
             "slot": "358",
             "type": "t_uint256",
-            "contract": "ArcoDepositVault",
-            "src": "contracts/vaults/ArcoDepositVault.sol:47"
+            "contract": "ArcoDepositVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoDepositVaultLiveLayout.sol:50"
           },
           {
             "label": "nextRequestId",
             "offset": 0,
             "slot": "359",
             "type": "t_uint256",
-            "contract": "ArcoDepositVault",
-            "src": "contracts/vaults/ArcoDepositVault.sol:48"
+            "contract": "ArcoDepositVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoDepositVaultLiveLayout.sol:51"
           },
           {
             "label": "depositRequests",
             "offset": 0,
             "slot": "360",
-            "type": "t_mapping(t_uint256,t_struct(DepositRequest)3534_storage)",
-            "contract": "ArcoDepositVault",
-            "src": "contracts/vaults/ArcoDepositVault.sol:50"
+            "type": "t_mapping(t_uint256,t_struct(DepositRequest)19869_storage)",
+            "contract": "ArcoDepositVaultLiveLayout",
+            "src": "contracts/test-helpers/ArcoDepositVaultLiveLayout.sol:53"
           }
         ],
         "types": {
@@ -2569,15 +2569,15 @@
             "label": "bytes4",
             "numberOfBytes": "4"
           },
-          "t_contract(IDataFeed)3370": {
+          "t_contract(IDataFeed)18234": {
             "label": "contract IDataFeed",
             "numberOfBytes": "20"
           },
-          "t_contract(IERC20MetadataUpgradeable)894": {
+          "t_contract(IERC20MetadataUpgradeable)2543": {
             "label": "contract IERC20MetadataUpgradeable",
             "numberOfBytes": "20"
           },
-          "t_contract(IProductToken)3392": {
+          "t_contract(IProductToken)18256": {
             "label": "contract IProductToken",
             "numberOfBytes": "20"
           },
@@ -2593,12 +2593,12 @@
             "label": "mapping(bytes4 => bool)",
             "numberOfBytes": "32"
           },
-          "t_mapping(t_uint256,t_struct(DepositRequest)3534_storage)": {
-            "label": "mapping(uint256 => struct ArcoDepositVault.DepositRequest)",
+          "t_mapping(t_uint256,t_struct(DepositRequest)19869_storage)": {
+            "label": "mapping(uint256 => struct ArcoDepositVaultLiveLayout.DepositRequest)",
             "numberOfBytes": "32"
           },
-          "t_struct(DepositRequest)3534_storage": {
-            "label": "struct ArcoDepositVault.DepositRequest",
+          "t_struct(DepositRequest)19869_storage": {
+            "label": "struct ArcoDepositVaultLiveLayout.DepositRequest",
             "members": [
               {
                 "label": "sender",
