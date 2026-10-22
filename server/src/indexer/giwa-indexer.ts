@@ -2,6 +2,7 @@ import type { IndexedEventInput, RedemptionRequestIndexInput } from "../services
 import type { GiwaDeploymentRegistry, RegistryProduct } from "../registry/types.js"
 import { decodeIndexedEventLog, type RawEvmLog } from "./event-decoder.js"
 import { productForVault, productIndexedAddresses, registryIndexedAddresses } from "./registry-addresses.js"
+import { safeErrorText } from "../arcousd/safe-error.js"
 
 export type EvmBlock = {
   readonly number: bigint
@@ -319,7 +320,7 @@ export class GiwaIndexer {
         // Leave the marker unset (and out of seenProducts) so the gap is retried next poll; never
         // crash the poller or block the other vaults.
         console.warn(
-          `[giwa-indexer] gap-backfill failed for ${product.productId}; will retry: ${error instanceof Error ? error.message : String(error)}`,
+          `[giwa-indexer] gap-backfill failed for ${product.productId}; will retry: ${safeErrorText(error)}`,
         )
       }
     }

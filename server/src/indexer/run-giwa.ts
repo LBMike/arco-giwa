@@ -11,7 +11,7 @@ import { readArcoUSDRegistry } from "../arcousd/registry.js"
 import { createSavingsChainReader } from "../arcousd/savings.js"
 import { ArcoUSDSavingsIndexer, PrismaSavingsIndexerStore, SAVINGS_CURSOR } from "../arcousd/savings-indexer.js"
 import { PrismaArcoUSDIndexerStore } from "../arcousd/store.js"
-import { safeErrorText } from "../arcousd/safe-error.js"
+import { safeErrorText, scrubUrls } from "../arcousd/safe-error.js"
 import { ArcoUSDWatcher } from "../arcousd/watcher.js"
 import { validateServerEnv } from "../config/env.js"
 import { createPrismaClient } from "../db/prisma.js"
@@ -252,7 +252,7 @@ export async function runGiwaIndexer(envSource: NodeJS.ProcessEnv = process.env)
         stringify({
           service: "arco-arcousd-indexer",
           mode: "error",
-          error: error instanceof Error ? error.message : String(error),
+          error: safeErrorText(error),
         }),
       )
     }
@@ -285,7 +285,7 @@ export async function runGiwaIndexer(envSource: NodeJS.ProcessEnv = process.env)
         stringify({
           service: "arco-giwa-indexer",
           mode: "error",
-          error: coreError instanceof Error ? coreError.message : String(coreError),
+          error: safeErrorText(coreError),
           retryInMs: backoffMs,
         }),
       )
@@ -297,7 +297,7 @@ export async function runGiwaIndexer(envSource: NodeJS.ProcessEnv = process.env)
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runGiwaIndexer().catch((error) => {
-    console.error(error)
+    console.error(scrubUrls(error instanceof Error ? (error.stack ?? error.message) : String(error)))
     process.exit(1)
   })
 }

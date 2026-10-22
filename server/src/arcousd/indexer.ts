@@ -6,6 +6,7 @@ import { reserveEventsAbi, routerEventsAbi } from "./abi.js"
 import { reserveEventWallet, withActivityWallet } from "./activity.js"
 import type { ArcoUSDChainReader, ReserveState } from "./reader.js"
 import { deployedArcoUSD, type ArcoUSDRegistryFile, type DeployedArcoUSD } from "./registry.js"
+import { safeErrorText } from "./safe-error.js"
 
 // ArcoUSD indexer (docs/specs/arcousd-v1.md §5). Runs beside the core GIWA indexer with its own
 // cursor ("arcousd") so neither can stall the other:
@@ -351,7 +352,7 @@ export class ArcoUSDIndexer {
       this.nextSnapshotAt = now + this.options.snapshotIntervalMs
       return "taken"
     } catch (error) {
-      console.warn(`[arcousd-indexer] snapshot failed: ${error instanceof Error ? error.message : String(error)}`)
+      console.warn(`[arcousd-indexer] snapshot failed: ${safeErrorText(error)}`) // never the RPC URL
       this.nextSnapshotAt = now + Math.min(SNAPSHOT_RETRY_MS, this.options.snapshotIntervalMs)
       return "failed"
     }

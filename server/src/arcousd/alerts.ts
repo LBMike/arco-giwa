@@ -1,7 +1,7 @@
 import { parseArcoUSDAlertEnv, type ArcoUSDAlertEnv } from "./alert-config.js"
 import { anyDelivered, deliver, type AlertChannel, type Delivery } from "./notify.js"
 import { deployedArcoUSD, type ArcoUSDRegistryFile } from "./registry.js"
-import { safeErrorText } from "./safe-error.js"
+import { safeErrorText, scrubUrls } from "./safe-error.js"
 import { duration, type Finding, type Severity } from "./watch.js"
 
 // The alert book (docs/operations/arcousd-alerts.md): turns each round's findings into alert rows
@@ -506,6 +506,7 @@ function toView(record: AlertRecord): AlertView {
   }
 }
 
+// Without RPC URLs: their path carries the provider key.
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return scrubUrls(error instanceof Error ? error.message : String(error))
 }

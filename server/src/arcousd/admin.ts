@@ -2,6 +2,7 @@ import { encodeFunctionData, formatUnits, getAddress, isAddress, parseAbi, type 
 import { unsignedAdminTransaction, type UnsignedAdminTransaction } from "../evm/admin-transactions.js"
 import type { ReserveState } from "./reader.js"
 import { deployedArcoUSD, type ArcoUSDRegistryFile, type DeployedArcoUSD } from "./registry.js"
+import { scrubUrls } from "./safe-error.js"
 
 // Admin reads over what the ArcoUSD indexer already records (docs/specs/arcousd-v1.md §5), plus
 // the manual processQueue transaction builder. No chain writes: the operator signs in the
@@ -1031,8 +1032,9 @@ function sameAddress(a: string | null | undefined, b: string | null | undefined)
   return typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase()
 }
 
+// Without RPC URLs: their path carries the provider key.
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return scrubUrls(error instanceof Error ? error.message : String(error))
 }
 
 // ─────────────────────────────── Prisma ───────────────────────────────
