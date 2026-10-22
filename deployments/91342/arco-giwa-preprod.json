@@ -132,21 +132,21 @@
       },
       "depositVault": {
         "proxy": "0x4ebCE7C472DcB478d30725D0cF3675772dBB34c2",
-        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
-        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+        "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
         "logicalLabel": "aCAPIX-deposit-vault",
         "contractName": "ArcoDepositVault",
         "deployTxHash": "0x2db4346d90f12d4c6b3902c4166dffd97b20301f89353af5e231458c459ce528",
-        "blockNumber": 29712510
+        "blockNumber": 39346820
       },
       "redemptionVault": {
         "proxy": "0x43a7Fd58b855f44bADAdc260dedb45F446B4Ecba",
-        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
-        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+        "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
         "logicalLabel": "aCAPIX-redemption-vault",
         "contractName": "ArcoRedemptionVault",
         "deployTxHash": "0xde8727747e0e0dad4de2158b3c5370da7f0037ed7dbfaf8ab942ce92ed230fe3",
-        "blockNumber": 29213036
+        "blockNumber": 39346838
       },
       "priceFeed": {
         "proxy": "0x0B01f3E517C1a8749bC3306c22c95C3BA253e4ed",
@@ -181,21 +181,21 @@
       },
       "depositVault": {
         "proxy": "0xfa24a31bF1F2B149298969Ced1205FC22670C1b7",
-        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
-        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+        "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
         "logicalLabel": "iBENJI-deposit-vault",
         "contractName": "ArcoDepositVault",
         "deployTxHash": "0xb889ea0846756b622a766b374865832c9e5ac377cbd38c22a8c0acc0d7cba07c",
-        "blockNumber": 29712517
+        "blockNumber": 39346853
       },
       "redemptionVault": {
         "proxy": "0x6701eFeC11aF345E38b899cAb2673A5e6C9701f2",
-        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
-        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+        "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
         "logicalLabel": "iBENJI-redemption-vault",
         "contractName": "ArcoRedemptionVault",
         "deployTxHash": "0x61898c054dc24462b684e2b6628b97658178d5eb54c2f2b88cf1baa8efa15968",
-        "blockNumber": 29213048
+        "blockNumber": 39346868
       },
       "priceFeed": {
         "proxy": "0x92CfC86aD37ED66734A4AE311A79525ba5990680",
@@ -230,21 +230,21 @@
       },
       "depositVault": {
         "proxy": "0xf3c43cD61993f4DCc4203547acB77fDE8F56ba8b",
-        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
-        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+        "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
         "logicalLabel": "uMINT-deposit-vault",
         "contractName": "ArcoDepositVault",
         "deployTxHash": "0x4be67985678d84e0d46a2f983c277c7f2c4e49f905b93b13be82e30d7b79fd4e",
-        "blockNumber": 29712525
+        "blockNumber": 39346883
       },
       "redemptionVault": {
         "proxy": "0xc4075029B9E854A7Ef28D53749560564c607Ea67",
-        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
-        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+        "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
         "logicalLabel": "uMINT-redemption-vault",
         "contractName": "ArcoRedemptionVault",
         "deployTxHash": "0xe70406ec5666d9ee414d1f04b919bbfaf8dbb0a23d226c0582bc4a555568925e",
-        "blockNumber": 29213059
+        "blockNumber": 39346898
       },
       "priceFeed": {
         "proxy": "0x57a4637a478c88643260E0F33534c75581bEe9DA",
@@ -279,21 +279,21 @@
       },
       "depositVault": {
         "proxy": "0x63bBF5E165a23ba75aAFA71A34E74a15A422235e",
-        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
-        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+        "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
         "logicalLabel": "aBTC-deposit-vault",
         "contractName": "ArcoDepositVault",
         "deployTxHash": "0x3b3749b9e6964775eb3378f1d3a78e11ca1f08eb522bf62d106fa98b83e314eb",
-        "blockNumber": 29712533
+        "blockNumber": 39346913
       },
       "redemptionVault": {
         "proxy": "0xf24362E7704383c368bC91D0F8d9DBCf21F609bB",
-        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
-        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+        "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
         "logicalLabel": "aBTC-redemption-vault",
         "contractName": "ArcoRedemptionVault",
         "deployTxHash": "0x7ed7b375c39312dcb1965c066ca462242805bcd725db6fd58ec47001d27b5038",
-        "blockNumber": 29213070
+        "blockNumber": 39346928
       },
       "priceFeed": {
         "proxy": "0x4C3593bC3D4093d3eB11377E64089DEECdF1e140",
@@ -328,21 +328,21 @@
       },
       "depositVault": {
         "proxy": "0xB245FBCa1f3De81Fc67622Ae954C1aB9F6cB3BaB",
-        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
-        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+        "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
         "logicalLabel": "aXRP-deposit-vault",
         "contractName": "ArcoDepositVault",
         "deployTxHash": "0x1f65418326bad7a7bdd22f725cf0d44c4d615e3ed2a6d59945fe2049a792e0c3",
-        "blockNumber": 29712540
+        "blockNumber": 39346943
       },
       "redemptionVault": {
         "proxy": "0x37Ae685703eD8815fc3ddE53ff4c9Cb12dccB9A7",
-        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
-        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+        "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
         "logicalLabel": "aXRP-redemption-vault",
         "contractName": "ArcoRedemptionVault",
         "deployTxHash": "0x2de5de9d19163769c7bba8abb92031c6ae109ae0a7be7063fd3370ebe538fc26",
-        "blockNumber": 29213085
+        "blockNumber": 39346958
       },
       "priceFeed": {
         "proxy": "0xd11D8C5094e67ca55FBfaad6Bf7E459404827f42",
@@ -377,21 +377,21 @@
       },
       "depositVault": {
         "proxy": "0xB79ac567B5C9200E5E68B3053B913Bcc59f78a7F",
-        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
-        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+        "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
         "logicalLabel": "aETH-deposit-vault",
         "contractName": "ArcoDepositVault",
         "deployTxHash": "0x3185ff3e05b7a19728c66670239681a3d263f17a847624e9c4c35381afa6b88d",
-        "blockNumber": 29712543
+        "blockNumber": 39346973
       },
       "redemptionVault": {
         "proxy": "0x0Bcb1702c4dF8d0E5d9476Cbc0d31d0E583B6140",
-        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
-        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+        "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
         "logicalLabel": "aETH-redemption-vault",
         "contractName": "ArcoRedemptionVault",
         "deployTxHash": "0xe066f09c8ba09dc7f201fb71a5a1112c7c6fd01ae054c8f8a4e4c5d259d6dcac",
-        "blockNumber": 29213096
+        "blockNumber": 39346988
       },
       "priceFeed": {
         "proxy": "0xaCC6e9adDBc8d43399CFf37c81cCf2c815F03dea",
@@ -426,21 +426,21 @@
       },
       "depositVault": {
         "proxy": "0x2703bE9dBDF663c369Db2b87a72B42b97bDdB3eA",
-        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
-        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+        "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
         "logicalLabel": "bEQTY-deposit-vault",
         "contractName": "ArcoDepositVault",
         "deployTxHash": "0xae1984da6646a9382d13bfa8218b8f9760fcba03c7de444a772247b19f93259b",
-        "blockNumber": 30013138
+        "blockNumber": 39347003
       },
       "redemptionVault": {
         "proxy": "0x63a1184031C679E1625020d93234D505F0C23Acc",
-        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
-        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+        "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
         "logicalLabel": "bEQTY-redemption-vault",
         "contractName": "ArcoRedemptionVault",
         "deployTxHash": "0x5dbea40b3bc63d8f7e44adb3825b5255015d6c029824de3d0ea5ebba247c365e",
-        "blockNumber": 30013149
+        "blockNumber": 39347018
       },
       "priceFeed": {
         "proxy": "0xeC241df6E4E608C4260959Dc07D4f751372AFBa4",
@@ -475,21 +475,21 @@
       },
       "depositVault": {
         "proxy": "0x4083d23D792cAefefc97b60677c12243AAC459e5",
-        "implementation": "0xD6CBe69Ebc30460E9603E02D8d903D57d0052e40",
-        "bytecodeHash": "0x1e9e487d63157d8f325aa438c78c0092755ef729553d81958ac0c3648b0ab923",
+        "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+        "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
         "logicalLabel": "arcoUSD-deposit-vault",
         "contractName": "ArcoDepositVault",
         "deployTxHash": "0xe9c570e1ad39d49c3c5f0ef8ba74fd86f138d731c1ebd63ac4f7ed35a97859c7",
-        "blockNumber": 30357026
+        "blockNumber": 39347032
       },
       "redemptionVault": {
         "proxy": "0x5719ED2d50a3fD00852e90aFE7d6Aa4fB696ec36",
-        "implementation": "0xc7e6514bE036A5999a1e13318Df9336EDFCdFdFE",
-        "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
+        "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+        "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
         "logicalLabel": "arcoUSD-redemption-vault",
         "contractName": "ArcoRedemptionVault",
         "deployTxHash": "0x311e1c8b6eaf6a66bc7cecd3497a684484ff41b75a7c6946e6d60eb36fc47d36",
-        "blockNumber": 30357040
+        "blockNumber": 39347047
       },
       "priceFeed": {
         "proxy": "0x2b1C1Af136f8c9d637a44dc5340748e0389D1Ead",
