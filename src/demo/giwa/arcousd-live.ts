@@ -59,7 +59,7 @@ export type ArcoUsdLiveSavings = Readonly<{
    * yearly cap (what a distribution pays once the Reserve's surplus covers it).
    */
   apyPercent: number | null
-  /** The rate being paid now, in percent (0 between distributions): what the balance grows at. */
+  /** The rate being paid now, in percent (0 between distributions). */
   paidApyPercent: number | null
   depositsOpen: boolean
   withdrawalsOpen: boolean

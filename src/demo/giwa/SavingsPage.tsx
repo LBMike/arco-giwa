@@ -217,9 +217,6 @@ function SavingsDetail({ vault, tone }: { vault: GiwaCatalogItem; tone: SavingsH
           ? Number(routeReserveQuery.data) * detail.baseUsd
           : null
   const apyPercent = marketApyPercent(market)
-  // The balance grows at the rate being paid: between distributions sArcoUSD shows the distributor's cap, which it is
-  // not earning yet.
-  const accrualApyPercent = liveSavings !== null ? liveSavings.paidApyPercent : apyPercent
   const tvl = useSavingsTvl(vault, navUsd)
   const tvlText = tvl !== null ? usdCompact(tvl) : null
 
@@ -252,7 +249,9 @@ function SavingsDetail({ vault, tone }: { vault: GiwaCatalogItem; tone: SavingsH
         available={available}
         availableUsd={availableUsd}
         availableCoins={coinsHeld}
-        apyPercent={accrualApyPercent}
+        // The balance's last digits keep rising at the APY shown, also between sArcoUSD distributions (when it shows the
+        // distributor's cap); each read of the balance starts them again from the balance as read.
+        apyPercent={apyPercent}
         onDeposit={() => openTransfer("deposit")}
         onWithdraw={() => openTransfer("withdraw")}
         tone={tone}
