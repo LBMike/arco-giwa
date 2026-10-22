@@ -19,6 +19,7 @@ import {
   type ArcoUsdLive,
 } from "./arcousd-live"
 import { tokenSymbolFor, vaultImageFor } from "./catalog"
+import { buildApySeries } from "./detail-charts"
 import { arcoUSDOperationCall } from "./contracts"
 import { GetArcoUsdButton } from "./GetArcoUsd"
 import { productThroughRoute, SAVINGS_ASSET_OPTIONS } from "./savings-assets"
@@ -319,7 +320,7 @@ test("the sArcoUSD account's figures: the share price as its NAV, the paid rate,
     status: "live",
     points: [
       { takenAt: "2026-10-20T00:00:00.000Z", blockNumber: "1", sharePrice: "1", totalAssetsUsd: "1", aprBps: 0 },
-      { takenAt: "2026-10-21T00:00:00.000Z", blockNumber: "2", sharePrice: "1.0002", totalAssetsUsd: "1", aprBps: 0 },
+      { takenAt: "2026-10-21T00:00:00.000Z", blockNumber: "2", sharePrice: "1.0002", totalAssetsUsd: "1", aprBps: 450 },
       { takenAt: "not a date", blockNumber: "3", sharePrice: "1.1", totalAssetsUsd: "1", aprBps: 0 },
     ],
     realizedApyBps: 730,
@@ -327,11 +328,17 @@ test("the sArcoUSD account's figures: the share price as its NAV, the paid rate,
   assert.deepEqual(liveSavingsHistory(history), {
     productId: LIVE_SAVINGS_PRODUCT_ID,
     apy: 7.3,
+    // The rate paid at each snapshot, compounded daily like the shown APY (450 bps → 4.6%).
     points: [
-      { t: 1792454400, navBase: 1, navUsd: 1 },
-      { t: 1792540800, navBase: 1.0002, navUsd: 1.0002 },
+      { t: 1792454400, navBase: 1, navUsd: 1, apy: 0 },
+      { t: 1792540800, navBase: 1.0002, navUsd: 1.0002, apy: 4.6 },
     ],
   })
+  // The APY chart plots those rates as they are, however close the snapshots.
+  assert.deepEqual(buildApySeries(liveSavingsHistory(history)), [
+    { ts: 1792454400, value: 0 },
+    { ts: 1792540800, value: 4.6 },
+  ])
   assert.equal(liveSavingsHistory({ ...history, status: "unavailable" }), undefined)
 })
 

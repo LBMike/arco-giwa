@@ -161,7 +161,12 @@ function capApyPercent(state: NonNullable<GiwaArcoUSDSavings["savings"]>): numbe
   if (!distributor || distributor.paused || distributor.reservePaused || distributor.arcoUSDMintPaused || state.rewardsPaused) return null
   const aprBps = distributor.maxAprBps
   if (!Number.isFinite(aprBps) || aprBps <= 0) return null
-  // The server's dailyCompoundedBps: whole basis points.
+  return dailyCompoundedPercent(aprBps)
+}
+
+/** A yearly rate (bps) compounded daily, in percent: the server's dailyCompoundedBps (whole basis points) / 100. */
+function dailyCompoundedPercent(aprBps: number): number {
+  if (!(aprBps > 0)) return 0
   return Math.round((Math.pow(1 + aprBps / BPS / 365, 365) - 1) * BPS) / 100
 }
 
@@ -306,13 +311,18 @@ export function liveSavingsMarket(savings: ArcoUsdLiveSavings): GiwaMarketEntry 
   }
 }
 
-/** The savings indexer's share-price history as a vault's price history (the APY chart reads it). */
+/**
+ * The savings indexer's history as a vault's price history: the share price, and the rate being paid at each snapshot
+ * (compounded daily, like the shown APY), which the APY chart plots as it is. Snapshots are minutes apart, too close to
+ * read a yearly rate from the share price between them.
+ */
 export function liveSavingsHistory(history: GiwaArcoUSDSavingsHistory | null | undefined): GiwaPriceHistory | undefined {
   if (!history || history.status !== "live") return undefined
   const points = history.points.flatMap((point) => {
     const t = Math.floor(Date.parse(point.takenAt) / 1000)
     const price = finiteNumber(point.sharePrice)
-    return Number.isFinite(t) && price !== null && price > 0 ? [{ t, navBase: price, navUsd: price }] : []
+    if (!Number.isFinite(t) || price === null || !(price > 0)) return []
+    return Number.isFinite(point.aprBps) ? [{ t, navBase: price, navUsd: price, apy: dailyCompoundedPercent(point.aprBps) }] : [{ t, navBase: price, navUsd: price }]
   })
   return {
     productId: LIVE_SAVINGS_PRODUCT_ID,

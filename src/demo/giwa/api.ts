@@ -64,7 +64,14 @@ export type GiwaVaultLimits = {
   paymentDecimals: number
   shareDecimals: number
 }
-export type GiwaPriceHistoryPoint = { t: number; navBase: number; navUsd: number | null }
+export type GiwaPriceHistoryPoint = {
+  t: number
+  navBase: number
+  navUsd: number | null
+  /** The yearly rate paid at this point, in percent, when the history states it (sArcoUSD's snapshots); else the APY
+   * chart reads it from the price between posts. */
+  apy?: number
+}
 export type GiwaPriceHistory = { productId: string; apy: number | null; points: GiwaPriceHistoryPoint[] }
 
 export type GiwaMonitoringOverview = {

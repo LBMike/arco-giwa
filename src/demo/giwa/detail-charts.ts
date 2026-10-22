@@ -69,6 +69,10 @@ export function buildRegisteredPriceSeries(
 // the list/stat/headline show.
 export function buildApySeries(history: GiwaPriceHistory | undefined): RawPoint[] {
   const posts = sortedPosts(history)
+  // A history that states the rate paid at each point (sArcoUSD's snapshots, minutes apart) is plotted as stated.
+  if (posts.length > 0 && posts.every((point) => typeof point.apy === "number" && Number.isFinite(point.apy))) {
+    return posts.map((point) => ({ ts: point.t, value: round4(Math.max(-APY_CLAMP_PERCENT, Math.min(APY_CLAMP_PERCENT, point.apy!))) }))
+  }
   const series: RawPoint[] = []
   for (let i = 1; i < posts.length; i += 1) {
     const prev = posts[i - 1]
