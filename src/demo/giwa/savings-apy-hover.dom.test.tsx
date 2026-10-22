@@ -47,7 +47,7 @@ test("APY sparkline: pointing moves the dot and shows that day's APY, date and c
 
     // At rest: the latest APY, the change over the line, the dot at the end, no date.
     assert.match(figures(), /4\.6%/)
-    assert.match(figures(), /0\.8pp/)
+    assert.match(figures(), /0\.8%/)
     assert.equal(dot(), "100%")
     assert.doesNotMatch(figures(), new RegExp(date(start)))
 
@@ -55,14 +55,14 @@ test("APY sparkline: pointing moves the dot and shows that day's APY, date and c
     await React.act(async () => line.dispatchEvent(new w.MouseEvent("pointermove", { bubbles: true, clientX: 150 })))
     assert.match(figures(), /3\.8%/)
     assert.match(figures(), new RegExp(date(start)))
-    assert.match(figures(), /0pp/)
+    assert.match(figures(), /3\.8%0%/) // the APY, then its change: 0%
     assert.equal(dot(), "25%")
 
     // Three quarters in: the second day's step.
     await React.act(async () => line.dispatchEvent(new w.MouseEvent("pointermove", { bubbles: true, clientX: 250 })))
     assert.match(figures(), /4\.2%/)
     assert.match(figures(), new RegExp(date(start + DAY)))
-    assert.match(figures(), /0\.4pp/)
+    assert.match(figures(), /0\.4%/)
     assert.equal(dot(), "75%")
 
     // Leaving puts the latest back.

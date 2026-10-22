@@ -26,7 +26,7 @@ import {
 import { SavingsHeroCard, type SavingsHeroProps } from "./SavingsHeroCard"
 import { niceTicks, simulateSavings } from "./savings-simulation"
 import { SavingsSimulation } from "./SavingsSimulation"
-import { ppLabel, SavingsStatsRow, sparklinePath, sparklinePointAt } from "./SavingsStatsRow"
+import { apyChangeLabel, SavingsStatsRow, sparklinePath, sparklinePointAt } from "./SavingsStatsRow"
 import { SavingsTabs } from "./SavingsTabs"
 import {
   amountForPercent,
@@ -289,10 +289,10 @@ test("sparkline pointer: the point whose step covers the pointer, the dot at the
   assert.deepEqual(sparklinePointAt(points, -1), { index: 0, x: 0, y: 36 })
 })
 
-test("change in percentage points: up to two decimals, no trailing zeros", () => {
-  assert.equal(ppLabel(0.8), "0.8pp")
-  assert.equal(ppLabel(0), "0pp")
-  assert.equal(ppLabel(0.123), "0.12pp")
+test("APY change: in percent, up to two decimals, no trailing zeros", () => {
+  assert.equal(apyChangeLabel(0.8), "0.8%")
+  assert.equal(apyChangeLabel(0), "0%")
+  assert.equal(apyChangeLabel(0.123), "0.12%")
 })
 
 // ── markup ────────────────────────────────────────────────────────────────
@@ -574,7 +574,11 @@ test("figures row: APY and TVL", () => {
   }
   const withLine = renderToStaticMarkup(<SavingsStatsRow apyText="4.6%" history={history} tvlText="$1K" />)
   assert.match(withLine, />4\.6%</)
-  assert.match(withLine, /0\.8pp/)
+  // Up in green.
+  assert.match(withLine, /text-\[var\(--color-arco-up-text\)\][^>]*>.*0\.8%/)
+  const falling = { ...history, points: history.points.map((point, i) => ({ ...point, apy: [4.6, 4.2, 3.8][i] })) }
+  // Down in red.
+  assert.match(renderToStaticMarkup(<SavingsStatsRow apyText="3.8%" history={falling} tvlText="$1K" />), /text-\[var\(--color-arco-down\)\][^>]*>.*0\.8%/)
   assert.doesNotMatch(withLine, /, 20\d\d</)
 })
 
