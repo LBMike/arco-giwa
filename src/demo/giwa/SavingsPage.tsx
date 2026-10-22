@@ -23,6 +23,7 @@ import { SavingsSkeleton } from "./GiwaSkeleton"
 import { marketApyPercent, marketApyText } from "./price-policy"
 import { buildSavingsAccounts, resolveSavingsSelection, type SavingsAccount } from "./savings"
 import { SavingsAccordion } from "./SavingsAccordion"
+import { withSeededApy } from "./savings-apy-seed"
 import { chosenSavingsOption, heldCoins, heldUsd, productThroughRoute, routeFor } from "./savings-assets"
 import { reserveAssetLabel, savingsBacking, savingsDepositLabel, savingsExposure } from "./savings-backing"
 import { savingsAssetCategory, savingsCategoryFromSearch } from "./savings-category"
@@ -163,7 +164,8 @@ function SavingsDetail({ vault, tone }: { vault: GiwaCatalogItem; tone: SavingsH
       ...vaultDetail,
       market,
       apyText: marketApyText(market),
-      history: liveSavingsHistory(liveHistoryQuery.data),
+      // The APY chart's month before the paid rate begins is seeded (savings-apy-seed.ts).
+      history: withSeededApy(liveSavingsHistory(liveHistoryQuery.data), Math.floor(Date.now() / 1000)),
       baseUsd: 1,
       // The Reserve's free USDC: what a withdrawal in the account's own coin can take at once.
       instantLiquidityUsd: ownLiquidity,
