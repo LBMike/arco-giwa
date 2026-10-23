@@ -2,13 +2,15 @@ import { BrandMark } from "../components/BrandMark"
 import type { FundParty, ListedFund } from "./listed-funds"
 
 // Product marks. RRDY, CMBBOND, kTW50 and JX are DigiFT's token marks; HOME is NUVA's nvHOME vault
-// mark. A missing file falls back to BrandMark's initial badge.
+// mark; PPLUS shows the Bitwise mark, as Ember lists it. A missing file falls back to BrandMark's
+// initial badge.
 const MARK_FILES: Record<string, string> = {
   RRDY: "/logos/rrdy.png",
   CMBBOND: "/logos/cmbbond.png",
   HOME: "/logos/nuva-home.svg",
   JX: "/logos/jx.png",
   kTW50: "/logos/ktw50.png",
+  PPLUS: "/logos/bitwise.png",
 }
 
 export function fundMarkSrc(symbol: string): string | undefined {

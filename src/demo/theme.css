@@ -110,6 +110,15 @@
   --color-savings-aurora-4: rgba(225, 224, 204, 0.2);
 }
 
+/* The Featured Funds card (FeaturedFunds.tsx, data-funds-hero): the Savings card's backdrop, with its aurora in
+   greens instead of blues. Re-scoped here so the aurora component and its loops stay the Savings card's own. */
+.arco-demo [data-funds-hero] {
+  --color-savings-aurora-1: var(--color-funds-aurora-1);
+  --color-savings-aurora-2: var(--color-funds-aurora-2);
+  --color-savings-aurora-3: var(--color-funds-aurora-3);
+  --color-savings-aurora-4: var(--color-funds-aurora-4);
+}
+
 /* On a phone the card is narrow and tall, so the curtains crowd behind its text: fainter there. */
 @media (max-width: 639px) {
   .arco-demo .savings-aurora-a,
@@ -194,7 +203,9 @@
    rule in index.css forces Almarai for the landing; this more-specific rule
    (and the explicit element list) overrides it inside `.arco-demo` only — the
    landing keeps Almarai + Instrument Serif untouched.
-   Mono values still use the system mono stack via Tailwind's `font-mono`.
+   Values read precisely (`font-mono`: amounts, rates, addresses, code) are
+   Geist too, with tabular figures so digits keep one width and columns line
+   up. No system monospace (Menlo, SF Mono) anywhere in the app.
    ────────────────────────────────────────────────────────────────────────── */
 .arco-demo,
 .arco-demo * {
@@ -206,8 +217,9 @@
 .arco-demo kbd,
 .arco-demo samp,
 .arco-demo pre {
-  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
-    'Liberation Mono', monospace;
+  font-family: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Roboto', sans-serif;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -257,6 +269,26 @@
   --color-risk-medium-ink: #8a5100;
   --color-risk-high-bg: #fbdcdc;
   --color-risk-high-ink: #b3261e;
+
+  /* funds-list Risk profile meter (Figma 3:2): a pill of three bars, lit by tier (low 1, medium 2, high 3).
+     Figma shows the medium tier (#FFC044); low and high follow it in green and red. */
+  --color-risk-meter-line: rgba(188, 182, 239, 0.3);   /* pill border (Figma 3:3) */
+  --color-risk-meter-fill: rgba(188, 182, 239, 0.05);  /* pill fill (Figma 3:3) */
+  --color-risk-meter-off: rgba(77, 77, 110, 0.4);      /* unlit bar (Figma 3:6) */
+  --color-risk-meter-low: #2fbf71;
+  --color-risk-meter-medium: #ffc044;                  /* lit bar (Figma 3:4) */
+  --color-risk-meter-high: #f0524f;
+
+  /* Funds page: the Featured Funds card (Figma 4:148) on the Savings card's dark backdrop, with a green aurora,
+     and the ember-style fund rows. */
+  --color-funds-aurora-1: rgba(16, 185, 129, 0.2);     /* aurora: emerald curtain (kept low so the 24px rate stays >= 3:1) */
+  --color-funds-aurora-2: rgba(52, 211, 153, 0.16);    /* aurora: mint curtain */
+  --color-funds-aurora-3: rgba(5, 150, 105, 0.18);     /* aurora: deep green pool, behind the metrics */
+  --color-funds-aurora-4: rgba(167, 243, 208, 0.1);    /* aurora: pale mint ribbon */
+  --color-funds-hero-rate: #839f55;                    /* rate figure on the card (Figma 4:193); 24px, >= 3:1 on the backdrop */
+  --color-funds-hero-tile: rgba(255, 255, 255, 0.1);   /* round tile behind the fund mark (Figma 4:175) */
+  --color-funds-row-line: #e8ebf3;                     /* fund row outline */
+  --color-funds-row-hover: #f6f8fc;                    /* fund row under the pointer */
 
   /* savings page */
   --color-arco-savings-accent: #0bb538;  /* selected accept-asset card border (Figma #0BB538) */
@@ -318,6 +350,8 @@
   --radius-row: 10px;      /* table rows */
   --radius-strategy: 12px; /* strategy cards / detail cards */
   --radius-pill: 9999px;   /* badges / chips */
+  --radius-funds-hero: 24px; /* Featured Funds card (Figma 4:156) */
+  --radius-funds-row: 20px;  /* ember-style fund rows */
 
   /* shadows */
   --shadow-control: 0 0 0 0.5px var(--color-arco-border);

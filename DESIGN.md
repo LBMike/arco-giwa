@@ -110,7 +110,7 @@ cta-accent      #E1E0CC        (cream reserved for brand moments)
 
 - **Sans — `Almarai`** (default). System fallback for body, labels, UI.
 - **Display italic — `Instrument Serif`, italic only**. Editorial accent. **Marketing only** by default — Admin and LP do not use serif italic.
-- **Mono — system stack** (`ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace`). Used for any value a person reads precisely: numbers, identifiers, tickers, addresses, filenames, code.
+- **Mono — the `font-mono` class**. In the app (`.arco-demo`) it is **Geist with tabular figures**, not a system monospace (no Menlo or SF Mono): digits keep one width so values line up. Used for any value a person reads precisely: numbers, identifiers, tickers, addresses, filenames, code.
 
 ### 2.2 Type direction per surface
 

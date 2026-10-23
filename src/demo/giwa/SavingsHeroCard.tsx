@@ -15,11 +15,11 @@ const FOCUS_ON_HERO = "focus-visible:outline focus-visible:outline-2 focus-visib
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const SLIDE_MS = 6_000
 
-const HERO_BACKGROUND = {
+export const HERO_BACKGROUND = {
   backgroundImage:
     "linear-gradient(135deg, var(--color-arco-hero-deco-1) 0%, var(--color-arco-hero-deco-2) 55%, var(--color-arco-hero) 100%)",
 }
-const HERO_GRID = {
+export const HERO_GRID = {
   backgroundImage:
     "linear-gradient(var(--color-savings-on-hero-fill) 1px, transparent 1px), linear-gradient(90deg, var(--color-savings-on-hero-fill) 1px, transparent 1px)",
   backgroundSize: "28px 28px",
@@ -36,7 +36,7 @@ const AURORA: readonly Readonly<{ name: string; box: CSSProperties; color: strin
   { name: "savings-aurora-d", box: { left: "36%", top: "-55%", width: "14%", height: "210%" }, color: "var(--color-savings-aurora-4)" },
 ]
 
-function HeroAurora() {
+export function HeroAurora() {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
       {AURORA.map((curtain) => (

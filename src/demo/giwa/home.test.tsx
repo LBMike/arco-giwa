@@ -115,7 +115,7 @@ test("Home renders one h1, Savings/Funds cards with data counts, and the Stocks 
   // The deployed vaults first, then the listed funds with their own headline rate (sr-only label).
   assert.equal(
     linkText(html, "/funds"),
-    "Funds 6 products L LEGACY — APY RRDY 3.66% 7-day yield CMBBOND 5.97% Yield to maturity HOME 7% Target APY JX 39.66% 12-month return kTW50 55.72% 6-month return Browse funds",
+    "Funds 7 products L LEGACY — APY RRDY 3.66% 7-day yield CMBBOND 5.97% Yield to maturity HOME 7% Target APY JX 39.66% 12-month return kTW50 55.72% 6-month return PPLUS 12.53% 30-day avg. APY Browse funds",
   )
   assert.equal(linkText(html, "/stocks"), "View all stocks")
   const invest = html.slice(html.indexOf('aria-labelledby="home-invest"'), html.indexOf('aria-labelledby="home-stocks"'))
@@ -153,7 +153,7 @@ test("Home fund chips use configured identities and published, legacy, implied r
   })
   assert.equal(
     linkText(html, "/funds"),
-    "Funds 7 products Credit Fund 0% APY N New Fund 3.46% APY RRDY 3.66% 7-day yield CMBBOND 5.97% Yield to maturity HOME 7% Target APY JX 39.66% 12-month return kTW50 55.72% 6-month return Browse funds",
+    "Funds 8 products Credit Fund 0% APY N New Fund 3.46% APY RRDY 3.66% 7-day yield CMBBOND 5.97% Yield to maturity HOME 7% Target APY JX 39.66% 12-month return kTW50 55.72% 6-month return PPLUS 12.53% 30-day avg. APY Browse funds",
   )
   assert.match(html, /src="\/logos\/credit.svg"/)
 })
@@ -163,5 +163,5 @@ test("a deployed fund chip names the fund deck's rate when no rate is published"
     client.setQueryData(["giwa", "catalog"], [vault("umint", "auMINT", { kind: "product" })])
     client.setQueryData(["giwa", "market", GIWA_CHAIN_ID], [{ productId: "umint", apy: null, impliedApy: 3.49 }])
   })
-  assert.match(linkText(html, "/funds"), /^Funds 6 products (\S )?auMINT 3\.55% 7-day yield RRDY 3\.66% 7-day yield /)
+  assert.match(linkText(html, "/funds"), /^Funds 7 products (\S )?auMINT 3\.55% 7-day yield RRDY 3\.66% 7-day yield /)
 })

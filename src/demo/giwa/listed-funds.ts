@@ -108,6 +108,10 @@ const KTW50_PAGE = `${DIGIFT_PRODUCT}kTW50`
 const KTW50_LAUNCH = "https://insights.digift.io/digift-and-kgi-bring-taiwans-ai-hardware-story-on-chain-with-ktw50/"
 const KGI_ETF = "https://www.kgifund.com.tw/Fund/Detail?fundID=J023"
 const KGI_FACTSHEET = "https://www.kgifund.com.tw/Upload/Files/ManageFileUploadMonths/J023.pdf"
+const PPLUS_EMBER = "https://ember.so/earn/PPLUS"
+const PPLUS_BITWISE = "https://onchain.bitwiseinvestments.com/vaults/pplus"
+const EMBER_RISKS = "https://learn.ember.so/ember-protocol/legal/risk-disclosure"
+const PPLUS_CONTRACT = "0xbc5d3722376d44f3bC316C6EA61C9Bd553Be8CBe"
 
 export const LISTED_FUNDS: readonly ListedFund[] = [
   {
@@ -452,6 +456,62 @@ export const LISTED_FUNDS: readonly ListedFund[] = [
       { label: "KGI factsheet", href: KGI_FACTSHEET },
     ],
     token: { platform: "DigiFT", networks: ["Ethereum"], contract: null },
+  },
+  {
+    id: "bitwise-pplus",
+    symbol: "PPLUS",
+    name: "Bitwise Premium+ RWA Vault",
+    category: "Prime Credit",
+    issuerKey: "ember",
+    // Ember Protocol operates the vault and issues the PPLUS tokens; Bitwise curates the strategy.
+    issuer: { name: "Ember Protocol" },
+    manager: { name: "Bitwise", logo: "/logos/bitwise.png" },
+    about: [
+      "PPLUS is a USDC vault that runs a leveraged credit strategy across tokenized real-world assets. Bitwise designs the strategy and recommends the allocations; Ember Protocol operates the vault and executes every transaction.",
+      "The vault holds tokenized private credit such as Huma PST, sUSDai and Hastra PRIME, borrows against it on DeFi lending markets at up to 5x leverage, and targets about 5% in a Bitwise-curated Morpho lending vault as a liquidity sleeve.",
+    ],
+    underlying: "Tokenized private credit (Huma PST, sUSDai, Hastra PRIME), levered up to 5x",
+    exposure: "Private credit, leveraged",
+    aum: { value: "$14.5M", usd: 14_500_000, asOf: "2026-10-23", label: "TVL" },
+    metric: { label: "30-day avg. APY", value: "12.53%", asOf: "2026-10-23" },
+    metricNote: "Ember's 30-day average before the 10% performance fee (11.28% after it). Bitwise targets 10%+, variable and not guaranteed.",
+    rate: 12.53,
+    price: "$1.0222",
+    liquidity: "Withdrawals settle T+4 up to 25% of the vault, T+7 above that",
+    minInvestment: "0.1 USDC",
+    fees: { management: 0.65, performance: 10, note: "0.1% withdrawal fee, returned to the vault" },
+    settlement: "Deposit in USDC · Withdrawal T+4 to T+7 at the NAV on the settlement date",
+    redemptionDays: 7,
+    portfolio: {
+      snapshot: {
+        title: "Allocation",
+        scope: "PPLUS vault",
+        asOf: "2026-10-23",
+        sourceLabel: "Bitwise vault page",
+        sourceUrl: PPLUS_BITWISE,
+        partial: true,
+        rows: [
+          { label: "Huma PST", percent: 53.58 },
+          { label: "USDai", percent: 28.08 },
+          { label: "Hastra PRIME", percent: 15.77 },
+          { label: "BPRIME liquidity sleeve", percent: 0.29 },
+        ],
+      },
+    },
+    facts: [
+      { label: "Roles", value: "Bitwise curates the strategy but does not hold the assets or execute trades; Ember Protocol operates the vault and executes all transactions through MPC wallets.", sourceLabel: "Bitwise vault page", sourceUrl: PPLUS_BITWISE },
+      { label: "Leverage", value: "3x to 5x across tokenized RWAs. In adverse markets the lending protocols can liquidate positions.", sourceLabel: "Bitwise vault page", sourceUrl: PPLUS_BITWISE },
+      { label: "Exposure split", value: "Targets about 95% in levered RWA positions and about 5% in a Bitwise-curated Morpho lending vault as a liquidity sleeve.", asOf: "2026-10-23", sourceLabel: "Bitwise vault page", sourceUrl: PPLUS_BITWISE },
+      { label: "Net returns", value: "8.96% a year since the vault's first data on 23 July 2026, and 6.82% over the last 30 days, annualized after all fees.", asOf: "2026-10-23", sourceLabel: "Bitwise vault page", sourceUrl: PPLUS_BITWISE },
+      { label: "Access", value: "Non-U.S. persons only. The vault's capacity is about $100M.", sourceLabel: "Bitwise vault page", sourceUrl: PPLUS_BITWISE },
+      { label: "Vault", value: "An ERC-4626 vault on Ethereum and a native vault on Sui. The code was deployed on 21 July 2026 and the vault launched on 22 September 2026.", sourceLabel: "Bitwise vault page", sourceUrl: PPLUS_BITWISE },
+    ],
+    docs: [
+      { label: "PPLUS on Ember", href: PPLUS_EMBER },
+      { label: "Bitwise vault page", href: PPLUS_BITWISE },
+      { label: "Ember risk disclosure", href: EMBER_RISKS },
+    ],
+    token: { platform: "Ember", networks: ["Ethereum", "Sui"], contract: PPLUS_CONTRACT, explorerUrl: `https://etherscan.io/address/${PPLUS_CONTRACT}` },
   },
 ]
 
