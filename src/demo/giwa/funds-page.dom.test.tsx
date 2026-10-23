@@ -1,5 +1,5 @@
 // The Funds page in a browser DOM: the Featured card's arrows and dots switch funds, the tabs narrow the list (arrow
-// keys move between them), and AUM / APY sort it. Gated like the other DOM tests (GIWA_HOST_DOM_RUNTIME = a jsdom
+// keys move between them), the Risk profile card opens and closes, and AUM / APY sort it. Gated like the other DOM tests (GIWA_HOST_DOM_RUNTIME = a jsdom
 // package.json).
 
 import assert from "node:assert/strict"
@@ -9,7 +9,7 @@ import test from "node:test"
 type AnyModule = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 const runtime = process.env.GIWA_HOST_DOM_RUNTIME
 
-test("Funds page: Featured arrows and dots, tabs and sorting (set GIWA_HOST_DOM_RUNTIME)", { skip: !runtime }, async () => {
+test("Funds page: Featured arrows and dots, tabs, Risk profile card and sorting (set GIWA_HOST_DOM_RUNTIME)", { skip: !runtime }, async () => {
   const { JSDOM } = createRequire(runtime!)("jsdom")
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: "http://localhost/funds", pretendToBeVisual: true })
   const w = dom.window
@@ -30,7 +30,7 @@ test("Funds page: Featured arrows and dots, tabs and sorting (set GIWA_HOST_DOM_
 
     const card = () => element.querySelector('[data-testid="featured-fund"]')!
     const featuredName = () => card().querySelector("a p")!.textContent
-    const rows = () => [...element.querySelectorAll('[data-testid="fund-row"] a')].map((link) => link.textContent!.split(/\s|·/)[0])
+    const rows = () => [...element.querySelectorAll('[data-testid="fund-row"] a[href^="/product/"]')].map((link) => link.textContent!.split(/\s|·/)[0])
     const click = async (target: Element) => React.act(async () => target.dispatchEvent(new w.MouseEvent("click", { bubbles: true })))
     const byLabel = (label: string) => element.querySelector(`[aria-label="${label}"]`)!
     const tab = (label: string) => [...element.querySelectorAll('[role="tab"]')].find((node) => node.textContent === label)!
@@ -58,6 +58,26 @@ test("Funds page: Featured arrows and dots, tabs and sorting (set GIWA_HOST_DOM_
     assert.deepEqual(rows(), ["JX"])
     assert.equal(w.document.activeElement, tab("Equity"))
     await click(tab("All Funds"))
+
+    // Risk profile: a click opens HOME's card, Escape closes it and returns focus, a press elsewhere closes it.
+    const meter = () => element.querySelector('[data-testid="fund-row"] button[data-risk]') as HTMLButtonElement
+    const panel = () => w.document.getElementById(meter().getAttribute("aria-controls")!)!
+    assert.equal(meter().getAttribute("aria-expanded"), "false")
+    await click(meter())
+    assert.equal(meter().getAttribute("aria-expanded"), "true")
+    assert.equal((panel() as HTMLElement).hidden, false)
+    assert.ok(panel().textContent!.includes("Up to 3 business days"))
+    meter().focus()
+    await React.act(async () => w.document.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })))
+    assert.equal(meter().getAttribute("aria-expanded"), "false")
+    assert.equal((panel() as HTMLElement).hidden, true)
+    assert.equal(w.document.activeElement, meter())
+    await click(meter())
+    await React.act(async () => w.document.body.dispatchEvent(new w.Event("pointerdown", { bubbles: true })))
+    assert.equal(meter().getAttribute("aria-expanded"), "false")
+    await click(meter())
+    await click(meter())
+    assert.equal(meter().getAttribute("aria-expanded"), "false") // a second click closes it
 
     // Sorting: AUM high to low, then low to high; APY high to low.
     await click(byLabel("Sort by AUM"))

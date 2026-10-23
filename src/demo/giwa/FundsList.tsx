@@ -145,15 +145,16 @@ function FundRow({ entry }: { entry: LineupFund }) {
               ·
             </span>
             {/* On a phone the row is narrow: the symbol shows, the name is still read out. */}
-            <span className="sr-only sm:not-sr-only">{fund.name}</span>
+            <span className="sr-only sm:not-sr-only sm:whitespace-nowrap">{fund.name}</span>
           </Link>
           <span className={`mt-0.5 block truncate text-sm leading-5 ${SOFT}`}>{entry.type}</span>
         </div>
       </div>
 
-      {/* A grid item keeps its z-index without being positioned, so on a phone the risk note can open across the row. */}
-      <div className="z-10 flex justify-self-start hover:z-20 focus-within:z-20 sm:relative">
-        <RiskProfile level={entry.risk} risks={entry.risks} />
+      {/* A grid item keeps its z-index without being positioned, so on a phone the risk card can open across the row;
+          an open card lifts its row above the rows below it. */}
+      <div className="z-10 flex justify-self-start hover:z-20 focus-within:z-20 has-[[data-open=true]]:z-30 sm:relative">
+        <RiskProfile profile={entry.risk} />
       </div>
 
       <div className={`${WIDE_ONLY} font-mono text-base text-[var(--color-arco-ink)]`}>

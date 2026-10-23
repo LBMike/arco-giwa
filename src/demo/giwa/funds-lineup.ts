@@ -1,7 +1,7 @@
 // The Funds page lineup: the funds Arco lists on GIWA, in the order the Featured Funds card shows them. Cash
 // management funds are not listed here (their pages and search entries stay). Each entry adds what the page needs
-// beyond the fund's own record: its tab, the type under its name, its risk tier and the risks named on hover, and the
-// sentence on its Featured card.
+// beyond the fund's own record: its tab, the type under its name, its Risk profile, and the sentence on its Featured
+// card.
 
 import type { RiskLevel } from "./RiskTag"
 import { listedFundById, type ListedFund } from "./listed-funds"
@@ -15,63 +15,86 @@ export const FUNDS_TABS: readonly Readonly<{ id: FundsTab; label: string }>[] = 
   { id: "equity", label: "Equity" },
 ]
 
+/** What the Risk profile shows when it opens (after app.sky.money/earn): the tier, a short account of the risk, three
+ * facts and where to read more. */
+export type FundRiskProfile = Readonly<{
+  level: RiskLevel
+  summary: string
+  /** What the fund is exposed to. */
+  exposure: string
+  liquidation: string
+  withdrawals: string
+  /** The fund's own risk document: one of its docs, by label. */
+  learnMore: Readonly<{ label: string; href: string }>
+}>
+
 export type LineupFund = Readonly<{
   fund: ListedFund
   tab: Exclude<FundsTab, "all">
   /** The kind of fund, under its name. */
   type: string
-  risk: RiskLevel
-  /** The main risks, shown when pointing at the Risk profile. */
-  risks: readonly string[]
+  risk: FundRiskProfile
   /** One sentence on the Featured Funds card. */
   blurb: string
 }>
 
-type LineupEntry = Omit<LineupFund, "fund"> & { id: string }
+type LineupEntry = Omit<LineupFund, "fund" | "risk"> & { id: string; risk: Omit<FundRiskProfile, "learnMore"> & { learnMore: string } }
 
+// Credit funds are Medium; equity funds are High.
 const LINEUP: readonly LineupEntry[] = [
   {
     id: "nuva-home",
     tab: "credit",
     type: "HELOC Private Credit",
-    risk: "medium",
-    risks: [
-      "Borrowers can fall behind or default; a first-loss tranche takes losses before HOME holders.",
-      "Falling U.S. home prices weaken the collateral, and most loans are second-lien.",
-      "Withdrawals take up to 3 U.S. business days.",
-    ],
+    risk: {
+      level: "medium",
+      summary:
+        "Private credit backed by U.S. home equity lines of credit. Borrowers can fall behind or default and falling home prices weaken the collateral; a first-loss tranche takes losses before HOME holders.",
+      exposure: "U.S. HELOCs",
+      liquidation: "None",
+      withdrawals: "Up to 3 business days",
+      learnMore: "HOME deep dive",
+    },
     blurb: "Private credit backed by U.S. home equity lines of credit that Figure originates and services, with a first-loss tranche ahead of holders.",
   },
   {
     id: "digift-jx",
     tab: "equity",
     type: "Japan Equity",
-    risk: "high",
-    risks: [
-      "Japanese share prices can fall sharply.",
-      "Returns in dollars move with the yen.",
-      "Concentrated in high-dividend, value-tilted stocks.",
-    ],
+    risk: {
+      level: "high",
+      summary:
+        "Japanese listed equities chosen for high dividends and value. Share prices can fall sharply, and returns in dollars move with the yen.",
+      exposure: "Japanese equities",
+      liquidation: "None",
+      withdrawals: "T+4",
+      learnMore: "DigiFT product page",
+    },
     blurb: "SBI Asset Management's high-conviction portfolio of Japanese listed equities, chosen for high dividends and value.",
   },
   {
     id: "bitwise-pplus",
     tab: "credit",
     type: "Levered Credit",
-    risk: "high",
-    risks: [
-      "Up to 5x leverage: losses are magnified and lending markets can liquidate positions.",
-      "Relies on third-party protocols, RWA issuers and their price oracles.",
-      "Withdrawals settle in T+4 to T+7.",
-    ],
+    risk: {
+      level: "medium",
+      summary:
+        "Tokenized private credit, borrowed against at up to 5x on DeFi lending markets. Leverage magnifies losses and positions can be liquidated; the vault relies on third-party protocols and price oracles.",
+      exposure: "Tokenized private credit",
+      liquidation: "Yes, up to 5x leverage",
+      withdrawals: "T+4 to T+7",
+      learnMore: "Ember risk disclosure",
+    },
     blurb: "A leveraged credit strategy across tokenized real-world assets, curated by Bitwise and operated by Ember Protocol.",
   },
 ]
 
-export const FUNDS_LINEUP: readonly LineupFund[] = LINEUP.map(({ id, ...entry }) => {
+export const FUNDS_LINEUP: readonly LineupFund[] = LINEUP.map(({ id, risk, ...entry }) => {
   const fund = listedFundById(id)
   if (!fund) throw new Error(`Funds lineup: no listed fund "${id}"`)
-  return { fund, ...entry }
+  const doc = fund.docs.find((entry) => entry.label === risk.learnMore)
+  if (!doc) throw new Error(`Funds lineup: ${fund.symbol} has no document "${risk.learnMore}"`)
+  return { fund, ...entry, risk: { ...risk, learnMore: { label: doc.label, href: doc.href } } }
 })
 
 export function lineupForTab(tab: FundsTab, funds: readonly LineupFund[] = FUNDS_LINEUP): readonly LineupFund[] {

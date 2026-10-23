@@ -24,17 +24,22 @@ test("the lineup is HOME, JX and PPLUS; Credit holds HOME and PPLUS, Equity hold
   assert.deepEqual(FUNDS_TABS.map((tab) => tab.label), ["All Funds", "Credit", "Equity"])
   assert.deepEqual(lineupForTab("credit").map((entry) => entry.fund.symbol), ["HOME", "PPLUS"])
   assert.deepEqual(lineupForTab("equity").map((entry) => entry.fund.symbol), ["JX"])
+  // Credit funds are Medium, equity funds High.
   assert.deepEqual(
-    FUNDS_LINEUP.map((entry) => [entry.type, entry.risk]),
+    FUNDS_LINEUP.map((entry) => [entry.type, entry.risk.level, entry.risk.liquidation, entry.risk.withdrawals]),
     [
-      ["HELOC Private Credit", "medium"],
-      ["Japan Equity", "high"],
-      ["Levered Credit", "high"],
+      ["HELOC Private Credit", "medium", "None", "Up to 3 business days"],
+      ["Japan Equity", "high", "None", "T+4"],
+      ["Levered Credit", "medium", "Yes, up to 5x leverage", "T+4 to T+7"],
     ],
   )
   for (const entry of FUNDS_LINEUP) {
-    assert.ok(entry.risks.length >= 2 && entry.risks.every((risk) => risk.endsWith(".")), `${entry.fund.symbol} risks`)
-    assert.ok(entry.blurb.length > 40, `${entry.fund.symbol} blurb`)
+    const { risk, fund } = entry
+    assert.ok(risk.summary.length > 60 && risk.summary.endsWith("."), `${fund.symbol} summary`)
+    assert.ok(risk.exposure.length > 0, `${fund.symbol} exposure`)
+    // The link is one of the fund's own documents.
+    assert.ok(fund.docs.some((doc) => doc.href === risk.learnMore.href) && risk.learnMore.href.startsWith("https://"), `${fund.symbol} learn more`)
+    assert.ok(entry.blurb.length > 40, `${fund.symbol} blurb`)
   }
 })
 
@@ -91,18 +96,32 @@ test("the list drops cash management funds, the Strategies cards and the Base As
   }
 })
 
-test("Risk profile lights one, two or three bars and names the risks", () => {
-  const bars = (level: "low" | "medium" | "high") => {
-    const html = renderToStaticMarkup(<RiskProfile level={level} risks={["One risk.", "Another risk."]} />)
-    return { lit: html.split('data-lit="true"').length - 1, off: html.split('data-lit="false"').length - 1, html }
+test("Risk profile lights one, two or three bars and opens a card with the tier, the risk and where to read more", () => {
+  const profile = (level: "low" | "medium" | "high") => ({
+    level,
+    summary: "A short account of what can go wrong with this fund and who takes the losses.",
+    exposure: "Something",
+    liquidation: "None",
+    withdrawals: "Instant",
+    learnMore: { label: "Risks", href: "https://example.com/risks" },
+  })
+  const render = (level: "low" | "medium" | "high") => {
+    const html = renderToStaticMarkup(<RiskProfile profile={profile(level)} />)
+    return { lit: html.split('data-lit="true"').length - 1, off: html.split('data-lit="false"').length - 1, segments: html.split('data-segment="lit"').length - 1, html }
   }
-  assert.deepEqual([bars("low").lit, bars("medium").lit, bars("high").lit], [1, 2, 3])
-  assert.deepEqual([bars("low").off, bars("medium").off, bars("high").off], [2, 1, 0])
-  const { html } = bars("medium")
-  assert.match(html, /aria-label="Medium Risk"/)
-  const describedBy = html.match(/aria-describedby="([^"]+)"/)?.[1]
-  assert.ok(describedBy && html.includes(`id="${describedBy}" role="tooltip"`), "the button names its tooltip")
-  assert.match(html, /role="tooltip"[^>]*>.*Medium Risk.*One risk\..*Another risk\./)
+  assert.deepEqual([render("low").lit, render("medium").lit, render("high").lit], [1, 2, 3])
+  assert.deepEqual([render("low").off, render("medium").off, render("high").off], [2, 1, 0])
+  assert.deepEqual([render("low").segments, render("medium").segments, render("high").segments], [1, 2, 3])
+
+  const { html } = render("medium")
+  // Closed until pointed at, clicked or tapped; the meter names and controls its card.
+  assert.match(html, /aria-label="Risk profile: Medium" aria-expanded="false" aria-controls="([^"]+)"/)
+  const panelId = html.match(/aria-controls="([^"]+)"/)![1]!
+  assert.match(html, new RegExp(`id="${panelId}" role="group" aria-labelledby="[^"]+" hidden=""`)) // takes no space while closed
+  // Risk profile · tier · bar · summary · Exposure / Liquidation risk / Withdrawals · Learn more about risk.
+  const order = [">Risk profile<", ">Medium<", 'data-segment="lit"', ">A short account", ">Exposure<", ">Liquidation risk<", ">Withdrawals<", "Learn more about risk"].map((text) => html.indexOf(text))
+  assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1]!)), JSON.stringify(order))
+  assert.match(html, /<a href="https:\/\/example\.com\/risks" target="_blank" rel="noopener noreferrer"/)
   assert.ok(html.includes("bg-[var(--color-risk-meter-medium)]"))
 })
 
