@@ -3,7 +3,7 @@
 // are gone.
 
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
@@ -65,6 +65,11 @@ test("the page opens on Featured Funds with HOME first, then the list rows in li
   assert.ok(card.includes(">NUVA HOME Vault<") && card.includes(">HELOC Private Credit<"))
   assert.ok(card.includes(">Target APY<") && card.includes(">7%<") && card.includes(">$10.01M<") && card.includes('alt="GIWA"'))
   assert.ok(card.includes('href="/product/nuva-home"'))
+  // The mark in its glass orb: 280px on wide screens, 88px in the logo's place below xl.
+  assert.equal(card.split('src="/logos/orb/nuva-home.svg"').length - 1, 2)
+  assert.match(card, /data-orb-size="280" class="funds-orb block" style="--funds-orb-size:280px"/)
+  assert.match(card, /data-orb-size="88" class="funds-orb block" style="--funds-orb-size:88px"/)
+  assert.match(html, /data-funds-hero="true"[^>]*style="background-image:linear-gradient\(135deg, var\(--color-funds-hero-1\)/)
   for (const symbol of ["HOME", "JX", "PPLUS"]) assert.ok(card.includes(`aria-label="Show ${symbol}"`), symbol)
   assert.ok(card.includes('aria-label="Previous featured fund"') && card.includes('aria-label="Next featured fund"'))
 
@@ -124,6 +129,17 @@ test("Risk profile lights one, two or three bars and opens a card with the tier,
   // The phone's bottom sheet renders nothing until a tap opens it.
   assert.doesNotMatch(html, /role="dialog"|data-testid="risk-sheet"/)
   assert.ok(html.includes("bg-[var(--color-risk-meter-medium)]"))
+})
+
+test("every fund in the lineup has a white orb mark on disk, and the orb holds still under reduced motion", () => {
+  for (const entry of FUNDS_LINEUP) {
+    assert.match(entry.orb.src, /^\/logos\/orb\//, entry.fund.symbol)
+    assert.ok(existsSync(`public${entry.orb.src}`), `${entry.fund.symbol} ${entry.orb.src}`)
+    assert.match(entry.orb.width, /^\d+%$/)
+  }
+  const css = readFileSync("src/demo/theme.css", "utf8")
+  assert.match(css, /\.arco-demo \.funds-orb \{/)
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.arco-demo \.funds-orb \{ animation: none; \}/)
 })
 
 test("values read precisely use Geist with tabular figures, never a system monospace", () => {

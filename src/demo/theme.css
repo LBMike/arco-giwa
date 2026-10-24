@@ -110,13 +110,70 @@
   --color-savings-aurora-4: rgba(225, 224, 204, 0.2);
 }
 
-/* The Featured Funds card (FeaturedFunds.tsx, data-funds-hero): the Savings card's backdrop, with its aurora in
-   greens instead of blues. Re-scoped here so the aurora component and its loops stay the Savings card's own. */
+/* The Featured Funds card (FeaturedFunds.tsx, data-funds-hero): the Savings card's grid and aurora on an espresso
+   backdrop, the aurora in cream instead of blues. Re-scoped here so the aurora component and its loops stay the
+   Savings card's own. */
 .arco-demo [data-funds-hero] {
   --color-savings-aurora-1: var(--color-funds-aurora-1);
   --color-savings-aurora-2: var(--color-funds-aurora-2);
   --color-savings-aurora-3: var(--color-funds-aurora-3);
   --color-savings-aurora-4: var(--color-funds-aurora-4);
+}
+
+/* The fund's mark in a dark glass orb on the Featured Funds card (FundOrb.tsx): a smoked-glass sphere with a cream
+   rim light, a top shine and the mark glowing cream inside. Sizes scale with --funds-orb-size (set on the orb), so one
+   look serves the 280px orb on wide screens and the small one beside the title. It floats slowly; still under reduced
+   motion. */
+.arco-demo .funds-orb {
+  --funds-orb-size: 280px;
+  position: relative;
+  width: var(--funds-orb-size);
+  height: var(--funds-orb-size);
+  border-radius: 9999px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 56%, #24211d 0%, #121110 52%, #050505 100%);
+  box-shadow:
+    inset 0 0 0 calc(var(--funds-orb-size) * 0.005 + 1px) rgba(225, 224, 204, 0.22),
+    inset 0 calc(var(--funds-orb-size) * 0.09) calc(var(--funds-orb-size) * 0.2) rgba(0, 0, 0, 0.65),
+    inset 0 calc(var(--funds-orb-size) * -0.08) calc(var(--funds-orb-size) * 0.16) rgba(225, 224, 204, 0.07),
+    0 calc(var(--funds-orb-size) * 0.13) calc(var(--funds-orb-size) * 0.27) rgba(0, 0, 0, 0.55);
+  animation: funds-orb-float 7s ease-in-out infinite;
+}
+.arco-demo .funds-orb-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background:
+    radial-gradient(circle at 18% 28%, rgba(225, 224, 204, 0.22), transparent 22%),
+    radial-gradient(circle at 78% 86%, rgba(255, 214, 170, 0.22), transparent 18%),
+    radial-gradient(circle at 50% 50%, transparent 64%, rgba(225, 224, 204, 0.12) 70%, transparent 72%);
+}
+.arco-demo .funds-orb-glyph {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  height: auto;
+  transform: translate(-50%, -50%);
+  filter:
+    drop-shadow(0 0 calc(var(--funds-orb-size) * 0.02) rgba(255, 252, 240, 0.95))
+    drop-shadow(0 0 calc(var(--funds-orb-size) * 0.09) rgba(225, 224, 204, 0.75))
+    drop-shadow(0 0 calc(var(--funds-orb-size) * 0.2) rgba(225, 224, 204, 0.35));
+}
+.arco-demo .funds-orb-shine {
+  position: absolute;
+  left: 15%;
+  top: 5%;
+  width: 70%;
+  height: 36%;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0));
+}
+@keyframes funds-orb-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(calc(var(--funds-orb-size) * -0.03)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .arco-demo .funds-orb { animation: none; }
 }
 
 /* On a phone the card is narrow and tall, so the curtains crowd behind its text: fainter there. */
@@ -279,12 +336,15 @@
   --color-risk-meter-medium: #ffc044;                  /* lit bar (Figma 3:4) */
   --color-risk-meter-high: #f0524f;
 
-  /* Funds page: the Featured Funds card (Figma 4:148) on the Savings card's dark backdrop, with a green aurora,
-     and the ember-style fund rows. */
-  --color-funds-aurora-1: rgba(16, 185, 129, 0.2);     /* aurora: emerald curtain (kept low so the 24px rate stays >= 3:1) */
-  --color-funds-aurora-2: rgba(52, 211, 153, 0.16);    /* aurora: mint curtain */
-  --color-funds-aurora-3: rgba(5, 150, 105, 0.18);     /* aurora: deep green pool, behind the metrics */
-  --color-funds-aurora-4: rgba(167, 243, 208, 0.1);    /* aurora: pale mint ribbon */
+  /* Funds page: the Featured Funds card (Figma 4:148) on an espresso backdrop with a cream aurora (the brand cream,
+     #E1E0CC) and the fund's mark in a dark glass orb, and the ember-style fund rows. */
+  --color-funds-hero-1: #3a3128;                       /* espresso backdrop, top left */
+  --color-funds-hero-2: #1d1813;                       /* espresso backdrop, middle */
+  --color-funds-hero-3: #070605;                       /* espresso backdrop, bottom right */
+  --color-funds-aurora-1: rgba(225, 224, 204, 0.24);   /* aurora: cream curtain */
+  --color-funds-aurora-2: rgba(225, 224, 204, 0.12);   /* aurora: faint cream curtain */
+  --color-funds-aurora-3: rgba(225, 224, 204, 0.16);   /* aurora: cream pool, behind the metrics */
+  --color-funds-aurora-4: rgba(225, 224, 204, 0.18);   /* aurora: cream ribbon */
   --color-funds-hero-rate: #839f55;                    /* rate figure on the card (Figma 4:193); 24px, >= 3:1 on the backdrop */
   --color-funds-hero-tile: rgba(255, 255, 255, 0.1);   /* round tile behind the fund mark (Figma 4:175) */
   --color-funds-row-line: #e8ebf3;                     /* fund row outline */
