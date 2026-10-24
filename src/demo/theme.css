@@ -335,7 +335,7 @@
   --color-funds-aurora-2: rgba(225, 224, 204, 0.12);   /* aurora: faint cream curtain */
   --color-funds-aurora-3: rgba(225, 224, 204, 0.16);   /* aurora: cream pool, behind the metrics */
   --color-funds-aurora-4: rgba(225, 224, 204, 0.18);   /* aurora: cream ribbon */
-  --color-funds-hero-rate: #839f55;                    /* rate figure on the card (Figma 4:193); 24px, >= 3:1 on the backdrop */
+  --color-funds-hero-rate: #00d395;                    /* rate figure on the card (user pick, brighter than Figma 4:193 #839F55); >= 6.5:1 on the backdrop */
   --color-funds-hero-tile: rgba(255, 255, 255, 0.1);   /* round tile behind the fund mark (Figma 4:175) */
   --color-funds-row-line: #e8ebf3;                     /* fund row outline */
   --color-funds-row-hover: #f6f8fc;                    /* fund row under the pointer */
