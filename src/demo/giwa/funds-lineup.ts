@@ -1,8 +1,9 @@
 // The Funds page lineup: the funds Arco lists on GIWA, in the order the Featured Funds card shows them. Cash
 // management funds are not listed here (their pages and search entries stay). Each entry adds what the page needs
-// beyond the fund's own record: its tab, the type under its name, its Risk profile, and the sentence on its Featured
-// card.
+// beyond the fund's own record: its tab, the type under its name, its Risk profile, and the sentence and glass-orb mark on
+// its Featured card.
 
+import type { FundOrbMark } from "./FundOrb"
 import type { RiskLevel } from "./RiskTag"
 import { listedFundById, type ListedFund } from "./listed-funds"
 import { compareNullLast, type SortDir } from "./sort"
@@ -37,6 +38,8 @@ export type LineupFund = Readonly<{
   risk: FundRiskProfile
   /** One sentence on the Featured Funds card. */
   blurb: string
+  /** The fund's mark in the Featured card's glass orb: a white, single-colour file and its width in the orb. */
+  orb: FundOrbMark
 }>
 
 type LineupEntry = Omit<LineupFund, "fund"> & { id: string }
@@ -56,6 +59,7 @@ const LINEUP: readonly LineupEntry[] = [
       withdrawals: "Up to 3 business days",
     },
     blurb: "Private credit backed by U.S. home equity lines of credit that Figure originates and services, with a first-loss tranche ahead of holders.",
+    orb: { src: "/logos/orb/nuva-home.svg", width: "46%" },
   },
   {
     id: "digift-jx",
@@ -70,6 +74,7 @@ const LINEUP: readonly LineupEntry[] = [
       withdrawals: "T+4",
     },
     blurb: "SBI Asset Management's high-conviction portfolio of Japanese listed equities, chosen for high dividends and value.",
+    orb: { src: "/logos/orb/sbi-jx.png", width: "62%" },
   },
   {
     id: "bitwise-pplus",
@@ -84,6 +89,7 @@ const LINEUP: readonly LineupEntry[] = [
       withdrawals: "T+4 to T+7",
     },
     blurb: "A leveraged credit strategy across tokenized real-world assets, curated by Bitwise and operated by Ember Protocol.",
+    orb: { src: "/logos/orb/bitwise-b.png", width: "34%" },
   },
 ]
 

@@ -1,7 +1,8 @@
-// Featured Funds at the top of the Funds page (Figma 4:148): one fund at a time on the Savings card's dark backdrop,
-// with its aurora in greens and the fund's mark large and faint on the right. The fund's mark, name, type, a sentence
-// on it and its rate, AUM and network sit on the left; the whole card opens the fund. Previous / next and the dots
-// switch funds.
+// Featured Funds at the top of the Funds page (Figma 4:148): one fund at a time on an espresso backdrop with the Savings
+// card's grid and a cream aurora, and the fund's mark in a dark glass orb (FundOrb) on the right. The fund's logo, name,
+// type, a sentence on it and its rate, AUM and network sit on the left; the whole card opens the fund. Previous / next
+// and the dots switch funds. Below xl the card is too narrow for the orb beside the text, so a small orb takes the
+// logo's place above the name.
 
 import { useState } from "react"
 import { Link } from "react-router-dom"
@@ -10,14 +11,14 @@ import { BrandMark } from "../components/BrandMark"
 import { fundMarkSrc } from "./FundMark"
 import type { LineupFund } from "./funds-lineup"
 import { giwaProductPath } from "./routes"
-import { HERO_BACKGROUND, HERO_GRID, HeroAurora } from "./SavingsHeroCard"
+import { FundOrb } from "./FundOrb"
+import { HERO_GRID, HeroAurora } from "./SavingsHeroCard"
 
 const ON_HERO_MUTED = "text-[var(--color-savings-on-hero-muted)]"
 const FOCUS_ON_HERO = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-on-dark)]"
-// The large mark fades out towards the text.
-const MARK_FADE = {
-  maskImage: "radial-gradient(closest-side, var(--color-arco-ink), transparent)",
-  WebkitMaskImage: "radial-gradient(closest-side, var(--color-arco-ink), transparent)",
+const FUNDS_BACKGROUND = {
+  backgroundImage:
+    "linear-gradient(135deg, var(--color-funds-hero-1) 0%, var(--color-funds-hero-2) 55%, var(--color-funds-hero-3) 100%)",
 }
 
 export function FeaturedFunds({ funds }: { funds: readonly LineupFund[] }) {
@@ -42,19 +43,13 @@ export function FeaturedFunds({ funds }: { funds: readonly LineupFund[] }) {
         aria-roledescription="carousel"
         aria-label="Featured Funds"
         className="relative isolate w-full overflow-hidden rounded-[var(--radius-funds-hero)] border border-[var(--color-savings-on-hero-line)] text-[var(--color-arco-on-dark)]"
-        style={HERO_BACKGROUND}
+        style={FUNDS_BACKGROUND}
       >
         <HeroAurora />
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10" style={HERO_GRID} />
-        {mark && (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -right-16 -top-10 -z-10 size-[260px] opacity-25 sm:right-[6%] sm:top-1/2 sm:size-[360px] sm:-translate-y-1/2 sm:opacity-35"
-            style={MARK_FADE}
-          >
-            <img src={mark} alt="" className="size-full rounded-[var(--radius-pill)] object-contain" />
-          </div>
-        )}
+        <div aria-hidden="true" className="pointer-events-none absolute right-[6%] top-1/2 hidden -translate-y-1/2 xl:block" data-testid="featured-orb">
+          <FundOrb mark={active.orb} size={280} />
+        </div>
 
         <p aria-live="polite" className="sr-only">{`${index + 1} of ${count}: ${fund.name}`}</p>
         {/* The card clips its overflow, so the link's focus ring is drawn inside its edge. */}
@@ -63,8 +58,11 @@ export function FeaturedFunds({ funds }: { funds: readonly LineupFund[] }) {
           className="flex min-h-[384px] flex-col gap-4 rounded-[var(--radius-funds-hero)] p-6 pb-16 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-[var(--color-arco-on-dark)] sm:p-12"
         >
           <div className="flex flex-col gap-4">
-            <span className="inline-flex size-11 shrink-0 overflow-hidden rounded-[var(--radius-pill)] bg-[var(--color-funds-hero-tile)] p-px">
+            <span className="hidden size-11 shrink-0 overflow-hidden rounded-[var(--radius-pill)] bg-[var(--color-funds-hero-tile)] p-px xl:inline-flex">
               <BrandMark src={mark} label={fund.symbol} size={42} />
+            </span>
+            <span className="xl:hidden">
+              <FundOrb mark={active.orb} size={88} />
             </span>
             <div>
               <p className="text-2xl font-medium leading-8">{fund.name}</p>
@@ -115,7 +113,8 @@ export function FeaturedFunds({ funds }: { funds: readonly LineupFund[] }) {
               </button>
             </div>
 
-            <div className="absolute bottom-6 right-6 flex items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--color-savings-on-hero-line)] px-2 py-1 backdrop-blur-md sm:bottom-12 sm:right-12">
+            {/* Bottom right; on wide screens the orb sits there, so bottom centre. */}
+            <div className="absolute bottom-6 right-6 flex items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--color-savings-on-hero-line)] px-2 py-1 backdrop-blur-md sm:bottom-12 sm:right-12 xl:bottom-6 xl:left-1/2 xl:right-auto xl:-translate-x-1/2">
               {funds.map((entry, dot) => (
                 <button
                   key={entry.fund.id}
