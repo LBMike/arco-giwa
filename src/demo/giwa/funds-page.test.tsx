@@ -143,6 +143,10 @@ test("every fund in the lineup has a white orb mark on disk, and the orb holds s
   const orbRules = css.split("}").filter((rule) => rule.includes(".funds-orb"))
   assert.ok(orbRules.length >= 4 && orbRules.every((rule) => !/animation/.test(rule)), "the orb does not move")
   assert.doesNotMatch(css, /funds-orb-float/)
+  // The mark sits dead centre in the orb.
+  const glyph = css.slice(css.indexOf(".arco-demo .funds-orb-glyph {"), css.indexOf("}", css.indexOf(".arco-demo .funds-orb-glyph {")))
+  assert.match(glyph, /left: 50%;\s*top: 50%;/)
+  assert.match(glyph, /transform: translate\(-50%, -50%\);/)
 })
 
 test("values read precisely use Geist with tabular figures, never a system monospace", () => {

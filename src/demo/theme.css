@@ -147,9 +147,10 @@
     radial-gradient(circle at 50% 50%, transparent 64%, rgba(225, 224, 204, 0.12) 70%, transparent 72%);
 }
 .arco-demo .funds-orb-glyph {
+  /* Dead centre: the mark's box sits on the orb's centre, both ways. */
   position: absolute;
   left: 50%;
-  top: 52%;
+  top: 50%;
   height: auto;
   transform: translate(-50%, -50%);
   filter:
