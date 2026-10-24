@@ -67,6 +67,8 @@ test("the page opens on Featured Funds with HOME first, then the list rows in li
   assert.ok(card.includes('href="/product/nuva-home"'))
   // The mark in its glass orb: 280px on wide screens, 88px in the logo's place below xl.
   assert.equal(card.split('src="/logos/orb/nuva-home.svg"').length - 1, 2)
+  // The original logo is not on the card; the orb carries the mark.
+  assert.ok(!card.includes('src="/logos/nuva-home.svg"'), "no original logo on the card")
   assert.match(card, /data-orb-size="280" class="funds-orb block" style="--funds-orb-size:280px"/)
   assert.match(card, /data-orb-size="88" class="funds-orb block" style="--funds-orb-size:88px"/)
   assert.match(html, /data-funds-hero="true"[^>]*style="background-image:linear-gradient\(135deg, var\(--color-funds-hero-1\)/)

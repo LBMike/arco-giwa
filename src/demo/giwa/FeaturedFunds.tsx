@@ -1,14 +1,12 @@
 // Featured Funds at the top of the Funds page (Figma 4:148): one fund at a time on an espresso backdrop with the Savings
-// card's grid and a cream aurora, and the fund's mark in a dark glass orb (FundOrb) on the right. The fund's logo, name,
-// type, a sentence on it and its rate, AUM and network sit on the left; the whole card opens the fund. Previous / next
-// and the dots switch funds. Below xl the card is too narrow for the orb beside the text, so a small orb takes the
-// logo's place above the name.
+// card's grid and a cream aurora, and the fund's mark in a dark glass orb (FundOrb) on the right. The fund's name, type,
+// a sentence on it and its rate, AUM and network sit on the left; the whole card opens the fund. Previous / next and the
+// dots switch funds. Below xl the card is too narrow for the orb beside the text, so a small orb sits above the name.
+// The fund's original logo is not shown on the card: the orb carries the mark.
 
 import { useState } from "react"
 import { Link } from "react-router-dom"
 import { ChevronLeft, ChevronRight } from "lucide-react"
-import { BrandMark } from "../components/BrandMark"
-import { fundMarkSrc } from "./FundMark"
 import type { LineupFund } from "./funds-lineup"
 import { giwaProductPath } from "./routes"
 import { FundOrb } from "./FundOrb"
@@ -26,7 +24,6 @@ export function FeaturedFunds({ funds }: { funds: readonly LineupFund[] }) {
   const active = funds[index] ?? funds[0]
   if (!active) return null
   const { fund } = active
-  const mark = fundMarkSrc(fund.symbol)
   const count = funds.length
   const show = (next: number) => setIndex((next + count) % count)
 
@@ -58,9 +55,6 @@ export function FeaturedFunds({ funds }: { funds: readonly LineupFund[] }) {
           className="flex min-h-[384px] flex-col gap-4 rounded-[var(--radius-funds-hero)] p-6 pb-16 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-[var(--color-arco-on-dark)] sm:p-12"
         >
           <div className="flex flex-col gap-4">
-            <span className="hidden size-11 shrink-0 overflow-hidden rounded-[var(--radius-pill)] bg-[var(--color-funds-hero-tile)] p-px xl:inline-flex">
-              <BrandMark src={mark} label={fund.symbol} size={42} />
-            </span>
             <span className="xl:hidden">
               <FundOrb mark={active.orb} size={88} />
             </span>
