@@ -131,7 +131,7 @@ test("Risk profile lights one, two or three bars and opens a card with the tier,
   assert.ok(html.includes("bg-[var(--color-risk-meter-medium)]"))
 })
 
-test("every fund in the lineup has a white orb mark on disk, and the orb holds still under reduced motion", () => {
+test("every fund in the lineup has a white orb mark on disk, and the orb holds still", () => {
   for (const entry of FUNDS_LINEUP) {
     assert.match(entry.orb.src, /^\/logos\/orb\//, entry.fund.symbol)
     assert.ok(existsSync(`public${entry.orb.src}`), `${entry.fund.symbol} ${entry.orb.src}`)
@@ -139,7 +139,14 @@ test("every fund in the lineup has a white orb mark on disk, and the orb holds s
   }
   const css = readFileSync("src/demo/theme.css", "utf8")
   assert.match(css, /\.arco-demo \.funds-orb \{/)
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.arco-demo \.funds-orb \{ animation: none; \}/)
+  // No motion: the orb and its parts never animate.
+  const orbRules = css.split("}").filter((rule) => rule.includes(".funds-orb"))
+  assert.ok(orbRules.length >= 4 && orbRules.every((rule) => !/animation/.test(rule)), "the orb does not move")
+  assert.doesNotMatch(css, /funds-orb-float/)
+  // The mark sits dead centre in the orb.
+  const glyph = css.slice(css.indexOf(".arco-demo .funds-orb-glyph {"), css.indexOf("}", css.indexOf(".arco-demo .funds-orb-glyph {")))
+  assert.match(glyph, /left: 50%;\s*top: 50%;/)
+  assert.match(glyph, /transform: translate\(-50%, -50%\);/)
 })
 
 test("values read precisely use Geist with tabular figures, never a system monospace", () => {
