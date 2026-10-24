@@ -122,8 +122,7 @@
 
 /* The fund's mark in a dark glass orb on the Featured Funds card (FundOrb.tsx): a smoked-glass sphere with a cream
    rim light, a top shine and the mark glowing cream inside. Sizes scale with --funds-orb-size (set on the orb), so one
-   look serves the 280px orb on wide screens and the small one beside the title. It floats slowly; still under reduced
-   motion. */
+   look serves the 280px orb on wide screens and the small one beside the title. It stays still. */
 .arco-demo .funds-orb {
   --funds-orb-size: 280px;
   position: relative;
@@ -137,7 +136,6 @@
     inset 0 calc(var(--funds-orb-size) * 0.09) calc(var(--funds-orb-size) * 0.2) rgba(0, 0, 0, 0.65),
     inset 0 calc(var(--funds-orb-size) * -0.08) calc(var(--funds-orb-size) * 0.16) rgba(225, 224, 204, 0.07),
     0 calc(var(--funds-orb-size) * 0.13) calc(var(--funds-orb-size) * 0.27) rgba(0, 0, 0, 0.55);
-  animation: funds-orb-float 7s ease-in-out infinite;
 }
 .arco-demo .funds-orb-rim {
   position: absolute;
@@ -160,20 +158,11 @@
     drop-shadow(0 0 calc(var(--funds-orb-size) * 0.2) rgba(225, 224, 204, 0.35));
 }
 .arco-demo .funds-orb-shine {
+  /* A soft light from the top of the sphere that fades out with no edge, so it follows the curve of the glass. */
   position: absolute;
-  left: 15%;
-  top: 5%;
-  width: 70%;
-  height: 36%;
+  inset: 0;
   border-radius: 9999px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0));
-}
-@keyframes funds-orb-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(calc(var(--funds-orb-size) * -0.03)); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .arco-demo .funds-orb { animation: none; }
+  background: radial-gradient(ellipse 72% 52% at 50% 0%, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.07) 55%, rgba(255, 255, 255, 0) 80%);
 }
 
 /* On a phone the card is narrow and tall, so the curtains crowd behind its text: fainter there. */
