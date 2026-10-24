@@ -61,9 +61,9 @@ test("risk cards read Low, Medium, High left to right and count the listed funds
   const medium = html.indexOf(">Medium Risk<")
   const high = html.indexOf(">High Risk<")
   assert.ok(low >= 0 && medium > low && high > medium, "Low → Medium → High")
-  // auMINT, aiBENJI + RRDY | CMBBOND, HOME | bEQTY + JX, kTW50
+  // auMINT, aiBENJI + RRDY | CMBBOND, HOME, PPLUS | bEQTY + JX, kTW50
   assert.ok(html.slice(low, medium).includes(">3 Products<"), "Low Risk counts 3")
-  assert.ok(html.slice(medium, high).includes(">2 Products<"), "Medium Risk counts 2")
+  assert.ok(html.slice(medium, high).includes(">3 Products<"), "Medium Risk counts 3") // CMBBOND, HOME, PPLUS
   assert.ok(html.slice(high).includes(">3 Products<"), "High Risk counts 3")
   assert.doesNotMatch(html, /Strategies ·|High Yield|Equity Income/)
 })

@@ -60,8 +60,9 @@ test("GIWA live-read queries poll 20s + focus refetch, never in the background",
   assert.equal(GIWA_LIVE_REFETCH.refetchIntervalInBackground, false)
   // The live market/catalog/price-history/detail queries opt into the shared policy. The vault
   // detail's market + price-history queries live in useGiwaVaultDetail.ts (extracted from
-  // ProductDetailPage in the Phase 3 section-reuse refactor).
-  for (const file of ["Investor.tsx", "useGiwaVaultDetail.ts", "AdminPrices.tsx"]) {
+  // ProductDetailPage in the Phase 3 section-reuse refactor). The Funds page (Investor.tsx) shows
+  // the fixed funds lineup and makes no live reads.
+  for (const file of ["useGiwaVaultDetail.ts", "AdminPrices.tsx"]) {
     assert.match(readFileSync(`src/demo/giwa/${file}`, "utf8"), /\.\.\.GIWA_LIVE_REFETCH/, file)
   }
 })

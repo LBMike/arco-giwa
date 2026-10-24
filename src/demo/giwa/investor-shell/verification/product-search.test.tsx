@@ -6,11 +6,11 @@ import { buildSearchProducts, filterSearchProducts } from "../../product-search"
 import { fixtureTop40Catalog, fixtureTop40Quotes } from "../../stocks-market/fixtures"
 const catalog = snapshot.catalog as unknown as GiwaCatalogItem[]
 const products = () => buildSearchProducts(catalog, snapshot.market, fixtureTop40Catalog().securities, fixtureTop40Quotes())
-test("search lists the deployed 4 savings, 8 funds and catalog-owned 40 stocks with existing logos and exact destinations", () => {
+test("search lists the deployed 4 savings, 9 funds and catalog-owned 40 stocks with existing logos and exact destinations", () => {
   const all = products()
-  assert.equal(all.length, 52)
+  assert.equal(all.length, 53)
   // 3 deployed vaults (aCAPIX is retired) and the 5 listed funds.
-  assert.deepEqual(all.filter(p => p.category === "Funds").map(p => p.symbol), ["bEQTY", "auMINT", "aiBENJI", "RRDY", "CMBBOND", "HOME", "JX", "kTW50"])
+  assert.deepEqual(all.filter(p => p.category === "Funds").map(p => p.symbol), ["bEQTY", "auMINT", "aiBENJI", "RRDY", "CMBBOND", "HOME", "JX", "kTW50", "PPLUS"])
   assert.deepEqual(all.filter(p => p.category === "Savings").map(p => p.symbol), ["USDC", "RLUSD", "ETH", "XRP"])
   assert.equal(all.find(p => p.symbol === "ETH")?.href, "/savings?asset=ETH&account=real%3Aaeth%3AETH")
   assert.equal(all.find(p => p.symbol === "SOXL")?.href, "/stocks?symbol=SOXL")
@@ -22,7 +22,7 @@ test("search lists the deployed 4 savings, 8 funds and catalog-owned 40 stocks w
   assert.ok(!all.some(p => p.symbol === "BTC"))
   const hidden = catalog.map(p => ({ ...p, vaultConfig: { ...p.vaultConfig!, hidden: true } }))
   // Hidden vaults drop out; the listed funds are not registry vaults, so they stay.
-  assert.deepEqual(buildSearchProducts(hidden, [], [], []).map(p => p.symbol), ["RRDY", "CMBBOND", "HOME", "JX", "kTW50"])
+  assert.deepEqual(buildSearchProducts(hidden, [], [], []).map(p => p.symbol), ["RRDY", "CMBBOND", "HOME", "JX", "kTW50", "PPLUS"])
   assert.deepEqual(buildSearchProducts([], [], [{ symbol: "NEW", name: "New Listing" }]).filter(p => p.category === "Stocks").map(p => p.symbol), ["NEW"])
 })
 test("search matches names, tickers, managers and multiple words without crossing category filters", () => {
@@ -36,7 +36,7 @@ test("search matches names, tickers, managers and multiple words without crossin
 test("missing or stale quotes do not invent current prices; independent savings/funds still list", () => {
   assert.equal(products().find(p => p.symbol === "SGOV")?.value, "—")
   assert.equal(products().find(p => p.symbol === "SCHD")?.change, undefined)
-  assert.equal(buildSearchProducts(catalog, snapshot.market, []).length, 12)
+  assert.equal(buildSearchProducts(catalog, snapshot.market, []).length, 13)
   // The listed funds are not registry vaults, so they still list without a catalog.
-  assert.equal(buildSearchProducts([], [], fixtureTop40Catalog().securities).length, 45)
+  assert.equal(buildSearchProducts([], [], fixtureTop40Catalog().securities).length, 46)
 })

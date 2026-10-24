@@ -38,7 +38,7 @@ classes (`bg-slate-*`, `text-gray-*`, `bg-white`, `text-black`), raw-color fallb
 `var(--token, #fff)`. Token definitions live in `src/demo/theme.css` (raw hex allowed THERE
 only). Enforced by `node .claude/hooks/check-design-tokens.mjs` (blocks, exit 2); legitimate
 exceptions carry a trailing `// design-tokens:allow`.
-**KNOWN DEBT:** 7 pre-existing violations (`Investor.tsx:111`, `components.tsx` ×6)
+**KNOWN DEBT:** 6 pre-existing violations (`components.tsx` ×6; the `Investor.tsx` one left with the 2026-10 Funds redesign)
 inherited at extraction — fix only as a dedicated approved task; never grow the list.
 
 ## Component structure & Figma fidelity
@@ -68,6 +68,6 @@ pre-release checks → `design-qa` · pre-PR review → `design-reviewer`.
 npm run typecheck
 npm run build
 npm run test:frontend && npm run test:server && npm run test:security
-node .claude/hooks/check-design-tokens.mjs --all   # baseline: the 7 known-debt findings
+node .claude/hooks/check-design-tokens.mjs --all   # baseline: the 6 known-debt findings
 node .claude/hooks/check-story-exists.mjs --all    # soft
 ```

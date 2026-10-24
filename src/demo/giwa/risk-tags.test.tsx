@@ -44,11 +44,11 @@ test("deployed fund rows: aCAPIX is retired, the rest show tier and category", (
 
 test("listed fund rows: tier and category from the catalog taxonomy", () => {
   const html = render([], true)
-  assert.equal((html.match(/data-testid="listed-fund-row"/g) ?? []).length, 5)
+  assert.equal((html.match(/data-testid="listed-fund-row"/g) ?? []).length, 6)
   assert.equal((html.match(pair("low", "Low Risk", "Cash Management")) ?? []).length, 1) // RRDY
-  assert.equal((html.match(pair("medium", "Medium Risk", "Income Strategies")) ?? []).length, 2) // CMBBOND, HOME
+  assert.equal((html.match(pair("medium", "Medium Risk", "Income Strategies")) ?? []).length, 3) // CMBBOND, HOME, PPLUS
   assert.equal((html.match(pair("high", "High Risk", "Equity Exposure")) ?? []).length, 2) // JX, kTW50
-  assert.equal((html.match(/data-risk=/g) ?? []).length, 5)
+  assert.equal((html.match(/data-risk=/g) ?? []).length, 6)
 })
 
 test("risk tags use the theme tokens, one tone per tier", () => {
@@ -84,16 +84,16 @@ test("deployed rows show the fund deck's dated rate unless the operator publishe
 test("listed funds follow every filter the deployed vaults use", () => {
   const symbols = (patch: Partial<GiwaFilters>) => applyListedFilters(LISTED_FUNDS, { ...GIWA_EMPTY_FILTERS, ...patch }).map((fund) => fund.symbol)
   const category = (value: GiwaCategory[]) => symbols({ category: value })
-  assert.deepEqual(category([]), ["RRDY", "CMBBOND", "HOME", "JX", "kTW50"])
+  assert.deepEqual(category([]), ["RRDY", "CMBBOND", "HOME", "JX", "kTW50", "PPLUS"])
   assert.deepEqual(category(["U.S Treasuries"]), ["RRDY"])
-  assert.deepEqual(category(["Prime Credit"]), ["CMBBOND", "HOME"])
+  assert.deepEqual(category(["Prime Credit"]), ["CMBBOND", "HOME", "PPLUS"])
   assert.deepEqual(category(["Equity Exposure"]), ["JX", "kTW50"])
   assert.deepEqual(category(["Arco Saving"]), [])
   assert.deepEqual(symbols({ issuer: ["nuva"] }), ["HOME"])
   assert.deepEqual(symbols({ issuer: ["arco"] }), [])
-  assert.deepEqual(symbols({ denomination: ["USD"] }).length, 5)
+  assert.deepEqual(symbols({ denomination: ["USD"] }).length, 6)
   assert.deepEqual(symbols({ denomination: ["BTC"] }), [])
-  assert.deepEqual(symbols({ network: ["Ethereum"] }).length, 5) // every listed token is issued on Ethereum
-  assert.deepEqual(symbols({ network: ["Giwa"] }).length, 5)
+  assert.deepEqual(symbols({ network: ["Ethereum"] }).length, 6) // every listed token is issued on Ethereum
+  assert.deepEqual(symbols({ network: ["Giwa"] }).length, 6)
   assert.deepEqual(symbols({ network: ["XRPL"] }), [])
 })

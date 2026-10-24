@@ -15,12 +15,13 @@ import { vaultCategoryRisk } from "./RiskTag"
 import snapshot from "./investor-shell/verification/deployed-giwa.snapshot.json"
 import type { GiwaCatalogItem } from "./types"
 
-// The fund lineup is eight products: auMINT, aiBENJI and bEQTY are deployed on GIWA Sepolia, and
-// RRDY, CMBBOND, HOME, JX and kTW50 are listed with the same content and an invest panel that
-// reads "Coming soon". aCAPIX is no longer offered.
+// The fund lineup is nine products: auMINT, aiBENJI and bEQTY are deployed on GIWA Sepolia, and
+// RRDY, CMBBOND, HOME, JX, kTW50 and PPLUS are listed with the same content and an invest panel that
+// reads "Coming soon". aCAPIX is no longer offered. (The Funds page lists HOME, JX and PPLUS:
+// funds-lineup.ts.)
 
 const catalog = snapshot.catalog as unknown as GiwaCatalogItem[]
-const CAPTURED = "2026-10-12"
+const CAPTURED = "2026-10-23"
 
 function renderRoute(path: string): string {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -55,7 +56,7 @@ function views(fund: (typeof LISTED_FUNDS)[number]): FundBreakdown[] {
   return [fund.portfolio.snapshot, fund.portfolio.industry, fund.portfolio.exposure].filter((view): view is FundBreakdown => Boolean(view))
 }
 
-test("five listed funds complete the lineup, one tier per category", () => {
+test("six listed funds complete the lineup, one tier per category", () => {
   assert.deepEqual(
     LISTED_FUNDS.map((fund) => [fund.symbol, categoryTitle(fund.category), vaultCategoryRisk(fund.category)]),
     [
@@ -64,6 +65,7 @@ test("five listed funds complete the lineup, one tier per category", () => {
       ["HOME", "Income Strategies", "medium"],
       ["JX", "Equity Exposure", "high"],
       ["kTW50", "Equity Exposure", "high"],
+      ["PPLUS", "Income Strategies", "medium"],
     ],
   )
   assert.equal(new Set(LISTED_FUNDS.map((fund) => fund.id)).size, LISTED_FUNDS.length)
@@ -116,12 +118,13 @@ test("a partial breakdown shows its calculated remainder, a full one does not", 
 
 test("a listed fund leaves the catalog once its symbol is deployed, and follows the search box", () => {
   const symbols = (deployed: string[], search?: string) => listedFundsForCatalog(deployed, search).map((fund) => fund.symbol)
-  assert.deepEqual(symbols([]), ["RRDY", "CMBBOND", "HOME", "JX", "kTW50"])
-  assert.deepEqual(symbols(["auMINT", "home"]), ["RRDY", "CMBBOND", "JX", "kTW50"])
+  assert.deepEqual(symbols([]), ["RRDY", "CMBBOND", "HOME", "JX", "kTW50", "PPLUS"])
+  assert.deepEqual(symbols(["auMINT", "home"]), ["RRDY", "CMBBOND", "JX", "kTW50", "PPLUS"])
   assert.deepEqual(symbols([], "figure"), ["HOME"])
   assert.deepEqual(symbols([], "taiwan"), ["kTW50"])
   assert.deepEqual(symbols([], "cash management"), ["RRDY"])
-  assert.deepEqual(symbols([], "income strategies"), ["CMBBOND", "HOME"])
+  assert.deepEqual(symbols([], "income strategies"), ["CMBBOND", "HOME", "PPLUS"])
+  assert.deepEqual(symbols([], "bitwise"), ["PPLUS"])
 })
 
 test("deployed vaults take the latest dated rates from DigiFT and the fund deck", () => {
@@ -133,9 +136,9 @@ test("deployed vaults take the latest dated rates from DigiFT and the fund deck"
   assert.equal(formatAsOf("soon"), "soon")
 })
 
-test("search lists the eight funds and no aCAPIX", () => {
+test("search lists the nine funds and no aCAPIX", () => {
   const funds = buildSearchProducts(catalog, [], []).filter((product) => product.category === "Funds")
-  assert.deepEqual(funds.map((product) => product.symbol), ["bEQTY", "auMINT", "aiBENJI", "RRDY", "CMBBOND", "HOME", "JX", "kTW50"])
+  assert.deepEqual(funds.map((product) => product.symbol), ["bEQTY", "auMINT", "aiBENJI", "RRDY", "CMBBOND", "HOME", "JX", "kTW50", "PPLUS"])
   assert.equal(funds.find((product) => product.symbol === "HOME")?.href, "/product/nuva-home")
   assert.equal(funds.find((product) => product.symbol === "auMINT")?.value, "3.55% 7-day yield")
 })
@@ -164,6 +167,9 @@ test("the token card lists the original chains; HOME links its Ethereum contract
   const jx = renderRoute("/product/digift-jx")
   assert.ok(jx.includes(">Original networks<") && jx.includes(">Ethereum, Solana, Plume<"))
   assert.doesNotMatch(jx, /etherscan/) // no contract address published
+  const pplus = renderRoute("/product/bitwise-pplus")
+  assert.ok(pplus.includes(">Original networks<") && pplus.includes(">Ethereum, Sui<"))
+  assert.ok(pplus.includes("https://etherscan.io/address/0xbc5d3722376d44f3bC316C6EA61C9Bd553Be8CBe"))
 })
 
 test("the retired aCAPIX page reads Product not found", () => {
@@ -184,7 +190,9 @@ test("product pages call a yield fund's rate APY and an equity fund's rate Retur
   assert.equal((jx.match(/>Return<\/p><p[^>]*>39\.66%<\/p><p[^>]*>12-month return · 31 Aug 2026<\/p>/g) ?? []).length, 2)
   const ktw50 = renderRoute("/product/digift-ktw50")
   assert.match(ktw50, />Return<\/p><p[^>]*>55\.72%<\/p><p[^>]*>6-month return · 1 Oct 2026<\/p>/)
-  for (const html of [rrdy, cmbbond, home, jx, ktw50]) {
+  const pplus = renderRoute("/product/bitwise-pplus")
+  assert.match(pplus, />APY<\/p><p[^>]*>12\.53%<\/p><p[^>]*>30-day avg\. APY · 23 Oct 2026<\/p>/)
+  for (const html of [rrdy, cmbbond, home, jx, ktw50, pplus]) {
     assert.doesNotMatch(html, /uppercase[^"]*">(7-day yield|Yield to maturity|Target APY|\d+-month return)</i)
   }
 
