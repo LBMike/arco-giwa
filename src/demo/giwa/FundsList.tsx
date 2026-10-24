@@ -151,9 +151,9 @@ function FundRow({ entry }: { entry: LineupFund }) {
         </div>
       </div>
 
-      {/* A grid item keeps its z-index without being positioned, so on a phone the risk card can open across the row;
-          an open card lifts its row above the rows below it. */}
-      <div className="z-10 flex justify-self-start hover:z-20 focus-within:z-20 has-[[data-open=true]]:z-30 sm:relative">
+      {/* Above the name's row-wide link; an open card lifts its row above the rows below it. (On a phone the profile
+          opens as a bottom sheet instead.) */}
+      <div className="relative z-10 flex justify-self-start hover:z-20 focus-within:z-20 has-[[data-open=true]]:z-30">
         <RiskProfile profile={entry.risk} />
       </div>
 

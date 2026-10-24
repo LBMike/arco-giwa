@@ -1,16 +1,17 @@
 // The Risk profile in the funds list. The meter is Figma 3:2: a pill of three bars, lit by the fund's tier (low 1,
-// medium 2, high 3). It opens a card after app.sky.money/earn: "Risk profile", the tier, a three-part bar, a short
-// account of the risk, Exposure / Liquidation risk / Withdrawals, and a link to the fund's own risk document.
+// medium 2, high 3). It opens the fund's risk after app.sky.money/earn: "Risk profile", the tier, a three-part bar, a
+// short account of the risk, Exposure / Liquidation risk / Withdrawals, and "Learn more about risk" (Arco's page on
+// user risks).
 //
-// A mouse opens it by pointing and it stays open while the pointer moves onto the card (so the link can be used); a
-// tap, or Enter / Space on the focused meter, toggles it; Escape, a click elsewhere or focus leaving it closes it.
-// From the `sm` breakpoint the card opens under the meter; on a phone the meter is static, so the card opens across its
-// row (the nearest positioned ancestor) instead of running off the screen. Where the window has no room below and more
-// above (the last rows), it opens upwards. Closed, it takes no space, so it never lengthens the page.
+// From the `sm` breakpoint it is a card under the meter: a mouse opens it by pointing and it stays open while the
+// pointer moves onto it (so the link can be used); Enter / Space toggles it; Escape, a press elsewhere or focus leaving
+// closes it. Where the window has no room below and more above (the last rows), it opens upwards. Closed, it takes no
+// space. On a phone a tap opens it as a bottom sheet (BottomSheet), closed by its Close button, the backdrop or Escape.
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import { ArrowUpRight } from "lucide-react"
-import type { FundRiskProfile } from "./funds-lineup"
+import { BottomSheet } from "./BottomSheet"
+import { FUNDS_RISK_DOC, type FundRiskProfile } from "./funds-lineup"
 import type { RiskLevel } from "./RiskTag"
 
 const LIT_BARS: Record<RiskLevel, number> = { low: 1, medium: 2, high: 3 }
@@ -24,7 +25,14 @@ const LIT_COLOR: Record<RiskLevel, string> = {
 }
 
 const MUTED = "text-[var(--color-arco-chip-ink)]"
+const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
 const CLOSE_DELAY_MS = 120
+const SM_QUERY = "(min-width: 640px)"
+
+/** The card under the meter from `sm`; below it, the bottom sheet. Without matchMedia (tests, old browsers): the card. */
+function wideViewport(): boolean {
+  return typeof window === "undefined" || typeof window.matchMedia !== "function" || window.matchMedia(SM_QUERY).matches
+}
 
 export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
   const { level } = profile
@@ -32,6 +40,7 @@ export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
   const panelId = `${id}-panel`
   const titleId = `${id}-title`
   const [open, setOpen] = useState(false)
+  const [sheetOpen, setSheetOpen] = useState(false)
   const [above, setAbove] = useState(false)
   const rootRef = useRef<HTMLSpanElement>(null)
   const panelRef = useRef<HTMLSpanElement>(null)
@@ -46,7 +55,7 @@ export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
     closeTimer.current = null
   }
 
-  // While open: Escape closes (and returns focus to the meter), and a press outside closes.
+  // While the card is open: Escape closes it (and returns focus to the meter), and a press outside closes it.
   useEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {
@@ -80,9 +89,9 @@ export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
     <span
       ref={rootRef}
       data-open={open}
-      className="inline-flex sm:relative"
+      className="relative inline-flex"
       onPointerEnter={(event) => {
-        if (event.pointerType !== "mouse") return
+        if (event.pointerType !== "mouse" || !wideViewport()) return
         cancelClose()
         setOpen(true)
       }}
@@ -100,7 +109,7 @@ export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
         type="button"
         data-risk={level}
         aria-label={`Risk profile: ${TIER[level]}`}
-        aria-expanded={open}
+        aria-expanded={open || sheetOpen}
         aria-controls={panelId}
         onPointerDown={(event) => {
           pressedWith.current = event.pointerType
@@ -109,6 +118,11 @@ export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
           event.stopPropagation()
           const mouse = pressedWith.current === "mouse"
           pressedWith.current = null
+          if (!wideViewport()) {
+            setOpen(false)
+            setSheetOpen(true)
+            return
+          }
           setOpen((current) => (mouse ? true : !current))
         }}
         className="inline-flex h-6 items-center rounded-[var(--radius-pill)] px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-arco-ink)]"
@@ -134,43 +148,67 @@ export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
         role="group"
         aria-labelledby={titleId}
         hidden={!open}
-        className={`absolute inset-x-3 z-30 sm:inset-x-auto sm:left-1/2 sm:w-[300px] sm:-translate-x-1/2 ${
-          above ? "bottom-full pb-2" : "top-full pt-2"
-        }`}
+        className={`absolute left-1/2 z-30 w-[300px] -translate-x-1/2 ${above ? "bottom-full pb-2" : "top-full pt-2"}`}
       >
         <span className="block rounded-[20px] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-5 text-left text-[var(--color-arco-ink)] shadow-[var(--shadow-savings-popover)]">
           <span className={`block text-xs ${MUTED}`}>Risk profile</span>
           <span id={titleId} className="mt-0.5 block text-lg font-medium leading-6">
             {TIER[level]}
           </span>
-          <span aria-hidden="true" className="mt-3 flex gap-1">
-            {[0, 1, 2].map((bar) => (
-              <span
-                key={bar}
-                data-segment={bar < lit ? "lit" : "off"}
-                className={`h-1 flex-1 rounded-[var(--radius-pill)] ${bar < lit ? LIT_COLOR[level] : "bg-[var(--color-risk-meter-off)]"}`}
-              />
-            ))}
-          </span>
-          <span className={`mt-4 block text-sm leading-[22px] ${MUTED}`}>{profile.summary}</span>
-          <span className="mt-4 block space-y-2 border-t border-[var(--color-arco-border)] pt-4 text-sm">
-            <Fact label="Exposure" value={profile.exposure} />
-            <Fact label="Liquidation risk" value={profile.liquidation} />
-            <Fact label="Withdrawals" value={profile.withdrawals} />
-          </span>
+          <RiskDetails profile={profile} />
           <a
-            href={profile.learnMore.href}
+            href={FUNDS_RISK_DOC}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(event) => event.stopPropagation()}
-            className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--color-arco-border)] pt-4 text-sm font-medium hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
+            className={`mt-4 flex items-center justify-between gap-3 border-t border-[var(--color-arco-border)] pt-4 text-sm font-medium hover:underline ${FOCUS_RING}`}
           >
             Learn more about risk
             <ArrowUpRight aria-hidden="true" className="size-4 shrink-0" />
           </a>
         </span>
       </span>
+
+      <BottomSheet id={`${id}-sheet`} open={sheetOpen} onClose={() => setSheetOpen(false)} label="Risk profile" returnFocusTo={buttonRef}>
+        <div className="px-2 pb-2 text-left text-[var(--color-arco-ink)]" data-testid="risk-sheet">
+          <p className="text-2xl font-medium leading-8">{TIER[level]}</p>
+          <RiskDetails profile={profile} />
+          <a
+            href={FUNDS_RISK_DOC}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`mt-6 flex min-h-12 items-center justify-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] px-5 text-base font-medium hover:bg-[var(--color-arco-chip)] ${FOCUS_RING}`}
+          >
+            Learn more about risk
+            <ArrowUpRight aria-hidden="true" className="size-4 shrink-0" />
+          </a>
+        </div>
+      </BottomSheet>
     </span>
+  )
+}
+
+/** The bar, the account of the risk and the three facts: the same in the card and the sheet. */
+function RiskDetails({ profile }: { profile: FundRiskProfile }) {
+  const lit = LIT_BARS[profile.level]
+  return (
+    <>
+      <span aria-hidden="true" className="mt-3 flex gap-1">
+        {[0, 1, 2].map((bar) => (
+          <span
+            key={bar}
+            data-segment={bar < lit ? "lit" : "off"}
+            className={`h-1 flex-1 rounded-[var(--radius-pill)] ${bar < lit ? LIT_COLOR[profile.level] : "bg-[var(--color-risk-meter-off)]"}`}
+          />
+        ))}
+      </span>
+      <span className={`mt-4 block text-sm leading-[22px] ${MUTED}`}>{profile.summary}</span>
+      <span className="mt-4 block space-y-2 border-t border-[var(--color-arco-border)] pt-4 text-sm">
+        <Fact label="Exposure" value={profile.exposure} />
+        <Fact label="Liquidation risk" value={profile.liquidation} />
+        <Fact label="Withdrawals" value={profile.withdrawals} />
+      </span>
+    </>
   )
 }
 

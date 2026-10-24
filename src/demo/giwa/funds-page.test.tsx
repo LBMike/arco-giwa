@@ -8,7 +8,7 @@ import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
 import GiwaInvestorPage from "./Investor"
-import { FUNDS_LINEUP, FUNDS_TABS, lineupForTab, nextTabIndex, sortLineup } from "./funds-lineup"
+import { FUNDS_LINEUP, FUNDS_RISK_DOC, FUNDS_TABS, lineupForTab, nextTabIndex, sortLineup } from "./funds-lineup"
 import { RiskProfile } from "./RiskProfile"
 
 function renderPage(): string {
@@ -37,8 +37,6 @@ test("the lineup is HOME, JX and PPLUS; Credit holds HOME and PPLUS, Equity hold
     const { risk, fund } = entry
     assert.ok(risk.summary.length > 60 && risk.summary.endsWith("."), `${fund.symbol} summary`)
     assert.ok(risk.exposure.length > 0, `${fund.symbol} exposure`)
-    // The link is one of the fund's own documents.
-    assert.ok(fund.docs.some((doc) => doc.href === risk.learnMore.href) && risk.learnMore.href.startsWith("https://"), `${fund.symbol} learn more`)
     assert.ok(entry.blurb.length > 40, `${fund.symbol} blurb`)
   }
 })
@@ -103,7 +101,6 @@ test("Risk profile lights one, two or three bars and opens a card with the tier,
     exposure: "Something",
     liquidation: "None",
     withdrawals: "Instant",
-    learnMore: { label: "Risks", href: "https://example.com/risks" },
   })
   const render = (level: "low" | "medium" | "high") => {
     const html = renderToStaticMarkup(<RiskProfile profile={profile(level)} />)
@@ -121,7 +118,11 @@ test("Risk profile lights one, two or three bars and opens a card with the tier,
   // Risk profile · tier · bar · summary · Exposure / Liquidation risk / Withdrawals · Learn more about risk.
   const order = [">Risk profile<", ">Medium<", 'data-segment="lit"', ">A short account", ">Exposure<", ">Liquidation risk<", ">Withdrawals<", "Learn more about risk"].map((text) => html.indexOf(text))
   assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1]!)), JSON.stringify(order))
-  assert.match(html, /<a href="https:\/\/example\.com\/risks" target="_blank" rel="noopener noreferrer"/)
+  // Every fund links Arco's page on user risks.
+  assert.equal(FUNDS_RISK_DOC, "https://docs.arco.financial/security/user-risks")
+  assert.match(html, /<a href="https:\/\/docs\.arco\.financial\/security\/user-risks" target="_blank" rel="noopener noreferrer"/)
+  // The phone's bottom sheet renders nothing until a tap opens it.
+  assert.doesNotMatch(html, /role="dialog"|data-testid="risk-sheet"/)
   assert.ok(html.includes("bg-[var(--color-risk-meter-medium)]"))
 })
 

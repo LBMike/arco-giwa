@@ -15,8 +15,11 @@ export const FUNDS_TABS: readonly Readonly<{ id: FundsTab; label: string }>[] = 
   { id: "equity", label: "Equity" },
 ]
 
-/** What the Risk profile shows when it opens (after app.sky.money/earn): the tier, a short account of the risk, three
- * facts and where to read more. */
+/** Where every Risk profile's "Learn more about risk" leads: Arco's page on the risks users take. */
+export const FUNDS_RISK_DOC = "https://docs.arco.financial/security/user-risks"
+
+/** What the Risk profile shows when it opens (after app.sky.money/earn): the tier, a short account of the risk and three
+ * facts. */
 export type FundRiskProfile = Readonly<{
   level: RiskLevel
   summary: string
@@ -24,8 +27,6 @@ export type FundRiskProfile = Readonly<{
   exposure: string
   liquidation: string
   withdrawals: string
-  /** The fund's own risk document: one of its docs, by label. */
-  learnMore: Readonly<{ label: string; href: string }>
 }>
 
 export type LineupFund = Readonly<{
@@ -38,7 +39,7 @@ export type LineupFund = Readonly<{
   blurb: string
 }>
 
-type LineupEntry = Omit<LineupFund, "fund" | "risk"> & { id: string; risk: Omit<FundRiskProfile, "learnMore"> & { learnMore: string } }
+type LineupEntry = Omit<LineupFund, "fund"> & { id: string }
 
 // Credit funds are Medium; equity funds are High.
 const LINEUP: readonly LineupEntry[] = [
@@ -53,7 +54,6 @@ const LINEUP: readonly LineupEntry[] = [
       exposure: "U.S. HELOCs",
       liquidation: "None",
       withdrawals: "Up to 3 business days",
-      learnMore: "HOME deep dive",
     },
     blurb: "Private credit backed by U.S. home equity lines of credit that Figure originates and services, with a first-loss tranche ahead of holders.",
   },
@@ -68,7 +68,6 @@ const LINEUP: readonly LineupEntry[] = [
       exposure: "Japanese equities",
       liquidation: "None",
       withdrawals: "T+4",
-      learnMore: "DigiFT product page",
     },
     blurb: "SBI Asset Management's high-conviction portfolio of Japanese listed equities, chosen for high dividends and value.",
   },
@@ -83,18 +82,15 @@ const LINEUP: readonly LineupEntry[] = [
       exposure: "Tokenized private credit",
       liquidation: "Yes, up to 5x leverage",
       withdrawals: "T+4 to T+7",
-      learnMore: "Ember risk disclosure",
     },
     blurb: "A leveraged credit strategy across tokenized real-world assets, curated by Bitwise and operated by Ember Protocol.",
   },
 ]
 
-export const FUNDS_LINEUP: readonly LineupFund[] = LINEUP.map(({ id, risk, ...entry }) => {
+export const FUNDS_LINEUP: readonly LineupFund[] = LINEUP.map(({ id, ...entry }) => {
   const fund = listedFundById(id)
   if (!fund) throw new Error(`Funds lineup: no listed fund "${id}"`)
-  const doc = fund.docs.find((entry) => entry.label === risk.learnMore)
-  if (!doc) throw new Error(`Funds lineup: ${fund.symbol} has no document "${risk.learnMore}"`)
-  return { fund, ...entry, risk: { ...risk, learnMore: { label: doc.label, href: doc.href } } }
+  return { fund, ...entry }
 })
 
 export function lineupForTab(tab: FundsTab, funds: readonly LineupFund[] = FUNDS_LINEUP): readonly LineupFund[] {
