@@ -23,7 +23,7 @@ const LIT_COLOR: Record<RiskLevel, string> = {
   high: "bg-[var(--color-risk-meter-high)]",
 }
 
-const ON_DARK_MUTED = "text-[var(--color-savings-on-hero-muted)]"
+const MUTED = "text-[var(--color-arco-chip-ink)]"
 const CLOSE_DELAY_MS = 120
 
 export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
@@ -138,8 +138,8 @@ export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
           above ? "bottom-full pb-2" : "top-full pt-2"
         }`}
       >
-        <span className="block rounded-[20px] bg-[var(--color-arco-ink)] p-5 text-left text-[var(--color-arco-on-dark)] shadow-[var(--shadow-savings-popover)]">
-          <span className={`block text-xs ${ON_DARK_MUTED}`}>Risk profile</span>
+        <span className="block rounded-[20px] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-5 text-left text-[var(--color-arco-ink)] shadow-[var(--shadow-savings-popover)]">
+          <span className={`block text-xs ${MUTED}`}>Risk profile</span>
           <span id={titleId} className="mt-0.5 block text-lg font-medium leading-6">
             {TIER[level]}
           </span>
@@ -148,12 +148,12 @@ export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
               <span
                 key={bar}
                 data-segment={bar < lit ? "lit" : "off"}
-                className={`h-1 flex-1 rounded-[var(--radius-pill)] ${bar < lit ? LIT_COLOR[level] : "bg-[var(--color-savings-on-hero-line)]"}`}
+                className={`h-1 flex-1 rounded-[var(--radius-pill)] ${bar < lit ? LIT_COLOR[level] : "bg-[var(--color-risk-meter-off)]"}`}
               />
             ))}
           </span>
-          <span className={`mt-4 block text-sm leading-[22px] ${ON_DARK_MUTED}`}>{profile.summary}</span>
-          <span className="mt-4 block space-y-2 border-t border-[var(--color-savings-on-hero-line)] pt-4 text-sm">
+          <span className={`mt-4 block text-sm leading-[22px] ${MUTED}`}>{profile.summary}</span>
+          <span className="mt-4 block space-y-2 border-t border-[var(--color-arco-border)] pt-4 text-sm">
             <Fact label="Exposure" value={profile.exposure} />
             <Fact label="Liquidation risk" value={profile.liquidation} />
             <Fact label="Withdrawals" value={profile.withdrawals} />
@@ -163,7 +163,7 @@ export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
             target="_blank"
             rel="noopener noreferrer"
             onClick={(event) => event.stopPropagation()}
-            className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--color-savings-on-hero-line)] pt-4 text-sm font-medium hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-on-dark)]"
+            className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--color-arco-border)] pt-4 text-sm font-medium hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
           >
             Learn more about risk
             <ArrowUpRight aria-hidden="true" className="size-4 shrink-0" />
@@ -177,7 +177,7 @@ export function RiskProfile({ profile }: { profile: FundRiskProfile }) {
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <span className="flex items-baseline justify-between gap-4">
-      <span className={ON_DARK_MUTED}>{label}</span>
+      <span className={MUTED}>{label}</span>
       <span className="text-right font-medium">{value}</span>
     </span>
   )
