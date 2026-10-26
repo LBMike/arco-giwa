@@ -3,7 +3,7 @@
 // deposit, and the Deposit / Withdraw buttons. Both states end with who the reserves are held with.
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react"
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChartNoAxesColumn, ChevronDown, Eye, Landmark, Pause, Play, Sprout, Zap } from "lucide-react"
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChartNoAxesColumn, ChevronDown, Eye, Landmark, Pause, Play, Sprout, Wallet, Zap } from "lucide-react"
 import { BrandMark } from "../components/BrandMark"
 import { RollingDigits, useTrend } from "./RollingDigits"
 import { SavingsInfoTip } from "./SavingsInfoTip"
@@ -321,37 +321,92 @@ export type SavingsHeroProps = {
   onWithdraw: () => void
   /** "blue" (default) for Stablecoins, "cream" for Crypto Native. */
   tone?: SavingsHeroTone
+  /** Before a wallet is connected: the card opens the wallet modal. Without it the card is not a button. */
+  onConnect?: () => void
 }
 
 export function SavingsHeroCard(props: SavingsHeroProps) {
   return props.connected ? <ConnectedHero {...props} /> : <WelcomeHero {...props} />
 }
 
-function WelcomeHero({ depositLabel, tokenSymbol, tokenIcon, tone = "blue" }: SavingsHeroProps) {
+// Before a wallet is connected, the whole card connects one (`onConnect`, the same wallet modal as the header's Connect
+// Wallet): a button laid over the card, under the slides and the partner logos, which keep working as before. While it
+// is pointed at or has keyboard focus, the "saving" pill turns white with the card's black text, its chart mark turns
+// into a wallet, and "Connect Wallet →" shows under the headline. A touch screen has no pointing, so there the line
+// always shows, and the pointing look is kept to screens that can point (a tap would otherwise leave it stuck on).
+const PILL_ON_CONNECT = [
+  "transition-[background-color,color,box-shadow] duration-200 motion-reduce:transition-none",
+  "[@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:bg-[var(--color-arco-on-dark)] [@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:text-[var(--color-arco-hero)] [@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:shadow-[0_0_28px_var(--color-savings-on-hero-line),0_0_28px_var(--color-savings-on-hero-line)]",
+  "group-has-[[data-hero-connect]:focus-visible]/hero:bg-[var(--color-arco-on-dark)] group-has-[[data-hero-connect]:focus-visible]/hero:text-[var(--color-arco-hero)] group-has-[[data-hero-connect]:focus-visible]/hero:shadow-[0_0_28px_var(--color-savings-on-hero-line),0_0_28px_var(--color-savings-on-hero-line)]",
+].join(" ")
+const SHOW_ON_CONNECT =
+  "[@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:opacity-100 group-has-[[data-hero-connect]:focus-visible]/hero:opacity-100"
+const HIDE_ON_CONNECT =
+  "[@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:opacity-0 group-has-[[data-hero-connect]:focus-visible]/hero:opacity-0"
+
+function WelcomeHero({ depositLabel, tokenSymbol, tokenIcon, tone = "blue", onConnect }: SavingsHeroProps) {
+  const connectable = onConnect !== undefined
   return (
     <HeroFrame tone={tone}>
-      <div className="flex min-h-[291px] flex-col gap-6 p-5 sm:p-6">
-        <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between md:gap-8">
-          <h2 className="text-[30px] font-medium leading-[36px] sm:text-[36px] sm:leading-[44px]">
-            <span className={ON_HERO_MUTED}>Deposit {depositLabel}</span>
-            <br />
-            <span className={ON_HERO_MUTED}>and start </span>
-            {/* Baseline-aligned: "saving" sits on the same line as "and start" (align-middle dropped it below). */}
-            <span className="inline-flex items-center gap-2 rounded-[var(--radius-pill)] border-2 border-[var(--color-arco-on-dark)] px-3 align-baseline leading-[40px]">
-              saving
-              <ChartNoAxesColumn aria-hidden="true" className="size-6" strokeWidth={2.5} />
-            </span>
-          </h2>
-          <div className="w-full md:max-w-[300px]">
-            <FeatureCarousel slides={heroSlides(tokenSymbol)} />
+      <div className={connectable ? "group/hero" : undefined}>
+        {connectable && (
+          // Over the card's text (z-[1]); the slides and the partner logos sit above it (z-10).
+          <button
+            type="button"
+            data-hero-connect=""
+            aria-label="Connect wallet to start saving"
+            onClick={onConnect}
+            className="absolute inset-0 z-[1] cursor-pointer rounded-[22px] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-[var(--color-arco-on-dark)]"
+          />
+        )}
+        <div className="flex min-h-[291px] flex-col gap-6 p-5 sm:p-6">
+          <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between md:gap-8">
+            <div>
+              <h2 className="text-[30px] font-medium leading-[36px] sm:text-[36px] sm:leading-[44px]">
+                <span className={ON_HERO_MUTED}>Deposit {depositLabel}</span>
+                <br />
+                <span className={ON_HERO_MUTED}>and start </span>
+                {/* Baseline-aligned: "saving" sits on the same line as "and start" (align-middle dropped it below). */}
+                <span
+                  data-hero-pill=""
+                  className={`inline-flex items-center gap-2 rounded-[var(--radius-pill)] border-2 border-[var(--color-arco-on-dark)] px-3 align-baseline leading-[40px]${connectable ? ` ${PILL_ON_CONNECT}` : ""}`}
+                >
+                  saving
+                  {connectable ? (
+                    <span aria-hidden="true" className="grid size-6 [&>*]:col-start-1 [&>*]:row-start-1">
+                      <ChartNoAxesColumn className={`size-6 transition-opacity duration-200 motion-reduce:transition-none ${HIDE_ON_CONNECT}`} strokeWidth={2.5} />
+                      <Wallet data-hero-wallet="" className={`size-6 opacity-0 transition-opacity duration-200 motion-reduce:transition-none ${SHOW_ON_CONNECT}`} strokeWidth={2.25} />
+                    </span>
+                  ) : (
+                    <ChartNoAxesColumn aria-hidden="true" className="size-6" strokeWidth={2.5} />
+                  )}
+                </span>
+              </h2>
+              {connectable && (
+                // The button says it for screen readers; this line is for the eye.
+                <p
+                  aria-hidden="true"
+                  data-hero-connect-hint=""
+                  className={`mt-4 flex translate-y-1 items-center gap-1.5 text-sm font-medium opacity-0 transition duration-200 motion-reduce:transition-none ${SHOW_ON_CONNECT} [@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:translate-y-0 group-has-[[data-hero-connect]:focus-visible]/hero:translate-y-0 [@media(hover:none)]:translate-y-0 [@media(hover:none)]:opacity-100`}
+                >
+                  Connect Wallet
+                  <ArrowRight className="size-4" />
+                </p>
+              )}
+            </div>
+            <div className="relative z-10 w-full md:max-w-[300px]">
+              <FeatureCarousel slides={heroSlides(tokenSymbol)} />
+            </div>
           </div>
-        </div>
-        <div className="mt-auto flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-          <div className="flex flex-col items-start gap-3">
-            <Chevrons />
-            <TokenChip symbol={tokenSymbol} icon={tokenIcon} />
+          <div className="mt-auto flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col items-start gap-3">
+              <Chevrons />
+              <TokenChip symbol={tokenSymbol} icon={tokenIcon} />
+            </div>
+            <div className="relative z-10 self-start md:self-auto">
+              <PoweredBy />
+            </div>
           </div>
-          <PoweredBy />
         </div>
       </div>
     </HeroFrame>
