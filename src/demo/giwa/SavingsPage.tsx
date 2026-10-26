@@ -254,6 +254,8 @@ function SavingsDetail({ vault, tone }: { vault: GiwaCatalogItem; tone: SavingsH
         apyPercent={apyPercent}
         onDeposit={() => openTransfer("deposit")}
         onWithdraw={() => openTransfer("withdraw")}
+        // Before a wallet: the card opens the same wallet modal as the header's Connect Wallet.
+        onConnect={() => void wallet.connect()}
         tone={tone}
       />
       {leftRunning !== null && transfer === null && (

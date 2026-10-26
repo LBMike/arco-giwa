@@ -374,6 +374,65 @@ test("savings card before a wallet: the invitation, the features and who the res
   assert.doesNotMatch(html, />Deposit</)
 })
 
+test("savings card before a wallet: the whole card connects one, the pill and a line show it, the slides and logos stay usable", () => {
+  // Pointing only where a pointer can hover (a tap would leave :hover stuck on a touch screen); focus everywhere.
+  const ON_HOVER = "[@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:"
+  const ON_FOCUS = "group-has-[[data-hero-connect]:focus-visible]/hero:"
+  for (const tone of ["blue", "cream"] as const) {
+    const html = renderToStaticMarkup(<SavingsHeroCard {...heroProps({ tone, onConnect: () => undefined })} />)
+    // One button over the card, named for what it does; first in the card, so first in the tab order.
+    const button = html.match(/<button type="button" data-hero-connect="" aria-label="Connect wallet to start saving" class="([^"]*)"><\/button>/)
+    assert.ok(button, `${tone}: the connect button`)
+    for (const token of ["absolute", "inset-0", "z-[1]", "cursor-pointer", "focus-visible:-outline-offset-4"]) assert.ok(button[1]!.split(" ").includes(token), `${tone}: ${token}`)
+    assert.ok(html.indexOf("data-hero-connect") < html.indexOf("<h2"), `${tone}: before the headline`)
+    assert.match(html, /<div class="group\/hero">/)
+    // The headline reads as before.
+    assert.match(html, />saving</)
+    // Pointed at or focused: the pill turns white with black text and a soft glow (the line colour twice), the chart mark turns into a wallet.
+    const pill = html.match(/data-hero-pill="" class="([^"]*)"/)![1]!.split(" ")
+    for (const state of [ON_HOVER, ON_FOCUS]) {
+      for (const look of ["bg-[var(--color-arco-on-dark)]", "text-[var(--color-arco-hero)]", "shadow-[0_0_28px_var(--color-savings-on-hero-line),0_0_28px_var(--color-savings-on-hero-line)]"]) {
+        assert.ok(pill.includes(`${state}${look}`), `${tone}: pill ${state}${look}`)
+      }
+    }
+    assert.ok(pill.includes("motion-reduce:transition-none"))
+    const wallet = html.match(/<svg [^>]*class="([^"]*lucide-wallet[^"]*)"[^>]*data-hero-wallet=""/)
+    assert.ok(wallet, `${tone}: the wallet mark`)
+    for (const token of ["opacity-0", `${ON_HOVER}opacity-100`, `${ON_FOCUS}opacity-100`]) assert.ok(wallet[1]!.split(" ").includes(token), `${tone}: wallet ${token}`)
+    // ...in place of the chart mark, which fades out (the two share one cell).
+    const chart = html.match(/data-hero-pill=""[^>]*>saving<span aria-hidden="true" class="grid size-6[^"]*"><svg [^>]*class="([^"]*lucide-chart-no-axes-column[^"]*)"/)
+    assert.ok(chart, `${tone}: the chart mark`)
+    for (const token of [`${ON_HOVER}opacity-0`, `${ON_FOCUS}opacity-0`]) assert.ok(chart[1]!.split(" ").includes(token), `${tone}: chart ${token}`)
+    assert.ok(!html.includes(" group-has-[[data-hero-connect]:hover]/hero:"), `${tone}: no ungated hover look`)
+    // The line under the headline: hidden until then, always shown on a touch screen; hidden from screen readers.
+    const hint = html.match(/<p aria-hidden="true" data-hero-connect-hint="" class="([^"]*)">Connect Wallet<svg/)
+    assert.ok(hint, `${tone}: the Connect Wallet line`)
+    for (const token of ["opacity-0", `${ON_HOVER}opacity-100`, `${ON_FOCUS}opacity-100`, "[@media(hover:none)]:opacity-100"]) {
+      assert.ok(hint[1]!.split(" ").includes(token), `${tone}: hint ${token}`)
+    }
+    // The slides and the partner logos sit above the button (z-10 over z-[1]); a browser check covers the stacking itself.
+    const slides = html.match(/<div class="([^"]*)"><div class="w-full"><div role="group" aria-roledescription="slide"/)
+    const logos = html.match(/<div class="([^"]*)"><div class="flex flex-wrap items-center gap-x-3 gap-y-2"><span[^>]*>Powered by</)
+    for (const [name, wrapper] of [["slides", slides], ["logos", logos]] as const) {
+      assert.ok(wrapper, `${tone}: ${name} wrapper`)
+      for (const token of ["relative", "z-10"]) assert.ok(wrapper[1]!.split(" ").includes(token), `${tone}: ${name} ${token}`)
+    }
+    // The logos' layer is only as wide as the logos on a phone (a full-width layer would take the press from the card).
+    assert.ok(logos![1]!.split(" ").includes("self-start"))
+  }
+
+  // Without onConnect the card is not a button; once connected there is no connect button either.
+  const plain = renderToStaticMarkup(<SavingsHeroCard {...heroProps()} />)
+  for (const gone of ["data-hero-connect", "Connect Wallet", "group/hero", "data-hero-wallet"]) assert.ok(!plain.includes(gone), gone)
+  const connected = renderToStaticMarkup(<SavingsHeroCard {...heroProps({ connected: true, onConnect: () => undefined })} />)
+  assert.ok(!connected.includes("data-hero-connect"))
+
+  // The Savings page hands the card the wallet's connect (the header's Connect Wallet modal).
+  const page = readFileSync(new URL("./SavingsPage.tsx", import.meta.url), "utf8")
+  const call = page.slice(page.indexOf("<SavingsHeroCard"), page.indexOf("/>", page.indexOf("<SavingsHeroCard")))
+  assert.match(call, /onConnect=\{[^}]*wallet\.connect\(\)/)
+})
+
 test("savings card with a wallet: balance, coins available, Deposit and Withdraw", () => {
   const html = renderToStaticMarkup(
     <SavingsHeroCard {...heroProps({ connected: true, balanceUsd: 1234.56789, shares: 1234.31, available: 500, availableUsd: 500 })} />,
