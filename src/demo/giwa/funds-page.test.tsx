@@ -65,8 +65,13 @@ test("the page opens on Featured Funds with HOME first, then the list rows in li
   assert.ok(card.includes(">NUVA HOME Vault<") && card.includes(">HELOC Private Credit<"))
   assert.ok(card.includes(">Target APY<") && card.includes(">7%<") && card.includes(">$10.01M<") && card.includes('alt="GIWA"'))
   assert.ok(card.includes('href="/product/nuva-home"'))
-  // The mark in its glass orb: 280px on wide screens, 88px in the logo's place below xl.
+  // The mark in its glass orb: 280px on the right of a wide card, 88px above the name on a narrower one. The card's own
+  // width decides (a container query), not the window's: below xl the sidebar folds away and the card gets wider.
   assert.equal(card.split('src="/logos/orb/nuva-home.svg"').length - 1, 2)
+  assert.match(html, /data-testid="featured-fund"[^>]*class="[^"]*\[container-type:inline-size\]/)
+  assert.match(card, /class="[^"]*hidden[^"]*\[@container_\(min-width:55rem\)\]:block" data-testid="featured-orb"/)
+  assert.match(card, /<span class="\[@container_\(min-width:55rem\)\]:hidden"><span aria-hidden="true" data-orb-size="88"/)
+  assert.ok(!/\bxl:(block|hidden)\b/.test(card), "no window breakpoint for the orb")
   // The original logo is not on the card; the orb carries the mark.
   assert.ok(!card.includes('src="/logos/nuva-home.svg"'), "no original logo on the card")
   assert.match(card, /data-orb-size="280" class="funds-orb block" style="--funds-orb-size:280px"/)
