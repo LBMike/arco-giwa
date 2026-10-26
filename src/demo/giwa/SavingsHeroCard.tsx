@@ -336,7 +336,8 @@ function WelcomeHero({ depositLabel, tokenSymbol, tokenIcon, tone = "blue" }: Sa
             <span className={ON_HERO_MUTED}>Deposit {depositLabel}</span>
             <br />
             <span className={ON_HERO_MUTED}>and start </span>
-            <span className="inline-flex items-center gap-2 rounded-[var(--radius-pill)] border-2 border-[var(--color-arco-on-dark)] px-3 align-middle leading-[40px]">
+            {/* Baseline-aligned: "saving" sits on the same line as "and start" (align-middle dropped it below). */}
+            <span className="inline-flex items-center gap-2 rounded-[var(--radius-pill)] border-2 border-[var(--color-arco-on-dark)] px-3 align-baseline leading-[40px]">
               saving
               <ChartNoAxesColumn aria-hidden="true" className="size-6" strokeWidth={2.5} />
             </span>
