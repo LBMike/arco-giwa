@@ -23,7 +23,7 @@ import { SavingsSkeleton } from "./GiwaSkeleton"
 import { marketApyPercent, marketApyText } from "./price-policy"
 import { buildSavingsAccounts, resolveSavingsSelection, type SavingsAccount } from "./savings"
 import { SavingsAccordion } from "./SavingsAccordion"
-import { withSeededApy } from "./savings-apy-seed"
+import { withBandedApy, withSeededApy } from "./savings-apy-seed"
 import { chosenSavingsOption, heldCoins, heldUsd, productThroughRoute, routeFor } from "./savings-assets"
 import { reserveAssetLabel, savingsBacking, savingsDepositLabel, savingsExposure } from "./savings-backing"
 import { savingsAssetCategory, savingsCategoryFromSearch } from "./savings-category"
@@ -157,7 +157,11 @@ function SavingsDetail({ vault, tone }: { vault: GiwaCatalogItem; tone: SavingsH
     ...GIWA_LIVE_REFETCH,
   })
   const detail = useMemo(() => {
-    if (liveSavings === null || live === null) return vaultDetail
+    if (liveSavings === null || live === null) {
+      // A Crypto Native vault's APY chart: a month of rates inside its band, ending on the rate shown (savings-apy-seed.ts).
+      const now = Math.floor(Date.now() / 1000)
+      return { ...vaultDetail, history: withBandedApy(vaultDetail.history, vault.productId, marketApyPercent(vaultDetail.market), now) }
+    }
     const market = liveSavingsMarket(liveSavings)
     const ownLiquidity = liveSavingsOwnLiquidity(live)
     return {
@@ -170,7 +174,7 @@ function SavingsDetail({ vault, tone }: { vault: GiwaCatalogItem; tone: SavingsH
       // The Reserve's free USDC: what a withdrawal in the account's own coin can take at once.
       instantLiquidityUsd: ownLiquidity,
     }
-  }, [vaultDetail, liveSavings, live, liveHistoryQuery.data])
+  }, [vaultDetail, liveSavings, live, liveHistoryQuery.data, vault.productId])
   const wallet = useGiwaWallet()
   const routes = useContext(SavingsRoutesContext)
   const [transfer, setTransfer] = useState<TransferMode | null>(null)
