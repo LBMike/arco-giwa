@@ -725,3 +725,19 @@ test("savings card: the Earning dot beats like a heart with a halo fading out of
   assert.match(reduced, /\.savings-heartbeat-dot,\s*\.arco-demo \.savings-heartbeat-halo,/)
   assert.match(reduced, /\.savings-heartbeat-halo \{ opacity: 0; \}/)
 })
+
+test("BTC savings: the coin shows Bitcoin's own mark; the aBTC token has its own", async () => {
+  const { paymentAssetIcon } = await import("./components")
+  const { vaultImageFor } = await import("./catalog")
+  const { savingsAssetCategory } = await import("./savings-category")
+  // "Available BTC" and the coin a deposit spends: the coin's mark, not the savings token's.
+  assert.equal(paymentAssetIcon("tBTC"), "/logos/bitcoin.svg")
+  // The aBTC token (no image set in the Vault Config): its own mark.
+  assert.equal(vaultImageFor({ productId: "abtc", vaultConfig: null } as never), "/logos/abtc.png")
+  for (const file of ["bitcoin.svg", "abtc.png"]) {
+    assert.ok(readFileSync(new URL(`../../../public/logos/${file}`, import.meta.url)).length > 0, file)
+  }
+  // The menu names it in full; it sits with ETH and XRP under Crypto Native.
+  assert.equal(savingsCoinName("BTC"), "Bitcoin")
+  assert.equal(savingsAssetCategory("BTC"), "crypto-native")
+})
