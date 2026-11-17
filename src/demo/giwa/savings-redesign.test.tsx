@@ -27,7 +27,7 @@ import { SavingsHeroCard, type SavingsHeroProps } from "./SavingsHeroCard"
 import { niceTicks, simulateSavings } from "./savings-simulation"
 import { SavingsSimulation } from "./SavingsSimulation"
 import { apyChangeLabel, SavingsStatsRow, sparklinePath, sparklinePointAt } from "./SavingsStatsRow"
-import { SavingsTabs } from "./SavingsTabs"
+import { SavingsTabs, savingsApyRange, savingsCoinName } from "./SavingsTabs"
 import {
   amountForPercent,
   exceedsBalance,
@@ -497,7 +497,7 @@ const account = (symbol: string, over: Partial<SavingsAccount> = {}): SavingsAcc
   ...over,
 })
 
-test("tabs: Stablecoins stacks its coins in one tab; Crypto Native has a chip per coin", () => {
+test("tabs: Stablecoins stacks its coins in one tab; Crypto Native stacks its supported coins with their APY range", () => {
   const accounts = [account("USDC"), account("RLUSD"), account("ETH", { apy: "3.86%" }), account("XRP", { disabled: true })]
   const html = renderToStaticMarkup(<SavingsTabs accounts={accounts} selectedKey={accounts[2]!.key} onSelect={() => undefined} />)
   assert.match(html, /Stablecoins/)
@@ -512,8 +512,39 @@ test("tabs: Stablecoins stacks its coins in one tab; Crypto Native has a chip pe
   assert.doesNotMatch(stack, /ring-/)
   assert.deepEqual([...stack.matchAll(/style="z-index:(\d+)"/g)].map((match) => Number(match[1])), [4, 3, 2, 1])
   assert.match(html, /Crypto Native/)
-  assert.match(html, /aria-pressed="true"[^>]*>.*?ETH.*?3\.86%/)
-  assert.match(html, /aria-pressed="false"[^>]*disabled=""[^>]*>.*?XRP.*?Soon/)
+  // One tab for Crypto Native, opening a menu. XRP is coming soon: no mark, no part in the range, no "Soon".
+  const tab = html.match(/<button type="button" data-crypto-tab="" data-selected="true" aria-haspopup="menu" aria-expanded="false"[^>]*>(.*?)<\/button>/)
+  assert.ok(tab, "the Crypto Native tab")
+  assert.deepEqual([...tab[1]!.matchAll(/<img src="([^"]+)"/g)].map((match) => match[1]), ["/accept/ETH.png"])
+  assert.match(tab[1]!, /<span class="sr-only">ETH; ETH selected<\/span>/)
+  assert.match(tab[1]!, />3\.86%<\/span><svg[^>]*lucide-chevron-down/)
+  assert.doesNotMatch(html, /XRP|Soon/)
+  // Closed: no menu in the page.
+  assert.doesNotMatch(html, /role="menu"/)
+})
+
+test("tabs: Crypto Native shows every supported coin stacked and the lowest to the highest APY", () => {
+  const accounts = [account("USDC"), account("XRP", { apy: "4.57%" }), account("ETH", { apy: "3.86%" }), account("BTC", { apy: "—" }), account("SOL", { apy: "9%", disabled: true })]
+  const html = renderToStaticMarkup(<SavingsTabs accounts={accounts} selectedKey={accounts[0]!.key} onSelect={() => undefined} />)
+  const tab = html.match(/<button type="button" data-crypto-tab="" data-selected="false"[^>]*>(.*?)<\/button>/)![1]!
+  // In the accounts' order, the first on top; the coming-soon SOL is left out.
+  assert.deepEqual([...tab.matchAll(/<img src="([^"]+)"/g)].map((match) => match[1]), ["/accept/XRP.png", "/accept/ETH.png", "/accept/BTC.png"])
+  assert.deepEqual([...tab.matchAll(/style="z-index:(\d+)"/g)].map((match) => Number(match[1])), [3, 2, 1])
+  assert.match(tab, /<span class="sr-only">XRP, ETH, BTC<\/span>/)
+  assert.match(tab, />3\.86% ~ 4\.57%</)
+
+  // The range: as the figures are written; one figure when there is one or they agree; none without a figure.
+  assert.equal(savingsApyRange([{ apy: "4.57%" }, { apy: "3.86%" }, { apy: "4.1%" }]), "3.86% ~ 4.57%")
+  assert.equal(savingsApyRange([{ apy: "3.86%" }]), "3.86%")
+  assert.equal(savingsApyRange([{ apy: "4%" }, { apy: "4%" }]), "4%")
+  assert.equal(savingsApyRange([{ apy: "—" }, { apy: "3.86%" }]), "3.86%")
+  assert.equal(savingsApyRange([{ apy: "—" }]), null)
+  assert.equal(savingsApyRange([]), null)
+  assert.equal(savingsCoinName("eth"), "Ethereum")
+  assert.equal(savingsCoinName("DOGE"), "DOGE")
+
+  // No coin that can be saved today: no Crypto Native tab.
+  assert.doesNotMatch(renderToStaticMarkup(<SavingsTabs accounts={[account("USDC"), account("XRP", { disabled: true })]} selectedKey={null} onSelect={() => undefined} />), /Crypto Native/)
 })
 
 test("tabs: a stablecoin the Vault Config lists beyond those trails the stack with its own mark", () => {
