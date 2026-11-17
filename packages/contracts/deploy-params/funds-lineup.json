@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "products": [
+    {
+      "productId": "home",
+      "symbol": "HOME",
+      "name": "NUVA HOME Vault",
+      "paymentAssetSymbol": "tUSDC",
+      "category": "Prime Credit",
+      "init": {
+        "maxSupplyCapShares": "1000000000000000",
+        "vaultMintAllowanceShares": "1000000000000000",
+        "maxRedemptionPayment": "1000000000000000",
+        "feedInitialAnswer": "100000000",
+        "feedHealthyDiffSeconds": 259200,
+        "feedMaxAnswer": "100000000000000",
+        "feedMinAnswer": "0"
+      }
+    },
+    {
+      "productId": "jxfund",
+      "symbol": "JX",
+      "name": "SBI Japan High Dividend Equity Strategy",
+      "paymentAssetSymbol": "tUSDC",
+      "category": "Equity Exposure",
+      "init": {
+        "maxSupplyCapShares": "1000000000000000",
+        "vaultMintAllowanceShares": "1000000000000000",
+        "maxRedemptionPayment": "1000000000000000",
+        "feedInitialAnswer": "100000000",
+        "feedHealthyDiffSeconds": 259200,
+        "feedMaxAnswer": "100000000000000",
+        "feedMinAnswer": "0"
+      }
+    },
+    {
+      "productId": "pplus",
+      "symbol": "PPLUS",
+      "name": "Bitwise Premium+ RWA Vault",
+      "paymentAssetSymbol": "tUSDC",
+      "category": "Prime Credit",
+      "init": {
+        "maxSupplyCapShares": "1000000000000000",
+        "vaultMintAllowanceShares": "1000000000000000",
+        "maxRedemptionPayment": "1000000000000000",
+        "feedInitialAnswer": "102220000",
+        "feedHealthyDiffSeconds": 259200,
+        "feedMaxAnswer": "100000000000000",
+        "feedMinAnswer": "0"
+      }
+    }
+  ]
+}
