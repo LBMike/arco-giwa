@@ -63,6 +63,9 @@ export function savingsApyRange(accounts: readonly Pick<SavingsAccount, "apy">[]
   return low.value === high.value ? low.text : `${low.text} ~ ${high.text}`
 }
 
+// useLayoutEffect warns when rendered on the server (the static-markup tests); there it has nothing to place anyway.
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect
+
 const SM_QUERY = "(min-width: 640px)"
 const MENU_WIDTH = 260
 const ROW =
@@ -140,7 +143,7 @@ function CryptoNativeTab({
     setPlace((current) => (current && current.left === next.left && current.top === next.top ? current : next))
   }
   // Before the open list is painted: placed; then focus on the open account's row (or the first).
-  useLayoutEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (open) anchorPlace()
     else setPlace(null)
   }, [open])
@@ -169,8 +172,9 @@ function CryptoNativeTab({
     }
   }, [open])
 
-  const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const rows = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])
+  // Arrow keys, Home and End move between the rows of whichever menu they are pressed in (the list or the sheet).
+  const onRowKeys = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const rows = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitemradio"]'))
     const at = rows.indexOf(document.activeElement as HTMLElement)
     const go = (index: number) => {
       event.preventDefault()
@@ -180,10 +184,15 @@ function CryptoNativeTab({
     else if (event.key === "ArrowUp") go(at - 1)
     else if (event.key === "Home") go(0)
     else if (event.key === "End") go(rows.length - 1)
-    else if (event.key === "Escape") {
+  }
+  // The list also closes on Escape and on Tab. Focus goes back to the tab first, so Tab moves on from the tab and not
+  // from the end of the page, where the list's portal is. (The sheet has its own Escape and keeps Tab inside itself.)
+  const onListKeys = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    onRowKeys(event)
+    if (event.key === "Escape") {
       event.preventDefault()
       close(true)
-    } else if (event.key === "Tab") close(false)
+    } else if (event.key === "Tab") close(true)
   }
 
   return (
@@ -197,8 +206,14 @@ function CryptoNativeTab({
         aria-expanded={open || sheetOpen}
         aria-controls={open ? menuId : undefined}
         onClick={() => {
-          if (wideViewport()) setOpen((current) => !current)
-          else setSheetOpen(true)
+          // One or the other, never both (the window may have crossed `sm` since the last press).
+          if (wideViewport()) {
+            setSheetOpen(false)
+            setOpen((current) => !current)
+          } else {
+            setOpen(false)
+            setSheetOpen(true)
+          }
         }}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" && wideViewport()) {
@@ -216,11 +231,17 @@ function CryptoNativeTab({
             </span>
           ))}
         </span>
+        {/* Read out in full; the figures on show are for the eye ("~" reads poorly). */}
         <span className="sr-only">
-          {accounts.map((account) => account.symbol).join(", ")}
+          {`Crypto Native: ${accounts.map((account) => account.symbol).join(", ")}`}
+          {range ? `, ${range.replace(" ~ ", " to ")} APY` : ""}
           {selected ? `; ${selected.symbol} selected` : ""}
         </span>
-        {range && <span className={APY}>{range}</span>}
+        {range && (
+          <span aria-hidden="true" className={APY}>
+            {range}
+          </span>
+        )}
         <ChevronDown aria-hidden="true" className={`size-4 text-[var(--color-arco-text-soft)] transition-transform duration-150 motion-reduce:transition-none${open ? " rotate-180" : ""}`} />
       </button>
 
@@ -234,9 +255,9 @@ function CryptoNativeTab({
               id={menuId}
               role="menu"
               aria-label="Crypto Native"
-              onKeyDown={onMenuKey}
+              onKeyDown={onListKeys}
               style={{ left: place?.left ?? 0, top: place?.top ?? 0, width: MENU_WIDTH, visibility: place ? "visible" : "hidden" }}
-              className="fixed z-50 rounded-[16px] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-1.5 shadow-[var(--shadow-savings-popover)]"
+              className="fixed z-50 max-h-[60vh] overflow-y-auto rounded-[16px] border border-[var(--color-arco-border)] bg-[var(--color-arco-surface)] p-1.5 shadow-[var(--shadow-savings-popover)]"
             >
               <CoinRows accounts={accounts} selectedKey={selectedKey} onPick={pick} />
             </div>
@@ -245,7 +266,7 @@ function CryptoNativeTab({
         )}
 
       <BottomSheet id={`${id}-sheet`} open={sheetOpen} onClose={() => setSheetOpen(false)} label="Crypto Native" returnFocusTo={buttonRef}>
-        <div role="menu" aria-label="Crypto Native" className="pb-2">
+        <div role="menu" aria-label="Crypto Native" onKeyDown={onRowKeys} className="pb-2">
           <CoinRows accounts={accounts} selectedKey={selectedKey} onPick={pick} />
         </div>
       </BottomSheet>

@@ -59,6 +59,17 @@ test("savings tabs: the Crypto Native menu lists supported coins and picks one (
     assert.equal(menu(), null)
     assert.equal(w.document.activeElement, tab())
 
+    // Home / End move to the first and last row; Tab closes the list with focus back on the tab (Tab then moves on from it).
+    await act(() => tab().click())
+    const again = Array.from(menu()!.querySelectorAll('[role="menuitemradio"]')) as HTMLElement[]
+    await act(() => again[1]!.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Home", bubbles: true })))
+    assert.equal(w.document.activeElement, again[0])
+    await act(() => again[0]!.dispatchEvent(new w.KeyboardEvent("keydown", { key: "End", bubbles: true })))
+    assert.equal(w.document.activeElement, again[1])
+    await act(() => again[1]!.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Tab", bubbles: true })))
+    assert.equal(menu(), null)
+    assert.equal(w.document.activeElement, tab())
+
     // Escape closes without picking; a press elsewhere closes too.
     await act(() => tab().click())
     await act(() => menu()!.querySelector("button")!.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true })))
@@ -67,6 +78,24 @@ test("savings tabs: the Crypto Native menu lists supported coins and picks one (
     await act(() => w.document.body.dispatchEvent(new w.Event("pointerdown", { bubbles: true })))
     assert.equal(menu(), null)
     assert.deepEqual(picked, ["XRP"])
+
+    // On a phone (below sm) the tab opens the bottom sheet instead, and never both: the open list closes.
+    await act(() => tab().click())
+    assert.ok(menu())
+    ;(w as unknown as { matchMedia: unknown }).matchMedia = (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })
+    await act(() => tab().click())
+    const menus = w.document.querySelectorAll('[role="menu"]')
+    assert.equal(menus.length, 1)
+    const dialog = w.document.querySelector('[role="dialog"]')!
+    assert.ok(dialog.contains(menus[0]!), "the one menu is the sheet's")
+    const sheetRows = Array.from(dialog.querySelectorAll('[role="menuitemradio"]')) as HTMLElement[]
+    assert.deepEqual(sheetRows.map((row) => row.getAttribute("data-coin")), ["ETH", "XRP"])
+    // The same arrow keys work in the sheet.
+    await act(() => sheetRows[0]!.focus())
+    await act(() => sheetRows[0]!.dispatchEvent(new w.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })))
+    assert.equal(w.document.activeElement, sheetRows[1])
+    await act(() => sheetRows[0]!.click())
+    assert.deepEqual(picked, ["XRP", "ETH"])
 
     await React.act(async () => root.unmount())
   } finally {

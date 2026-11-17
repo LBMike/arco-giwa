@@ -71,7 +71,7 @@ export default function GiwaSavingsPage() {
   const category = savingsCategoryFromSearch(searchParams)
   const selectedAsset = searchParams.get("asset")
   const selectedAccount = searchParams.get("account")
-  // The tabs show every account. The pick: an explicit enabled account or asset in the URL's category, else that
+  // The tabs show every account that can be saved today (a coming-soon Crypto Native coin is left out). The pick: an explicit enabled account or asset in the URL's category, else that
   // category's first enabled account (the sidebar's Stablecoins / Crypto Native links), else the first overall.
   const selected = useMemo<SavingsAccount | null>(() => {
     const inCategory = accounts.filter((account) => savingsAssetCategory(account.symbol) === category)

@@ -516,8 +516,9 @@ test("tabs: Stablecoins stacks its coins in one tab; Crypto Native stacks its su
   const tab = html.match(/<button type="button" data-crypto-tab="" data-selected="true" aria-haspopup="menu" aria-expanded="false"[^>]*>(.*?)<\/button>/)
   assert.ok(tab, "the Crypto Native tab")
   assert.deepEqual([...tab[1]!.matchAll(/<img src="([^"]+)"/g)].map((match) => match[1]), ["/accept/ETH.png"])
-  assert.match(tab[1]!, /<span class="sr-only">ETH; ETH selected<\/span>/)
-  assert.match(tab[1]!, />3\.86%<\/span><svg[^>]*lucide-chevron-down/)
+  // Read out in full for screen readers; the figure on show is for the eye.
+  assert.match(tab[1]!, /<span class="sr-only">Crypto Native: ETH, 3\.86% APY; ETH selected<\/span>/)
+  assert.match(tab[1]!, /<span aria-hidden="true"[^>]*>3\.86%<\/span><svg/)
   assert.doesNotMatch(html, /XRP|Soon/)
   // Closed: no menu in the page.
   assert.doesNotMatch(html, /role="menu"/)
@@ -530,7 +531,7 @@ test("tabs: Crypto Native shows every supported coin stacked and the lowest to t
   // In the accounts' order, the first on top; the coming-soon SOL is left out.
   assert.deepEqual([...tab.matchAll(/<img src="([^"]+)"/g)].map((match) => match[1]), ["/accept/XRP.png", "/accept/ETH.png", "/accept/BTC.png"])
   assert.deepEqual([...tab.matchAll(/style="z-index:(\d+)"/g)].map((match) => Number(match[1])), [3, 2, 1])
-  assert.match(tab, /<span class="sr-only">XRP, ETH, BTC<\/span>/)
+  assert.match(tab, /<span class="sr-only">Crypto Native: XRP, ETH, BTC, 3\.86% to 4\.57% APY<\/span>/)
   assert.match(tab, />3\.86% ~ 4\.57%</)
 
   // The range: as the figures are written; one figure when there is one or they agree; none without a figure.
