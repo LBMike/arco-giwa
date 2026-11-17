@@ -8,7 +8,19 @@ import { pauseStateOf, vaultConfigOf } from "./catalog"
 import { GIWA_CHAIN_ID } from "./config"
 import { afterConfirmedReceipt, readTokenBalance, sendPreparedTransaction, toBaseUnits } from "./contracts"
 import { AdminWriteGroup, useGiwaAdmin } from "./admin-context"
-import { UNLIMITED_HUMAN, allowanceBelowCap, isPositiveHuman, resolveLimit, usdHint } from "./limits-helpers"
+import { useOnchainRole } from "./admin-roles"
+import {
+  UNLIMITED_HUMAN,
+  allowanceBelowCap,
+  depositLimitNote,
+  isPositiveHuman,
+  limitBadges,
+  redemptionLimitNote,
+  resolveLimit,
+  usageLine,
+  usdHint,
+  type LimitUsageSide,
+} from "./limits-helpers"
 import type { GiwaCatalogItem, GiwaRedemption, GiwaReserveRecall, HexAddress, UnsignedAdminTransaction } from "./types"
 import {
   isReserveRecall,
@@ -183,6 +195,7 @@ function LimitField({
   onChange,
   hint,
   helper,
+  usage,
 }: {
   label: string
   unit: string
@@ -191,6 +204,8 @@ function LimitField({
   onChange: (value: string) => void
   hint: string | null
   helper?: { label: string; value: string }
+  /** What is already used against this limit; omitted for minimums and while unread. */
+  usage?: { side: LimitUsageSide; usedLabel: string } | null
 }) {
   return (
     <div>
@@ -210,6 +225,19 @@ function LimitField({
         </span>
         {hint && <span className="tabular-nums">{hint}</span>}
       </div>
+      {usage && (
+        <div className="mt-1">
+          <div className="h-1 w-full overflow-hidden rounded-[var(--radius-pill)] bg-[var(--color-arco-surface-muted)]">
+            <div
+              className={`h-full ${usage.side.level === "ok" ? "bg-[var(--color-arco-up)]" : "bg-[var(--color-arco-down)]"}`}
+              style={{ width: `${Math.min(100, Math.max(usage.side.usedPct, usage.side.usedPct > 0 ? 2 : 0))}%` }}
+            />
+          </div>
+          <p className={`mt-1 text-[11px] tabular-nums ${usage.side.level === "ok" ? "text-[var(--color-arco-muted)]" : "text-[var(--color-arco-down)]"}`}>
+            {usageLine(usage.side, usage.usedLabel)}
+          </p>
+        </div>
+      )}
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -279,7 +307,16 @@ function VaultCard({
   }
   const recallAttention = recallsNeedingAttention(recallsQuery.data?.recalls ?? [], product.productId)
   const recallHeaderBadge = recallBadge(recallAttention)
-  const headerBadges = recallHeaderBadge ? [...pauseBadges, recallHeaderBadge] : pauseBadges
+  // Limit usage of every vault (one shared request for every card, also while collapsed): the
+  // header flags a vault that is close to, or at, a limit before a customer hits the revert.
+  const limitsUsageQuery = useQuery({
+    queryKey: ["giwa", "admin-limits-usage"],
+    queryFn: () => giwaApi.admin.limitsUsage(auth),
+    enabled: auth.ready,
+    refetchInterval: 60_000,
+  })
+  const listedUsage = limitsUsageQuery.data?.products.find((row) => row.productId === product.productId)?.usage ?? null
+  const headerBadges = [...pauseBadges, ...limitBadges(listedUsage), ...(recallHeaderBadge ? [recallHeaderBadge] : [])]
   const recallsUnavailable = recallsUnavailableReason(recallsQuery.data, recallsQuery.error)
   const [recallPhases, setRecallPhases] = useState<Record<string, ActionPhase>>({})
   const [recallErrors, setRecallErrors] = useState<Record<string, string>>({})
@@ -325,6 +362,12 @@ function VaultCard({
     refetchInterval: 60_000,
   })
   const cur = limitsQuery.data?.limits
+  // The card's own read is the fresher one once expanded; the shared list covers the header.
+  const usage = limitsQuery.data?.usage ?? listedUsage
+  // setLimits is role-gated on each vault; say so before a signature is requested.
+  const depositLimitsRole = useOnchainRole(expanded ? product.depositVaultAddress : null, "DEPOSIT_VAULT_ADMIN_ROLE", "deposit vault", walletAddress)
+  const redemptionLimitsRole = useOnchainRole(expanded ? product.redemptionVaultAddress : null, "REDEMPTION_VAULT_ADMIN_ROLE", "redemption vault", walletAddress)
+  const refreshLimits = () => Promise.all([limitsQuery.refetch(), limitsUsageQuery.refetch()])
   // Price-feed wiring of both vaults (read-only). A payment feed equal to the product feed
   // makes every quote 1:1 regardless of NAV — shown as a warning until the repair runs.
   const feedsQuery = useQuery({
@@ -703,6 +746,9 @@ function VaultCard({
           CURRENT value (setLimits overwrites all fields — a stray 0 would brick the vault). */}
       <div className="rounded-[var(--radius-card)] border border-[var(--color-arco-border)] p-3">
         <h3 className="text-sm font-semibold text-[var(--color-arco-ink)]">Limits</h3>
+        <p className="mt-1 text-[11px] text-[var(--color-arco-muted)]">
+          Allowances count lifetime mints and redemptions: a withdrawal does not give mint allowance back, so a vault can fill up while its supply is below the cap.
+        </p>
         {!cur ? (
           <p className="mt-2 text-xs text-[var(--color-arco-muted)]">
             {limitsQuery.isError ? (
@@ -720,13 +766,21 @@ function VaultCard({
               <p className="text-xs font-medium text-[var(--color-arco-ink)]">Deposit limits</p>
               <div className="mt-3 space-y-3">
                 <LimitField label="Minimum deposit" unit={product.paymentAssetSymbol} current={cur.deposit.minimumDeposit} value={depMin} onChange={setDepMin} hint={usdHint(resolveLimit(depMin, cur.deposit.minimumDeposit), baseUsd)} helper={{ label: "No minimum", value: "0" }} />
-                <LimitField label="Max supply cap" unit={`${product.symbol} shares`} current={cur.deposit.maxSupplyCap} value={depCap} onChange={setDepCap} hint={usdHint(resolveLimit(depCap, cur.deposit.maxSupplyCap), navUsd)} helper={{ label: "Set unlimited", value: UNLIMITED_HUMAN }} />
-                <LimitField label="Vault mint allowance" unit={`${product.symbol} shares`} current={cur.deposit.vaultMintAllowance} value={depAllow} onChange={setDepAllow} hint={usdHint(resolveLimit(depAllow, cur.deposit.vaultMintAllowance), navUsd)} helper={{ label: "Set unlimited", value: UNLIMITED_HUMAN }} />
+                <LimitField label="Max supply cap" unit={`${product.symbol} shares`} current={cur.deposit.maxSupplyCap} value={depCap} onChange={setDepCap} hint={usdHint(resolveLimit(depCap, cur.deposit.maxSupplyCap), navUsd)} helper={{ label: "Set unlimited", value: UNLIMITED_HUMAN }} usage={usage?.deposit.supplyCap ? { side: usage.deposit.supplyCap, usedLabel: "Supply" } : null} />
+                <LimitField label="Vault mint allowance" unit={`${product.symbol} shares`} current={cur.deposit.vaultMintAllowance} value={depAllow} onChange={setDepAllow} hint={usdHint(resolveLimit(depAllow, cur.deposit.vaultMintAllowance), navUsd)} helper={{ label: "Set unlimited", value: UNLIMITED_HUMAN }} usage={usage ? { side: usage.deposit.mintAllowance, usedLabel: "Minted (lifetime)" } : null} />
               </div>
               {allowanceBelowCap(resolveLimit(depAllow, cur.deposit.vaultMintAllowance), resolveLimit(depCap, cur.deposit.maxSupplyCap)) && (
                 <p className="mt-2 flex items-start gap-1.5 text-[11px] text-[var(--color-arco-muted)]">
                   <AlertCircle className="mt-0.5 size-3 shrink-0" /> Mint allowance is below the supply cap — allowed, but mints stop at the allowance.
                 </p>
+              )}
+              {usage && depositLimitNote(usage) && (
+                <p className="mt-2 flex items-start gap-1.5 text-[11px] text-[var(--color-arco-down)]">
+                  <AlertCircle className="mt-0.5 size-3 shrink-0" /> {depositLimitNote(usage)}
+                </p>
+              )}
+              {depositLimitsRole.status === "missing" && (
+                <p className="mt-2 break-words text-[11px] text-[var(--color-arco-down)]">{depositLimitsRole.message}</p>
               )}
               <button
                 type="button"
@@ -739,11 +793,12 @@ function VaultCard({
                         maxSupplyCap: resolveLimit(depCap, cur.deposit.maxSupplyCap),
                         vaultMintAllowance: resolveLimit(depAllow, cur.deposit.vaultMintAllowance),
                       }),
-                    () => limitsQuery.refetch(),
+                    () => refreshLimits(),
                   )
                 }
                 disabled={
                   busyAction(depLimitsPhase) ||
+                  depositLimitsRole.status === "missing" ||
                   !isPositiveHuman(resolveLimit(depCap, cur.deposit.maxSupplyCap)) ||
                   !isPositiveHuman(resolveLimit(depAllow, cur.deposit.vaultMintAllowance))
                 }
@@ -759,8 +814,16 @@ function VaultCard({
               <p className="text-xs font-medium text-[var(--color-arco-ink)]">Redemption limits</p>
               <div className="mt-3 space-y-3">
                 <LimitField label="Minimum redeem" unit={`${product.symbol} shares`} current={cur.redemption.minimumRedeem} value={redMin} onChange={setRedMin} hint={usdHint(resolveLimit(redMin, cur.redemption.minimumRedeem), navUsd)} helper={{ label: "No minimum", value: "0" }} />
-                <LimitField label="Vault redeem allowance" unit={product.paymentAssetSymbol} current={cur.redemption.vaultRedeemAllowance} value={redAllow} onChange={setRedAllow} hint={usdHint(resolveLimit(redAllow, cur.redemption.vaultRedeemAllowance), baseUsd)} helper={{ label: "Set unlimited", value: UNLIMITED_HUMAN }} />
+                <LimitField label="Vault redeem allowance" unit={product.paymentAssetSymbol} current={cur.redemption.vaultRedeemAllowance} value={redAllow} onChange={setRedAllow} hint={usdHint(resolveLimit(redAllow, cur.redemption.vaultRedeemAllowance), baseUsd)} helper={{ label: "Set unlimited", value: UNLIMITED_HUMAN }} usage={usage ? { side: usage.redemption, usedLabel: "Redeemed (lifetime)" } : null} />
               </div>
+              {usage && redemptionLimitNote(usage, product.paymentAssetSymbol) && (
+                <p className="mt-2 flex items-start gap-1.5 text-[11px] text-[var(--color-arco-down)]">
+                  <AlertCircle className="mt-0.5 size-3 shrink-0" /> {redemptionLimitNote(usage, product.paymentAssetSymbol)}
+                </p>
+              )}
+              {redemptionLimitsRole.status === "missing" && (
+                <p className="mt-2 break-words text-[11px] text-[var(--color-arco-down)]">{redemptionLimitsRole.message}</p>
+              )}
               <button
                 type="button"
                 onClick={() =>
@@ -771,10 +834,10 @@ function VaultCard({
                         minimumRedeem: resolveLimit(redMin, cur.redemption.minimumRedeem),
                         vaultRedeemAllowance: resolveLimit(redAllow, cur.redemption.vaultRedeemAllowance),
                       }),
-                    () => limitsQuery.refetch(),
+                    () => refreshLimits(),
                   )
                 }
-                disabled={busyAction(redLimitsPhase) || !isPositiveHuman(resolveLimit(redAllow, cur.redemption.vaultRedeemAllowance))}
+                disabled={busyAction(redLimitsPhase) || redemptionLimitsRole.status === "missing" || !isPositiveHuman(resolveLimit(redAllow, cur.redemption.vaultRedeemAllowance))}
                 className="mt-3 inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--color-arco-ink)] px-3 text-xs font-medium text-[var(--color-arco-on-dark)] disabled:opacity-50"
               >
                 {busyAction(redLimitsPhase) && <Loader2 className="size-3.5 animate-spin" />}

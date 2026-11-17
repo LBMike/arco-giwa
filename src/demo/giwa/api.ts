@@ -1,3 +1,4 @@
+import type { VaultLimitUsage } from "./limits-helpers"
 import { getAddress, isAddress } from "viem"
 import { assertRequiredPaymentAsset } from "./catalog"
 import { ARCO_API_BASE, GIWA_CHAIN_ID } from "./config"
@@ -61,6 +62,8 @@ export type GiwaVaultLimits = {
     deposit: { minimumDeposit: string; maxSupplyCap: string; vaultMintAllowance: string }
     redemption: { minimumRedeem: string; vaultRedeemAllowance: string }
   }
+  /** How much of the limits is used (lifetime mints/redemptions, supply); null when the server could not read it. */
+  usage?: VaultLimitUsage | null
   paymentDecimals: number
   shareDecimals: number
 }
@@ -333,6 +336,9 @@ export const giwaApi = {
       }),
     limits: (auth: AdminAuth, productId: string) =>
       adminJson<GiwaVaultLimits>(auth, `/api/v1/admin/products/${productId}/limits`),
+    // Limit usage of every deployed vault in one call (the list flags vaults close to a limit).
+    limitsUsage: (auth: AdminAuth) =>
+      adminJson<{ products: Array<{ productId: string; usage: VaultLimitUsage | null }> }>(auth, "/api/v1/admin/limits-usage"),
     // Both vaults' price-feed wiring + warnings (payment feed == product feed → quotes are 1:1).
     feeds: (auth: AdminAuth, productId: string) =>
       adminJson<GiwaVaultFeeds>(auth, `/api/v1/admin/products/${encodeURIComponent(productId)}/feeds`),

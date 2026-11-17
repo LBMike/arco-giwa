@@ -265,27 +265,55 @@ async function composeServer(
     "function vaultMintAllowance() view returns (uint256)",
     "function minimumRedeem() view returns (uint256)",
     "function vaultRedeemAllowance() view returns (uint256)",
+    "function mintedByVault() view returns (uint256)",
+    "function redeemedByVault() view returns (uint256)",
+    "function productToken() view returns (address)",
+    "function totalSupply() view returns (uint256)",
   ])
   // Settle confirms a direct-transfer payout against its receipt before recording SETTLED.
   const verifyPayout = createPayoutVerifier((hash) => rpcClient.getTransactionReceipt({ hash }))
 
   const readVaultLimits = async (refs: { depositVault: string; redemptionVault: string }) => {
-    const readLimit = (address: string, functionName: "minimumDeposit" | "maxSupplyCap" | "vaultMintAllowance" | "minimumRedeem" | "vaultRedeemAllowance") =>
-      rpcClient.readContract({ address: address as `0x${string}`, abi: vaultLimitsReadAbi, functionName }) as Promise<bigint>
+    const readLimit = (
+      address: string,
+      functionName: "minimumDeposit" | "maxSupplyCap" | "vaultMintAllowance" | "minimumRedeem" | "vaultRedeemAllowance" | "mintedByVault" | "redeemedByVault",
+    ) => rpcClient.readContract({ address: address as `0x${string}`, abi: vaultLimitsReadAbi, functionName }) as Promise<bigint>
+    // The supply cap is checked against the product token's totalSupply. Best-effort: a failed
+    // supply read leaves that side unknown instead of hiding the limits.
+    const readShareSupply = async () => {
+      try {
+        const productToken = (await rpcClient.readContract({
+          address: refs.depositVault as `0x${string}`,
+          abi: vaultLimitsReadAbi,
+          functionName: "productToken",
+        })) as `0x${string}`
+        const supply = (await rpcClient.readContract({ address: productToken, abi: vaultLimitsReadAbi, functionName: "totalSupply" })) as bigint
+        return supply.toString()
+      } catch {
+        return null
+      }
+    }
     try {
-      const [minimumDeposit, maxSupplyCap, vaultMintAllowance, minimumRedeem, vaultRedeemAllowance] = await Promise.all([
-        readLimit(refs.depositVault, "minimumDeposit"),
-        readLimit(refs.depositVault, "maxSupplyCap"),
-        readLimit(refs.depositVault, "vaultMintAllowance"),
-        readLimit(refs.redemptionVault, "minimumRedeem"),
-        readLimit(refs.redemptionVault, "vaultRedeemAllowance"),
-      ])
+      const [minimumDeposit, maxSupplyCap, vaultMintAllowance, minimumRedeem, vaultRedeemAllowance, mintedByVault, redeemedByVault, shareSupply] =
+        await Promise.all([
+          readLimit(refs.depositVault, "minimumDeposit"),
+          readLimit(refs.depositVault, "maxSupplyCap"),
+          readLimit(refs.depositVault, "vaultMintAllowance"),
+          readLimit(refs.redemptionVault, "minimumRedeem"),
+          readLimit(refs.redemptionVault, "vaultRedeemAllowance"),
+          readLimit(refs.depositVault, "mintedByVault"),
+          readLimit(refs.redemptionVault, "redeemedByVault"),
+          readShareSupply(),
+        ])
       return {
         minimumDeposit: minimumDeposit.toString(),
         maxSupplyCap: maxSupplyCap.toString(),
         vaultMintAllowance: vaultMintAllowance.toString(),
         minimumRedeem: minimumRedeem.toString(),
         vaultRedeemAllowance: vaultRedeemAllowance.toString(),
+        mintedByVault: mintedByVault.toString(),
+        redeemedByVault: redeemedByVault.toString(),
+        shareSupply,
       }
     } catch {
       return null
