@@ -25,9 +25,11 @@ The partners' own logo files, shown as overlapping round badges on the Savings c
 - rlusd.png   — RLUSD, 64×64
 - arcousd.png — ArcoUSD, 200×200
 - Chain badges: Ethereum and XRPL are inline marks (BrandMark.tsx NetworkIcon), GIWA is giwa.png
+- bitcoin.svg — BTC, Bitcoin's own mark (from the cryptocurrency-icons package, CC0-1.0). The Savings tab, its menu and "Available BTC" (components.tsx paymentAssetIcon; the Vault Config accept-asset icon)
 
 ## Product token icons
 - sarcousd.png — sArcoUSD, 200×200 (the arcoUSD Savings vault's share as customers see it; catalog.ts PRESENTED_TOKENS)
+- abtc.png — aBTC, 146×146 (the Arco BTC Savings token: a black Bitcoin mark on cream; components.tsx TOKEN_ICONS)
 - token-abtc.png
 - token-aeth.png
 - token-acapix.png

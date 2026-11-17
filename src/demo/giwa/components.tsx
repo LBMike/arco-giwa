@@ -196,7 +196,8 @@ function tokenIcon(productId: string) {
 
 export function paymentAssetIcon(symbol: string) {
   if (symbol === "tUSDC") return "/logos/usdc.svg"
-  if (symbol === "tBTC") return "/logos/abtc.png"
+  // The coin itself (Bitcoin's own mark); abtc.png is the aBTC savings token.
+  if (symbol === "tBTC") return "/logos/bitcoin.svg"
   if (symbol === "tWETH") return "/logos/aeth.png"
   if (symbol === "tXRP") return "/logos/XRP.png"
   if (symbol === "ArcoUSD") return "/logos/arco.png"
