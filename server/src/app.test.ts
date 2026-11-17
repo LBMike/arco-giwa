@@ -1394,9 +1394,10 @@ test("market impliedApy: registered non-builtin with ≥2 posts computes; <2 pos
   assert.equal(acapixEntry.apy, 11.58) // built-in static rate unchanged
   assert.equal(acapixEntry.impliedApy, null) // <2 posts → no implied APY
 
-  // aBTC: a set rate (2.79%), whatever its price posts imply. The Savings page shows `apy` ahead of `impliedApy`.
+  // aBTC and aXRP: set rates (2.79%, 4.57%), whatever their price posts imply. The Savings page shows `apy` ahead of `impliedApy`.
   const abtcEntry = entries.find((entry: any) => entry.productId === "abtc")
   assert.equal(abtcEntry.apy, 2.79)
+  assert.equal(entries.find((entry: any) => entry.productId === "axrp").apy, 4.57)
 
   // A built-in with zero indexed posts → both apy paths null (unchanged).
   const zeroPost = entries.find((entry: any) => entry.productId !== "anew" && entry.productId !== "acapix")
