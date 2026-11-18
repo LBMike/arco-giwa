@@ -284,7 +284,16 @@ async function main() {
     const vault = new Contract(target.proxy, VAULT_ABI, deployer)
     const tx = (await vault.setPaymentPriceFeed(constantFeed, await txOverrides(150_000))) as ContractTransaction
     await confirmedReceipt(tx, `${target.symbol} ${target.kind} setPaymentPriceFeed`)
-    const now = ((await vault.paymentPriceFeed()) as string).toLowerCase()
+    // The public RPC can serve a read from a node that has not seen the confirmed block yet
+    // (deploy-giwa.ts retries its post-deploy read-back for the same reason), so a first stale
+    // read is not a failure. Only a value that stays wrong is.
+    let now = ""
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      now = ((await vault.paymentPriceFeed()) as string).toLowerCase()
+      if (now === constantFeed.toLowerCase()) break
+      console.log(`${target.symbol} ${target.kind} paymentPriceFeed read-back not ready (attempt ${attempt}/6). retrying in 1000ms`)
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
     if (now !== constantFeed.toLowerCase()) throw new Error(`${target.symbol} ${target.kind} paymentPriceFeed read-back mismatch`)
     setCount += 1
   }
