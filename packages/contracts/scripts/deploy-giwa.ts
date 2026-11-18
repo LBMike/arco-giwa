@@ -127,6 +127,22 @@ function ensureCleanTree() {
   }
 }
 
+// The suites that exercise what a vault deploy touches: the vault contracts, the deploy-params
+// schema, the merged product plan and its resumability, feed init args, storage layouts and the
+// registry. Scoped like the other GIWA scripts (upgrade-payment-feeds-giwa.ts): the Stocks and
+// external-cash suites need hardhat.stocks.config.ts (chain 91342) and always fail under this
+// config, so running everything would block every vault deploy on unrelated suites.
+const PRE_DEPLOY_TESTS = [
+  "test/arco-harness.test.ts",
+  "test/deploy-params.test.ts",
+  "test/active-products.test.ts",
+  "test/resumable-deployment.test.ts",
+  "test/price-feed-init-args.test.ts",
+  "test/storage-layout.test.ts",
+  "test/registry-impl-preservation.test.ts",
+  "test/deploy-gate-network.test.ts",
+]
+
 function ensureContractTestsPass() {
   const testEnv = {
     ...process.env,
@@ -135,8 +151,8 @@ function ensureContractTestsPass() {
     GIWA_KEYSTORE_PASSWORD: "",
     CONFIRM_GIWA_BROADCAST: "",
   }
-  console.log("Running pre-broadcast contract tests on local hardhat network (chainId 31337).")
-  execFileSync("corepack", ["yarn", "hardhat", "test", "--network", "hardhat"], {
+  console.log(`Running pre-broadcast vault tests on local hardhat network (chainId 31337): ${PRE_DEPLOY_TESTS.join(", ")}`)
+  execFileSync("corepack", ["yarn", "hardhat", "test", "--network", "hardhat", ...PRE_DEPLOY_TESTS], {
     cwd: packageRoot(),
     env: testEnv,
     stdio: "inherit",

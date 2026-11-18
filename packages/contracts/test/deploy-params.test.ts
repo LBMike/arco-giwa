@@ -30,7 +30,7 @@ function goodParams(): DeployParamsFile {
 describe("deploy-params (2c-2 shared schema)", () => {
   it("category enum IS the shared taxonomy constant (single source, exact strings)", () => {
     expect(PARAMS_CATEGORIES).to.equal(SHARED_CATEGORIES) // same module object, not a copy
-    expect([...SHARED_CATEGORIES]).to.deep.equal(["U.S Treasuries", "Prime Credit", "Arco Saving"])
+    expect([...SHARED_CATEGORIES]).to.deep.equal(["U.S Treasuries", "Prime Credit", "Arco Saving", "Equity Exposure"])
   })
 
   it("accepts a valid file and applies launch-parity defaults", () => {
