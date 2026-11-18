@@ -50,6 +50,8 @@ inherited at extraction — fix only as a dedicated approved task; never grow th
   4 decimals (min 2) — near-par NAV needs sub-cent precision; `par → $1.00`.
   **Exception:** operational gas balances (admin console, e.g. the queue bot wallet's
   ETH) may show up to 4 decimals, no forced trailing zeros — a few cents of gas still matter.
+  **Exception:** Crypto Native coin amounts on the Savings deposit / withdraw screen (yearly earnings in tBTC,
+  tXRP…) may show up to 4 decimals, no forced trailing zeros — 0.0083 BTC a year would read "0".
 
 ## Routes
 

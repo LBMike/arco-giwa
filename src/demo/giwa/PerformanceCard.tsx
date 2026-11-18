@@ -10,6 +10,8 @@ import {
 import { GiwaTwoMetricChartCard, pctLabel, type ChartMetric } from "./TwoMetricChartCard"
 import { marketApyText, navSharePrice } from "./price-policy"
 import { aumLabel } from "../data/products"
+import { marketApyPercent } from "./price-policy"
+import { withBandedApy } from "./savings-apy-seed"
 
 // Vault-detail Performance card: a Price/APY toggle over one vault's series, rendered by the
 // shared GiwaTwoMetricChartCard. Price = real navBase history (built-ins keep the legacy
@@ -36,7 +38,12 @@ export function GiwaPerformanceCard({
         : buildRegisteredPriceSeries(history),
     [isBuiltIn, history, market?.navUsd, market?.apy, now],
   )
-  const apySeries = useMemo(() => buildApySeries(history), [history])
+  // A Crypto Native savings vault's APY line is its banded month, as on the Savings page (savings-apy-seed.ts); the
+  // price line stays the posted prices. Any other product: the rates its price posts imply.
+  const apySeries = useMemo(
+    () => buildApySeries(withBandedApy(history, market?.productId ?? history?.productId ?? "", marketApyPercent(market), now)),
+    [history, market, now],
+  )
 
   const priceMetric: ChartMetric = {
     key: "price",

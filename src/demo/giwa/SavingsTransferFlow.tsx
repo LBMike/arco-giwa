@@ -22,6 +22,7 @@ import { displayAmount, operationFlowView, type FlowOperation, type OperationFlo
 import { computeQuote, navSharePrice, navSharePriceValue } from "./price-policy"
 import { RollingDigits, useTrend } from "./RollingDigits"
 import { SavingsDialog } from "./SavingsDialog"
+import { savingsCoinDecimals } from "./savings-category"
 import { groupDigits, rollingAmount, rollingDecimals, shortAddress, tokenAmount, usd } from "./savings-format"
 import {
   BUSY_PHASES,
@@ -526,6 +527,8 @@ export function SavingsTransferFlow({
   const pickCoin = assetPicker !== undefined && !busy ? () => setPicking("coin") : undefined
   const pickPay = convert !== undefined && !busy ? () => setPicking("pay") : undefined
   const picker = picking === "pay" ? convert?.payPicker : picking === "coin" ? assetPicker : undefined
+  // A coin amount: two decimals for a dollar coin, four for a Crypto Native one (0.0083 tBTC a year would read "0").
+  const payDecimals = savingsCoinDecimals(paySymbol)
   const yearlyEarn = deposit && apyPercent !== null && amountNumber > 0 ? amountNumber * (apyPercent / 100) : null
   // The withdrawal's side of it: what the coins taken out would have earned in a year at the current APY.
   const yearlyForgone = !deposit && apyPercent !== null && quote !== null ? quote * (apyPercent / 100) : null
@@ -763,7 +766,7 @@ export function SavingsTransferFlow({
                         {yearlyEarn !== null && (
                           <p className="flex items-center justify-center gap-1.5 rounded-[12px] bg-[var(--color-arco-page)] py-2 text-[13px] font-medium text-[var(--color-arco-up-text)]">
                             <Sprout aria-hidden="true" className="size-3.5" />
-                            Earn ~{tokenAmount(yearlyEarn, 2)} {paySymbol}/year
+                            Earn ~{tokenAmount(yearlyEarn, payDecimals)} {paySymbol}/year
                           </p>
                         )}
                         <TokenRow
@@ -777,7 +780,7 @@ export function SavingsTransferFlow({
                     ) : (
                       <div className={`${CARD} space-y-2 p-2 pt-3`}>
                         <SavingsBadge apyText={apyText} />
-                        {yearlyForgone !== null && <ForgoneEarnings amount={tokenAmount(yearlyForgone, 2)} symbol={paySymbol} />}
+                        {yearlyForgone !== null && <ForgoneEarnings amount={tokenAmount(yearlyForgone, payDecimals)} symbol={paySymbol} />}
                         <TokenRow
                           icon={payIcon}
                           symbol={paySymbol}
