@@ -507,6 +507,153 @@
         "redemptionsEnabled": false,
         "adminUiEnabled": false
       }
+    },
+    {
+      "productId": "home",
+      "symbol": "HOME",
+      "name": "NUVA HOME Vault",
+      "paymentAssetSymbol": "tUSDC",
+      "productToken": {
+        "proxy": "0xD45eDf9C5d761293CE1023Ca1b3f64D75eEfEc80",
+        "implementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+        "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+        "logicalLabel": "HOME",
+        "contractName": "ProductToken",
+        "deployTxHash": "0x705470ace6281d424af5428d5abfb3ab0dc3b86e04ac9abbad0c78cacc248701",
+        "blockNumber": 41635424
+      },
+      "depositVault": {
+        "proxy": "0x930F3775D8cA468aAD6b8Bb170443b0222AEdF87",
+        "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+        "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
+        "logicalLabel": "HOME-deposit-vault",
+        "contractName": "ArcoDepositVault",
+        "deployTxHash": "0x04bcfcf63d5d22ff42df415dffc859b31f4c2536659add25eb8482755e41c0bd",
+        "blockNumber": 41635469
+      },
+      "redemptionVault": {
+        "proxy": "0x58eb7DDF65CA3bAa7250e2018f7a66ed17D4C30C",
+        "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+        "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
+        "logicalLabel": "HOME-redemption-vault",
+        "contractName": "ArcoRedemptionVault",
+        "deployTxHash": "0x9e7415d7962e5acc86240d9f1943859c634a83a15a73551893598fd549d3f9d6",
+        "blockNumber": 41635499
+      },
+      "priceFeed": {
+        "proxy": "0x1e1dff4830C69f45F6b0Dbf4c94134c091939668",
+        "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+        "logicalLabel": "HOME-price-feed",
+        "contractName": "ProductPriceFeed",
+        "deployTxHash": "0x9e53c548b79152b435246503950c81b18a0c58dc15c9ea14e26ae62c647b7583",
+        "blockNumber": 41635446
+      },
+      "deploymentBlock": 41635424,
+      "activationFlags": {
+        "deployed": true,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false,
+        "adminUiEnabled": false
+      }
+    },
+    {
+      "productId": "jxfund",
+      "symbol": "JX",
+      "name": "SBI Japan High Dividend Equity Strategy",
+      "paymentAssetSymbol": "tUSDC",
+      "productToken": {
+        "proxy": "0xec32264813612AdFf58538a7b8ddd2FE7E78639b",
+        "implementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+        "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+        "logicalLabel": "JX",
+        "contractName": "ProductToken",
+        "deployTxHash": "0x99a8810f33eb2973c712e57ff977227250a7ddebb1615dd2e021f08a40f11701",
+        "blockNumber": 41635431
+      },
+      "depositVault": {
+        "proxy": "0x35F0b76bE975934b52156c7a42B7285b34f416F9",
+        "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+        "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
+        "logicalLabel": "JX-deposit-vault",
+        "contractName": "ArcoDepositVault",
+        "deployTxHash": "0xd65537cc8596522cc420f9595d87e63629d26b8db45fe4041e989d9c64e004da",
+        "blockNumber": 41635480
+      },
+      "redemptionVault": {
+        "proxy": "0x3Cb9EB0Dd0e22736815E5769710a6B11C79d4337",
+        "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+        "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
+        "logicalLabel": "JX-redemption-vault",
+        "contractName": "ArcoRedemptionVault",
+        "deployTxHash": "0x2aa5914082589b35445f9a0532bc6b4e78769f36234ddef25c4b413b59e079ec",
+        "blockNumber": 41635509
+      },
+      "priceFeed": {
+        "proxy": "0x79614e54Fb7b94E370267a72FA5623C3EB99c36c",
+        "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+        "logicalLabel": "JX-price-feed",
+        "contractName": "ProductPriceFeed",
+        "deployTxHash": "0x9ad759375009b7c415968efe60bca3b5a960e163ba690ae8a9bc0c3b33032d6d",
+        "blockNumber": 41635455
+      },
+      "deploymentBlock": 41635431,
+      "activationFlags": {
+        "deployed": true,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false,
+        "adminUiEnabled": false
+      }
+    },
+    {
+      "productId": "pplus",
+      "symbol": "PPLUS",
+      "name": "Bitwise Premium+ RWA Vault",
+      "paymentAssetSymbol": "tUSDC",
+      "productToken": {
+        "proxy": "0x28570accaDB959584478b9Ec35343befc5490c42",
+        "implementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+        "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+        "logicalLabel": "PPLUS",
+        "contractName": "ProductToken",
+        "deployTxHash": "0x527e015c8ac2fb9dbddfed95a1d83ddef204eb61c0007a99cbf2c45ad838099e",
+        "blockNumber": 41635439
+      },
+      "depositVault": {
+        "proxy": "0x14c2aF588F0435CF18b4F0dAA722A2c54A1dAdF8",
+        "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+        "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
+        "logicalLabel": "PPLUS-deposit-vault",
+        "contractName": "ArcoDepositVault",
+        "deployTxHash": "0x0f6222377a5f887ef0678d27384fe473e85f236beaabfa5d2c7c1d56d479bf5b",
+        "blockNumber": 41635490
+      },
+      "redemptionVault": {
+        "proxy": "0xC0Cf3bc5BeDe3a827eC4Ffc588B34399E9934248",
+        "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+        "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
+        "logicalLabel": "PPLUS-redemption-vault",
+        "contractName": "ArcoRedemptionVault",
+        "deployTxHash": "0xe31be8a6e22244b66e890ff3d2bf1f6b859997d8b1e8e356ca7914a559618d99",
+        "blockNumber": 41635519
+      },
+      "priceFeed": {
+        "proxy": "0x17213473CF6eb33C30620d721bca250c834E4674",
+        "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+        "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+        "logicalLabel": "PPLUS-price-feed",
+        "contractName": "ProductPriceFeed",
+        "deployTxHash": "0x4d723bc7727038e8190a826115dbc5a601d046e8350287cf6637b247dd24e90b",
+        "blockNumber": 41635462
+      },
+      "deploymentBlock": 41635439,
+      "activationFlags": {
+        "deployed": true,
+        "depositsEnabled": false,
+        "redemptionsEnabled": false,
+        "adminUiEnabled": false
+      }
     }
   ],
   "productPaymentMappings": {
@@ -517,7 +664,10 @@
     "aXRP": "tXRP",
     "aETH": "tWETH",
     "bEQTY": "tUSDC",
-    "arcoUSD": "tUSDC"
+    "arcoUSD": "tUSDC",
+    "HOME": "tUSDC",
+    "JX": "tUSDC",
+    "PPLUS": "tUSDC"
   },
   "events": {
     "targetEvents": [
@@ -1213,6 +1363,126 @@
       "bytecodeHash": "0xcd99feede57db88c4db254ece413ed7764fd3457586abe365c56e60b9d30a3c8",
       "deployTxHash": "0x311e1c8b6eaf6a66bc7cecd3497a684484ff41b75a7c6946e6d60eb36fc47d36",
       "blockNumber": 30357040
+    },
+    {
+      "key": "proxy:product:home:productToken",
+      "logicalLabel": "HOME",
+      "contractName": "ProductToken",
+      "proxy": "0xD45eDf9C5d761293CE1023Ca1b3f64D75eEfEc80",
+      "implementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+      "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+      "deployTxHash": "0x705470ace6281d424af5428d5abfb3ab0dc3b86e04ac9abbad0c78cacc248701",
+      "blockNumber": 41635424
+    },
+    {
+      "key": "proxy:product:jxfund:productToken",
+      "logicalLabel": "JX",
+      "contractName": "ProductToken",
+      "proxy": "0xec32264813612AdFf58538a7b8ddd2FE7E78639b",
+      "implementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+      "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+      "deployTxHash": "0x99a8810f33eb2973c712e57ff977227250a7ddebb1615dd2e021f08a40f11701",
+      "blockNumber": 41635431
+    },
+    {
+      "key": "proxy:product:pplus:productToken",
+      "logicalLabel": "PPLUS",
+      "contractName": "ProductToken",
+      "proxy": "0x28570accaDB959584478b9Ec35343befc5490c42",
+      "implementation": "0xAEfC146E2C7ea1fcdd0223762e97256C9C9D9DaB",
+      "bytecodeHash": "0x0e7a19dded5b4f2d4494d3b743082af96814cd46f6d231730f95246f83a4a76c",
+      "deployTxHash": "0x527e015c8ac2fb9dbddfed95a1d83ddef204eb61c0007a99cbf2c45ad838099e",
+      "blockNumber": 41635439
+    },
+    {
+      "key": "proxy:product:home:priceFeed",
+      "logicalLabel": "HOME-price-feed",
+      "contractName": "ProductPriceFeed",
+      "proxy": "0x1e1dff4830C69f45F6b0Dbf4c94134c091939668",
+      "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+      "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+      "deployTxHash": "0x9e53c548b79152b435246503950c81b18a0c58dc15c9ea14e26ae62c647b7583",
+      "blockNumber": 41635446
+    },
+    {
+      "key": "proxy:product:jxfund:priceFeed",
+      "logicalLabel": "JX-price-feed",
+      "contractName": "ProductPriceFeed",
+      "proxy": "0x79614e54Fb7b94E370267a72FA5623C3EB99c36c",
+      "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+      "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+      "deployTxHash": "0x9ad759375009b7c415968efe60bca3b5a960e163ba690ae8a9bc0c3b33032d6d",
+      "blockNumber": 41635455
+    },
+    {
+      "key": "proxy:product:pplus:priceFeed",
+      "logicalLabel": "PPLUS-price-feed",
+      "contractName": "ProductPriceFeed",
+      "proxy": "0x17213473CF6eb33C30620d721bca250c834E4674",
+      "implementation": "0xa55f430172F10F4F7C669ee70C47C22B1aa927Ec",
+      "bytecodeHash": "0xe7ebdae745336affb2de82d164ef429c9a3ac09b79c35b53f6c96a663458c841",
+      "deployTxHash": "0x4d723bc7727038e8190a826115dbc5a601d046e8350287cf6637b247dd24e90b",
+      "blockNumber": 41635462
+    },
+    {
+      "key": "proxy:product:home:depositVault",
+      "logicalLabel": "HOME-deposit-vault",
+      "contractName": "ArcoDepositVault",
+      "proxy": "0x930F3775D8cA468aAD6b8Bb170443b0222AEdF87",
+      "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+      "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
+      "deployTxHash": "0x04bcfcf63d5d22ff42df415dffc859b31f4c2536659add25eb8482755e41c0bd",
+      "blockNumber": 41635469
+    },
+    {
+      "key": "proxy:product:jxfund:depositVault",
+      "logicalLabel": "JX-deposit-vault",
+      "contractName": "ArcoDepositVault",
+      "proxy": "0x35F0b76bE975934b52156c7a42B7285b34f416F9",
+      "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+      "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
+      "deployTxHash": "0xd65537cc8596522cc420f9595d87e63629d26b8db45fe4041e989d9c64e004da",
+      "blockNumber": 41635480
+    },
+    {
+      "key": "proxy:product:pplus:depositVault",
+      "logicalLabel": "PPLUS-deposit-vault",
+      "contractName": "ArcoDepositVault",
+      "proxy": "0x14c2aF588F0435CF18b4F0dAA722A2c54A1dAdF8",
+      "implementation": "0x1A2C5Ddb0677A7a81af7ACe334aF26d1051136ab",
+      "bytecodeHash": "0xdbcf95f87abbc2ce3a2c635eef53a8df3b5f3255574ac7bb03e5d2d4ad488d3b",
+      "deployTxHash": "0x0f6222377a5f887ef0678d27384fe473e85f236beaabfa5d2c7c1d56d479bf5b",
+      "blockNumber": 41635490
+    },
+    {
+      "key": "proxy:product:home:redemptionVault",
+      "logicalLabel": "HOME-redemption-vault",
+      "contractName": "ArcoRedemptionVault",
+      "proxy": "0x58eb7DDF65CA3bAa7250e2018f7a66ed17D4C30C",
+      "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+      "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
+      "deployTxHash": "0x9e7415d7962e5acc86240d9f1943859c634a83a15a73551893598fd549d3f9d6",
+      "blockNumber": 41635499
+    },
+    {
+      "key": "proxy:product:jxfund:redemptionVault",
+      "logicalLabel": "JX-redemption-vault",
+      "contractName": "ArcoRedemptionVault",
+      "proxy": "0x3Cb9EB0Dd0e22736815E5769710a6B11C79d4337",
+      "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+      "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
+      "deployTxHash": "0x2aa5914082589b35445f9a0532bc6b4e78769f36234ddef25c4b413b59e079ec",
+      "blockNumber": 41635509
+    },
+    {
+      "key": "proxy:product:pplus:redemptionVault",
+      "logicalLabel": "PPLUS-redemption-vault",
+      "contractName": "ArcoRedemptionVault",
+      "proxy": "0xC0Cf3bc5BeDe3a827eC4Ffc588B34399E9934248",
+      "implementation": "0x2b88c474b4eEf427C697aA53d2a000fc99212855",
+      "bytecodeHash": "0xab9d69c9e52bae6470cf09f924b0a3e30a9132834236fae8d33e36f132021007",
+      "deployTxHash": "0xe31be8a6e22244b66e890ff3d2bf1f6b859997d8b1e8e356ca7914a559618d99",
+      "blockNumber": 41635519
     }
   ],
   "roleGrants": [
@@ -2030,6 +2300,294 @@
       "granteeKey": "role-address:tier2Operator",
       "txHash": null,
       "blockNumber": 30357046,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:home:productToken:GREENLIST_OPERATOR_ROLE:role-address:tier2Operator",
+      "role": "GREENLIST_OPERATOR_ROLE",
+      "roleHash": "0x77c5b782690f31cd39b1abf2448215259a688a75920040c399d96a676bd1999d",
+      "target": "0xD45eDf9C5d761293CE1023Ca1b3f64D75eEfEc80",
+      "targetKey": "proxy:product:home:productToken",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635425,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:jxfund:productToken:GREENLIST_OPERATOR_ROLE:role-address:tier2Operator",
+      "role": "GREENLIST_OPERATOR_ROLE",
+      "roleHash": "0x77c5b782690f31cd39b1abf2448215259a688a75920040c399d96a676bd1999d",
+      "target": "0xec32264813612AdFf58538a7b8ddd2FE7E78639b",
+      "targetKey": "proxy:product:jxfund:productToken",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635433,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:pplus:productToken:GREENLIST_OPERATOR_ROLE:role-address:tier2Operator",
+      "role": "GREENLIST_OPERATOR_ROLE",
+      "roleHash": "0x77c5b782690f31cd39b1abf2448215259a688a75920040c399d96a676bd1999d",
+      "target": "0x28570accaDB959584478b9Ec35343befc5490c42",
+      "targetKey": "proxy:product:pplus:productToken",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635440,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:home:priceFeed:FEED_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "FEED_ADMIN_ROLE",
+      "roleHash": "0xca653680535807dc09f7a0756c414d6cb833893dcb2ecc17895855899b8e7c15",
+      "target": "0x1e1dff4830C69f45F6b0Dbf4c94134c091939668",
+      "targetKey": "proxy:product:home:priceFeed",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635449,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:jxfund:priceFeed:FEED_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "FEED_ADMIN_ROLE",
+      "roleHash": "0xca653680535807dc09f7a0756c414d6cb833893dcb2ecc17895855899b8e7c15",
+      "target": "0x79614e54Fb7b94E370267a72FA5623C3EB99c36c",
+      "targetKey": "proxy:product:jxfund:priceFeed",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635457,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:pplus:priceFeed:FEED_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "FEED_ADMIN_ROLE",
+      "roleHash": "0xca653680535807dc09f7a0756c414d6cb833893dcb2ecc17895855899b8e7c15",
+      "target": "0x17213473CF6eb33C30620d721bca250c834E4674",
+      "targetKey": "proxy:product:pplus:priceFeed",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635463,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:home:productToken:MINTER_ROLE:proxy:product:home:depositVault",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0xD45eDf9C5d761293CE1023Ca1b3f64D75eEfEc80",
+      "targetKey": "proxy:product:home:productToken",
+      "grantee": "0x930F3775D8cA468aAD6b8Bb170443b0222AEdF87",
+      "granteeKey": "proxy:product:home:depositVault",
+      "txHash": "0xcf4dce8d93ae83a251f7864c08d6f14e9d76180a07a1efbe57385c60d0c1e7c6",
+      "blockNumber": 41635474,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:home:depositVault:DEPOSIT_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "DEPOSIT_VAULT_ADMIN_ROLE",
+      "roleHash": "0x2728bd32a7e1e24afac41a073e9c92dbb65527c9ec3baa2a8d5ee1d06c0fa779",
+      "target": "0x930F3775D8cA468aAD6b8Bb170443b0222AEdF87",
+      "targetKey": "proxy:product:home:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635474,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:home:depositVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x930F3775D8cA468aAD6b8Bb170443b0222AEdF87",
+      "targetKey": "proxy:product:home:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635474,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:jxfund:productToken:MINTER_ROLE:proxy:product:jxfund:depositVault",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0xec32264813612AdFf58538a7b8ddd2FE7E78639b",
+      "targetKey": "proxy:product:jxfund:productToken",
+      "grantee": "0x35F0b76bE975934b52156c7a42B7285b34f416F9",
+      "granteeKey": "proxy:product:jxfund:depositVault",
+      "txHash": "0xf8e4217c8bbe159363394feb838673cbda69503b7aae42f4d7ef6ab77431c175",
+      "blockNumber": 41635484,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:jxfund:depositVault:DEPOSIT_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "DEPOSIT_VAULT_ADMIN_ROLE",
+      "roleHash": "0x2728bd32a7e1e24afac41a073e9c92dbb65527c9ec3baa2a8d5ee1d06c0fa779",
+      "target": "0x35F0b76bE975934b52156c7a42B7285b34f416F9",
+      "targetKey": "proxy:product:jxfund:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635483,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:jxfund:depositVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x35F0b76bE975934b52156c7a42B7285b34f416F9",
+      "targetKey": "proxy:product:jxfund:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635484,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:pplus:productToken:MINTER_ROLE:proxy:product:pplus:depositVault",
+      "role": "MINTER_ROLE",
+      "roleHash": "0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4ceeef8d981c8956a6",
+      "target": "0x28570accaDB959584478b9Ec35343befc5490c42",
+      "targetKey": "proxy:product:pplus:productToken",
+      "grantee": "0x14c2aF588F0435CF18b4F0dAA722A2c54A1dAdF8",
+      "granteeKey": "proxy:product:pplus:depositVault",
+      "txHash": "0xb705510f286853ac7411c29b80c7f2aba4544d75840bf87fe7112b51dc5b130d",
+      "blockNumber": 41635494,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:pplus:depositVault:DEPOSIT_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "DEPOSIT_VAULT_ADMIN_ROLE",
+      "roleHash": "0x2728bd32a7e1e24afac41a073e9c92dbb65527c9ec3baa2a8d5ee1d06c0fa779",
+      "target": "0x14c2aF588F0435CF18b4F0dAA722A2c54A1dAdF8",
+      "targetKey": "proxy:product:pplus:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635493,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:pplus:depositVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x14c2aF588F0435CF18b4F0dAA722A2c54A1dAdF8",
+      "targetKey": "proxy:product:pplus:depositVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635494,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:home:productToken:BURNER_ROLE:proxy:product:home:redemptionVault",
+      "role": "BURNER_ROLE",
+      "roleHash": "0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848",
+      "target": "0xD45eDf9C5d761293CE1023Ca1b3f64D75eEfEc80",
+      "targetKey": "proxy:product:home:productToken",
+      "grantee": "0x58eb7DDF65CA3bAa7250e2018f7a66ed17D4C30C",
+      "granteeKey": "proxy:product:home:redemptionVault",
+      "txHash": "0xc9d2f312464d576d0f5be9e05ffa85af4b8d7f55985bf493d83efec567737d3c",
+      "blockNumber": 41635504,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:home:redemptionVault:REDEMPTION_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "REDEMPTION_VAULT_ADMIN_ROLE",
+      "roleHash": "0x57df534b215589c7ade8c8abe0978debf2ea95cf1d442550f94eec78a69d238e",
+      "target": "0x58eb7DDF65CA3bAa7250e2018f7a66ed17D4C30C",
+      "targetKey": "proxy:product:home:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635503,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:home:redemptionVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x58eb7DDF65CA3bAa7250e2018f7a66ed17D4C30C",
+      "targetKey": "proxy:product:home:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635503,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:jxfund:productToken:BURNER_ROLE:proxy:product:jxfund:redemptionVault",
+      "role": "BURNER_ROLE",
+      "roleHash": "0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848",
+      "target": "0xec32264813612AdFf58538a7b8ddd2FE7E78639b",
+      "targetKey": "proxy:product:jxfund:productToken",
+      "grantee": "0x3Cb9EB0Dd0e22736815E5769710a6B11C79d4337",
+      "granteeKey": "proxy:product:jxfund:redemptionVault",
+      "txHash": "0x42efed9e295756cc3f5e52aea6fe444847e2a629941964688b7f58cb40977ed8",
+      "blockNumber": 41635513,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:jxfund:redemptionVault:REDEMPTION_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "REDEMPTION_VAULT_ADMIN_ROLE",
+      "roleHash": "0x57df534b215589c7ade8c8abe0978debf2ea95cf1d442550f94eec78a69d238e",
+      "target": "0x3Cb9EB0Dd0e22736815E5769710a6B11C79d4337",
+      "targetKey": "proxy:product:jxfund:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635512,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:jxfund:redemptionVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0x3Cb9EB0Dd0e22736815E5769710a6B11C79d4337",
+      "targetKey": "proxy:product:jxfund:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635513,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:pplus:productToken:BURNER_ROLE:proxy:product:pplus:redemptionVault",
+      "role": "BURNER_ROLE",
+      "roleHash": "0x3c11d16cbaffd01df69ce1c404f6340ee057498f5f00246190ea54220576a848",
+      "target": "0x28570accaDB959584478b9Ec35343befc5490c42",
+      "targetKey": "proxy:product:pplus:productToken",
+      "grantee": "0xC0Cf3bc5BeDe3a827eC4Ffc588B34399E9934248",
+      "granteeKey": "proxy:product:pplus:redemptionVault",
+      "txHash": "0xf00288e25edd9fe106b071c6205cdb8ac546ff95a8beecfedffb0fb21faf0f53",
+      "blockNumber": 41635523,
+      "status": "confirmed"
+    },
+    {
+      "key": "grant:proxy:product:pplus:redemptionVault:REDEMPTION_VAULT_ADMIN_ROLE:role-address:tier2Operator",
+      "role": "REDEMPTION_VAULT_ADMIN_ROLE",
+      "roleHash": "0x57df534b215589c7ade8c8abe0978debf2ea95cf1d442550f94eec78a69d238e",
+      "target": "0xC0Cf3bc5BeDe3a827eC4Ffc588B34399E9934248",
+      "targetKey": "proxy:product:pplus:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635523,
+      "status": "already-present"
+    },
+    {
+      "key": "grant:proxy:product:pplus:redemptionVault:PAUSER_ROLE:role-address:tier2Operator",
+      "role": "PAUSER_ROLE",
+      "roleHash": "0x65d7a28e3265b37a6474929f336521b332c1681b933f6cb9f3376673440d862a",
+      "target": "0xC0Cf3bc5BeDe3a827eC4Ffc588B34399E9934248",
+      "targetKey": "proxy:product:pplus:redemptionVault",
+      "grantee": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+      "granteeKey": "role-address:tier2Operator",
+      "txHash": null,
+      "blockNumber": 41635523,
       "status": "already-present"
     }
   ]
