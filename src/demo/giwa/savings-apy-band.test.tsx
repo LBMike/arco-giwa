@@ -3,7 +3,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { buildApySeries } from "./detail-charts"
+import { renderToStaticMarkup } from "react-dom/server"
+import { GiwaPerformanceCard } from "./PerformanceCard"
 import { SAVINGS_VAULT_APY_BANDS, withBandedApy } from "./savings-apy-seed"
+import { savingsCoinDecimals } from "./savings-category"
+import { tokenAmount } from "./savings-format"
 
 const DAY = 86_400
 const NOW = 1_795_000_000
@@ -48,4 +52,26 @@ test("banded APY: other vaults, and a vault with no rate to show, keep their his
   assert.equal(withBandedApy(undefined, "umint", 4, NOW), undefined)
   // No history read yet: the banded month is still drawn, at price 1.
   assert.equal(withBandedApy(undefined, "ABTC", 2.79, NOW)!.points.length, 31)
+})
+
+test("product page: a banded vault's APY chart is its month of rates, not the rates its price posts imply", () => {
+  // Two posts minutes apart (a wrong price, then its correction) imply an absurd rate; the banded month is drawn instead.
+  const posts = { productId: "abtc", apy: 2.79, points: [{ t: NOW - 100 * DAY, navBase: 1, navUsd: 60_000 }, { t: NOW - 5 * DAY, navBase: 0.5, navUsd: 30_000 }, { t: NOW - 4 * DAY, navBase: 1.0109, navUsd: 60_600 }] }
+  const market = { productId: "abtc", navBase: 1.0109, baseUsd: 60_000, navUsd: 60_654, apy: 2.79, impliedApy: null }
+  const html = renderToStaticMarkup(<GiwaPerformanceCard market={market as never} history={posts} isBuiltIn={false} initialMetric="apy" now={NOW} />)
+  assert.match(html, /2\.79%/)
+  assert.doesNotMatch(html, /-\d+(\.\d+)?%/, "no negative rate from the wrong post")
+  // A month of rates: the card opens on the 30-day range with the month's change (three posts alone would not).
+  assert.match(html, /· 30D/)
+})
+
+test("coin amounts: two decimals for a dollar coin, four for a Crypto Native one", () => {
+  assert.equal(savingsCoinDecimals("USDC"), 2)
+  assert.equal(savingsCoinDecimals("tUSDC"), 2)
+  assert.equal(savingsCoinDecimals("ArcoUSD"), 2)
+  assert.equal(savingsCoinDecimals("tBTC"), 4)
+  assert.equal(savingsCoinDecimals("tXRP"), 4)
+  // 0.3 tBTC at 2.79% a year: 0.0083 tBTC, not "0".
+  assert.equal(tokenAmount(0.3 * 0.0279, savingsCoinDecimals("tBTC")), "0.0083")
+  assert.equal(tokenAmount(0.3 * 0.0279, 2), "0")
 })

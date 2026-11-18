@@ -8,6 +8,14 @@ const STABLECOINS = new Set(["USDC", "RLUSD", "USDT", "ARCOUSD", "DAI", "USDE", 
 export function savingsAssetCategory(symbol: string): SavingsCategory {
   return STABLECOINS.has(symbol.toUpperCase()) ? "stablecoins" : "crypto-native"
 }
+/**
+ * How many decimals a coin amount shows on the Savings screens: two for a dollar coin, four for a Crypto Native one
+ * (0.0083 BTC a year would read "0" at two). Takes the coin as customers know it ("BTC") or the test token ("tBTC").
+ */
+export function savingsCoinDecimals(symbol: string): 2 | 4 {
+  const coin = symbol.replace(/^t(?=[A-Z])/, "")
+  return savingsAssetCategory(coin) === "stablecoins" ? 2 : 4
+}
 /** Explicit category wins; existing asset deep links retain their matching category. */
 export function savingsCategoryFromSearch(params: URLSearchParams): SavingsCategory {
   const category = params.get("category")
