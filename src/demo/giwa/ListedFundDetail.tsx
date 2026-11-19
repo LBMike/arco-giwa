@@ -26,6 +26,8 @@ const CHIP = "rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-2 py-0
 export type ListedFundLive = {
   readonly priceText: string
   readonly addresses: GiwaVaultDetail["addresses"]
+  /** The vault's Price / APY chart (its posted NAV history), shown at the top of Performance. */
+  readonly chart: ReactNode
   /** Desktop side panel. */
   readonly panel: ReactNode
   /** Mobile dock and the transaction modal, rendered once at the end of the page. */
@@ -95,6 +97,7 @@ export function ListedFundDetail({ fund, live }: { fund: ListedFund; live?: List
 
           <section id="performance" className="scroll-mt-[140px] space-y-4">
             <h2 className="text-lg font-semibold text-[var(--color-arco-ink)]">Performance</h2>
+            {live?.chart}
             <div className={CARD}>
               <p className="text-xs uppercase tracking-wide text-[var(--color-arco-muted)]">{rateLabel(fund.category)}</p>
               <p className="mt-3 font-mono text-2xl font-medium text-[var(--color-arco-ink)] sm:text-3xl">{fund.metric.value}</p>

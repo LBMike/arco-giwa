@@ -6,6 +6,7 @@ import { giwaApi } from "./api"
 import { isRetiredProduct, tokenSymbolFor, vaultDisplayName } from "./catalog"
 import { parseAumToNumber } from "./display-profile"
 import { GiwaInvestPanel, GiwaNetworkIcon } from "./components"
+import { GiwaPerformanceCard } from "./PerformanceCard"
 import { GiwaInvestDock } from "./GiwaInvestDock"
 import { GiwaOperationModal } from "./GiwaOperationModal"
 import { useGiwaVaultDetail } from "./useGiwaVaultDetail"
@@ -55,6 +56,7 @@ function ListedFundWithVault({ fund, product }: { fund: ListedFund; product: Giw
       live={{
         priceText: detail.priceText,
         addresses: detail.addresses,
+        chart: <GiwaPerformanceCard market={detail.market} history={detail.history} isBuiltIn={detail.isBuiltIn} />,
         panel: <GiwaInvestPanel {...detail.panel} instantLiquidityUsd={detail.instantLiquidityUsd} baseUsd={detail.baseUsd} />,
         overlay: (
           <>
