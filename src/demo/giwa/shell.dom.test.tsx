@@ -57,6 +57,9 @@ test("investor shell DOM (set GIWA_HOST_DOM_RUNTIME to an existing jsdom package
     // The live ArcoUSD v1 reads the shell makes for Get ArcoUSD and Savings (arcousd-live-context.tsx): not deployed here.
     client.setQueryData(["giwa", "arcousd", "reserve"], { status: "not-deployed", chainId: 91342, contracts: null, readAt: "", reserve: null, gate: { status: "inactive", reason: "not-deployed" } })
     client.setQueryData(["giwa", "arcousd", "savings"], { status: "not-deployed", chainId: 91342, contracts: null, readAt: "", savings: null })
+    // The live ArcoGOLD reads (arcogold-live-context.tsx) for the gold Savings account and Mint test assets: not deployed here.
+    client.setQueryData(["giwa", "arcogold", "reserve"], { status: "not-deployed", chainId: 91342, contracts: null, readAt: "", reserve: null })
+    client.setQueryData(["giwa", "arcogold", "savings"], { status: "not-deployed", chainId: 91342, contracts: null, readAt: "", savings: null, apyPercent: 3.1, ounceUsd: null })
     const probe: { pathname: string; navigate: NavigateFunction | null } = { pathname: "", navigate: null }
     function Probe() { probe.pathname = useLocation().pathname; probe.navigate = useNavigate(); return null }
     await act(async () => {

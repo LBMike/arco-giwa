@@ -514,7 +514,7 @@ export function SavingsTransferFlow({
   const operation: FlowOperation = deposit ? "deposit" : liquidityShort && !instantOnly ? "requestRedeem" : "redeemInstant"
   const shortNotice =
     !deposit && liquidityShort && instantOnly
-      ? `Instant liquidity is ${liquidityInPay !== null ? tokenAmount(liquidityInPay, 2) : "—"} ${paySymbol}. ${convert !== undefined ? "Convert" : "Withdraw"} up to that amount, or try again later.`
+      ? `Instant liquidity is ${liquidityInPay !== null ? tokenAmount(liquidityInPay, savingsCoinDecimals(paySymbol)) : "—"} ${paySymbol}. ${convert !== undefined ? "Convert" : "Withdraw"} up to that amount, or try again later.`
       : null
   const sendSymbol = deposit ? paySymbol : tokenSymbol
   const sendIcon = deposit ? payIcon : tokenIcon

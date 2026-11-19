@@ -18,6 +18,8 @@ import type {
   GiwaArcoUSDSavings,
   GiwaArcoUSDSavingsAdmin,
   GiwaArcoUSDSavingsHistory,
+  GiwaArcoGoldReserve,
+  GiwaArcoGoldSavings,
   GiwaActivity,
   GiwaAsset,
   GiwaCatalogItem,
@@ -274,6 +276,11 @@ export const giwaApi = {
     gate: () => fetchJson<GiwaArcoUSDReserve["gate"]>(`/api/v1/arcousd/gate`),
     savings: () => fetchJson<GiwaArcoUSDSavings>(`/api/v1/arcousd/savings`),
     savingsHistory: (days?: number) => fetchJson<GiwaArcoUSDSavingsHistory>(`/api/v1/arcousd/savings/history${days ? `?days=${days}` : ""}`),
+  },
+  // ArcoGOLD, the gold Savings account (public, no credentials): "not-deployed" until its registry file exists.
+  arcogold: {
+    reserve: () => fetchJson<GiwaArcoGoldReserve>(`/api/v1/arcogold/reserve`),
+    savings: () => fetchJson<GiwaArcoGoldSavings>(`/api/v1/arcogold/savings`),
   },
   monitoring: {
     overview: (auth: AdminAuth, chainId: number) =>

@@ -44,6 +44,7 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
   const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query")
   const { default: Portfolio } = await import("./PortfolioPage")
   const { ArcoUsdLiveContext, ArcoUsdLiveFailedContext, ArcoUsdLivePendingContext } = await import("./arcousd-live-context")
+  const { ArcoGoldLiveContext } = await import("./arcogold-live-context")
   const { GiwaFeaturesContext } = await import("./features")
   const { giwaApi, normalizeCatalog } = await import("./api")
   const { default: snapshot } = await import("./investor-shell/verification/deployed-giwa.snapshot.json")
@@ -67,7 +68,7 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
     giwaApi.redemptions = async () => []
   }
   // Stocks shown unless a case hides them (the app's switch, features.ts).
-  async function mount(live: unknown = null, status: { pending?: boolean; failed?: { retry: () => void } | null; stocks?: boolean } = {}) {
+  async function mount(live: unknown = null, status: { pending?: boolean; failed?: { retry: () => void } | null; stocks?: boolean; gold?: unknown } = {}) {
     const element = document.createElement("div"); document.body.append(element)
     const root = createRoot(element)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -78,7 +79,9 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
             <ArcoUsdLivePendingContext.Provider value={status.pending ?? false}>
               <ArcoUsdLiveFailedContext.Provider value={status.failed ?? null}>
                 <ArcoUsdLiveContext.Provider value={live as never}>
-                  <MemoryRouter><Portfolio /></MemoryRouter>
+                  <ArcoGoldLiveContext.Provider value={(status.gold ?? null) as never}>
+                    <MemoryRouter><Portfolio /></MemoryRouter>
+                  </ArcoGoldLiveContext.Provider>
                 </ArcoUsdLiveContext.Provider>
               </ArcoUsdLiveFailedContext.Provider>
             </ArcoUsdLivePendingContext.Provider>
@@ -363,6 +366,38 @@ test("main Portfolio distinguishes confirmed empty holdings from failed or pendi
       assert.match(empty.text(), /Deposit into Savings or Funds to start building your portfolio\./)
       assert.doesNotMatch(empty.text(), /buy Stocks|Stocks holdings could not be confirmed/)
     } finally { await empty.close() }
+  })
+
+  await t.test("ArcoGOLD: the wallet's ArcoGOLD is a Savings row with its mark, valued at ounces per share × an ounce's dollars", async () => {
+    reset()
+    const GOLD = "0x00000000000000000000000000000000000000Ab"
+    const gold = { arcoGOLD: GOLD, zap: "0x00000000000000000000000000000000000000Ac", coins: [], sharePrice: 1.25, ounceUsd: 2400, apyPercent: 3.1, depositPaused: false, redeemPaused: false, depositsOpen: true, withdrawalsOpen: true }
+    const read: string[] = []
+    boundary.balance = async (token) => { read.push(token); return token === GOLD ? "2" : "0" }
+    const m = await mount(null, { gold })
+    try {
+      // 2 ArcoGOLD × 1.25 oz × $2,400 = $6,000 under Savings, at the set 3.1%; no history yet, so no 24h change.
+      assert.ok(m.text().includes("2 ArcoGOLD"), m.text())
+      assert.match(m.part("portfolio-allocation") ?? "", /Savings\$6,000\.00100% · 1 holding/)
+      assert.match(m.text(), /2 ArcoGOLD—\$6,000\.003\.1%/)
+      assert.ok(m.element.querySelector('img[src="/logos/arcogold.png"]'), "the ArcoGOLD mark")
+      assert.ok(read.includes(GOLD))
+      // No ounce price: the holding stays, its value is not guessed.
+      await m.close()
+      const unpriced = await mount(null, { gold: { ...gold, ounceUsd: null } })
+      try {
+        assert.ok(unpriced.text().includes("2 ArcoGOLD"))
+        assert.doesNotMatch(unpriced.text(), /\$6,000/)
+      } finally { await unpriced.close() }
+    } finally { await m.close().catch(() => undefined) }
+    // Before the gold deploy (no live gold): nothing is read for ArcoGOLD and no row shows.
+    reset(); read.length = 0
+    boundary.balance = async (token) => { read.push(token); return "0" }
+    const none = await mount()
+    try {
+      assert.ok(!none.text().includes("ArcoGOLD"))
+      assert.ok(!read.includes(GOLD))
+    } finally { await none.close() }
   })
 
   await t.test("ArcoUSD v1 without a live Savings: ArcoUSD alone, nothing read for sArcoUSD", async () => {

@@ -9,6 +9,7 @@ import { SavingsDialog } from "./SavingsDialog"
 import { ChainIcon, ChainStack, CoinMark } from "./SavingsCoinMark"
 import { chainName, chainsWithBalance, pickerSections, SAVINGS_CHAINS, type SavingsAssetChoice, type SavingsChainId } from "./savings-assets"
 import { tokenAmount, usd } from "./savings-format"
+import { savingsCoinDecimals } from "./savings-category"
 
 const SOFT = "text-[var(--color-arco-text-soft)]"
 const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
@@ -152,12 +153,12 @@ function ChoiceRow({ choice, selected, onSelect }: { choice: SavingsAssetChoice;
           <span className="shrink-0 text-right tabular-nums">
             <span className="block text-[15px] font-medium leading-5 text-[var(--color-arco-ink)]">
               <span className="sr-only">Balance </span>
-              {choice.balance !== null ? tokenAmount(choice.balance, 2) : "—"}
+              {choice.balance !== null ? tokenAmount(choice.balance, savingsCoinDecimals(choice.symbol)) : "—"}
             </span>
             {choice.usd !== null && <span className={`block text-[13px] leading-5 ${SOFT}`}>{usd(choice.usd)}</span>}
           </span>
         ) : (
-          <span className={`shrink-0 rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-2 py-0.5 text-[11px] font-medium ${SOFT}`}>Coming soon</span>
+          <span className={`shrink-0 rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-2 py-0.5 text-[11px] font-medium ${SOFT}`}>{choice.unavailableLabel ?? "Coming soon"}</span>
         )}
         {selected && <Check aria-hidden="true" className="size-4 shrink-0 text-[var(--color-arco-ink)]" />}
       </button>

@@ -4,21 +4,23 @@
 
 import { useQueries } from "@tanstack/react-query"
 import { readTokenBalance } from "./contracts"
-import { nativeSavingsOption, routeFor, SAVINGS_ASSET_OPTIONS, type SavingsAssetChoice, type SavingsRoute } from "./savings-assets"
+import { routeFor, savingsOptionsFor, type SavingsAssetChoice, type SavingsRoute } from "./savings-assets"
 import type { GiwaCatalogItem, HexAddress } from "./types"
 
-/** Null for a vault that takes no stablecoin (it keeps its single coin and no picker). */
+/** Null for a vault that takes no stablecoin or gold coin (it keeps its single coin and no picker). */
 export function useSavingsAssetChoices(
   vault: GiwaCatalogItem,
   routes: readonly SavingsRoute[],
   account: HexAddress | null,
   usdPerCoin: number | null,
 ): SavingsAssetChoice[] | null {
-  const native = nativeSavingsOption(vault.paymentAssetSymbol)
+  // The vault's own family of coins: every stablecoin for a stablecoin vault, PAXG and XAUT for the gold account.
+  const family = savingsOptionsFor(vault.paymentAssetSymbol)
+  const native = family?.native ?? null
   const sources =
-    native === null
+    family === null || native === null
       ? []
-      : SAVINGS_ASSET_OPTIONS.map((option) => {
+      : family.options.map((option) => {
           const own = option.key === native.key
           const token = own ? vault.paymentAssetAddress : (routeFor(routes, vault, option.key)?.token ?? null)
           const decimals = own ? (vault.paymentAsset?.decimals ?? option.decimals) : option.decimals

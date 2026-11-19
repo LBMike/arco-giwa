@@ -61,6 +61,33 @@ export const SAVINGS_ASSET_OPTIONS: readonly SavingsAssetOption[] = SAVINGS_COIN
   })),
 )
 
+/**
+ * The gold coins the gold account (ArcoGOLD) takes, on GIWA only, where each is a test coin (tPAXG 18 decimals, tXAUT
+ * 6). Their own list, never the stablecoins': a stablecoin screen never offers gold, a gold screen never a stablecoin.
+ * The marks are the Gold tab's (savings-category.ts SAVINGS_GOLD_COINS).
+ */
+export const SAVINGS_GOLD_ASSET_OPTIONS: readonly SavingsAssetOption[] = [
+  { key: savingsOptionKey("PAXG", "giwa"), symbol: "PAXG", name: "PAX Gold", logo: "/logos/paxg.png", decimals: 18, chain: "giwa", chainName: chainName("giwa") },
+  { key: savingsOptionKey("XAUT", "giwa"), symbol: "XAUT", name: "Tether Gold", logo: "/logos/xaut.png", decimals: 6, chain: "giwa", chainName: chainName("giwa") },
+]
+
+/** A gold coin as the picker lists it (PAXG on GIWA for tPAXG), or null. */
+export function goldSavingsOption(symbol: string): SavingsAssetOption | null {
+  const coin = symbol.replace(/^t(?=[A-Z])/, "").toUpperCase()
+  return SAVINGS_GOLD_ASSET_OPTIONS.find((option) => option.symbol === coin) ?? null
+}
+
+/**
+ * A vault's own coin and the coins its screens list beside it: every stablecoin option for a stablecoin vault, the two
+ * gold coins for the gold account. Null for a vault that takes neither (a Crypto Native coin: no picker).
+ */
+export function savingsOptionsFor(paymentAssetSymbol: string): Readonly<{ native: SavingsAssetOption; options: readonly SavingsAssetOption[] }> | null {
+  const stable = nativeSavingsOption(paymentAssetSymbol)
+  if (stable !== null) return { native: stable, options: SAVINGS_ASSET_OPTIONS }
+  const gold = goldSavingsOption(paymentAssetSymbol)
+  return gold !== null ? { native: gold, options: SAVINGS_GOLD_ASSET_OPTIONS } : null
+}
+
 /** The option a vault's own coin is (USDC on GIWA for a vault paid in tUSDC); null for a vault that takes no stablecoin. */
 export function nativeSavingsOption(paymentAssetSymbol: string): SavingsAssetOption | null {
   // The GIWA test assets carry a "t" (tUSDC is USDC), as reserveAssetLabel in savings-backing.ts reads them.
@@ -111,16 +138,17 @@ export function productThroughRoute(vault: GiwaCatalogItem, option: SavingsAsset
 
 /**
  * The coin a transfer uses: the one picked, while the vault can take it (its own coin, or one it has a route for);
- * otherwise the vault's own. Null for a vault that takes no stablecoin (it keeps its single coin).
+ * otherwise the vault's own. Null for a vault that takes no stablecoin or gold coin (it keeps its single coin).
  */
 export function chosenSavingsOption(
   vault: Pick<GiwaCatalogItem, "productId" | "paymentAssetSymbol">,
   routes: readonly SavingsRoute[],
   picked: string | null,
 ): SavingsAssetOption | null {
-  const native = nativeSavingsOption(vault.paymentAssetSymbol)
-  if (native === null || picked === null || picked === native.key) return native
-  const option = SAVINGS_ASSET_OPTIONS.find((entry) => entry.key === picked)
+  const family = savingsOptionsFor(vault.paymentAssetSymbol)
+  const native = family?.native ?? null
+  if (family === null || native === null || picked === null || picked === native.key) return native
+  const option = family.options.find((entry) => entry.key === picked)
   return option !== undefined && routeFor(routes, vault, option.key) !== null ? option : native
 }
 
@@ -131,6 +159,8 @@ export type SavingsAssetChoice = SavingsAssetOption &
     balance: number | null
     /** The balance in dollars, or null while unknown. */
     usd: number | null
+    /** Why an unavailable coin is greyed out, when it is not "Coming soon" (a gold coin the Zap cannot pay at once). */
+    unavailableLabel?: string
   }>
 
 export type PickerFilter = Readonly<{ chain: SavingsChainId | "all"; query: string }>

@@ -24,10 +24,10 @@ COPY --chown=node:node package.json ./package.json
 COPY --chown=node:node prisma/migrations ./prisma/migrations
 COPY --chown=node:node scripts/stocks-preflight ./scripts/stocks-preflight
 COPY --chown=node:node scripts/stocks-deploy/healthcheck.mjs ./scripts/stocks-deploy/healthcheck.mjs
-# Public legacy registry, plus the ArcoUSD registry once its deploy script has written it (the
+# Public legacy registry, plus the ArcoUSD and ArcoGOLD registries once their deploy scripts have written them (the
 # [n] glob keeps the build working before then; the API stays "not-deployed" without it).
 # Reviewed Stocks settings are mounted at runtime.
-COPY --chown=node:node deployments/91342/arco-giwa-preprod.json deployments/91342/arcousd-giwa.jso[n] ./deployments/91342/
+COPY --chown=node:node deployments/91342/arco-giwa-preprod.json deployments/91342/arcousd-giwa.jso[n] deployments/91342/arcogold-giwa.jso[n] ./deployments/91342/
 USER node
 EXPOSE 8080
 STOPSIGNAL SIGTERM

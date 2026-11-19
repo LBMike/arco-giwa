@@ -577,6 +577,26 @@ const arcoSavingsZapAbi = parseAbi([
   "error MinSharesViolation()",
 ])
 
+/** ArcoSavingsZap.quoteRedeem: what `shares` pay in `asset` now, and whether redeem() would go through Instant. */
+const arcoSavingsZapQuoteAbi = parseAbi([
+  "function quoteRedeem(uint256 shares, address asset) view returns (uint256 arcoUSDOut, uint256 assetOut, bool instant)",
+  "error NotReserveAsset()",
+])
+
+/**
+ * Whether a Zap would pay `shares` out in `asset` at once (quoteRedeem's `instant`: the vault and the Reserve's redeem
+ * switches open, the coin redeemable and enough of it in the Reserve's free buffer), with the coin it would pay.
+ */
+export async function readZapRedeemQuote(zap: HexAddress, shares: bigint, asset: HexAddress) {
+  const [, assetOut, instant] = await publicGiwaClient.readContract({
+    address: zap,
+    abi: arcoSavingsZapQuoteAbi,
+    functionName: "quoteRedeem",
+    args: [shares, asset],
+  })
+  return { assetOut, instant }
+}
+
 export type ArcoUSDOperationCall = Readonly<{ address: HexAddress; abi: Abi; functionName: string; args: readonly unknown[] }>
 
 /**

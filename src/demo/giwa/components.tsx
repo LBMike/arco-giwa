@@ -507,9 +507,16 @@ export function TestFundsButton({ admin = false, inMenu = false }: { admin?: boo
   // lists them. dripAll already mints every configured faucet asset — this only lists their
   // balances and covers the per-asset fallback.
   const reserveQuery = useQuery({ queryKey: ["giwa", "arcousd", "reserve"], queryFn: () => giwaApi.arcousd.reserve(), enabled: !admin })
+  // The gold test coins (tPAXG, tXAUT) the gold Reserve lists once ArcoGOLD is deployed: the same faucet drips them.
+  // Before the gold deploy this read answers "not-deployed" (or fails on an older API) and adds nothing.
+  const goldReserveQuery = useQuery({ queryKey: ["giwa", "arcogold", "reserve"], queryFn: () => giwaApi.arcogold.reserve(), enabled: !admin, retry: 1 })
   const assets = useMemo(
-    () => withReserveTestAssets(uniquePaymentAssets(catalogQuery.data ?? []), reserveQuery.data?.reserve?.assets ?? []),
-    [catalogQuery.data, reserveQuery.data],
+    () =>
+      withReserveTestAssets(
+        withReserveTestAssets(uniquePaymentAssets(catalogQuery.data ?? []), reserveQuery.data?.reserve?.assets ?? []),
+        goldReserveQuery.data?.reserve?.assets ?? [],
+      ),
+    [catalogQuery.data, reserveQuery.data, goldReserveQuery.data],
   )
   const faucet = assets.find((asset) => asset.faucet)?.faucet ?? null
   const [phase, setPhase] = useState<UiPhase>("ready")

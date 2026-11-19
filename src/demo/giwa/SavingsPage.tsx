@@ -1,6 +1,6 @@
 import { useContext, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { useQuery } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import { formatUnits } from "viem"
 import { Calculator, ChartPie, Grid2x2 } from "lucide-react"
 import { giwaApi } from "./api"
@@ -13,18 +13,30 @@ import {
   REPLACED_SAVINGS_PRODUCT_ID,
 } from "./arcousd-live"
 import { ArcoUsdLiveContext, ArcoUsdLiveFailedContext, ArcoUsdLivePendingContext } from "./arcousd-live-context"
+import {
+  GOLD_SAVINGS_PRODUCT_ID,
+  goldOwnLiquidity,
+  goldQuoteShares,
+  goldSavingsMarket,
+  goldSavingsRoutes,
+  goldSavingsVault,
+  withGoldAccounts,
+  withInstantCoins,
+  type ArcoGoldLive,
+} from "./arcogold-live"
+import { ArcoGoldLiveContext, ArcoGoldLivePendingContext } from "./arcogold-live-context"
 import { assetLabel } from "./asset-label"
 import { tokenSymbolFor } from "./catalog"
 import { AllocationTreemap } from "./AllocationTreemap"
 import { paymentAssetIcon } from "./components"
 import { GIWA_CHAIN_ID, GIWA_LIVE_REFETCH } from "./config"
-import { readShareSupply, readTokenBalance } from "./contracts"
+import { readShareSupply, readTokenBalance, readZapRedeemQuote } from "./contracts"
 import { SavingsSkeleton } from "./GiwaSkeleton"
 import { marketApyPercent, marketApyText } from "./price-policy"
 import { buildSavingsAccounts, resolveSavingsSelection, type SavingsAccount } from "./savings"
 import { SavingsAccordion } from "./SavingsAccordion"
 import { withBandedApy, withSeededApy } from "./savings-apy-seed"
-import { chosenSavingsOption, heldCoins, heldUsd, productThroughRoute, routeFor } from "./savings-assets"
+import { chosenSavingsOption, heldCoins, heldUsd, productThroughRoute, routeFor, type SavingsAssetChoice, type SavingsRoute } from "./savings-assets"
 import { reserveAssetLabel, savingsBacking, savingsDepositLabel, savingsExposure } from "./savings-backing"
 import { savingsAssetCategory, savingsCategoryFromSearch } from "./savings-category"
 import { usdCompact } from "./savings-format"
@@ -67,6 +79,15 @@ export default function GiwaSavingsPage() {
     const apy = marketApyText(liveSavingsMarket(live.savings))
     return built.map((account) => (account.vault?.productId === REPLACED_SAVINGS_PRODUCT_ID ? { ...account, vault: liveVault, apy } : account))
   }, [catalogQuery.data, marketQuery.data, liveVault, live])
+  // The gold account on the live ArcoGOLD contracts (arcogold-live.ts): made from the gold deployment, in the place of
+  // any gold coin the Vault Config lists. Absent (not deployed, or not read) the list is as built.
+  const gold = useContext(ArcoGoldLiveContext)
+  const goldPending = useContext(ArcoGoldLivePendingContext)
+  const goldVault = useMemo(() => (gold !== null ? goldSavingsVault(gold) : null), [gold])
+  const withGold = useMemo(
+    () => withGoldAccounts(accounts, goldVault, gold, gold !== null ? marketApyText(goldSavingsMarket(gold)) : "—"),
+    [accounts, goldVault, gold],
+  )
   const [searchParams, setSearchParams] = useSearchParams()
   const category = savingsCategoryFromSearch(searchParams)
   const selectedAsset = searchParams.get("asset")
@@ -74,15 +95,16 @@ export default function GiwaSavingsPage() {
   // The tabs show every account that can be saved today (a coming-soon Crypto Native coin is left out). The pick: an explicit enabled account or asset in the URL's category, else that
   // category's first enabled account (the sidebar's Stablecoins / Crypto Native links), else the first overall.
   const selected = useMemo<SavingsAccount | null>(() => {
-    const inCategory = accounts.filter((account) => savingsAssetCategory(account.symbol) === category)
-    return resolveSavingsSelection(inCategory.length > 0 ? inCategory : accounts, selectedAccount, selectedAsset)
-  }, [accounts, category, selectedAccount, selectedAsset])
+    const inCategory = withGold.filter((account) => savingsAssetCategory(account.symbol) === category)
+    return resolveSavingsSelection(inCategory.length > 0 ? inCategory : withGold, selectedAccount, selectedAsset)
+  }, [withGold, category, selectedAccount, selectedAsset])
 
   // First load only: background refetches are isFetching, not isLoading, so they never re-skeleton. The first ArcoUSD
   // reads are waited for too, so the stablecoin account never opens on the vault the sArcoUSD account replaces; when
   // they keep failing the page says so (and keeps asking) instead of loading forever.
   const liveUnread = livePending && liveFailed !== null
-  const loading = catalogQuery.isLoading || marketQuery.isLoading || (livePending && !liveUnread)
+  // A link to the Gold tab also waits for the first gold reads (data or a failure), so it does not open on another account.
+  const loading = catalogQuery.isLoading || marketQuery.isLoading || (livePending && !liveUnread) || (goldPending && category === "gold")
 
   return (
     <div className="w-full">
@@ -92,12 +114,12 @@ export default function GiwaSavingsPage() {
           <SavingsSkeleton />
         ) : liveUnread ? (
           <SavingsLoadError onRetry={liveFailed!.retry} />
-        ) : accounts.length === 0 ? (
+        ) : withGold.length === 0 ? (
           <SavingsEmptyState />
         ) : (
           <>
             <SavingsTabs
-              accounts={accounts}
+              accounts={withGold}
               selectedKey={selected?.key ?? null}
               onSelect={(account) =>
                 setSearchParams((previous) => {
@@ -118,7 +140,7 @@ export default function GiwaSavingsPage() {
                 coinMarks={
                   // The gold account takes PAXG and XAUT: both marks beside what is available.
                   savingsAssetCategory(selected.symbol) === "gold"
-                    ? savingsGoldMarks(accounts.filter((account) => account.vault?.productId === selected.vault!.productId)).map((coin) => ({ icon: coin.logo ?? undefined, symbol: coin.symbol }))
+                    ? savingsGoldMarks(withGold.filter((account) => account.vault?.productId === selected.vault!.productId)).map((coin) => ({ icon: coin.logo ?? undefined, symbol: coin.symbol }))
                     : undefined
                 }
               />
@@ -164,7 +186,10 @@ function SavingsDetail({
   // The sArcoUSD account on ArcoUSD v1 reads its figures from the Savings API, not from posted prices.
   const live = useContext(ArcoUsdLiveContext)
   const liveSavings = vault.productId === LIVE_SAVINGS_PRODUCT_ID ? (live?.savings ?? null) : null
-  const vaultDetail = useGiwaVaultDetail(vault, { history: liveSavings === null })
+  // The gold account on ArcoGOLD reads its figures from the gold API (no posted prices either).
+  const goldLive = useContext(ArcoGoldLiveContext)
+  const liveGold = vault.productId === GOLD_SAVINGS_PRODUCT_ID ? goldLive : null
+  const vaultDetail = useGiwaVaultDetail(vault, { history: liveSavings === null && liveGold === null })
   const liveHistoryQuery = useQuery({
     queryKey: ["giwa", "arcousd", "savings-history"],
     queryFn: () => giwaApi.arcousd.savingsHistory(),
@@ -172,6 +197,19 @@ function SavingsDetail({
     ...GIWA_LIVE_REFETCH,
   })
   const detail = useMemo(() => {
+    if (liveGold !== null) {
+      // ArcoGOLD: ounces per share at an ounce's dollars, the set rate, and its banded month of rates (savings-apy-seed.ts).
+      const market = goldSavingsMarket(liveGold)
+      return {
+        ...vaultDetail,
+        market,
+        apyText: marketApyText(market),
+        history: withBandedApy(undefined, vault.productId, market.apy, Math.floor(Date.now() / 1000)),
+        baseUsd: liveGold.ounceUsd,
+        // The gold Reserve's free PAXG: what a withdrawal in the account's own coin can take at once.
+        instantLiquidityUsd: liveGold.ounceUsd !== null ? goldOwnLiquidity(liveGold) * liveGold.ounceUsd : null,
+      }
+    }
     if (liveSavings === null || live === null) {
       // A Crypto Native vault's APY chart: a month of rates inside its band, ending on the rate shown (savings-apy-seed.ts).
       const now = Math.floor(Date.now() / 1000)
@@ -189,9 +227,14 @@ function SavingsDetail({
       // The Reserve's free USDC: what a withdrawal in the account's own coin can take at once.
       instantLiquidityUsd: ownLiquidity,
     }
-  }, [vaultDetail, liveSavings, live, liveHistoryQuery.data, vault.productId])
+  }, [vaultDetail, liveSavings, live, liveGold, liveHistoryQuery.data, vault.productId])
   const wallet = useGiwaWallet()
-  const routes = useContext(SavingsRoutesContext)
+  const contextRoutes = useContext(SavingsRoutesContext)
+  // The gold account's XAUT comes in and goes out through the gold Zap: its route is added here, beside the others.
+  const routes = useMemo<readonly SavingsRoute[]>(
+    () => (liveGold !== null ? [...contextRoutes, ...goldSavingsRoutes(liveGold)] : contextRoutes),
+    [contextRoutes, liveGold],
+  )
   const [transfer, setTransfer] = useState<TransferMode | null>(null)
   // A transaction left running when the deposit / withdraw screen closed: its outcome shows under the card.
   const [leftRunning, setLeftRunning] = useState<TransferLeftRunning | null>(null)
@@ -215,16 +258,21 @@ function SavingsDetail({
     refetchInterval: 30_000,
   })
   const choices = useSavingsAssetChoices(vault, routes, wallet.address, detail.baseUsd)
+  // Withdrawing from the gold account: a coin the Zap would not pay at once (quoteRedeem) is greyed out in the picker.
+  const goldInstant = useGoldInstantCoins(liveGold, transfer === "withdraw", flowPanel.amount, panel.productBalance, choices)
+  const pickerChoices = useMemo(() => withInstantCoins(choices, goldInstant), [choices, goldInstant])
 
   const connected = panel.phase !== "disconnected"
   const navUsd = market?.navUsd ?? null
   const shares = numberOrNull(panel.productBalance)
   const balanceUsd = shares !== null && navUsd !== null ? shares * navUsd : null
-  const available = numberOrNull(panel.paymentBalance)
+  // The gold account's own coin is one of two: without an ounce price its available gold is not one coin's balance.
+  const available = liveGold !== null ? null : numberOrNull(panel.paymentBalance)
   // What a deposit can use: every coin the vault can take, when there are several; else its own coin.
   const availableUsd =
     choices !== null ? heldUsd(choices) : available !== null && detail.baseUsd !== null ? available * detail.baseUsd : null
-  const coinsHeld = choices !== null ? heldCoins(choices).map((coin) => ({ icon: coin.logo, symbol: coin.symbol })) : coinMarks
+  // The gold account shows both its marks (PAXG and XAUT) beside its available gold, whichever the wallet holds.
+  const coinsHeld = coinMarks ?? (choices !== null ? heldCoins(choices).map((coin) => ({ icon: coin.logo, symbol: coin.symbol })) : undefined)
   const flowLiquidityUsd =
     route === null
       ? detail.instantLiquidityUsd
@@ -338,7 +386,7 @@ function SavingsDetail({
         paySymbol={flowPaySymbol}
         payIcon={option?.logo ?? payIcon}
         payChain={option?.chain ?? "giwa"}
-        assetPicker={choices !== null && option !== null ? { choices, selected: option.key, onSelect: setPicked } : undefined}
+        assetPicker={pickerChoices !== null && option !== null ? { choices: pickerChoices, selected: option.key, onSelect: setPicked } : undefined}
         tokenSymbol={tokenSymbol}
         tokenIcon={tokenIcon}
         apyPercent={apyPercent}
@@ -348,6 +396,38 @@ function SavingsDetail({
       />
     </div>
   )
+}
+
+/**
+ * On the gold account's withdraw screen: for each gold coin, whether the Zap would pay out at once (Zap.quoteRedeem's
+ * `instant`), keyed by the picker's option key. Asked for the amount entered, else the whole ArcoGOLD balance, else one
+ * ArcoGOLD. Null anywhere else (nothing is greyed out); a coin whose quote has not answered is not greyed out either.
+ */
+function useGoldInstantCoins(
+  gold: ArcoGoldLive | null,
+  withdrawing: boolean,
+  amount: string,
+  balance: string,
+  choices: readonly SavingsAssetChoice[] | null,
+): ReadonlyMap<string, boolean> | null {
+  const active = gold !== null && withdrawing && choices !== null
+  const shares = goldQuoteShares(amount, balance)
+  const coins = active ? gold!.coins : []
+  const quotes = useQueries({
+    queries: coins.map((coin) => ({
+      queryKey: ["giwa", "arcogold", "quote-redeem", gold?.zap ?? null, coin.token, shares.toString()],
+      queryFn: () => readZapRedeemQuote(gold!.zap, shares, coin.token),
+      enabled: active,
+      staleTime: 10_000,
+    })),
+  })
+  if (!active) return null
+  const instant = new Map<string, boolean>()
+  coins.forEach((coin, index) => {
+    const quote = quotes[index]?.data
+    if (quote !== undefined) instant.set(coin.option.key, quote.instant)
+  })
+  return instant
 }
 
 // Shown before any saving vault / accept-asset is configured (first run) so the page never looks broken.
