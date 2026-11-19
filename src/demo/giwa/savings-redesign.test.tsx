@@ -530,9 +530,12 @@ test("savings card look: light gold for Gold, every colour on it re-scoped to th
   ]) {
     assert.match(block, new RegExp(`--color-${name}: var\\(--color-${value}\\);`), name)
   }
-  for (const [name, value] of [["gold-1", "#fffdf0"], ["gold-2", "#fff7b8"], ["gold-3", "#ffe23d"], ["gold-ink", "#2e1f00"], ["gold-cta", "#4f3900"]]) { // design-tokens:allow (the brief's colours, asserted against theme.css)
+  // The top left is a pale gold, not white (2026-11), with the white aurora toned down so the left stays gold.
+  for (const [name, value] of [["gold-1", "#fff3b3"], ["gold-2", "#ffed8a"], ["gold-3", "#ffe23d"], ["gold-ink", "#2e1f00"], ["gold-cta", "#4f3900"]]) { // design-tokens:allow (the brief's colours, asserted against theme.css)
     assert.match(theme, new RegExp(`--color-savings-${name}: ${value};`), name)
   }
+  assert.match(theme, /--color-savings-gold-aurora-1: rgba\(255, 255, 255, 0\.3\);/)
+  assert.match(theme, /--color-savings-gold-aurora-3: rgba\(255, 255, 255, 0\.2\);/)
   // The navy and cream cards keep their colours: the new card tokens stand for the ones they used.
   assert.match(theme, /--color-savings-hero-cta: var\(--color-arco-surface\);/)
   assert.match(theme, /--color-savings-hero-cta-ink: var\(--color-arco-ink\);/)
@@ -638,6 +641,25 @@ test("tabs: a stablecoin the Vault Config lists beyond those trails the stack wi
   assert.match(html, /<img src="\/logos\/arcousd\.png"[^>]*><\/span><span [^>]*><img src="\/accept\/PYUSD\.png"/)
   // No stablecoin account, no Stablecoins tab.
   assert.doesNotMatch(renderToStaticMarkup(<SavingsTabs accounts={[account("ETH")]} selectedKey={null} onSelect={() => undefined} />), /Stablecoins/)
+})
+
+test("tabs: share the card's width equally, never below their content, and the row never scrolls up and down", () => {
+  for (const accounts of [[account("USDC"), account("ETH")], [account("USDC"), account("ETH"), account("PAXG")]]) {
+    const html = renderToStaticMarkup(<SavingsTabs accounts={accounts} selectedKey={accounts[0]!.key} onSelect={() => undefined} />)
+    // Edge to edge with the card (no side padding); sideways scroll only where the tabs cannot fit (phones).
+    const nav = html.match(/<nav aria-label="Savings accounts" class="([^"]*)"/)![1]!
+    assert.match(nav, /\boverflow-x-auto\b/)
+    assert.match(nav, /\boverflow-y-hidden\b/)
+    assert.doesNotMatch(nav, /\bpx-/)
+    // Every tab grows from nothing to an equal share, but never below its own content (no cut rate or squashed marks).
+    const groups = [...html.matchAll(/<div class="(-mb-px [^"]*)"/g)].map((match) => match[1]!)
+    assert.equal(groups.length, accounts.length)
+    for (const group of groups) {
+      assert.match(group, /flex-\[1_0_0%\]/)
+      assert.match(group, /\bmin-w-max\b/)
+      assert.doesNotMatch(group, /\bshrink-0\b/)
+    }
+  }
 })
 
 test("accordion: closed rows show their summary; the open one shows its content", () => {

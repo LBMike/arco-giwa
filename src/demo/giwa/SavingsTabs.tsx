@@ -14,7 +14,7 @@ import { Check, ChevronDown } from "lucide-react"
 import { BrandMark } from "../components/BrandMark"
 import { BottomSheet } from "./BottomSheet"
 import { SAVINGS_COINS } from "./savings-assets"
-import { SAVINGS_GOLD_COINS, savingsAssetCategory, savingsGoldCoin } from "./savings-category"
+import { SAVINGS_GOLD_COINS, savingsAssetCategory, savingsGoldCoin, savingsMarkIsRound } from "./savings-category"
 import type { SavingsAccount } from "./savings"
 
 type CoinMark = { symbol: string; logo: string | null }
@@ -51,17 +51,23 @@ function StackedMarks({ coins }: { coins: readonly CoinMark[] }) {
     <span className="flex items-center" aria-hidden="true">
       {coins.map((coin, index) => (
         <span key={coin.symbol} className={`relative inline-flex${index > 0 ? " -ml-1.5" : ""}`} style={{ zIndex: coins.length - index }}>
-          <BrandMark src={coin.logo ?? undefined} label={coin.symbol} size={20} />
+          {/* A mark that is not a disc (XAUT's gem) is not cropped round, as on the card's coin stack. */}
+          <BrandMark src={coin.logo ?? undefined} label={coin.symbol} size={20} shape={savingsMarkIsRound(coin.symbol) ? "round" : "rounded"} />
         </span>
       ))}
     </span>
   )
 }
 
+// The tabs share the row's width equally (it spans the card's width): each grows from nothing (flex 1 0 0%) but never
+// below its own content (min-w-max), so a rate or a coin is never cut. Where the row cannot hold every tab at an equal
+// share (Crypto Native's range is the widest), a tab keeps its content width and the others share what is left; where
+// it cannot hold them at all (phones), the row scrolls sideways as before. Inside a tab the name sits left and the
+// coins with their rate right (the button's ml-auto), so the selected look is the same size whatever the tab's width.
 const GROUP =
-  "-mb-px flex shrink-0 items-end gap-1 rounded-t-[22px] border-x border-t border-[var(--color-arco-border)] bg-[var(--color-arco-page)] px-2 pt-2"
+  "-mb-px flex min-w-max flex-[1_0_0%] items-end gap-0.5 rounded-t-[22px] border-x border-t border-[var(--color-arco-border)] bg-[var(--color-arco-page)] px-1.5 pt-2"
 const PILL_BASE =
-  "inline-flex min-h-11 items-center gap-2 whitespace-nowrap rounded-t-[16px] px-3 text-sm transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-arco-ink)] motion-reduce:transition-none"
+  "ml-auto inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-t-[16px] px-2.5 text-sm transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-arco-ink)] motion-reduce:transition-none"
 const PILL_ON = "bg-[var(--color-arco-surface)] font-medium text-[var(--color-arco-ink)] shadow-[var(--shadow-control)]"
 const PILL_OFF = "text-[var(--color-arco-text-soft)] hover:bg-[var(--color-arco-chip)]"
 const APY = "tabular-nums text-[var(--color-arco-text-soft)]"
@@ -299,7 +305,7 @@ function CryptoNativeTab({
 }
 
 function GroupLabel({ label }: { label: string }) {
-  return <span className="flex min-h-11 items-center whitespace-nowrap px-2 text-[13px] font-medium text-[var(--color-arco-text-soft)]">{label}</span>
+  return <span className="flex min-h-11 items-center whitespace-nowrap px-1.5 text-[13px] font-medium text-[var(--color-arco-text-soft)]">{label}</span>
 }
 
 export function SavingsTabs({
@@ -324,7 +330,9 @@ export function SavingsTabs({
   const goldCoins = savingsGoldMarks(gold)
 
   return (
-    <nav aria-label="Savings accounts" className="flex w-full items-end gap-2 overflow-x-auto border-b border-[var(--color-arco-border)] px-1">
+    // Edge to edge with the card. overflow-y-hidden: the tabs' -mb-px (over the row's bottom line) made the row 1px
+    // taller than its box, so a sideways-scrolling row also scrolled up and down and showed a scrollbar at its right end.
+    <nav aria-label="Savings accounts" className="flex w-full items-end gap-1.5 overflow-x-auto overflow-y-hidden border-b border-[var(--color-arco-border)]">
       {stable.length > 0 && (
         <div className={GROUP}>
           <GroupLabel label="Stablecoins" />

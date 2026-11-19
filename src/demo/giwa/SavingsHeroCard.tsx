@@ -8,6 +8,7 @@ import { BrandMark } from "../components/BrandMark"
 import { RollingDigits, useTrend } from "./RollingDigits"
 import { SavingsInfoTip } from "./SavingsInfoTip"
 import { SAVINGS_POWERED_BY } from "./savings-backing"
+import { savingsMarkIsRound } from "./savings-category"
 import { balanceParts, tokenAmount, usd } from "./savings-format"
 
 const ON_HERO_MUTED = "text-[var(--color-savings-on-hero-muted)]"
@@ -158,16 +159,22 @@ function PoweredBy() {
 
 /**
  * A coin's own mark (the savings token's, or the wallet coin's beside what is available), as it is: no disc behind it.
- * A hairline in the card's line colour keeps a dark logo's edge on the dark card.
+ * A hairline in the card's line colour keeps a dark logo's edge on the dark card. A mark that is not a disc (Tether
+ * Gold's gem) gets no hairline and no round crop: a circle around it would draw an empty ring.
  */
 function TokenMark({ src, label, size }: { src: string | undefined; label: string; size: number }) {
-  return <BrandMark src={src} label={label} size={size} className="ring-1 ring-[var(--color-savings-on-hero-line)]" />
+  return savingsMarkIsRound(label) ? (
+    <BrandMark src={src} label={label} size={size} className="ring-1 ring-[var(--color-savings-on-hero-line)]" />
+  ) : (
+    <BrandMark src={src} label={label} size={size} shape="rounded" />
+  )
 }
 
 /**
  * The coins the wallet holds beside what is available: up to four marks, each tucked under the one before it. No
  * cut-out ring around them: the strip they sit on is lighter than the card's own colour, so a ring in that colour
- * would read as a dark edge. Each mark's own hairline keeps them apart.
+ * would read as a dark edge. Each round mark's own hairline keeps them apart (a gem, XAUT, has none; the round mark
+ * on top of it keeps its hairline).
  */
 function CoinStack({ coins }: { coins: readonly Readonly<{ icon: string | undefined; symbol: string }>[] }) {
   const shown = coins.slice(0, 4)

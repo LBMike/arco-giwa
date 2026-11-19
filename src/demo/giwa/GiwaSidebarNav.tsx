@@ -1,10 +1,8 @@
-import { useCallback, useContext, useSyncExternalStore } from "react"
-import { QueryClientContext } from "@tanstack/react-query"
+import { useContext } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { ChartCandlestick, ChartPie, ChevronDown, ChevronRight, House, Layers, PiggyBank, Send, ShieldCheck, type LucideIcon } from "lucide-react"
-import { SAVINGS_CATEGORIES, savingsAssetCategory, savingsCategoryFromSearch, savingsCategoryPath } from "./savings-category"
-import { buildSavingsAccounts } from "./savings"
-import type { GiwaCatalogItem } from "./types"
+import { SAVINGS_CATEGORIES, savingsCategoryFromSearch, savingsCategoryPath } from "./savings-category"
+import { ArcoGoldLiveContext } from "./arcogold-live-context"
 import { investorNavSections, isNavItemActive, type InvestorNavItemId } from "./investor-nav"
 import { GiwaFeaturesContext } from "./features"
 
@@ -25,28 +23,22 @@ const COMPACT_ROW = "flex min-h-10 w-full items-center justify-center rounded-[v
 const FOCUS =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
 
-const CATALOG_KEY = ["giwa", "catalog"]
-
 /**
- * Whether the Savings page has a gold account, read from the catalog the page has already loaded (the query cache):
- * the sidebar fetches nothing itself. Before the catalog is read (or with no query client) there is no gold account,
- * so the Gold category stays hidden until a gold accept asset is configured.
+ * Whether the Savings page has a gold account: the live ArcoGOLD account the shell's ArcoGoldLiveProvider reads from the
+ * gold API (/api/v1/arcogold/reserve and /savings), the same context the Savings page builds its gold account from. The
+ * gold account is never in the Vault Config catalog; it is made client-side from those reads (arcogold-live.ts). Until
+ * both reads answer "live" (not deployed, unavailable, a failed read, a host with its own routes, or no provider at all)
+ * the context is null and the Gold category stays hidden.
  */
 function useHasGoldSavings(): boolean {
-  const client = useContext(QueryClientContext)
-  const subscribe = useCallback((onChange: () => void) => (client ? client.getQueryCache().subscribe(onChange) : () => undefined), [client])
-  const read = () => {
-    const catalog = client?.getQueryData<GiwaCatalogItem[]>(CATALOG_KEY)
-    return catalog ? buildSavingsAccounts(catalog, []).some((account) => savingsAssetCategory(account.symbol) === "gold") : false
-  }
-  return useSyncExternalStore(subscribe, read, read)
+  return useContext(ArcoGoldLiveContext) !== null
 }
 
 export function GiwaSidebarNav({ isAdmin, onNavigate, compact = false }: { isAdmin: boolean; onNavigate?: () => void; compact?: boolean }) {
   const { pathname, search } = useLocation()
   const savingsCategory = savingsCategoryFromSearch(new URLSearchParams(search))
   const features = useContext(GiwaFeaturesContext)
-  // Gold is listed only once there is a gold account (Stablecoins and Crypto Native always are).
+  // Gold is listed only while the live gold account is (Stablecoins and Crypto Native always are).
   const hasGold = useHasGoldSavings()
   const categories = SAVINGS_CATEGORIES.filter((category) => category.id !== "gold" || hasGold)
   return (

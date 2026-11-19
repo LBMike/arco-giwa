@@ -110,7 +110,7 @@
   --color-savings-aurora-4: rgba(225, 224, 204, 0.2);
 }
 
-/* The Gold card (data-savings-tone="gold", ArcoGOLD): light gold (#FFFDF0 → #FFF7B8 → #FFE23D) with dark brown text,
+/* The Gold card (data-savings-tone="gold", ArcoGOLD): light gold (#FFF3B3 → #FFED8A → #FFE23D) with dark brown text,
    so every colour drawn on the card is re-scoped: text, muted text, hairlines, panels, the aurora (white and gold),
    the Deposit button (brown with gold text), the Earning pill (a dark green that reads on the pale gold) and the
    connect pill's pointed-at look (on-dark bg with hero text: brown with gold text here). Focus rings follow the text
@@ -377,20 +377,22 @@
   --color-savings-hero-cta-hover: var(--color-arco-chip);     /* Deposit button under the pointer */
   --color-savings-hero-earning: var(--color-arco-delta-up);   /* the "Earning" pill's text and dot */
   --color-savings-tip-text: var(--color-arco-on-dark);        /* text in the info tips' navy bubble */
-  /* The Gold card (ArcoGOLD; look "A", light gold after paxgy.com). Contrast on the gradient's two ends
-     (#FFFDF0 / #FFE23D): ink 15.67 / 12.34:1, muted 5.92 / 5.22:1, Deposit gold on brown 8.45:1, earning (on the
-     pill's panel) 6.47 / 5.12:1; under the gold aurora's densest light and a panel the floor is muted 4.69:1, earning
-     4.61:1 (AA). #17694A fell to 4.17:1 there, so the green is one step darker. */
-  --color-savings-gold-1: #fffdf0;                    /* card gradient, top left */
-  --color-savings-gold-2: #fff7b8;                    /* card gradient, 42% */
+  /* The Gold card (ArcoGOLD; look "A", light gold after paxgy.com). The top left is a pale gold, not white
+     (2026-11: was #FFFDF0 / #FFF7B8, white aurora 0.75 / 0.5). Contrast on the gradient's two ends
+     (#FFF3B3 / #FFE23D): ink 14.27 / 12.34:1, muted 5.61 / 5.19:1, Deposit gold on brown 8.45:1; on a panel the
+     ends read ink 12.84 / 11.15:1, muted 5.36 / 4.98:1. Under the gold aurora's densest light and a panel the floor
+     (bottom right, unchanged) is muted 4.69:1, earning 4.61:1 (AA). #17694A fell to 4.17:1 there, so the green is
+     one step darker. */
+  --color-savings-gold-1: #fff3b3;                    /* card gradient, top left: pale gold, not white */
+  --color-savings-gold-2: #ffed8a;                    /* card gradient, 42% */
   --color-savings-gold-3: #ffe23d;                    /* card gradient, bottom right; Deposit text; connect pill text */
   --color-savings-gold-ink: #2e1f00;                  /* text, marks and focus rings on the gold card */
   --color-savings-gold-muted: rgba(46, 31, 0, 0.7);   /* secondary text on the gold card (ink @ 70%) */
   --color-savings-gold-line: rgba(46, 31, 0, 0.16);   /* hairlines, outline buttons and grid (ink @ 16%) */
   --color-savings-gold-fill: rgba(46, 31, 0, 0.055);  /* translucent panels (ink @ 5.5%) */
-  --color-savings-gold-aurora-1: rgba(255, 255, 255, 0.75); /* aurora: white curtain */
+  --color-savings-gold-aurora-1: rgba(255, 255, 255, 0.3);  /* aurora: white curtain (soft, so the left stays gold) */
   --color-savings-gold-aurora-2: rgba(191, 161, 0, 0.22);   /* aurora: gold curtain */
-  --color-savings-gold-aurora-3: rgba(255, 255, 255, 0.5);  /* aurora: white pool */
+  --color-savings-gold-aurora-3: rgba(255, 255, 255, 0.2);  /* aurora: white pool (soft, so the left stays gold) */
   --color-savings-gold-aurora-4: rgba(215, 185, 0, 0.28);   /* aurora: gold ribbon */
   --color-savings-gold-cta: #4f3900;                  /* Deposit button: brown */
   --color-savings-gold-cta-hover: #3d2c00;            /* Deposit button under the pointer */

@@ -8,11 +8,12 @@ export type SavingsCategory = typeof SAVINGS_CATEGORIES[number]["id"]
 const STABLECOINS = new Set(["USDC", "RLUSD", "USDT", "ARCOUSD", "DAI", "USDE", "USDS", "PYUSD", "EURC"])
 /**
  * The gold coins the Gold account takes (either one deposits into ArcoGOLD), with their marks. The Gold tab stacks them
- * in this order (SavingsTabs.tsx); on GIWA each is a test coin (tPAXG, tXAUT).
+ * in this order (SavingsTabs.tsx); on GIWA each is a test coin (tPAXG, tXAUT). `round` is false for a mark that is not a
+ * disc (Tether Gold's gem): drawn without a round ring or a round crop around it.
  */
-export const SAVINGS_GOLD_COINS: readonly Readonly<{ symbol: string; name: string; logo: string }>[] = [
-  { symbol: "PAXG", name: "PAX Gold", logo: "/logos/paxg.png" },
-  { symbol: "XAUT", name: "Tether Gold", logo: "/logos/xaut.png" },
+export const SAVINGS_GOLD_COINS: readonly Readonly<{ symbol: string; name: string; logo: string; round: boolean }>[] = [
+  { symbol: "PAXG", name: "PAX Gold", logo: "/logos/paxg.png", round: true },
+  { symbol: "XAUT", name: "Tether Gold", logo: "/logos/xaut.png", round: false },
 ]
 const GOLD = new Set(SAVINGS_GOLD_COINS.map((coin) => coin.symbol))
 /** A GIWA test coin as customers know it: tPAXG is PAXG. */
@@ -21,6 +22,10 @@ const coinOf = (symbol: string) => symbol.replace(/^t(?=[A-Z])/, "")
 export function savingsGoldCoin(symbol: string) {
   const coin = coinOf(symbol).toUpperCase()
   return SAVINGS_GOLD_COINS.find((entry) => entry.symbol === coin) ?? null
+}
+/** Whether a coin's mark is a disc (every mark but Tether Gold's gem): only a disc gets a round ring or crop. */
+export function savingsMarkIsRound(symbol: string): boolean {
+  return savingsGoldCoin(symbol)?.round ?? true
 }
 export function savingsAssetCategory(symbol: string): SavingsCategory {
   if (STABLECOINS.has(symbol.toUpperCase())) return "stablecoins"

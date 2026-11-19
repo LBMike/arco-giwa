@@ -5,7 +5,8 @@ import { MemoryRouter } from "react-router-dom"
 import { GiwaSidebarNav } from "./GiwaSidebarNav"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { vaultConfigOf } from "./catalog"
-import { SAVINGS_CATEGORIES, savingsAssetCategory, savingsCategoryFromSearch, savingsCategoryPath } from "./savings-category"
+import { SAVINGS_CATEGORIES, savingsAssetCategory, savingsCategoryFromSearch, savingsCategoryPath, savingsMarkIsRound } from "./savings-category"
+import { SavingsHeroCard } from "./SavingsHeroCard"
 import type { GiwaCatalogItem } from "./types"
 import { resolveSavingsSelection, type SavingsAccount } from "./savings"
 
@@ -54,28 +55,49 @@ test("Gold: PAXG and XAUT (and their test coins tPAXG / tXAUT) are the gold cate
   assert.equal(resolveSavingsSelection(gold, null, null)?.key, "real:arcogold:PAXG")
 })
 
-test("Gold: the sidebar lists Gold only once the loaded catalog has a gold account (it fetches nothing itself)", () => {
+test("Gold: a gold coin in the Vault Config catalog alone does not list Gold in the sidebar (the gold account is made from the gold API)", () => {
   const goldVault = {
     productId: "arcogold",
     symbol: "ArcoGOLD",
     vaultConfig: { ...vaultConfigOf({ vaultConfig: null }), kind: "saving", acceptAssets: [{ symbol: "PAXG", icon: null, apy: null, savingVaultId: "arcogold", isDummy: false, sortOrder: null }] },
   } as unknown as GiwaCatalogItem
-  const render = (catalog: GiwaCatalogItem[] | null) => {
-    const client = new QueryClient()
-    if (catalog) client.setQueryData(["giwa", "catalog"], catalog)
-    return renderToStaticMarkup(
-      <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={["/savings?category=gold"]}><GiwaSidebarNav isAdmin={false} /></MemoryRouter>
-      </QueryClientProvider>,
-    )
-  }
-  for (const html of [render(null), render([{ ...goldVault, vaultConfig: { ...goldVault.vaultConfig!, acceptAssets: [] } } as GiwaCatalogItem])]) {
-    assert.doesNotMatch(html, /category=gold/)
-    assert.match(html, /href="\/savings\?category=crypto-native"/)
-  }
-  const html = render([goldVault])
-  // After Crypto Native, current on a gold deep link.
-  assert.match(html, /category=crypto-native"[^]*aria-current="location"[^>]*href="\/savings\?category=gold"[^>]*>Gold</)
-  // No query client at all (the static tests above): no Gold, nothing breaks.
+  const client = new QueryClient()
+  client.setQueryData(["giwa", "catalog"], [goldVault])
+  const html = renderToStaticMarkup(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/savings?category=gold"]}><GiwaSidebarNav isAdmin={false} /></MemoryRouter>
+    </QueryClientProvider>,
+  )
+  assert.doesNotMatch(html, /category=gold/)
+  assert.match(html, /href="\/savings\?category=crypto-native"/)
+  // No query client or gold provider at all (the static tests above): no Gold, nothing breaks.
   assert.doesNotMatch(renderToStaticMarkup(<MemoryRouter initialEntries={["/savings"]}><GiwaSidebarNav isAdmin={false} /></MemoryRouter>), /category=gold/)
+})
+
+test("Gold: Tether Gold's mark (a gem, not a disc) gets no round ring or crop; the round marks keep theirs", () => {
+  assert.deepEqual(["PAXG", "tPAXG", "XAUT", "tXAUT", "USDC", "ETH"].map(savingsMarkIsRound), [true, true, false, false, true, true])
+  const html = renderToStaticMarkup(
+    <SavingsHeroCard
+      connected
+      depositLabel="Gold"
+      tokenSymbol="ArcoGOLD"
+      tokenIcon="/logos/arcogold.png"
+      paySymbol="PAXG"
+      payIcon="/logos/paxg.png"
+      balanceUsd={0}
+      shares={0}
+      available={0}
+      availableUsd={0}
+      availableCoins={[{ icon: "/logos/paxg.png", symbol: "PAXG" }, { icon: "/logos/xaut.png", symbol: "XAUT" }]}
+      apyPercent={3.1}
+      onDeposit={() => undefined}
+      onWithdraw={() => undefined}
+      tone="gold"
+    />,
+  )
+  const img = (symbol: string) => html.match(new RegExp(`<img[^>]*alt="${symbol}"[^>]*>`))?.[0] ?? ""
+  assert.match(img("PAXG"), /ring-1/)
+  assert.match(img("PAXG"), /border-radius:9999px/)
+  assert.doesNotMatch(img("XAUT"), /ring-/)
+  assert.doesNotMatch(img("XAUT"), /border-radius:9999px/)
 })
