@@ -181,6 +181,13 @@ test("live: per-coin instant liquidity and totals in ounces; share price, displa
   assert.deepEqual([savings.ounceUsd, savings.ounceUsdSource, savings.sharePriceUsd, savings.totalAssetsUsd], [2400, OUNCE_USD_SOURCE, 3000, "12000"])
 })
 
+test("the ounce source is reported as given: the Kraken fallback says so; a bad quote falls back to null with the primary source", async () => {
+  const kraken = await service(() => registry(), { ounceUsd: async () => ({ usd: 2400, source: "kraken:paxg" as const }) }).savingsState()
+  assert.deepEqual([kraken.ounceUsd, kraken.ounceUsdSource, kraken.sharePriceUsd], [2400, "kraken:paxg", 3000])
+  const bad = await service(() => registry(), { ounceUsd: async () => ({ usd: -1, source: "kraken:paxg" as const }) }).savingsState()
+  assert.deepEqual([bad.ounceUsd, bad.ounceUsdSource, bad.sharePriceUsd], [null, OUNCE_USD_SOURCE, null])
+})
+
 test("no ounce price: the vault still answers, its USD fields are null (never a made-up price)", async () => {
   for (const ounce of [async () => null, async () => Number.NaN, async () => { throw new Error("rate limited") }]) {
     const savings = await service(() => registry(), { ounceUsd: ounce }).savingsState()

@@ -24,7 +24,7 @@ import { EvmMonitoringService } from "./services/evm-monitoring-service.js"
 import { EvmPortfolioService } from "./services/evm-portfolio-service.js"
 import { EvmRegistryService } from "./services/evm-registry-service.js"
 import { PrismaArcoService } from "./services/prisma-arco-service.js"
-import { fetchUsdRates, ounceUsd } from "./services/usd-rates.js"
+import { fetchUsdRates, ounceQuote } from "./services/usd-rates.js"
 import { parseArcoGoldEnv } from "./arcogold/config.js"
 import { readArcoGoldRegistry } from "./arcogold/registry.js"
 import { ArcoGoldService } from "./arcogold/service.js"
@@ -158,7 +158,7 @@ async function composeServer(
     loadRegistry: () => readArcoGoldRegistry(arcoGoldEnv.registryPath),
     readReserve: createArcoUSDChainReader(rpcClient),
     readVault: createGoldVaultReader(rpcClient),
-    ounceUsd: async () => ounceUsd(await fetchUsdRates()),
+    ounceUsd: async () => ounceQuote(await fetchUsdRates()),
   })
   const priceFeedReadAbi = parseAbi([
     "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)",
