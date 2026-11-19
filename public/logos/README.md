@@ -39,3 +39,6 @@ The partners' own logo files, shown as overlapping round badges on the Savings c
 - token-ahedge.png
 - token-umint.png
 - token-ibenji.png
+
+## Issuer marks
+- ember.png — Ember Protocol, 200×200, supplied by the user (issuer of the PPLUS vault; listed-funds.ts `bitwise-pplus`)
