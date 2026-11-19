@@ -662,6 +662,48 @@ test("tabs: share the card's width equally, never below their content, and the r
   }
 })
 
+test("tabs: on a narrow row (phones) every tab is an equal column with its name over its marks and rate, no sideways swipe", () => {
+  const COMPACT = "[@container_(max-width:42.99rem)]:"
+  const compact = (classes: string) => new Set(classes.split(/\s+/).filter((name) => name.startsWith(COMPACT)).map((name) => name.slice(COMPACT.length)))
+  const gold = [account("PAXG", { key: "real:arcogold:PAXG", vaultId: "arcogold", apy: "3.1%" }), account("XAUT", { key: "real:arcogold:XAUT", vaultId: "arcogold", apy: "3.1%" })]
+  const accounts = [account("USDC"), account("BTC", { apy: "2.79%" }), account("XRP", { apy: "4.57%" }), ...gold]
+  const html = renderToStaticMarkup(<SavingsTabs accounts={accounts} selectedKey={accounts[1]!.key} onSelect={() => undefined} />)
+  // The row is what the tabs measure (its own width, not the window's, as the sidebar takes part of a wide window).
+  const nav = html.match(/<nav aria-label="Savings accounts" class="([^"]*)"/)![1]!
+  assert.match(nav, /\[container-type:inline-size\]/)
+  // Under 43rem of row: equal columns that may shrink to their share (no min-w-max), name over the button.
+  const groups = [...html.matchAll(/<div class="(-mb-px [^"]*)"/g)].map((match) => match[1]!)
+  assert.equal(groups.length, 3)
+  for (const group of groups) {
+    const narrow = compact(group)
+    for (const name of ["min-w-0", "flex-[1_1_0%]", "flex-col", "items-stretch"]) assert.ok(narrow.has(name), `group: ${name}`)
+    // One line from 43rem, as before.
+    assert.match(group, /(^| )flex-\[1_0_0%\]( |$)/)
+    assert.match(group, /(^| )min-w-max( |$)/)
+  }
+  // Each button: the marks, then the rate on its own line (Crypto Native's chevron beside its marks), 44px tall.
+  const buttons = [...html.matchAll(/<button type="button"[^>]*class="([^"]*)"[^>]*>(.*?)<\/button>/g)]
+  assert.equal(buttons.length, 3)
+  for (const [, classes, inner] of buttons) {
+    assert.match(classes!, /(^| )min-h-11( |$)/)
+    const narrow = compact(classes!)
+    for (const name of ["ml-0", "flex-wrap", "justify-center"]) assert.ok(narrow.has(name), `button: ${name}`)
+    const rate = inner!.match(/<span (?:aria-hidden="true" )?class="(tabular-nums [^"]*)"/)![1]!
+    for (const name of ["order-last", "basis-full", "whitespace-nowrap"]) assert.ok(compact(rate).has(name), `rate: ${name}`)
+    // 12px, and 11px (the smallest) on a 320px phone; never smaller.
+    assert.match(rate, /\[@container_\(min-width:19\.5rem\)_and_\(max-width:42\.99rem\)\]:text-xs/)
+    assert.match(rate, /\[@container_\(max-width:19\.49rem\)\]:text-\[11px\]/)
+    // Marks at 16px on a phone.
+    for (const img of inner!.matchAll(/<img [^>]*class="([^"]*)"/g)) assert.ok(compact(img[1]!).has("!size-4"))
+  }
+  // The names: full, centred over the button; the sr-only names as before.
+  for (const label of ["Stablecoins", "Crypto Native", "Gold"]) assert.match(html, new RegExp(`justify-center[^"]*">${label}</span>`))
+  assert.match(html, /<span class="sr-only">USDC, USDT, RLUSD, ArcoUSD<\/span>/)
+  assert.match(html, /<span class="sr-only">Crypto Native: BTC, XRP, 2\.79% to 4\.57% APY; BTC selected<\/span>/)
+  assert.match(html, /<span class="sr-only">PAXG, XAUT<\/span>/)
+  assert.match(html, />2\.79% ~ 4\.57%</)
+})
+
 test("accordion: closed rows show their summary; the open one shows its content", () => {
   const sections = [
     { id: "backing", title: "Backing", icon: null, summary: "Backing assets: $1M", content: <p>backing body</p> },
