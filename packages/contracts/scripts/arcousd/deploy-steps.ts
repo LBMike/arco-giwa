@@ -517,7 +517,7 @@ async function findStrategyId(reserve: Contract, productToken: string): Promise<
   throw new Error(`Product token ${productToken} is registered but no strategy matches`)
 }
 
-type DeployRecord = { address: Address | null; deployTxHash?: `0x${string}`; pending?: boolean }
+export type DeployRecord = { address: Address | null; deployTxHash?: `0x${string}`; pending?: boolean }
 
 /**
  * Deploys (or settles an interrupted deploy of) one contract:
@@ -528,7 +528,7 @@ type DeployRecord = { address: Address | null; deployTxHash?: `0x${string}`; pen
  *               node pruned its tx index): adopt it only if `isOurs` proves it runs the compiled
  *               contract, otherwise stop for a human.
  */
-async function ensureDeployed(
+export async function ensureDeployed(
   label: string,
   current: DeployRecord,
   send: () => Promise<Contract>,
@@ -595,7 +595,7 @@ async function settlePending(
 }
 
 /** Whether `address` runs exactly the compiled `contractName` (runtime bytecode, metadata included). */
-async function matchesArtifact(address: string, contractName: string): Promise<boolean> {
+export async function matchesArtifact(address: string, contractName: string): Promise<boolean> {
   const [code, artifact] = await Promise.all([ethers.provider.getCode(address), artifacts.readArtifact(contractName)])
   return code.toLowerCase() === artifact.deployedBytecode.toLowerCase()
 }
@@ -618,7 +618,7 @@ async function creationBlock(address: string): Promise<number> {
 }
 
 /** Retries post-confirmation chain READS (never a transaction) while a lagging RPC catches up. */
-async function readbackWithRetry<T>(read: () => Promise<T>, label: string, log: (message: string) => void): Promise<T> {
+export async function readbackWithRetry<T>(read: () => Promise<T>, label: string, log: (message: string) => void): Promise<T> {
   let lastError: unknown
   for (let attempt = 1; attempt <= READBACK_ATTEMPTS; attempt++) {
     try {
@@ -634,7 +634,7 @@ async function readbackWithRetry<T>(read: () => Promise<T>, label: string, log: 
   throw lastError
 }
 
-async function codeHash(address: string): Promise<`0x${string}`> {
+export async function codeHash(address: string): Promise<`0x${string}`> {
   const code = await ethers.provider.getCode(address)
   if (!code || code === "0x") throw new Error(`No bytecode at ${address}`)
   return utils.keccak256(code) as `0x${string}`
