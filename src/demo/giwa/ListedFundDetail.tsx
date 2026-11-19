@@ -9,6 +9,8 @@ import { MetricCard } from "../components/MetricCard"
 import { PortfolioCard } from "../components/PortfolioCard"
 import { SectionNav } from "../components/SectionNav"
 import { GiwaNetworkIcon } from "./components"
+import { SmartContractsCard } from "./SmartContractsCard"
+import type { GiwaVaultDetail } from "./useGiwaVaultDetail"
 import { FirmMark, FundMark } from "./FundMark"
 import { ListedFundInvestPanel } from "./ListedFundInvestPanel"
 import { listedFundPortfolio } from "./listed-fund-portfolio"
@@ -19,10 +21,21 @@ import { GIWA_FUNDS_ROUTE } from "./routes"
 const CARD = "rounded-[var(--radius-strategy)] bg-[var(--color-arco-surface)] p-5 shadow-[var(--shadow-control)]"
 const CHIP = "rounded-[var(--radius-pill)] bg-[var(--color-arco-chip)] px-2 py-0.5 text-[11px] text-[var(--color-arco-text-soft)]"
 
+// What a fund's GIWA vault adds to its page: the on-chain NAV, the vault's contracts and its
+// Invest / Redeem panel. Built by the page that holds the vault (ProductDetailPage).
+export type ListedFundLive = {
+  readonly priceText: string
+  readonly addresses: GiwaVaultDetail["addresses"]
+  /** Desktop side panel. */
+  readonly panel: ReactNode
+  /** Mobile dock and the transaction modal, rendered once at the end of the page. */
+  readonly overlay: ReactNode
+}
+
 // Product page for a listed fund, built like the deployed vault page (ProductDetailView): the same
-// header, section nav, overview, performance, transparency and more-info blocks, and the invest
-// panel with the action reading "Coming soon".
-export function ListedFundDetail({ fund }: { fund: ListedFund }) {
+// header, section nav, overview, performance, transparency and more-info blocks. A fund with a
+// GIWA vault (`live`) gets the vault's Invest / Redeem panel; the others read "Coming soon".
+export function ListedFundDetail({ fund, live }: { fund: ListedFund; live?: ListedFundLive }) {
   useEffect(() => {
     window.scrollTo(0, 0)
   }, [fund.id])
@@ -31,7 +44,8 @@ export function ListedFundDetail({ fund }: { fund: ListedFund }) {
   const asOf = (iso: string) => `As of ${formatAsOf(iso)}`
 
   return (
-    <div className="w-full pb-10" data-testid="listed-fund-detail">
+    // With a live panel, pb-24 (mobile only) clears the fixed Invest/Redeem bottom bar.
+    <div className={`w-full ${live ? "pb-24 lg:pb-10" : "pb-10"}`} data-testid="listed-fund-detail">
       <Link to={GIWA_FUNDS_ROUTE} className="inline-flex items-center gap-1 text-sm text-[var(--color-arco-muted)] hover:text-[var(--color-arco-ink)]">
         <ArrowLeft aria-hidden="true" className="size-4" /> Back to products
       </Link>
@@ -65,7 +79,9 @@ export function ListedFundDetail({ fund }: { fund: ListedFund }) {
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <MetricCard label={fund.aum.label ?? "AUM"} value={fund.aum.value} sub={asOf(fund.aum.asOf)} />
               <MetricCard label={rateLabel(fund.category)} value={fund.metric.value} sub={metricCaption(fund.metric)} />
-              {fund.price ? (
+              {live ? (
+                <MetricCard label="Price" value={live.priceText} sub="NAV / share (USD)" />
+              ) : fund.price ? (
                 <MetricCard label="Price" value={fund.price} sub="NAV / share (USD)" />
               ) : (
                 <MetricCard label="Liquidity" value="Daily" sub="Dealing at NAV" />
@@ -134,22 +150,29 @@ export function ListedFundDetail({ fund }: { fund: ListedFund }) {
           <section id="more-info" className="scroll-mt-[140px] space-y-4">
             <h2 className="text-lg font-semibold text-[var(--color-arco-ink)]">More Info</h2>
             <div className={`grid grid-cols-1 gap-4 ${fund.docs.length > 0 ? "md:grid-cols-2" : ""}`}>
-              <TokenCard fund={fund} />
+              <TokenCard fund={fund} onGiwa={live ? "Live on GIWA Sepolia" : "Coming soon"} />
               {fund.docs.length > 0 && <DocsLinksCard docs={[...fund.docs]} />}
             </div>
+            {live && <SmartContractsCard rows={live.addresses} />}
           </section>
         </div>
 
-        <aside className="min-w-0">
-          <ListedFundInvestPanel fund={fund} />
-        </aside>
+        {live ? (
+          // Desktop (>= lg) side panel; below lg the dock in `overlay` takes over.
+          <aside className="hidden min-w-0 lg:block">{live.panel}</aside>
+        ) : (
+          <aside className="min-w-0">
+            <ListedFundInvestPanel fund={fund} />
+          </aside>
+        )}
       </div>
+      {live?.overlay}
     </div>
   )
 }
 
 // The token as issued today: platform, its own chain and contract, and its GIWA status.
-function TokenCard({ fund }: { fund: ListedFund }) {
+function TokenCard({ fund, onGiwa }: { fund: ListedFund; onGiwa: string }) {
   const { token } = fund
   const rows: Array<{ label: string; value: ReactNode }> = [
     { label: "Issued on", value: token.platform },
@@ -166,7 +189,7 @@ function TokenCard({ fund }: { fund: ListedFund }) {
           <span className="font-mono text-xs text-[var(--color-arco-muted)]">—</span>
         ),
     },
-    { label: "On GIWA", value: "Coming soon" },
+    { label: "On GIWA", value: onGiwa },
   ]
   return (
     <div className="overflow-hidden rounded-[var(--radius-card)] bg-[var(--color-arco-surface)]" style={{ boxShadow: "var(--shadow-control)" }}>

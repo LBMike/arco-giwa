@@ -1,3 +1,4 @@
+import { listedFundForVault } from "./listed-funds"
 import { isRetiredProduct, vaultConfigOf } from "./catalog"
 import { buildSavingsAccounts, type SavingsAccount } from "./savings"
 import type { GiwaCatalogItem } from "./types"
@@ -8,9 +9,15 @@ import type { GiwaMarketEntry } from "./api"
 
 // Same predicate as the Funds page list (Investor.tsx): hidden vaults are investor declutter,
 // saving vaults live on the Savings page only, and retired vaults are no longer offered.
+// A vault that belongs to a listed fund (HOME, JX, PPLUS) is left out: the fund's own entry
+// represents it, so it is not listed twice.
 export function fundsProductsOf(catalog: GiwaCatalogItem[]): GiwaCatalogItem[] {
   return catalog.filter(
-    (product) => !vaultConfigOf(product).hidden && vaultConfigOf(product).kind !== "saving" && !isRetiredProduct(product),
+    (product) =>
+      !vaultConfigOf(product).hidden &&
+      vaultConfigOf(product).kind !== "saving" &&
+      !isRetiredProduct(product) &&
+      !listedFundForVault(product.productId),
   )
 }
 
