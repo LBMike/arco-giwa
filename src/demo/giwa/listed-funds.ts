@@ -1,7 +1,8 @@
 /**
  * Funds Arco distributes that are not deployed on GIWA Sepolia. The catalog shows them the same way
  * as the deployed vaults: risk tag, category, AUM, headline rate, portfolio, fees, terms and docs.
- * They have no GIWA contract, balance or price feed, so their invest panel reads "Coming soon".
+ * They have no GIWA contract, balance or price feed, so their invest panel reads "Coming soon";
+ * the ones in LISTED_FUND_VAULTS do have a vault and get its live panel instead.
  *
  * Figures come from DigiFT's product pages and its product deck dated 30 Sep 2026, whichever is newer
  * (every metric carries its own date), the NUVA app and docs for HOME, and each manager's monthly
@@ -529,12 +530,38 @@ export function listedFundById(id: string): ListedFund | undefined {
   return LISTED_FUNDS.find((fund) => fund.id === id)
 }
 
-/** Listed funds not already deployed (matched by symbol), narrowed by an optional search. */
+/**
+ * Listed funds that have a vault on GIWA Sepolia: listed fund id → registry product id. The fund
+ * keeps its listed page (terms, portfolio, facts) and gets the vault's Invest / Redeem panel on
+ * it, so there is one page per fund. The vault's own page (/product/<productId>) opens that page.
+ */
+export const LISTED_FUND_VAULTS: Readonly<Record<string, string>> = {
+  "nuva-home": "home",
+  "digift-jx": "jxfund",
+  "bitwise-pplus": "pplus",
+}
+
+/** The registry product id of a listed fund's GIWA vault, if it has one. */
+export function vaultProductIdForFund(fundId: string): string | undefined {
+  return LISTED_FUND_VAULTS[fundId]
+}
+
+/** The listed fund a vault belongs to, if any (product ids compare case-insensitively). */
+export function listedFundForVault(productId: string): ListedFund | undefined {
+  const wanted = productId.toLowerCase()
+  const fundId = Object.keys(LISTED_FUND_VAULTS).find((id) => LISTED_FUND_VAULTS[id] === wanted)
+  return fundId ? listedFundById(fundId) : undefined
+}
+
+/**
+ * Listed funds not already deployed (matched by symbol), narrowed by an optional search. A fund
+ * with its own GIWA vault stays listed: its vault is shown through the fund's entry, not beside it.
+ */
 export function listedFundsForCatalog(deployedSymbols: readonly string[], search = ""): ListedFund[] {
   const deployed = new Set(deployedSymbols.map((symbol) => symbol.toLowerCase()))
   const query = search.trim().toLowerCase()
   return LISTED_FUNDS.filter((fund) => {
-    if (deployed.has(fund.symbol.toLowerCase())) return false
+    if (deployed.has(fund.symbol.toLowerCase()) && !vaultProductIdForFund(fund.id)) return false
     if (!query) return true
     return [fund.symbol, fund.name, categoryTitle(fund.category), fund.manager.name, fund.issuer.name, fund.underlying, fund.exposure, ...fund.about]
       .join(" ")

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { Link, useParams } from "react-router-dom"
+import { Link, Navigate, useParams } from "react-router-dom"
 import { ArrowLeft } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { giwaApi } from "./api"
@@ -10,20 +10,61 @@ import { GiwaInvestDock } from "./GiwaInvestDock"
 import { GiwaOperationModal } from "./GiwaOperationModal"
 import { useGiwaVaultDetail } from "./useGiwaVaultDetail"
 import { PerformanceSection, TransparencySection, MoreInfoSection } from "./detail-sections"
-import { GIWA_FUNDS_ROUTE } from "./routes"
+import { GIWA_FUNDS_ROUTE, giwaProductPath } from "./routes"
 import type { GiwaCatalogItem } from "./types"
 import { BrandMark } from "../components/BrandMark"
 import { SectionNav } from "../components/SectionNav"
 import { MetricCard } from "../components/MetricCard"
 import { AboutCard } from "../components/AboutCard"
-import { listedFundById } from "./listed-funds"
+import { listedFundById, listedFundForVault, vaultProductIdForFund, type ListedFund } from "./listed-funds"
 import { ListedFundDetail } from "./ListedFundDetail"
 
 export default function GiwaProductDetailPage() {
   const { id } = useParams()
+  // A listed fund's vault has no page of its own: /product/home opens /product/nuva-home, so
+  // portfolio and activity links (which carry the vault's product id) land on the fund's page.
+  const fundOfVault = id ? listedFundForVault(id) : undefined
+  if (fundOfVault) return <Navigate to={giwaProductPath(fundOfVault.id)} replace />
   const listedFund = id ? listedFundById(id) : undefined
-  if (listedFund) return <ListedFundDetail fund={listedFund} />
+  if (listedFund) {
+    const vaultId = vaultProductIdForFund(listedFund.id)
+    return vaultId ? <ListedFundVaultPage fund={listedFund} vaultId={vaultId} /> : <ListedFundDetail fund={listedFund} />
+  }
   return <DeployedProductDetailPage id={id} />
+}
+
+// A listed fund with a GIWA vault: the fund's page with the vault's live panel. The vault is
+// used whether or not it is listed in the catalog views (hidden), since the fund's entry is what
+// investors see. If the catalog does not carry the vault (another environment, or it was
+// retired), the page falls back to the "Coming soon" panel instead of failing.
+function ListedFundVaultPage({ fund, vaultId }: { fund: ListedFund; vaultId: string }) {
+  const catalogQuery = useQuery({ queryKey: ["giwa", "catalog"], queryFn: giwaApi.catalog })
+  if (catalogQuery.isLoading) return <CenteredNote>Loading product…</CenteredNote>
+  const product = (catalogQuery.data ?? []).find(
+    (candidate) => candidate.productId.toLowerCase() === vaultId && !isRetiredProduct(candidate),
+  )
+  if (!product) return <ListedFundDetail fund={fund} />
+  return <ListedFundWithVault fund={fund} product={product} />
+}
+
+function ListedFundWithVault({ fund, product }: { fund: ListedFund; product: GiwaCatalogItem }) {
+  const detail = useGiwaVaultDetail(product)
+  return (
+    <ListedFundDetail
+      fund={fund}
+      live={{
+        priceText: detail.priceText,
+        addresses: detail.addresses,
+        panel: <GiwaInvestPanel {...detail.panel} instantLiquidityUsd={detail.instantLiquidityUsd} baseUsd={detail.baseUsd} />,
+        overlay: (
+          <>
+            <GiwaInvestDock {...detail.panel} instantLiquidityUsd={detail.instantLiquidityUsd} baseUsd={detail.baseUsd} />
+            <GiwaOperationModal flow={detail.panel.flow} onClose={detail.panel.onFlowClose} onRetry={detail.panel.onFlowRetry} />
+          </>
+        ),
+      }}
+    />
+  )
 }
 
 function DeployedProductDetailPage({ id }: { id: string | undefined }) {

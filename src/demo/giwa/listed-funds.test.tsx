@@ -119,7 +119,9 @@ test("a partial breakdown shows its calculated remainder, a full one does not", 
 test("a listed fund leaves the catalog once its symbol is deployed, and follows the search box", () => {
   const symbols = (deployed: string[], search?: string) => listedFundsForCatalog(deployed, search).map((fund) => fund.symbol)
   assert.deepEqual(symbols([]), ["RRDY", "CMBBOND", "HOME", "JX", "kTW50", "PPLUS"])
-  assert.deepEqual(symbols(["auMINT", "home"]), ["RRDY", "CMBBOND", "JX", "kTW50", "PPLUS"])
+  assert.deepEqual(symbols(["auMINT", "rrdy"]), ["CMBBOND", "HOME", "JX", "kTW50", "PPLUS"])
+  // HOME, JX and PPLUS have their own GIWA vault: the fund's entry stands for it, so it stays.
+  assert.deepEqual(symbols(["home", "JX", "pplus"]), ["RRDY", "CMBBOND", "HOME", "JX", "kTW50", "PPLUS"])
   assert.deepEqual(symbols([], "figure"), ["HOME"])
   assert.deepEqual(symbols([], "taiwan"), ["kTW50"])
   assert.deepEqual(symbols([], "cash management"), ["RRDY"])
