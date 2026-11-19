@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "unit": { "name": "Arco Gold Ounce", "symbol": "ArcoXAU" },
+  "savings": { "name": "ArcoGOLD", "symbol": "ArcoGOLD", "vestingPeriod": 86400 },
+  "reserve": {
+    "mintCap": "100000000000000000000000",
+    "mmfTargetBps": 0,
+    "bufferFloorBps": 10000,
+    "queueMinDelay": 600
+  },
+  "pegFeed": { "answerBase18": "1000000000000000000", "maxDepegBps": 100 },
+  "testAssets": [
+    { "symbol": "tPAXG", "name": "Test PAXG", "decimals": 18, "faucet": { "drip": "1", "dailyCapDrips": 1000, "globalCapDrips": 1000000, "cooldown": 86400 } },
+    { "symbol": "tXAUT", "name": "Test XAUT", "decimals": 6, "faucet": { "drip": "1", "dailyCapDrips": 1000, "globalCapDrips": 1000000, "cooldown": 86400 } }
+  ],
+  "reserveAssets": [
+    { "symbol": "tPAXG", "decimals": 18, "instantFeeBps": 0, "swapFeeBps": 0, "depositCap": "max", "minQueued": "10000000000000000" },
+    { "symbol": "tXAUT", "decimals": 6, "instantFeeBps": 0, "swapFeeBps": 0, "depositCap": "max", "minQueued": "10000" }
+  ],
+  "seedAsset": "tPAXG"
+}
