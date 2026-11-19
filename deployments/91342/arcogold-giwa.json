@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "product": "arcogold",
+  "chainId": 91342,
+  "network": "giwa-sepolia",
+  "gitCommit": "d8dc8113d146",
+  "deployed": true,
+  "deploymentBlock": 41754340,
+  "admin": "0xFDCf58E2954988E5bf0446aAF1284A1069136F29",
+  "faucet": "0x785918816f5f5ED6a8C5EDF5E223f14223bF41Bc",
+  "unit": {
+    "name": "Arco Gold Ounce",
+    "symbol": "ArcoXAU",
+    "contract": {
+      "proxy": "0x19fe2B0a9E014C85db70bFaEb3E01d2678d7DF29",
+      "implementation": "0x4C4D3887d6732A32B1F118C85AA4185Be66B939E",
+      "bytecodeHash": "0xed8576049229ee8943f24beb1ea14def3190b7654289b2164b6f496ab1c51754",
+      "deployTxHash": "0x5c4464694ba6a1918f4e538e940ae7a6468c26a02fc9bb888775a83c11fd82a2",
+      "blockNumber": 41754363
+    }
+  },
+  "reserve": {
+    "proxy": "0x6A318D07F08ae3fb64956Bd29fbF7e2be7BB84BA",
+    "implementation": "0x609dbabc9C4164470Cb0cbcCDC80FabEB492d073",
+    "bytecodeHash": "0xaa5cd5e144e164c15ade1179eb82faaeb982925df67c9fad3b88b654c3247446",
+    "deployTxHash": "0xabc2d85ac2fb815844b7418809ac00c1201adeea295120b995711a6cf284c3a4",
+    "blockNumber": 41754374
+  },
+  "lens": {
+    "address": "0x00566CFb2A016Af64909125010020F67fdc616A5",
+    "bytecodeHash": "0x5514db3b50d369f35352c43e3f71d0c685587fa84dfffe2c40daed6680a85c2d",
+    "deployTxHash": "0x9155a04bbe48c232d57bdd27cc721eea19e10880693468a6ad4a86bbbf31bb1a",
+    "blockNumber": 41754378
+  },
+  "pegFeed": {
+    "address": "0xFC6664FC51A4f32393b4314a67dc300b9168b89e",
+    "bytecodeHash": "0x28cd9da4713d4a74698625e6c876a92705bc1dea52d224996314cea900ecf3b7",
+    "deployTxHash": "0xbce08c7bdce19c6a47e0b1b0fcbb80597f7759372fc046e0371b0a8d15863ccc",
+    "blockNumber": 41754381,
+    "answerBase18": "1000000000000000000",
+    "maxDepegBps": 100
+  },
+  "testAssets": [
+    {
+      "symbol": "tPAXG",
+      "name": "Test PAXG",
+      "decimals": 18,
+      "contract": {
+        "proxy": "0x3A1c532b6cB1170600451DBd0902810f946aedc5",
+        "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b",
+        "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+        "deployTxHash": "0x6e584f7c5c4d7c901384f8c1e7e28476a6cd4d331de1806f9da401da65bac7b9",
+        "blockNumber": 41754340
+      },
+      "faucet": {
+        "drip": "1",
+        "dailyCapDrips": 1000,
+        "globalCapDrips": 1000000,
+        "cooldown": 86400
+      },
+      "faucetConfigured": true
+    },
+    {
+      "symbol": "tXAUT",
+      "name": "Test XAUT",
+      "decimals": 6,
+      "contract": {
+        "proxy": "0xFbf496eEcbC4F5510FE997AA45DCa77bB4313B3D",
+        "implementation": "0x127b8beae9b6eFceFF5fbD24C314A4C3ea08e00b",
+        "bytecodeHash": "0xfc6abab2c69dcda69d6de424d0f41d9ecfa4b45991eafae131ee6e10b0609385",
+        "deployTxHash": "0xe94ba6701ad8ee2b4e25550e1ab4aec0bd4c7047f315b949b1c1a10daa0cd9a9",
+        "blockNumber": 41754351
+      },
+      "faucet": {
+        "drip": "1",
+        "dailyCapDrips": 1000,
+        "globalCapDrips": 1000000,
+        "cooldown": 86400
+      },
+      "faucetConfigured": true
+    }
+  ],
+  "reserveAssets": [
+    {
+      "symbol": "tPAXG",
+      "decimals": 18,
+      "instantFeeBps": 0,
+      "swapFeeBps": 0,
+      "depositCap": "max",
+      "minQueued": "10000000000000000",
+      "address": "0x3A1c532b6cB1170600451DBd0902810f946aedc5",
+      "configured": true
+    },
+    {
+      "symbol": "tXAUT",
+      "decimals": 6,
+      "instantFeeBps": 0,
+      "swapFeeBps": 0,
+      "depositCap": "max",
+      "minQueued": "10000",
+      "address": "0xFbf496eEcbC4F5510FE997AA45DCa77bB4313B3D",
+      "configured": true
+    }
+  ],
+  "params": {
+    "mintCap": "100000000000000000000000",
+    "mmfTargetBps": 0,
+    "bufferFloorBps": 10000,
+    "queueMinDelay": 600
+  },
+  "roleGrants": [
+    {
+      "key": "unit:MINTER_ROLE:reserve",
+      "txHash": "0x15b6f261ba188962fb9dbc9eb61717cbde8c90b47474678c06478ebb2f5d7e96",
+      "status": "confirmed"
+    },
+    {
+      "key": "unit:BURNER_ROLE:reserve",
+      "txHash": "0x936114c841b9110f5915ca69a683f28c030c2a25d59326dddbf5ae11bc75b1cd",
+      "status": "confirmed"
+    }
+  ],
+  "savings": {
+    "name": "ArcoGOLD",
+    "symbol": "ArcoGOLD",
+    "vault": {
+      "proxy": "0xCfBB1da2040Bd559B2d7a96F818494d922Fb1860",
+      "implementation": "0x152b68139b5E75e73A9Cb68B9500F4624E571b90",
+      "bytecodeHash": "0x2b7818f87d6ac69aa99544203a2e43876cbf14e269d291699c8a32f46fdebad6",
+      "deployTxHash": "0xf74998bb3f18ab32d959180729b93799b2f2bb58cce0b23f96bc0fae5ad9e028",
+      "blockNumber": 41754420
+    },
+    "zap": {
+      "address": "0x6C67403808DCDA693e5B9f2ddF543659FF3f27B4",
+      "bytecodeHash": "0x02189095c90d06623c4ef09544e4111a67ae20820e99ddbd605ec4385d53f05f",
+      "deployTxHash": "0x1537453a5afac96ff990acc0a6f81652917eff9376d516ce67a032927733960a",
+      "blockNumber": 41754426
+    },
+    "distributor": null,
+    "params": {
+      "vestingPeriod": 86400
+    },
+    "seedAsset": "tPAXG",
+    "seeded": true
+  }
+}
