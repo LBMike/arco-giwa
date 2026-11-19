@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { maxUint256 } from "viem"
 import { giwaApi } from "./api"
@@ -9,6 +9,7 @@ import {
   readableError,
   readGreenlistEnforced,
   readPriceFeedState,
+  readAtConfirmedBlock,
   readTokenBalance,
   receivedTokenAmount,
   submitArcoUSDOperation,
@@ -223,6 +224,13 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
           ? "Withdrawals are temporarily paused"
           : null
 
+  // Everything refreshReads does except the token balances (written from the confirmed block instead).
+  async function refreshUnpinnedReads() {
+    await wallet.refreshBalance()
+    if (live !== null) void queryClient.invalidateQueries({ queryKey: ["giwa", "arcousd"] })
+    await Promise.all([allowanceQuery.refetch(), redemptionsQuery.refetch(), faucetQuery.refetch()])
+  }
+
   async function refreshReads() {
     await wallet.refreshBalance()
     // ArcoUSD v1 moves the Reserve's buffer and the Savings figures: the next reads must not be the cached ones.
@@ -237,13 +245,61 @@ export function useGiwaProductOperation(product: GiwaCatalogItem) {
     ])
   }
 
+  // Balances as of the block the transaction confirmed in, written straight into the query cache,
+  // so the panel shows the result the moment the receipt arrives. A plain "latest" refetch right
+  // after a receipt can be answered by an RPC node that is a block behind and put the
+  // pre-transaction balance back on screen (readAtConfirmedBlock). Covers the wallet's payment
+  // asset and product token, the selected Router pay asset, and the redemption vault's balance
+  // (Instant liquidity).
+  async function writeConfirmedBalances(blockNumber: bigint | undefined) {
+    const account = wallet.address
+    if (blockNumber === undefined || !account) return
+    const targets: Array<{ key: readonly unknown[]; token: HexAddress | null | undefined; holder: HexAddress | null | undefined; decimals: number }> = [
+      { key: ["giwa", "payment-balance-one", account, product.paymentAssetAddress], token: product.paymentAssetAddress, holder: account, decimals: paymentDecimals },
+      { key: ["giwa", "product-balance", account, product.productTokenAddress], token: product.productTokenAddress, holder: account, decimals: 18 },
+      ...(routed ? [{ key: ["giwa", "payment-balance-one", account, payToken], token: payToken, holder: account, decimals: payDecimals }] : []),
+      ...(live === null
+        ? [{ key: ["giwa", "vault-balance", "redemption", product.productId], token: product.paymentAssetAddress, holder: product.redemptionVaultAddress, decimals: paymentDecimals }]
+        : []),
+    ]
+    await Promise.all(
+      targets.map(async ({ key, token, holder, decimals }) => {
+        if (!token || !holder) return
+        const balance = await readAtConfirmedBlock((block) => readTokenBalance(token, holder, decimals, block), blockNumber)
+        if (balance !== null) queryClient.setQueryData(key, balance)
+      }),
+    )
+  }
+
+  // Reads that are not pinned (allowance, the indexer's redemption list, the faucet, the gas balance)
+  // and every other view of this wallet (holdings, activity) converge a little later: the indexer
+  // trails the chain by a few blocks, and by then every RPC node has the block.
+  const followUps = useRef<Array<ReturnType<typeof setTimeout>>>([])
+  useEffect(() => () => followUps.current.forEach(clearTimeout), [])
+  function scheduleFollowUpRefresh() {
+    followUps.current.forEach(clearTimeout)
+    followUps.current = [6_000, 15_000].map((delay) =>
+      setTimeout(() => {
+        void refreshReads().catch(() => undefined)
+        for (const key of ["portfolio-holdings", "activity", "redemptions", "vault-balance", "payment-balance-one"]) {
+          void queryClient.invalidateQueries({ queryKey: ["giwa", key] })
+        }
+      }, delay),
+    )
+  }
+
   async function waitForReceipts(hashes: HexAddress[]) {
     setOperationPhase("confirming")
     let last: Awaited<ReturnType<typeof waitForSuccessfulReceipt>> | null = null
     for (const hash of hashes) {
       last = await waitForSuccessfulReceipt(hash)
     }
-    await refreshReads()
+    // Confirmed balances first (pinned to the block), then the reads that have no pinned form. The
+    // balance queries are not refetched here: a "latest" answer from a lagging node would undo the write.
+    await writeConfirmedBalances(last?.blockNumber)
+    if (last?.blockNumber === undefined) await refreshReads()
+    else await refreshUnpinnedReads()
+    scheduleFollowUpRefresh()
     return last
   }
 
