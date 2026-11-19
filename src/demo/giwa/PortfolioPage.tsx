@@ -7,6 +7,8 @@ import { readShareSupply, readTokenBalance } from "./contracts"
 import { ArcoUsdLiveContext, ArcoUsdLiveFailedContext, ArcoUsdLivePendingContext } from "./arcousd-live-context"
 import { GiwaFeaturesContext } from "./features"
 import { liveSavingsHistory } from "./arcousd-live"
+import { goldSavingsMarket } from "./arcogold-live"
+import { ArcoGoldLiveContext } from "./arcogold-live-context"
 import { positionUsdValue } from "./usd-prices"
 import { GiwaActivityTable, GiwaHoldingsTable, type HoldingPriceCell } from "./components"
 import { buildActivityFeed } from "./activity-feed"
@@ -67,6 +69,8 @@ const NO_STOCK_TRADES: StocksActivity = { status: "ready", entries: [] }
 // themselves like the Stocks row. Both are listed under Savings, where they are got and deposited.
 const ARCOUSD_ROW = { id: "arcousd:ArcoUSD", symbol: "ArcoUSD", label: CATEGORY_LABEL.savings, imageUrl: "/logos/arcousd.png" } as const
 const SARCOUSD_ROW = { id: "arcousd:sArcoUSD", symbol: "sArcoUSD", label: CATEGORY_LABEL.savings, imageUrl: "/logos/sarcousd.png" } as const
+// ArcoGOLD (arcogold-live.ts), the gold Savings account's token: not a catalog product either.
+const ARCOGOLD_ROW = { id: "arcogold:ArcoGOLD", symbol: "ArcoGOLD", label: CATEGORY_LABEL.savings, imageUrl: "/logos/arcogold.png" } as const
 const SEGMENT_ACTIVE = "bg-[var(--color-arco-surface)] font-medium text-[var(--color-arco-ink)] shadow-[var(--shadow-control)]"
 const SEGMENT_IDLE = "text-[var(--color-arco-muted)]"
 const LINK_BUTTON =
@@ -147,14 +151,28 @@ export default function GiwaPortfolioPage() {
     refetchInterval: 60_000,
   })
   const sArcoUSDHistory = liveSavingsHistory(savingsHistoryQuery.data)
+  // ArcoGOLD, once the gold stack is live: the wallet's ArcoGOLD (18 decimals) at its share price in ounces × an ounce's
+  // dollars. Before the gold deploy nothing is read and nothing changes here.
+  const gold = useContext(ArcoGoldLiveContext)
+  const arcoGoldQuery = useQuery({
+    queryKey: ["giwa", "portfolio-arcogold", wallet.address, gold?.arcoGOLD ?? null],
+    queryFn: async () => Number(await readTokenBalance(gold!.arcoGOLD, wallet.address as HexAddress, 18)),
+    enabled: Boolean(wallet.address && gold),
+  })
 
   const arcoUSDKnown = !livePending && (live === null || arcoUSDQuery.isSuccess)
-  const holdingsKnown = catalogQuery.isSuccess && (products.length === 0 || holdingsQuery.isSuccess) && arcoUSDKnown
+  const arcoGoldKnown = gold === null || arcoGoldQuery.isSuccess
+  const holdingsKnown = catalogQuery.isSuccess && (products.length === 0 || holdingsQuery.isSuccess) && arcoUSDKnown && arcoGoldKnown
   const holdingsError =
-    catalogQuery.isError || (products.length > 0 && holdingsQuery.isError) || (livePending && liveFailed !== null) || (live !== null && arcoUSDQuery.isError)
+    catalogQuery.isError ||
+    (products.length > 0 && holdingsQuery.isError) ||
+    (livePending && liveFailed !== null) ||
+    (live !== null && arcoUSDQuery.isError) ||
+    (gold !== null && arcoGoldQuery.isError)
   const rawHoldings = holdingsKnown ? holdingsQuery.data ?? [] : []
   const arcoUSDUnits = holdingsKnown && live !== null ? positive(arcoUSDQuery.data?.arcoUSD) : 0
   const sArcoUSDUnits = holdingsKnown && liveSavings !== null ? positive(arcoUSDQuery.data?.sArcoUSD) : 0
+  const arcoGoldUnits = holdingsKnown && gold !== null ? positive(arcoGoldQuery.data) : 0
   const heldIds = rawHoldings.map((h) => h.product.productId)
 
   const historyQuery = useQuery({
@@ -198,7 +216,7 @@ export default function GiwaPortfolioPage() {
   // Stocks trades that could not be read are said so; with nothing else to show that is an unconfirmed history.
   const stocksActivityError = stocksActivity.activity.status === "error"
   const refreshing =
-    [catalogQuery, holdingsQuery, marketQuery, historyQuery, activityQuery, redemptionsQuery, arcoUSDQuery, savingsHistoryQuery].some(query => query.isFetching) ||
+    [catalogQuery, holdingsQuery, marketQuery, historyQuery, activityQuery, redemptionsQuery, arcoUSDQuery, savingsHistoryQuery, arcoGoldQuery].some(query => query.isFetching) ||
     stocks.fetching || stocksActivity.fetching
   const refresh = () => {
     void Promise.allSettled([
@@ -208,6 +226,7 @@ export default function GiwaPortfolioPage() {
       ...(live !== null && wallet.address ? [arcoUSDQuery.refetch()] : []),
       ...(liveFailed !== null ? [Promise.resolve(liveFailed.retry())] : []),
       ...(liveSavings !== null ? [savingsHistoryQuery.refetch()] : []),
+      ...(gold !== null && wallet.address ? [arcoGoldQuery.refetch()] : []),
     ])
   }
 
@@ -242,7 +261,8 @@ export default function GiwaPortfolioPage() {
   const stockPrice = stock.status === "ready" ? stock.price : null
   const sArcoUSDPrice = liveSavings?.sharePrice ?? null
   const sArcoUSDDelta = priceChange24hPct(sArcoUSDHistory?.points ?? [])
-  const ownRow = (row: typeof ARCOUSD_ROW | typeof SARCOUSD_ROW, units: number) => ({
+  const arcoGoldMarket = gold !== null ? goldSavingsMarket(gold) : null
+  const ownRow = (row: typeof ARCOUSD_ROW | typeof SARCOUSD_ROW | typeof ARCOGOLD_ROW, units: number) => ({
     productId: row.id,
     balance: trimShares(units),
     status: "Held",
@@ -275,6 +295,21 @@ export default function GiwaPortfolioPage() {
           delta24h: sArcoUSDDelta,
           priceCell: priceCellOf(sArcoUSDPrice, sArcoUSDDelta),
           position: ownRow(SARCOUSD_ROW, sArcoUSDUnits),
+        }]
+      : []),
+    // ArcoGOLD at its share price in dollars (ounces per share × an ounce's price) and the set rate. No history yet, so
+    // no 24h change; without an ounce price its value is unknown, never a guess.
+    ...(arcoGoldUnits > 0
+      ? [{
+          key: ARCOGOLD_ROW.id,
+          category: "savings" as const,
+          sortName: ARCOGOLD_ROW.symbol,
+          units: arcoGoldUnits,
+          usd: arcoGoldMarket?.navUsd != null ? arcoGoldUnits * arcoGoldMarket.navUsd : null,
+          apy: arcoGoldMarket?.apy ?? null,
+          delta24h: null,
+          priceCell: null,
+          position: ownRow(ARCOGOLD_ROW, arcoGoldUnits),
         }]
       : []),
     // ArcoUSD at its dollar peg: no yield, no price movement to show.

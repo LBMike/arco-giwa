@@ -11,6 +11,8 @@ import { stocksPlugin, type StocksPluginOptions } from "./stocks/plugin.js"
 import { stocksSubmissionsPlugin, type StocksSubmissionsPluginOptions } from "./stocks-submissions/plugin.js"
 import { stocksMarketDataPlugin, type StocksMarketDataService } from "./stocks-market-data/index.js"
 import { arcoUSDPlugin } from "./arcousd/plugin.js"
+import { arcoGoldPlugin } from "./arcogold/plugin.js"
+import type { ArcoGoldService } from "./arcogold/service.js"
 import { scrubUrls } from "./arcousd/safe-error.js"
 import type { ArcoUSDService } from "./arcousd/service.js"
 import type { ArcoUSDRecalls, RecallRow } from "./arcousd/recall.js"
@@ -146,6 +148,8 @@ export type ArcoAppServices = {
   readonly arcoUSDRedemptions?: ArcoUSDRedemptions
   /** Savings admin reads (distributions, flows) and the distribute() builder. */
   readonly arcoUSDSavingsAdmin?: ArcoUSDSavingsAdmin
+  /** ArcoGOLD (gold Savings) public reserve + savings state; absent → the /api/v1/arcogold routes are not registered. */
+  readonly arcoGold?: ArcoGoldService
   readonly stocksMarketClock?: StocksMarketDataPluginOptions["marketClock"]
   readonly stocks?: StocksPluginOptions
   readonly arco: PrismaArcoService
@@ -1883,6 +1887,7 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
   if (services.arcoUSD) {
     app.register(arcoUSDPlugin, { service: services.arcoUSD, savings: services.arcoUSDSavings, redemptions: services.arcoUSDRedemptions })
   }
+  if (services.arcoGold) app.register(arcoGoldPlugin, { service: services.arcoGold })
   if (services.stocks) app.register(stocksPlugin, services.stocks)
   if (services.stocksRuntimeStatus) {
     app.register(stocksRuntimeStatusPlugin, services.stocksRuntimeStatus)

@@ -515,6 +515,63 @@ export type GiwaArcoUSDSavings = {
   savings: GiwaArcoUSDSavingsState | null
 }
 
+// ── ArcoGOLD (the gold Savings account: server/src/arcogold) ───────────────────────────────────────────────────────
+// Ounce amounts are base18 (1e18 = one troy ounce); `*Ounces` / `*Human` are formatUnits strings.
+
+/** GET /api/v1/arcogold/reserve (public): the gold Reserve, per-coin instant liquidity in `assets[].availableHuman`. */
+export type GiwaArcoGoldReserve = {
+  status: GiwaArcoUSDStatus
+  chainId: number
+  contracts: { unit: string; reserve: string; lens: string } | null
+  readAt: string
+  reserve: null | {
+    blockNumber: string
+    totalBacking: string
+    totalLiabilities: string
+    totalBackingOunces: string
+    totalLiabilitiesOunces: string
+    reservePaused: boolean
+    depositPaused: boolean
+    redeemPaused: boolean
+    redeemInstantOnlyPaused: boolean
+    /** The ounce unit's (ArcoXAU) pause, and its mint and burn switches. */
+    arcoUSDPaused: boolean
+    arcoUSDMintPaused: boolean
+    arcoUSDBurnPaused: boolean
+    assets: GiwaArcoUSDAssetState[]
+  }
+}
+
+/** GET /api/v1/arcogold/savings (public): ArcoGOLD's share price and switches, the display APY and the ounce's USD price. */
+export type GiwaArcoGoldSavings = {
+  status: GiwaArcoUSDStatus
+  chainId: number
+  contracts: { arcoGOLD: string; zap: string; unit: string; reserve: string } | null
+  readAt: string
+  savings: null | {
+    blockNumber: string
+    totalAssets: string
+    totalAssetsOunces: string
+    totalSupply: string
+    /** Ounces per 1 ArcoGOLD, base18 / human. */
+    sharePrice: string
+    sharePriceHuman: string
+    seeded: boolean
+    vaultPaused: boolean
+    depositPaused: boolean
+    withdrawPaused: boolean
+    depositsOpen: boolean
+    withdrawalsOpen: boolean
+  }
+  /** The set display rate, in percent. */
+  apyPercent: number | null
+  /** USD per troy ounce (PAX Gold), null while the server has no price. */
+  ounceUsd: number | null
+  ounceUsdSource: string
+  sharePriceUsd: number | null
+  totalAssetsUsd: string | null
+}
+
 /** GET /api/v1/arcousd/savings/history: share price / TVL from the savings indexer's snapshots. */
 export type GiwaArcoUSDSavingsHistory = {
   status: GiwaArcoUSDStatus

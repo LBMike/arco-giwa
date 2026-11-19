@@ -3,6 +3,7 @@ import { PanelLeftClose } from "lucide-react"
 import { Link, Outlet } from "react-router-dom"
 import { GiwaHeader, TestFundsButton, useGiwaIsAdmin } from "./components"
 import { ArcoUsdLiveProvider } from "./arcousd-live-context"
+import { ArcoGoldLiveProvider } from "./arcogold-live-context"
 import { GetArcoUsdButton } from "./GetArcoUsd"
 import { Footer } from "../components/Footer"
 import { GIWA_FOOTER_LINKS } from "./footer-links"
@@ -28,7 +29,9 @@ export function GiwaPreprodApp({ admin = false }: { admin?: boolean }) {
   }, [sidebarCollapsed])
 
   return (
-    // The live ArcoUSD v1 contracts for Get ArcoUSD and the sArcoUSD Savings account (a preview's demo chain keeps its own).
+    // The live ArcoUSD v1 contracts for Get ArcoUSD and the sArcoUSD Savings account (a preview's demo chain keeps its own),
+    // and the live ArcoGOLD contracts for the gold Savings account (outside, so it sees a preview host's routes).
+    <ArcoGoldLiveProvider enabled={!admin}>
     <ArcoUsdLiveProvider enabled={!admin}>
       <div
         data-sidebar-state={sidebarCollapsed ? "collapsed" : "expanded"}
@@ -109,5 +112,6 @@ export function GiwaPreprodApp({ admin = false }: { admin?: boolean }) {
         </div>
       </div>
     </ArcoUsdLiveProvider>
+    </ArcoGoldLiveProvider>
   )
 }

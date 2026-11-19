@@ -1,12 +1,14 @@
 // Server-side USD rates for valuing product NAVs. Fetches the public CoinGecko simple
 // price (best-effort, rate-limited) with a ~60s in-memory cache; USDC is pinned to 1.
+// XAU (one troy ounce of gold, for ArcoGOLD) is read as PAX Gold (CoinGecko id "pax-gold"),
+// a token backed one fine troy ounce each, in the same request.
 // On failure callers get null (or the last cached value) and degrade to navUsd: null —
 // never a wrong number. baseUsd() is pure.
 
-export type UsdRates = { USDC: number; BTC: number; ETH: number; XRP: number }
+export type UsdRates = { USDC: number; BTC: number; ETH: number; XRP: number; XAU: number }
 
 const COINGECKO_URL =
-  "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,ripple&vs_currencies=usd"
+  "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,ripple,pax-gold&vs_currencies=usd"
 const CACHE_TTL_MS = 60_000
 
 let cache: { rates: UsdRates; at: number } | null = null
@@ -21,7 +23,7 @@ export async function fetchUsdRates(): Promise<UsdRates | null> {
       const value = body?.[id]?.usd
       return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : Number.NaN
     }
-    const rates: UsdRates = { USDC: 1, BTC: read("bitcoin"), ETH: read("ethereum"), XRP: read("ripple") }
+    const rates: UsdRates = { USDC: 1, BTC: read("bitcoin"), ETH: read("ethereum"), XRP: read("ripple"), XAU: read("pax-gold") }
     cache = { rates, at: Date.now() }
     return rates
   } catch {
@@ -39,4 +41,10 @@ export function baseUsd(paymentAssetSymbol: string, rates: UsdRates | null | und
   if (!key) return null
   const value = rates[key]
   return Number.isFinite(value) && value > 0 ? value : null
+}
+
+/** USD per troy ounce (ArcoGOLD's unit), or null when the rate is unavailable. */
+export function ounceUsd(rates: UsdRates | null | undefined): number | null {
+  const value = rates?.XAU
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null
 }

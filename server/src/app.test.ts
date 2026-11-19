@@ -304,7 +304,7 @@ function makeApp(options?: {
   /** Wallets whose nonce a service owns (the Stocks signer); absent → none. */
   signerWallets?: string[]
   /** The market's USD rates read; defaults to fixed rates. */
-  fetchRates?: () => Promise<{ USDC: number; BTC: number; ETH: number; XRP: number } | null>
+  fetchRates?: () => Promise<{ USDC: number; BTC: number; ETH: number; XRP: number; XAU: number } | null>
 }) {
   const prisma = makePrisma()
   const arco = new PrismaArcoService(prisma as PrismaLike)
@@ -321,7 +321,7 @@ function makeApp(options?: {
   const market = new EvmMarketService({
     arco,
     loadRegistry: () => fullRegistry,
-    fetchRates: options?.fetchRates ?? (async () => ({ USDC: 1, BTC: 60000, ETH: 3000, XRP: 0.5 })),
+    fetchRates: options?.fetchRates ?? (async () => ({ USDC: 1, BTC: 60000, ETH: 3000, XRP: 0.5, XAU: 2400 })),
   })
   const monitoring = new EvmMonitoringService({
     arco,

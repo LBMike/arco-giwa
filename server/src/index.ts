@@ -24,7 +24,11 @@ import { EvmMonitoringService } from "./services/evm-monitoring-service.js"
 import { EvmPortfolioService } from "./services/evm-portfolio-service.js"
 import { EvmRegistryService } from "./services/evm-registry-service.js"
 import { PrismaArcoService } from "./services/prisma-arco-service.js"
-import { fetchUsdRates } from "./services/usd-rates.js"
+import { fetchUsdRates, ounceUsd } from "./services/usd-rates.js"
+import { parseArcoGoldEnv } from "./arcogold/config.js"
+import { readArcoGoldRegistry } from "./arcogold/registry.js"
+import { ArcoGoldService } from "./arcogold/service.js"
+import { createGoldVaultReader } from "./arcogold/vault.js"
 import { readRegistryFile } from "./registry/io.js"
 import { parseArcoUSDEnv } from "./arcousd/config.js"
 import { createArcoUSDChainReader } from "./arcousd/reader.js"
@@ -144,6 +148,17 @@ async function composeServer(
     store: new PrismaArcoUSDAlertStore(prisma),
     env: arcoUSDAlertEnv,
     channels: alertChannels(arcoUSDAlertEnv),
+  })
+  // ArcoGOLD (gold Savings): the gold Reserve through the same reader as ArcoUSD's, the ArcoGOLD vault, and the ounce
+  // price from the shared USD rates (PAX Gold). Inert ("not-deployed") until the gold deploy script has written
+  // deployments/91342/arcogold-giwa.json (ARCOGOLD_REGISTRY_PATH overrides it); re-read on each cache refresh.
+  const arcoGoldEnv = parseArcoGoldEnv(envSource)
+  const arcoGold = new ArcoGoldService({
+    chainId: GIWA_CHAIN_ID,
+    loadRegistry: () => readArcoGoldRegistry(arcoGoldEnv.registryPath),
+    readReserve: createArcoUSDChainReader(rpcClient),
+    readVault: createGoldVaultReader(rpcClient),
+    ounceUsd: async () => ounceUsd(await fetchUsdRates()),
   })
   const priceFeedReadAbi = parseAbi([
     "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)",
@@ -469,7 +484,7 @@ async function composeServer(
           registryPath: env.registryPath,
         },
         {
-          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD, arcoUSDRecalls, arcoUSDAdmin, arcoUSDAlerts, arcoUSDSavings, arcoUSDSavingsAdmin, arcoUSDRedemptions,
+          arco, registry, portfolio, readiness, market, monitoring, register, readPauseState, readPauseDetail, readVaultLimits, readVaultFeeds, verifyPayout, stocksMarketData, stocksMarketClock, arcoUSD, arcoUSDRecalls, arcoUSDAdmin, arcoUSDAlerts, arcoUSDSavings, arcoUSDSavingsAdmin, arcoUSDRedemptions, arcoGold,
           resolveStocksOperator: sessions?.resolveOperator,
           signerWallets,
           stocks: stocks ? {
