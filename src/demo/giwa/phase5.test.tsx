@@ -8,6 +8,7 @@ import { assertRequiredPaymentAsset } from "./catalog"
 import { GiwaCatalogTable, GiwaInvestPanel, ProductCatalogList } from "./components"
 import {
   afterConfirmedReceipt,
+  readAtConfirmedBlock,
   dripAllTestAssetsWithClients,
   encodedOperationCall,
   sendPreparedTransactionWithClients,
@@ -1104,4 +1105,33 @@ test("redeem tab renders the Instant liquidity row in the payment asset", () => 
   // Payout (1) is within liquidity (1000) → instant path, so no request-fallback notice.
   assert.doesNotMatch(html, /processed as a redemption request/)
   assert.match(html, /Redeem instant/)
+})
+
+test("readAtConfirmedBlock retries a node that does not have the block yet, and gives up with null", async () => {
+  // A lagging RPC node fails a read pinned to a block it has not seen; the next attempt reaches one that has it.
+  const calls: bigint[] = []
+  let failures = 2
+  const value = await readAtConfirmedBlock(
+    async (blockNumber) => {
+      calls.push(blockNumber)
+      if (failures-- > 0) throw new Error("header not found")
+      return "1000"
+    },
+    42n,
+    { sleep: async () => undefined },
+  )
+  assert.equal(value, "1000")
+  assert.deepEqual(calls, [42n, 42n, 42n])
+
+  let attempts = 0
+  const none = await readAtConfirmedBlock(
+    async () => {
+      attempts += 1
+      throw new Error("header not found")
+    },
+    42n,
+    { tries: 3, sleep: async () => undefined },
+  )
+  assert.equal(none, null)
+  assert.equal(attempts, 3)
 })

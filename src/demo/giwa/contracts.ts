@@ -125,7 +125,7 @@ export function walletClient() {
 }
 
 type ReceiptClient = {
-  waitForTransactionReceipt(args: { hash: Hex }): Promise<{ status: string; logs?: readonly Log[] }>
+  waitForTransactionReceipt(args: { hash: Hex }): Promise<{ status: string; logs?: readonly Log[]; blockNumber?: bigint }>
 }
 
 type EstimateGasClient = {
@@ -264,14 +264,39 @@ async function simulateAndWrite(args: {
   return simulateAndWriteWithClients(args)
 }
 
-export async function readTokenBalance(token: HexAddress, account: HexAddress, decimals: number) {
+// `blockNumber` pins the read to that block (see readAtConfirmedBlock); omitted reads the latest.
+export async function readTokenBalance(token: HexAddress, account: HexAddress, decimals: number, blockNumber?: bigint) {
   const balance = await publicGiwaClient.readContract({
     address: token,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: [account],
+    ...(blockNumber === undefined ? {} : { blockNumber }),
   })
   return fromBaseUnits(balance, decimals)
+}
+
+/**
+ * A read as of the block a transaction confirmed in. The public RPC is several nodes: right after a
+ * receipt, a "latest" read can be answered by one that has not seen the block yet and return the
+ * pre-transaction value, which then sits on screen. Pinned to the block, such a node cannot answer
+ * (it fails), so the read is retried until a node that has the block replies. Null when none does
+ * in time; the caller falls back to its ordinary refresh.
+ */
+export async function readAtConfirmedBlock<T>(
+  read: (blockNumber: bigint) => Promise<T>,
+  blockNumber: bigint,
+  options: { tries?: number; delayMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<T | null> {
+  const { tries = 10, delayMs = 400, sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)) } = options
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    try {
+      return await read(blockNumber)
+    } catch {
+      if (attempt < tries - 1) await sleep(delayMs)
+    }
+  }
+  return null
 }
 
 export async function readGreenlistEnforced(productToken: HexAddress) {
