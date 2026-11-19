@@ -267,7 +267,9 @@ export const LISTED_FUNDS: readonly ListedFund[] = [
     price: "$1.00",
     liquidity: "Withdraw any time, no lockup",
     minInvestment: "No minimum",
-    fees: { management: null, performance: null, note: "NUVA shows the protocol fee as free; management fee amounts are not published" },
+    // Arco's terms for the HOME vault on GIWA (set by Arco, 2026-11-19; the same figures are in
+    // the vault's Vault Config, which the invest panel reads). Not a NUVA-published fee schedule.
+    fees: { management: 0, performance: 10, note: "No management fee · 10% performance fee on the GIWA vault" },
     settlement: "Deposit in 5–10 minutes · Withdrawal within 3 U.S. business days",
     redemptionDays: 3,
     portfolio: {
