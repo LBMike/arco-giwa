@@ -467,7 +467,7 @@ export const LISTED_FUNDS: readonly ListedFund[] = [
     category: "Prime Credit",
     issuerKey: "ember",
     // Ember Protocol operates the vault and issues the PPLUS tokens; Bitwise curates the strategy.
-    issuer: { name: "Ember Protocol" },
+    issuer: { name: "Ember Protocol", logo: "/logos/ember.png" },
     manager: { name: "Bitwise", logo: "/logos/bitwise.png" },
     about: [
       "PPLUS is a USDC vault that runs a leveraged credit strategy across tokenized real-world assets. Bitwise designs the strategy and recommends the allocations; Ember Protocol operates the vault and executes every transaction.",
