@@ -40,6 +40,7 @@ import {
 } from "./savings-assets"
 import { SavingsRoutesContext } from "./savings-routes"
 import GiwaSavingsPage from "./SavingsPage"
+import { GiwaSidebarNav } from "./GiwaSidebarNav"
 import type { GiwaArcoGoldReserve, GiwaArcoGoldSavings, GiwaArcoUSDAssetState, HexAddress } from "./types"
 import { GiwaWalletProvider } from "./wallet"
 
@@ -270,6 +271,37 @@ test("provider: not deployed answers no gold; live answers the account; nothing 
   assert.equal(renderProvider({ reserve: reserveRead(), savings: savingsRead() }), "pending=false gold=true")
   assert.equal(renderProvider({}, { enabled: false }), "pending=false gold=false")
   assert.equal(renderProvider({ reserve: reserveRead(), savings: savingsRead() }, { routes: [{ vault: "arcousd", option: "usdt-giwa" } as unknown as SavingsRoute] }), "pending=false gold=false")
+})
+
+function renderSidebar(seed: { reserve?: unknown; savings?: unknown }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  if (seed.reserve !== undefined) client.setQueryData(["giwa", "arcogold", "reserve"], seed.reserve)
+  if (seed.savings !== undefined) client.setQueryData(["giwa", "arcogold", "savings"], seed.savings)
+  return renderToStaticMarkup(
+    <QueryClientProvider client={client}>
+      <ArcoGoldLiveProvider>
+        <MemoryRouter initialEntries={["/savings?category=gold"]}>
+          <GiwaSidebarNav isAdmin={false} />
+        </MemoryRouter>
+      </ArcoGoldLiveProvider>
+    </QueryClientProvider>,
+  )
+}
+
+test("sidebar: Gold is listed exactly when the gold API reads are live (the Savings page's gold account), hidden otherwise", () => {
+  const html = renderSidebar({ reserve: reserveRead(), savings: savingsRead() })
+  // After Crypto Native, current on a gold deep link.
+  assert.match(html, /category=crypto-native"[^]*aria-current="location"[^>]*href="\/savings\?category=gold"[^>]*>Gold</)
+  for (const seed of [
+    {},
+    { reserve: NOT_DEPLOYED, savings: SAVINGS_NOT_DEPLOYED },
+    { reserve: { ...reserveRead(), status: "unavailable" }, savings: { ...savingsRead(), status: "unavailable" } },
+    { reserve: reserveRead(), savings: savingsRead({ seeded: false }) },
+  ]) {
+    const hidden = renderSidebar(seed)
+    assert.doesNotMatch(hidden, /category=gold/)
+    assert.match(hidden, /href="\/savings\?category=crypto-native"/)
+  }
 })
 
 const stableVault = {
