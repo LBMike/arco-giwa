@@ -1,3 +1,5 @@
+import { fundMarkSrc } from "./FundMark"
+import { listedFundForVault } from "./listed-funds"
 import { tokenIcon } from "../data/products"
 import type { GiwaCatalogItem, GiwaPauseState, GiwaVaultConfig } from "./types"
 
@@ -68,12 +70,19 @@ export function tokenSymbolFor(product: Pick<GiwaCatalogItem, "productId" | "sym
   return presentedToken(product)?.symbol ?? product.symbol
 }
 
-// Config-first vault logo: admin-set image, else the legacy per-product icon, else undefined
-// (letter fallback). A token presented under another symbol shows that token's mark ahead of both.
-// Shared by the vault list, holdings, and the portfolio Activity feed so their vault identity
-// resolves identically and can't drift.
+// Config-first vault logo: admin-set image, else the mark of the listed fund the vault belongs to
+// (HOME, JX, PPLUS: the same mark as the fund's page header), else the legacy per-product icon,
+// else undefined (letter fallback). A token presented under another symbol shows that token's mark
+// ahead of all. Shared by the vault list, the invest panel, holdings, and the portfolio Activity
+// feed so their vault identity resolves identically and can't drift.
 export function vaultImageFor(product: Pick<GiwaCatalogItem, "productId" | "vaultConfig">): string | undefined {
-  return presentedToken(product)?.image ?? vaultConfigOf(product).vaultImageUrl ?? tokenIcon(product.productId)
+  const fund = listedFundForVault(product.productId)
+  return (
+    presentedToken(product)?.image ??
+    vaultConfigOf(product).vaultImageUrl ??
+    (fund ? fundMarkSrc(fund.symbol) : undefined) ??
+    tokenIcon(product.productId)
+  )
 }
 
 // Config-first vault name: admin displayName, else the token's symbol as customers see it.

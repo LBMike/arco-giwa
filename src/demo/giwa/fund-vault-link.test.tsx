@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import GiwaProductDetailPage from "./ProductDetailPage"
 import { ListedFundDetail } from "./ListedFundDetail"
+import { vaultImageFor } from "./catalog"
 import { fundsProductsOf } from "./home"
 import { LISTED_FUND_VAULTS, listedFundById, listedFundForVault, vaultProductIdForFund } from "./listed-funds"
 import { GiwaWalletProvider } from "./wallet"
@@ -106,4 +107,15 @@ test("the vault's own product id opens the fund's page", () => {
   const html = renderRoute("/product/home", [vault("home", "HOME", true)])
   assert.doesNotMatch(html, /Product not found/)
   assert.doesNotMatch(html, /data-testid="listed-fund-detail"/)
+})
+
+test("a fund's vault shows the fund's mark as its token image; an admin-set image still wins", () => {
+  assert.equal(vaultImageFor(vault("home", "HOME")), "/logos/nuva-home.svg")
+  assert.equal(vaultImageFor(vault("jxfund", "JX")), "/logos/jx.png")
+  assert.equal(vaultImageFor(vault("pplus", "PPLUS")), "/logos/bitwise.png")
+  const custom = { ...vault("home", "HOME"), vaultConfig: { hidden: true, vaultImageUrl: "/logos/custom.png" } } as unknown as GiwaCatalogItem
+  assert.equal(vaultImageFor(custom), "/logos/custom.png")
+  // The invest panel on the fund page uses it: no letter badge for the token.
+  const html = renderRoute("/product/nuva-home", [vault("home", "HOME", true)])
+  assert.match(html, /\/logos\/nuva-home\.svg/)
 })
