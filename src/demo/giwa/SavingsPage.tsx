@@ -28,11 +28,11 @@ import { chosenSavingsOption, heldCoins, heldUsd, productThroughRoute, routeFor 
 import { reserveAssetLabel, savingsBacking, savingsDepositLabel, savingsExposure } from "./savings-backing"
 import { savingsAssetCategory, savingsCategoryFromSearch } from "./savings-category"
 import { usdCompact } from "./savings-format"
-import { SavingsHeroCard, type SavingsHeroTone } from "./SavingsHeroCard"
+import { SavingsHeroCard, savingsHeroTone, type SavingsHeroTone } from "./SavingsHeroCard"
 import { SavingsRoutesContext } from "./savings-routes"
 import { SavingsSimulation } from "./SavingsSimulation"
 import { SavingsStatsRow } from "./SavingsStatsRow"
-import { SavingsTabs } from "./SavingsTabs"
+import { SavingsTabs, savingsGoldMarks } from "./SavingsTabs"
 import { SavingsTransferFlow, SavingsTransferStatus, type TransferLeftRunning } from "./SavingsTransferFlow"
 import type { TransferMode } from "./savings-transfer"
 import type { GiwaCatalogItem } from "./types"
@@ -114,7 +114,13 @@ export default function GiwaSavingsPage() {
               <SavingsDetail
                 key={selected.vault.productId}
                 vault={selected.vault}
-                tone={savingsAssetCategory(selected.symbol) === "crypto-native" ? "cream" : "blue"}
+                tone={savingsHeroTone(savingsAssetCategory(selected.symbol))}
+                coinMarks={
+                  // The gold account takes PAXG and XAUT: both marks beside what is available.
+                  savingsAssetCategory(selected.symbol) === "gold"
+                    ? savingsGoldMarks(accounts.filter((account) => account.vault?.productId === selected.vault!.productId)).map((coin) => ({ icon: coin.logo ?? undefined, symbol: coin.symbol }))
+                    : undefined
+                }
               />
             ) : (
               <p className="mt-6 text-center text-sm text-[var(--color-arco-muted)]">Select a savings account to continue.</p>
@@ -145,7 +151,16 @@ function useSavingsTvl(vault: GiwaCatalogItem, navUsd: number | null): number | 
 
 // The selected savings account: the card, its figures, Backing / Exposure / Simulation, and the deposit and withdraw
 // screens. Reads the same vault detail as the product page (useGiwaVaultDetail).
-function SavingsDetail({ vault, tone }: { vault: GiwaCatalogItem; tone: SavingsHeroTone }) {
+function SavingsDetail({
+  vault,
+  tone,
+  coinMarks,
+}: {
+  vault: GiwaCatalogItem
+  tone: SavingsHeroTone
+  /** The coins the account takes, shown beside what is available when the vault has no coin picker (the gold account). */
+  coinMarks?: readonly Readonly<{ icon: string | undefined; symbol: string }>[]
+}) {
   // The sArcoUSD account on ArcoUSD v1 reads its figures from the Savings API, not from posted prices.
   const live = useContext(ArcoUsdLiveContext)
   const liveSavings = vault.productId === LIVE_SAVINGS_PRODUCT_ID ? (live?.savings ?? null) : null
@@ -209,7 +224,7 @@ function SavingsDetail({ vault, tone }: { vault: GiwaCatalogItem; tone: SavingsH
   // What a deposit can use: every coin the vault can take, when there are several; else its own coin.
   const availableUsd =
     choices !== null ? heldUsd(choices) : available !== null && detail.baseUsd !== null ? available * detail.baseUsd : null
-  const coinsHeld = choices !== null ? heldCoins(choices).map((coin) => ({ icon: coin.logo, symbol: coin.symbol })) : undefined
+  const coinsHeld = choices !== null ? heldCoins(choices).map((coin) => ({ icon: coin.logo, symbol: coin.symbol })) : coinMarks
   const flowLiquidityUsd =
     route === null
       ? detail.instantLiquidityUsd

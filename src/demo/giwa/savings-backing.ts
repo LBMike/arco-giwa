@@ -109,10 +109,14 @@ export function reserveAssetLabel(paymentAssetSymbol: string): string {
   return base === "WETH" ? "ETH" : base
 }
 
-/** What the Savings card invites a deposit of: "Stablecoins" for the stablecoin account, else its coin ("ETH"). */
+/**
+ * What the Savings card invites a deposit of: "Stablecoins" for the stablecoin account, "Gold" for the gold account
+ * (it takes PAXG and XAUT), else its coin ("ETH").
+ */
 export function savingsDepositLabel(paymentAssetSymbol: string): string {
   const coin = reserveAssetLabel(paymentAssetSymbol)
-  return savingsAssetCategory(coin) === "stablecoins" ? "Stablecoins" : coin
+  const category = savingsAssetCategory(coin)
+  return category === "stablecoins" ? "Stablecoins" : category === "gold" ? "Gold" : coin
 }
 
 /**

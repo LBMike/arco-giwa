@@ -54,6 +54,7 @@ import { ASSET_MANAGERS, ISSUERS, aumLabel, apyLabel, productById } from "../dat
 import { GiwaMultiSelect } from "./GiwaMultiSelect"
 import { SavingsAssetPicker } from "./SavingsAssetPicker"
 import type { SavingsAssetChoice } from "./savings-assets"
+import { savingsGoldCoin } from "./savings-category"
 import {
   amountAfterSwapFee,
   payAssetForOption,
@@ -156,6 +157,8 @@ const RISK_CARD_BLURB: Record<RiskLevel, string> = {
 
 const TOKEN_ICONS: Record<string, string> = {
   abtc: "/logos/abtc.png",
+  // The ArcoGOLD Savings token (the gold account's share).
+  arcogold: "/logos/arcogold.png",
   aeth: "/logos/aeth.png",
   acapix: "/logos/aksia.svg",
   ibenji: "/logos/ibenji.svg",
@@ -201,7 +204,8 @@ export function paymentAssetIcon(symbol: string) {
   if (symbol === "tWETH") return "/logos/aeth.png"
   if (symbol === "tXRP") return "/logos/XRP.png"
   if (symbol === "ArcoUSD") return "/logos/arco.png"
-  return undefined
+  // The gold coins (PAXG, XAUT) and their GIWA test coins (tPAXG, tXAUT).
+  return savingsGoldCoin(symbol)?.logo
 }
 
 // The category a vault falls back to when no operator override is set (Vault Config "inherit").

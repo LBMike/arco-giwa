@@ -2,24 +2,43 @@
 export const SAVINGS_CATEGORIES = [
   { id: "stablecoins", label: "Stablecoins" },
   { id: "crypto-native", label: "Crypto Native" },
+  { id: "gold", label: "Gold" },
 ] as const
 export type SavingsCategory = typeof SAVINGS_CATEGORIES[number]["id"]
 const STABLECOINS = new Set(["USDC", "RLUSD", "USDT", "ARCOUSD", "DAI", "USDE", "USDS", "PYUSD", "EURC"])
+/**
+ * The gold coins the Gold account takes (either one deposits into ArcoGOLD), with their marks. The Gold tab stacks them
+ * in this order (SavingsTabs.tsx); on GIWA each is a test coin (tPAXG, tXAUT).
+ */
+export const SAVINGS_GOLD_COINS: readonly Readonly<{ symbol: string; name: string; logo: string }>[] = [
+  { symbol: "PAXG", name: "PAX Gold", logo: "/logos/paxg.png" },
+  { symbol: "XAUT", name: "Tether Gold", logo: "/logos/xaut.png" },
+]
+const GOLD = new Set(SAVINGS_GOLD_COINS.map((coin) => coin.symbol))
+/** A GIWA test coin as customers know it: tPAXG is PAXG. */
+const coinOf = (symbol: string) => symbol.replace(/^t(?=[A-Z])/, "")
+/** The gold coin a symbol is (PAXG for "tPAXG" or "paxg"), or null. */
+export function savingsGoldCoin(symbol: string) {
+  const coin = coinOf(symbol).toUpperCase()
+  return SAVINGS_GOLD_COINS.find((entry) => entry.symbol === coin) ?? null
+}
 export function savingsAssetCategory(symbol: string): SavingsCategory {
-  return STABLECOINS.has(symbol.toUpperCase()) ? "stablecoins" : "crypto-native"
+  if (STABLECOINS.has(symbol.toUpperCase())) return "stablecoins"
+  return GOLD.has(coinOf(symbol).toUpperCase()) ? "gold" : "crypto-native"
 }
 /**
- * How many decimals a coin amount shows on the Savings screens: two for a dollar coin, four for a Crypto Native one
- * (0.0083 BTC a year would read "0" at two). Takes the coin as customers know it ("BTC") or the test token ("tBTC").
+ * How many decimals a coin amount shows on the Savings screens: two for a dollar coin, four for any other (a Crypto
+ * Native or a gold coin: 0.0083 BTC a year would read "0" at two). Takes the coin as customers know it ("BTC") or the
+ * test token ("tBTC").
  */
 export function savingsCoinDecimals(symbol: string): 2 | 4 {
-  const coin = symbol.replace(/^t(?=[A-Z])/, "")
-  return savingsAssetCategory(coin) === "stablecoins" ? 2 : 4
+  return savingsAssetCategory(coinOf(symbol)) === "stablecoins" ? 2 : 4
 }
+const isCategory = (value: string | null): value is SavingsCategory => SAVINGS_CATEGORIES.some((category) => category.id === value)
 /** Explicit category wins; existing asset deep links retain their matching category. */
 export function savingsCategoryFromSearch(params: URLSearchParams): SavingsCategory {
   const category = params.get("category")
-  if (category === "stablecoins" || category === "crypto-native") return category
+  if (isCategory(category)) return category
   const asset = params.get("asset")
   return asset ? savingsAssetCategory(asset) : "stablecoins"
 }

@@ -23,11 +23,13 @@ import {
   usd,
   usdCompact,
 } from "./savings-format"
-import { SavingsHeroCard, type SavingsHeroProps } from "./SavingsHeroCard"
+import { SavingsHeroCard, savingsHeroTone, type SavingsHeroProps } from "./SavingsHeroCard"
+import { vaultImageFor } from "./catalog"
+import { paymentAssetIcon } from "./components"
 import { niceTicks, simulateSavings } from "./savings-simulation"
 import { SavingsSimulation } from "./SavingsSimulation"
 import { apyChangeLabel, SavingsStatsRow, sparklinePath, sparklinePointAt } from "./SavingsStatsRow"
-import { SavingsTabs, savingsApyRange, savingsCoinName } from "./SavingsTabs"
+import { SavingsTabs, savingsApyRange, savingsCoinName, savingsGoldMarks } from "./SavingsTabs"
 import {
   amountForPercent,
   exceedsBalance,
@@ -142,8 +144,18 @@ test("exposure: the backing grouped by asset type, the reserve in the vault's ow
   assert.deepEqual(["tUSDC", "tWETH", "tXRP", "tBTC", "USDC"].map(reserveAssetLabel), ["USDC", "ETH", "XRP", "BTC", "USDC"])
 })
 
-test("deposit label: the stablecoin account invites Stablecoins, the others their coin", () => {
+test("deposit label: the stablecoin account invites Stablecoins, the gold account Gold, the others their coin", () => {
   assert.deepEqual(["tUSDC", "USDC", "tWETH", "tXRP"].map(savingsDepositLabel), ["Stablecoins", "Stablecoins", "ETH", "XRP"])
+  assert.deepEqual(["tPAXG", "PAXG", "tXAUT", "XAUT"].map(savingsDepositLabel), ["Gold", "Gold", "Gold", "Gold"])
+})
+
+test("gold icons: ArcoGOLD's token mark, and PAXG / XAUT (and their test coins) with their own marks", () => {
+  assert.equal(vaultImageFor({ productId: "arcogold", vaultConfig: null }), "/logos/arcogold.png")
+  assert.deepEqual(["PAXG", "tPAXG", "XAUT", "tXAUT"].map(paymentAssetIcon), ["/logos/paxg.png", "/logos/paxg.png", "/logos/xaut.png", "/logos/xaut.png"])
+  for (const file of ["arcogold.png", "paxg.png", "xaut.png"]) assert.ok(existsSync(new URL(`../../../public/logos/${file}`, import.meta.url)), file)
+  // The other coins keep theirs.
+  assert.equal(paymentAssetIcon("tBTC"), "/logos/bitcoin.svg")
+  assert.equal(paymentAssetIcon("tDOGE"), undefined)
 })
 
 // ── amounts and the main button ───────────────────────────────────────────
@@ -485,6 +497,49 @@ test("savings card look: the navy card by default, black with cream lines and li
   }
 })
 
+test("savings card look: light gold for Gold, every colour on it re-scoped to the brown ink", () => {
+  assert.deepEqual((["stablecoins", "crypto-native", "gold"] as const).map(savingsHeroTone), ["blue", "cream", "gold"])
+  const page = readFileSync(new URL("./SavingsPage.tsx", import.meta.url), "utf8")
+  assert.match(page, /tone=\{savingsHeroTone\(savingsAssetCategory\(selected\.symbol\)\)\}/)
+  for (const connected of [false, true]) {
+    const html = renderToStaticMarkup(<SavingsHeroCard {...heroProps({ connected, tone: "gold", depositLabel: "Gold", balanceUsd: 10, shares: 1 })} />)
+    assert.match(html, /data-savings-tone="gold"/)
+    assert.match(html, /linear-gradient\(135deg, var\(--color-savings-gold-1\) 0%, var\(--color-savings-gold-2\) 42%, var\(--color-savings-gold-3\) 100%\)/)
+    assert.match(html, connected ? /Available Gold/ : /Deposit Gold/)
+  }
+  const connected = renderToStaticMarkup(<SavingsHeroCard {...heroProps({ connected: true, tone: "gold", depositLabel: "Gold", balanceUsd: 10, shares: 1 })} />)
+  assert.match(connected, /The gold in your connected wallet that you can deposit\./)
+  // The Deposit button and the Earning pill read card-scoped tokens (navy and cream cards: white / ink, delta green).
+  assert.match(connected, /bg-\[var\(--color-savings-hero-cta\)\][^"]*text-\[var\(--color-savings-hero-cta-ink\)\][^"]*hover:bg-\[var\(--color-savings-hero-cta-hover\)\]/)
+  assert.match(connected, /text-\[var\(--color-savings-hero-earning\)\]/)
+
+  const theme = readFileSync(new URL("../theme.css", import.meta.url), "utf8")
+  const scope = theme.slice(theme.indexOf('[data-savings-tone="gold"] {'))
+  const block = scope.slice(0, scope.indexOf("}"))
+  for (const [name, value] of [
+    ["arco-on-dark", "savings-gold-ink"],
+    ["arco-hero", "savings-gold-3"],
+    ["savings-on-hero-muted", "savings-gold-muted"],
+    ["savings-on-hero-line", "savings-gold-line"],
+    ["savings-on-hero-fill", "savings-gold-fill"],
+    ["savings-aurora-1", "savings-gold-aurora-1"],
+    ["savings-aurora-4", "savings-gold-aurora-4"],
+    ["savings-hero-cta", "savings-gold-cta"],
+    ["savings-hero-cta-ink", "savings-gold-3"],
+    ["savings-hero-earning", "savings-gold-earning"],
+  ]) {
+    assert.match(block, new RegExp(`--color-${name}: var\\(--color-${value}\\);`), name)
+  }
+  for (const [name, value] of [["gold-1", "#fffdf0"], ["gold-2", "#fff7b8"], ["gold-3", "#ffe23d"], ["gold-ink", "#2e1f00"], ["gold-cta", "#4f3900"]]) { // design-tokens:allow (the brief's colours, asserted against theme.css)
+    assert.match(theme, new RegExp(`--color-savings-${name}: ${value};`), name)
+  }
+  // The navy and cream cards keep their colours: the new card tokens stand for the ones they used.
+  assert.match(theme, /--color-savings-hero-cta: var\(--color-arco-surface\);/)
+  assert.match(theme, /--color-savings-hero-cta-ink: var\(--color-arco-ink\);/)
+  assert.match(theme, /--color-savings-hero-earning: var\(--color-arco-delta-up\);/)
+  assert.match(theme, /--color-savings-tip-text: var\(--color-arco-on-dark\);/)
+})
+
 const account = (symbol: string, over: Partial<SavingsAccount> = {}): SavingsAccount => ({
   key: `real:v-${symbol}:${symbol}`,
   symbol,
@@ -546,6 +601,32 @@ test("tabs: Crypto Native shows every supported coin stacked and the lowest to t
 
   // No coin that can be saved today: no Crypto Native tab.
   assert.doesNotMatch(renderToStaticMarkup(<SavingsTabs accounts={[account("USDC"), account("XRP", { disabled: true })]} selectedKey={null} onSelect={() => undefined} />), /Crypto Native/)
+})
+
+test("tabs: Gold is one tab after Crypto Native, PAXG and XAUT stacked with the APY, no menu", () => {
+  const gold = [account("PAXG", { key: "real:arcogold:PAXG", vaultId: "arcogold", apy: "3.1%" }), account("XAUT", { key: "real:arcogold:XAUT", vaultId: "arcogold", apy: "3.1%" })]
+  const accounts = [account("USDC"), account("ETH", { apy: "3.86%" }), ...gold]
+  const html = renderToStaticMarkup(<SavingsTabs accounts={accounts} selectedKey={gold[1]!.key} onSelect={() => undefined} />)
+  assert.ok(html.indexOf(">Stablecoins<") < html.indexOf(">Crypto Native<") && html.indexOf(">Crypto Native<") < html.indexOf(">Gold<"))
+  const tabs = [...html.matchAll(/<button type="button" data-gold-tab="" aria-pressed="(\w+)"[^>]*>(.*?)<\/button>/g)]
+  assert.equal(tabs.length, 1, "one Gold button")
+  const [, pressed, tab] = tabs[0]!
+  // Either gold coin selected presses the one tab.
+  assert.equal(pressed, "true")
+  assert.deepEqual([...tab!.matchAll(/<img src="([^"]+)"/g)].map((match) => match[1]), ["/logos/paxg.png", "/logos/xaut.png"])
+  assert.deepEqual([...tab!.matchAll(/style="z-index:(\d+)"/g)].map((match) => Number(match[1])), [2, 1])
+  assert.match(tab!, /<span class="sr-only">PAXG, XAUT<\/span>/)
+  assert.match(tab!, />3\.1%</)
+  assert.doesNotMatch(tab!, /lucide-chevron-down/)
+  assert.doesNotMatch(html.slice(html.indexOf(">Gold<")), /aria-haspopup/)
+  // Only the Crypto Native tab opens a menu.
+  assert.equal(html.split('aria-haspopup="menu"').length - 1, 1)
+  // The test coins read as their coins; one mark each.
+  assert.deepEqual(savingsGoldMarks([{ symbol: "tXAUT", icon: null }, { symbol: "tPAXG", icon: null }, { symbol: "PAXG", icon: null }]).map((mark) => mark.symbol), ["PAXG", "XAUT"])
+  // No gold account, no Gold tab; Stablecoins and Crypto Native no longer take the gold coins.
+  const without = renderToStaticMarkup(<SavingsTabs accounts={accounts.slice(0, 2)} selectedKey={null} onSelect={() => undefined} />)
+  assert.doesNotMatch(without, /Gold|data-gold-tab/)
+  assert.doesNotMatch(html.slice(0, html.indexOf(">Gold<")), /PAXG|XAUT/)
 })
 
 test("tabs: a stablecoin the Vault Config lists beyond those trails the stack with its own mark", () => {
