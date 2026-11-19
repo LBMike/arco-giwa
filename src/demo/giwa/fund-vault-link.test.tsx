@@ -76,6 +76,8 @@ test("a listed fund with a vault shows the vault's live panel, not Coming soon, 
   assert.doesNotMatch(html, /data-testid="listed-fund-panel"/)
   assert.match(html, /Live on GIWA Sepolia/)
   assert.match(html, /Smart Contracts/)
+  // The vault's Price / APY chart card sits in Performance, above the fund's published rate.
+  assert.match(html, /No performance data yet/)
   // The fund's own content is still the page.
   assert.match(html, /Bitwise Premium\+ RWA Vault/)
   assert.match(html, /Fund facts|Product terms/)
@@ -85,6 +87,7 @@ test("without the vault in the catalog the fund page falls back to Coming soon; 
   const missing = renderRoute("/product/nuva-home", [vault("umint", "uMINT", false)])
   assert.match(missing, /data-testid="listed-fund-panel"/)
   assert.match(missing, /Coming soon/)
+  assert.doesNotMatch(missing, /No performance data yet/)
   const loading = renderRoute("/product/nuva-home", undefined)
   assert.match(loading, /Loading product/)
   assert.doesNotMatch(loading, /Coming soon/)
