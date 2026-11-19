@@ -2,7 +2,8 @@
 // tab for all its coins: their marks stacked, the lowest to the highest APY, and a menu to pick one) and Gold (one
 // account, ArcoGOLD, the gold coins it takes stacked, no menu). Only the coins
 // that can be saved today are shown: a coming-soon account has no mark, no part in the range and no row in the menu.
-// The row scrolls sideways when the accounts outgrow the column.
+// Where the row is too narrow for the tabs on one line (phones), each tab stacks its content (see COMPACT below), so
+// every tab is in view with no sideways swipe.
 //
 // The Crypto Native menu: from `sm` a list under the tab (drawn in a portal, since the tab row clips what overflows it);
 // on a phone a bottom sheet. Each row is a coin's mark, name and APY; the open account's row is checked. A coin added
@@ -45,32 +46,45 @@ export function savingsGoldMarks(accounts: readonly Pick<SavingsAccount, "symbol
   )
 }
 
+// The tabs share the row's width equally (it spans the card's width): each grows from nothing (flex 1 0 0%) but never
+// below its own content (min-w-max), so a rate or a coin is never cut. Where the row cannot hold every tab at an equal
+// share (Crypto Native's range is the widest), a tab keeps its content width and the others share what is left. Inside a
+// tab the name sits left and the coins with their rate right (the button's ml-auto), so the selected look is the same
+// size whatever the tab's width.
+//
+// COMPACT: the one-line tabs need about 674px for all three (measured: Stablecoins 228, Crypto Native 286, Gold 147,
+// with the gaps), so below 43rem (688px) of the row's own width (a container query on the nav, not the window, since
+// the sidebar takes part of a wide window) the tabs become equal columns (flex 1 1 0%, min-w-0) that together fill the
+// card's width: the name on top, then the button with the coin marks (16px) over the rate (12px; 11px where the row is
+// under 19.5rem, a 320px phone, with a little less side padding, so Crypto Native's range fits on its line). Crypto Native's chevron stays beside its
+// marks. The button keeps its 44px height, its surface pill and shadow when selected, and sits on the row's bottom line
+// as on one line. A browser without container queries keeps the one-line row, which scrolls sideways where it must.
+const GROUP =
+  "-mb-px flex min-w-max flex-[1_0_0%] items-end gap-0.5 rounded-t-[22px] border-x border-t border-[var(--color-arco-border)] bg-[var(--color-arco-page)] px-1.5 pt-2 [@container_(max-width:42.99rem)]:min-w-0 [@container_(max-width:42.99rem)]:flex-[1_1_0%] [@container_(max-width:42.99rem)]:flex-col [@container_(max-width:42.99rem)]:items-stretch [@container_(max-width:42.99rem)]:gap-0 [@container_(max-width:42.99rem)]:rounded-t-[18px] [@container_(max-width:42.99rem)]:px-1 [@container_(max-width:42.99rem)]:pt-1.5"
+const PILL_BASE =
+  "ml-auto inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-t-[16px] px-2.5 text-sm transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-arco-ink)] motion-reduce:transition-none [@container_(max-width:42.99rem)]:ml-0 [@container_(max-width:42.99rem)]:flex-wrap [@container_(max-width:42.99rem)]:content-center [@container_(max-width:42.99rem)]:justify-center [@container_(max-width:42.99rem)]:gap-x-1 [@container_(max-width:42.99rem)]:gap-y-1 [@container_(max-width:42.99rem)]:whitespace-normal [@container_(max-width:42.99rem)]:rounded-t-[14px] [@container_(min-width:19.5rem)_and_(max-width:42.99rem)]:px-1 [@container_(max-width:19.49rem)]:px-0.5 [@container_(max-width:42.99rem)]:py-1.5 [@container_(max-width:42.99rem)]:text-center"
+const PILL_ON = "bg-[var(--color-arco-surface)] font-medium text-[var(--color-arco-ink)] shadow-[var(--shadow-control)]"
+const PILL_OFF = "text-[var(--color-arco-text-soft)] hover:bg-[var(--color-arco-chip)]"
+// Compact: the rate takes its own line under the marks (order-last, a full line), kept whole (nowrap).
+const APY =
+  "tabular-nums text-[var(--color-arco-text-soft)] [@container_(max-width:42.99rem)]:order-last [@container_(max-width:42.99rem)]:basis-full [@container_(max-width:42.99rem)]:whitespace-nowrap [@container_(max-width:42.99rem)]:leading-4 [@container_(min-width:19.5rem)_and_(max-width:42.99rem)]:text-xs [@container_(max-width:19.49rem)]:text-[11px]"
+// Compact: smaller marks, overlapping a little less, so four stablecoins stay a short stack.
+const MARK_COMPACT = "[@container_(max-width:42.99rem)]:!size-4"
+const MARK_OVERLAP = "-ml-1.5 [@container_(max-width:42.99rem)]:-ml-1"
+
 /** A tab's coins, overlapping as they are, with no ring around them, the first on top (as the card's coin stack). */
 function StackedMarks({ coins }: { coins: readonly CoinMark[] }) {
   return (
     <span className="flex items-center" aria-hidden="true">
       {coins.map((coin, index) => (
-        <span key={coin.symbol} className={`relative inline-flex${index > 0 ? " -ml-1.5" : ""}`} style={{ zIndex: coins.length - index }}>
+        <span key={coin.symbol} className={`relative inline-flex${index > 0 ? ` ${MARK_OVERLAP}` : ""}`} style={{ zIndex: coins.length - index }}>
           {/* A mark that is not a disc (XAUT's gem) is not cropped round, as on the card's coin stack. */}
-          <BrandMark src={coin.logo ?? undefined} label={coin.symbol} size={20} shape={savingsMarkIsRound(coin.symbol) ? "round" : "rounded"} />
+          <BrandMark src={coin.logo ?? undefined} label={coin.symbol} size={20} shape={savingsMarkIsRound(coin.symbol) ? "round" : "rounded"} className={MARK_COMPACT} />
         </span>
       ))}
     </span>
   )
 }
-
-// The tabs share the row's width equally (it spans the card's width): each grows from nothing (flex 1 0 0%) but never
-// below its own content (min-w-max), so a rate or a coin is never cut. Where the row cannot hold every tab at an equal
-// share (Crypto Native's range is the widest), a tab keeps its content width and the others share what is left; where
-// it cannot hold them at all (phones), the row scrolls sideways as before. Inside a tab the name sits left and the
-// coins with their rate right (the button's ml-auto), so the selected look is the same size whatever the tab's width.
-const GROUP =
-  "-mb-px flex min-w-max flex-[1_0_0%] items-end gap-0.5 rounded-t-[22px] border-x border-t border-[var(--color-arco-border)] bg-[var(--color-arco-page)] px-1.5 pt-2"
-const PILL_BASE =
-  "ml-auto inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-t-[16px] px-2.5 text-sm transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-arco-ink)] motion-reduce:transition-none"
-const PILL_ON = "bg-[var(--color-arco-surface)] font-medium text-[var(--color-arco-ink)] shadow-[var(--shadow-control)]"
-const PILL_OFF = "text-[var(--color-arco-text-soft)] hover:bg-[var(--color-arco-chip)]"
-const APY = "tabular-nums text-[var(--color-arco-text-soft)]"
 
 /** Full names for the menu rows; a coin not listed here shows its symbol alone. */
 const COIN_NAMES: Record<string, string> = { ETH: "Ethereum", XRP: "XRP", BTC: "Bitcoin", SOL: "Solana" }
@@ -256,8 +270,8 @@ function CryptoNativeTab({
         {/* Stacked as the Stablecoins tab stacks its coins: no ring, the first on top. */}
         <span className="flex items-center" aria-hidden="true">
           {accounts.map((account, index) => (
-            <span key={account.key} className={`relative inline-flex${index > 0 ? " -ml-1.5" : ""}`} style={{ zIndex: accounts.length - index }}>
-              <BrandMark src={account.icon ?? undefined} label={account.symbol} size={20} />
+            <span key={account.key} className={`relative inline-flex${index > 0 ? ` ${MARK_OVERLAP}` : ""}`} style={{ zIndex: accounts.length - index }}>
+              <BrandMark src={account.icon ?? undefined} label={account.symbol} size={20} className={MARK_COMPACT} />
             </span>
           ))}
         </span>
@@ -272,7 +286,10 @@ function CryptoNativeTab({
             {range}
           </span>
         )}
-        <ChevronDown aria-hidden="true" className={`size-4 text-[var(--color-arco-text-soft)] transition-transform duration-150 motion-reduce:transition-none${open ? " rotate-180" : ""}`} />
+        <ChevronDown
+          aria-hidden="true"
+          className={`size-4 shrink-0 text-[var(--color-arco-text-soft)] transition-transform duration-150 motion-reduce:transition-none [@container_(max-width:42.99rem)]:size-3.5${open ? " rotate-180" : ""}`}
+        />
       </button>
 
       {open &&
@@ -305,7 +322,12 @@ function CryptoNativeTab({
 }
 
 function GroupLabel({ label }: { label: string }) {
-  return <span className="flex min-h-11 items-center whitespace-nowrap px-1.5 text-[13px] font-medium text-[var(--color-arco-text-soft)]">{label}</span>
+  // Compact: one short line over the button, centred (12px, so "Crypto Native" fits a third of a 320px phone).
+  return (
+    <span className="flex min-h-11 items-center whitespace-nowrap px-1.5 text-[13px] font-medium text-[var(--color-arco-text-soft)] [@container_(max-width:42.99rem)]:min-h-0 [@container_(max-width:42.99rem)]:justify-center [@container_(max-width:42.99rem)]:px-0 [@container_(max-width:42.99rem)]:pb-1 [@container_(max-width:42.99rem)]:text-xs">
+      {label}
+    </span>
+  )
 }
 
 export function SavingsTabs({
@@ -332,7 +354,11 @@ export function SavingsTabs({
   return (
     // Edge to edge with the card. overflow-y-hidden: the tabs' -mb-px (over the row's bottom line) made the row 1px
     // taller than its box, so a sideways-scrolling row also scrolled up and down and showed a scrollbar at its right end.
-    <nav aria-label="Savings accounts" className="flex w-full items-end gap-1.5 overflow-x-auto overflow-y-hidden border-b border-[var(--color-arco-border)]">
+    // The row is the container its tabs measure (COMPACT above).
+    <nav
+      aria-label="Savings accounts"
+      className="flex w-full items-end gap-1.5 overflow-x-auto overflow-y-hidden border-b border-[var(--color-arco-border)] [container-type:inline-size]"
+    >
       {stable.length > 0 && (
         <div className={GROUP}>
           <GroupLabel label="Stablecoins" />
