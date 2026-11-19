@@ -46,7 +46,7 @@ export function SavingsInfoTip({
       <span
         id={id}
         role="tooltip"
-        className={`invisible absolute z-30 w-max max-w-[240px] rounded-[var(--radius-card)] bg-[var(--color-arco-ink)] px-2.5 py-2 text-left text-xs font-normal normal-case leading-[18px] tracking-normal text-[var(--color-arco-on-dark)] opacity-0 transition-[opacity,visibility] duration-150 motion-reduce:transition-none ${
+        className={`invisible absolute z-30 w-max max-w-[240px] rounded-[var(--radius-card)] bg-[var(--color-arco-ink)] px-2.5 py-2 text-left text-xs font-normal normal-case leading-[18px] tracking-normal text-[var(--color-savings-tip-text)] opacity-0 transition-[opacity,visibility] duration-150 motion-reduce:transition-none ${
           dismissed ? "" : "group-focus-within/tip:visible group-focus-within/tip:opacity-100 group-hover/tip:visible group-hover/tip:opacity-100"
         } ${side === "top" ? "bottom-full mb-0.5" : "top-full mt-0.5"} ${align === "end" ? "right-0" : "left-0"}`}
       >

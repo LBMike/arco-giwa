@@ -97,6 +97,20 @@ test("savings tabs: the Crypto Native menu lists supported coins and picks one (
     await act(() => sheetRows[0]!.click())
     assert.deepEqual(picked, ["XRP", "ETH"])
 
+    // The Gold tab: one button for both gold coins; a press picks the gold account straight away, with no menu.
+    const gold = [account("PAXG", "3.1%"), account("XAUT", "3.1%")].map((a) => ({ ...a, key: `real:arcogold:${a.symbol}`, vaultId: "arcogold" }))
+    await React.act(async () => root.render(React.createElement(SavingsTabs, { accounts: [...accounts, ...gold], selectedKey: accounts[0]!.key, onSelect: (a: { symbol: string }) => picked.push(a.symbol) })))
+    const goldTabs = element.querySelectorAll("[data-gold-tab]")
+    assert.equal(goldTabs.length, 1)
+    const goldTab = goldTabs[0] as HTMLButtonElement
+    assert.equal(goldTab.getAttribute("aria-pressed"), "false")
+    assert.equal(goldTab.hasAttribute("aria-haspopup"), false)
+    assert.equal(goldTab.querySelectorAll("img").length, 2)
+    const menusBefore = w.document.querySelectorAll('[role="menu"]').length
+    await act(() => goldTab.click())
+    assert.deepEqual(picked, ["XRP", "ETH", "PAXG"])
+    assert.equal(w.document.querySelectorAll('[role="menu"]').length, menusBefore, "no menu opens")
+
     await React.act(async () => root.unmount())
   } finally {
     for (const [key, descriptor] of Object.entries(previous)) {

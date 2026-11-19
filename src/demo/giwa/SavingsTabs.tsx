@@ -1,5 +1,6 @@
-// The Savings account tabs above the card: Stablecoins (one account, the coins it takes stacked) and Crypto Native (one
-// tab for all its coins: their marks stacked, the lowest to the highest APY, and a menu to pick one). Only the coins
+// The Savings account tabs above the card: Stablecoins (one account, the coins it takes stacked), Crypto Native (one
+// tab for all its coins: their marks stacked, the lowest to the highest APY, and a menu to pick one) and Gold (one
+// account, ArcoGOLD, the gold coins it takes stacked, no menu). Only the coins
 // that can be saved today are shown: a coming-soon account has no mark, no part in the range and no row in the menu.
 // The row scrolls sideways when the accounts outgrow the column.
 //
@@ -13,7 +14,7 @@ import { Check, ChevronDown } from "lucide-react"
 import { BrandMark } from "../components/BrandMark"
 import { BottomSheet } from "./BottomSheet"
 import { SAVINGS_COINS } from "./savings-assets"
-import { savingsAssetCategory } from "./savings-category"
+import { SAVINGS_GOLD_COINS, savingsAssetCategory, savingsGoldCoin } from "./savings-category"
 import type { SavingsAccount } from "./savings"
 
 type CoinMark = { symbol: string; logo: string | null }
@@ -32,6 +33,29 @@ function stablecoinMarks(accounts: readonly SavingsAccount[]): CoinMark[] {
     marks.push({ symbol: account.symbol, logo: account.icon })
   }
   return marks
+}
+
+/**
+ * The gold coins the gold account takes, one mark per coin (PAXG, then XAUT): the coins the Vault Config lists for it
+ * (PAXG or tPAXG alike), each with its own mark. Also the coins beside "Available Gold" on the card (SavingsPage.tsx).
+ */
+export function savingsGoldMarks(accounts: readonly Pick<SavingsAccount, "symbol" | "icon">[]): CoinMark[] {
+  return SAVINGS_GOLD_COINS.filter((coin) => accounts.some((account) => savingsGoldCoin(account.symbol)?.symbol === coin.symbol)).map(
+    (coin) => ({ symbol: coin.symbol, logo: coin.logo }),
+  )
+}
+
+/** A tab's coins, overlapping as they are, with no ring around them, the first on top (as the card's coin stack). */
+function StackedMarks({ coins }: { coins: readonly CoinMark[] }) {
+  return (
+    <span className="flex items-center" aria-hidden="true">
+      {coins.map((coin, index) => (
+        <span key={coin.symbol} className={`relative inline-flex${index > 0 ? " -ml-1.5" : ""}`} style={{ zIndex: coins.length - index }}>
+          <BrandMark src={coin.logo ?? undefined} label={coin.symbol} size={20} />
+        </span>
+      ))}
+    </span>
+  )
 }
 
 const GROUP =
@@ -293,6 +317,11 @@ export function SavingsTabs({
   const stableDefault = stable.find((account) => !account.disabled) ?? null
   const stableSelected = stable.some((account) => account.key === selectedKey)
   const stableCoins = stablecoinMarks(stable)
+  // The gold account: one vault (ArcoGOLD) whichever gold coin pays in, so one tab like Stablecoins.
+  const gold = accounts.filter((account) => savingsAssetCategory(account.symbol) === "gold")
+  const goldDefault = gold.find((account) => !account.disabled) ?? null
+  const goldSelected = gold.some((account) => account.key === selectedKey)
+  const goldCoins = savingsGoldMarks(gold)
 
   return (
     <nav aria-label="Savings accounts" className="flex w-full items-end gap-2 overflow-x-auto border-b border-[var(--color-arco-border)] px-1">
@@ -306,18 +335,7 @@ export function SavingsTabs({
             onClick={() => stableDefault && onSelect(stableDefault)}
             className={`${PILL_BASE} ${stableSelected ? PILL_ON : PILL_OFF} disabled:opacity-50`}
           >
-            {/* The marks overlap as they are, with no ring around them, the first on top (as the card's coin stack). */}
-            <span className="flex items-center" aria-hidden="true">
-              {stableCoins.map((coin, index) => (
-                <span
-                  key={coin.symbol}
-                  className={`relative inline-flex${index > 0 ? " -ml-1.5" : ""}`}
-                  style={{ zIndex: stableCoins.length - index }}
-                >
-                  <BrandMark src={coin.logo ?? undefined} label={coin.symbol} size={20} />
-                </span>
-              ))}
-            </span>
+            <StackedMarks coins={stableCoins} />
             <span className="sr-only">{stableCoins.map((coin) => coin.symbol).join(", ")}</span>
             {stableDefault && <span className={APY}>{stableDefault.apy}</span>}
           </button>
@@ -327,6 +345,23 @@ export function SavingsTabs({
         <div className={GROUP}>
           <GroupLabel label="Crypto Native" />
           <CryptoNativeTab accounts={crypto} selectedKey={selectedKey} onSelect={onSelect} />
+        </div>
+      )}
+      {gold.length > 0 && (
+        <div className={GROUP}>
+          <GroupLabel label="Gold" />
+          <button
+            type="button"
+            data-gold-tab=""
+            aria-pressed={goldSelected}
+            disabled={goldDefault === null}
+            onClick={() => goldDefault && onSelect(goldDefault)}
+            className={`${PILL_BASE} ${goldSelected ? PILL_ON : PILL_OFF} disabled:opacity-50`}
+          >
+            <StackedMarks coins={goldCoins} />
+            <span className="sr-only">{goldCoins.map((coin) => coin.symbol).join(", ")}</span>
+            {goldDefault && <span className={APY}>{goldDefault.apy}</span>}
+          </button>
         </div>
       )}
     </nav>

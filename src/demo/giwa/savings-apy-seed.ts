@@ -68,7 +68,7 @@ function withoutKeeperGaps(points: readonly GiwaPriceHistoryPoint[]): GiwaPriceH
   return points.filter((point, i) => paid(point) || !(paid(points[i - 1]) && paid(points[i + 1])))
 }
 
-/* ── Crypto Native savings vaults (aBTC, aXRP) ─────────────────────────────────────────────────────────────────────
+/* ── Crypto Native and Gold savings vaults (aBTC, aXRP, ArcoGOLD) ────────────────────────────────────────────────────
  * Their rates are set figures (the market's published `apy`: server/src/registry/apy.ts), and their price feeds are
  * posted by hand now and then, so there is no rate history to draw. The APY chart shows a month of daily rates that
  * move inside the vault's band and arrive at the rate shown above the chart.
@@ -84,6 +84,7 @@ export type SavingsApyBand = Readonly<{ low: number; high: number }>
 export const SAVINGS_VAULT_APY_BANDS: Readonly<Record<string, SavingsApyBand>> = {
   abtc: { low: 2, high: 3.5 },
   axrp: { low: 3, high: 5 },
+  arcogold: { low: 2.5, high: 3.8 },
 }
 
 const BAND_DAYS = 30

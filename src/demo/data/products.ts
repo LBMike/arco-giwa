@@ -77,6 +77,8 @@ export const ISSUERS: Record<string, { label: string; logo: string }> = {
 // coloured initial badge via <BrandMark>.
 const TOKEN_ICONS: Record<string, string> = {
   abtc: '/logos/abtc.png',
+  // ArcoGOLD, the gold Savings account's token.
+  arcogold: '/logos/arcogold.png',
   aeth: '/logos/aeth.png',
   // aCAPIX & aHedge reuse the Aksia mark as their token icon.
   acapix: '/logos/aksia.svg',

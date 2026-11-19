@@ -13,9 +13,9 @@ const DAY = 86_400
 const NOW = 1_795_000_000
 const history = { productId: "abtc", apy: 2.79, points: [{ t: NOW - 100 * DAY, navBase: 1, navUsd: 60_000 }, { t: NOW - 600, navBase: 1.0109, navUsd: 60_600 }] }
 
-test("banded APY: aBTC stays in 2–3.5% and aXRP in 3–5%, a point a day for a month, ending now on the rate shown", () => {
-  assert.deepEqual(SAVINGS_VAULT_APY_BANDS, { abtc: { low: 2, high: 3.5 }, axrp: { low: 3, high: 5 } })
-  for (const [id, rate] of [["abtc", 2.79], ["axrp", 4.57]] as const) {
+test("banded APY: aBTC stays in 2–3.5%, aXRP in 3–5% and ArcoGOLD in 2.5–3.8%, a point a day for a month, ending now on the rate shown", () => {
+  assert.deepEqual(SAVINGS_VAULT_APY_BANDS, { abtc: { low: 2, high: 3.5 }, axrp: { low: 3, high: 5 }, arcogold: { low: 2.5, high: 3.8 } })
+  for (const [id, rate] of [["abtc", 2.79], ["axrp", 4.57], ["arcogold", 3.1]] as const) {
     const band = SAVINGS_VAULT_APY_BANDS[id]!
     const drawn = withBandedApy({ ...history, productId: id }, id, rate, NOW)!
     assert.equal(drawn.points.length, 31)
@@ -71,6 +71,8 @@ test("coin amounts: two decimals for a dollar coin, four for a Crypto Native one
   assert.equal(savingsCoinDecimals("ArcoUSD"), 2)
   assert.equal(savingsCoinDecimals("tBTC"), 4)
   assert.equal(savingsCoinDecimals("tXRP"), 4)
+  // Gold coins are not dollar coins: four, like the Crypto Native ones.
+  for (const coin of ["PAXG", "XAUT", "tPAXG", "tXAUT"]) assert.equal(savingsCoinDecimals(coin), 4, coin)
   // 0.3 tBTC at 2.79% a year: 0.0083 tBTC, not "0".
   assert.equal(tokenAmount(0.3 * 0.0279, savingsCoinDecimals("tBTC")), "0.0083")
   assert.equal(tokenAmount(0.3 * 0.0279, 2), "0")

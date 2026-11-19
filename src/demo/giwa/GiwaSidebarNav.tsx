@@ -1,7 +1,10 @@
-import { useContext } from "react"
+import { useCallback, useContext, useSyncExternalStore } from "react"
+import { QueryClientContext } from "@tanstack/react-query"
 import { Link, useLocation } from "react-router-dom"
 import { ChartCandlestick, ChartPie, ChevronDown, ChevronRight, House, Layers, PiggyBank, Send, ShieldCheck, type LucideIcon } from "lucide-react"
-import { SAVINGS_CATEGORIES, savingsCategoryFromSearch, savingsCategoryPath } from "./savings-category"
+import { SAVINGS_CATEGORIES, savingsAssetCategory, savingsCategoryFromSearch, savingsCategoryPath } from "./savings-category"
+import { buildSavingsAccounts } from "./savings"
+import type { GiwaCatalogItem } from "./types"
 import { investorNavSections, isNavItemActive, type InvestorNavItemId } from "./investor-nav"
 import { GiwaFeaturesContext } from "./features"
 
@@ -22,10 +25,30 @@ const COMPACT_ROW = "flex min-h-10 w-full items-center justify-center rounded-[v
 const FOCUS =
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-arco-ink)]"
 
+const CATALOG_KEY = ["giwa", "catalog"]
+
+/**
+ * Whether the Savings page has a gold account, read from the catalog the page has already loaded (the query cache):
+ * the sidebar fetches nothing itself. Before the catalog is read (or with no query client) there is no gold account,
+ * so the Gold category stays hidden until a gold accept asset is configured.
+ */
+function useHasGoldSavings(): boolean {
+  const client = useContext(QueryClientContext)
+  const subscribe = useCallback((onChange: () => void) => (client ? client.getQueryCache().subscribe(onChange) : () => undefined), [client])
+  const read = () => {
+    const catalog = client?.getQueryData<GiwaCatalogItem[]>(CATALOG_KEY)
+    return catalog ? buildSavingsAccounts(catalog, []).some((account) => savingsAssetCategory(account.symbol) === "gold") : false
+  }
+  return useSyncExternalStore(subscribe, read, read)
+}
+
 export function GiwaSidebarNav({ isAdmin, onNavigate, compact = false }: { isAdmin: boolean; onNavigate?: () => void; compact?: boolean }) {
   const { pathname, search } = useLocation()
   const savingsCategory = savingsCategoryFromSearch(new URLSearchParams(search))
   const features = useContext(GiwaFeaturesContext)
+  // Gold is listed only once there is a gold account (Stablecoins and Crypto Native always are).
+  const hasGold = useHasGoldSavings()
+  const categories = SAVINGS_CATEGORIES.filter((category) => category.id !== "gold" || hasGold)
   return (
     <nav aria-label="Main" className={`flex flex-col ${compact ? "gap-2" : "gap-5"}`}>
       {investorNavSections(isAdmin, features).map((section, index) => (
@@ -77,7 +100,7 @@ export function GiwaSidebarNav({ isAdmin, onNavigate, compact = false }: { isAdm
                   </Link>
                   {/* The Savings page also exposes these categories when the desktop rail is compact. */}
                   {!compact && item.id === "savings" && active && <ul aria-label="Savings categories" className="ml-5 mt-1 space-y-1 border-l border-[var(--color-arco-border)] pl-3">
-                    {SAVINGS_CATEGORIES.map(category => <li key={category.id}>
+                    {categories.map(category => <li key={category.id}>
                       <Link to={savingsCategoryPath(category.id)} onClick={onNavigate} aria-current={savingsCategory === category.id ? "location" : undefined}
                         className={`flex min-h-10 items-center rounded-lg px-3 text-sm ${FOCUS} ${savingsCategory === category.id ? "bg-[var(--color-arco-chip)] font-medium text-[var(--color-arco-ink)]" : "text-[var(--color-arco-text-soft)] hover:bg-[var(--color-row-hover-weak)]"}`}>
                         {category.label}

@@ -75,20 +75,32 @@ export function useLiveAccrual(value: number | null, apyPercent: number | null):
   return base * Math.pow(1 + apyPercent! / 100, years)
 }
 
-/** The card's look: blue (the navy card, Stablecoins) or cream (a black card with cream lines and light, Crypto Native). */
-export type SavingsHeroTone = "blue" | "cream"
+/**
+ * The card's look: blue (the navy card, Stablecoins), cream (a black card with cream lines and light, Crypto Native) or
+ * gold (a light gold card with dark brown text, Gold / ArcoGOLD).
+ */
+export type SavingsHeroTone = "blue" | "cream" | "gold"
+
+/** The card's look for an account's category. */
+export function savingsHeroTone(category: "stablecoins" | "crypto-native" | "gold"): SavingsHeroTone {
+  return category === "crypto-native" ? "cream" : category === "gold" ? "gold" : "blue"
+}
 
 const HERO_BLACK = { backgroundColor: "var(--color-arco-hero)" }
+const HERO_GOLD = {
+  backgroundImage: "linear-gradient(135deg, var(--color-savings-gold-1) 0%, var(--color-savings-gold-2) 42%, var(--color-savings-gold-3) 100%)",
+}
+const HERO_LOOK: Record<SavingsHeroTone, CSSProperties> = { blue: HERO_BACKGROUND, cream: HERO_BLACK, gold: HERO_GOLD }
 
-// The cream look re-scopes the card's line, panel and aurora colours (theme.css, [data-savings-tone="cream"]), so
-// the grid, hairlines and light below need no second set of styles.
+// The cream and gold looks re-scope the card's colours (theme.css, [data-savings-tone="cream"] / "gold"), so the
+// grid, hairlines, text and light below need no second set of styles.
 function HeroFrame({ tone, children }: { tone: SavingsHeroTone; children: ReactNode }) {
   return (
     <section
       aria-label="Your savings"
       data-savings-tone={tone}
       className="relative isolate w-full overflow-hidden rounded-[22px] text-[var(--color-arco-on-dark)]"
-      style={tone === "cream" ? HERO_BLACK : HERO_BACKGROUND}
+      style={HERO_LOOK[tone]}
     >
       <HeroAurora />
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10" style={HERO_GRID} />
@@ -319,7 +331,7 @@ export type SavingsHeroProps = {
   apyPercent: number | null
   onDeposit: () => void
   onWithdraw: () => void
-  /** "blue" (default) for Stablecoins, "cream" for Crypto Native. */
+  /** "blue" (default) for Stablecoins, "cream" for Crypto Native, "gold" for Gold. */
   tone?: SavingsHeroTone
   /** Before a wallet is connected: the card opens the wallet modal. Without it the card is not a button. */
   onConnect?: () => void
@@ -438,7 +450,7 @@ function ConnectedHero({
   const earning = balanceUsd !== null && balanceUsd > 0
   const availableText = availableUsd !== null ? usd(availableUsd) : available !== null ? `${tokenAmount(available)} ${paySymbol}` : "—"
   // What the wallet can deposit, named as the card's headline names it: "Stablecoins" for the stablecoin account.
-  const availableNoun = depositLabel === "Stablecoins" ? "stablecoins" : depositLabel
+  const availableNoun = depositLabel === "Stablecoins" ? "stablecoins" : depositLabel === "Gold" ? "gold" : depositLabel
   return (
     <HeroFrame tone={tone}>
       <div className="flex min-h-[200px] flex-col justify-between gap-6 p-5 sm:p-6">
@@ -452,11 +464,11 @@ function ConnectedHero({
             />
           </p>
           {earning && (
-            <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] bg-[var(--color-savings-on-hero-fill)] px-2 py-0.5 text-xs text-[var(--color-arco-delta-up)] ring-1 ring-[var(--color-savings-on-hero-line)]">
+            <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] bg-[var(--color-savings-on-hero-fill)] px-2 py-0.5 text-xs text-[var(--color-savings-hero-earning)] ring-1 ring-[var(--color-savings-on-hero-line)]">
               {/* The dot beats like a heart (a double beat, then a rest) with a halo fading out of it (theme.css). */}
               <span aria-hidden="true" className="relative inline-flex size-1.5 shrink-0">
-                <span className="savings-heartbeat-halo absolute inset-0 rounded-[var(--radius-pill)] bg-[var(--color-arco-delta-up)]" />
-                <span className="savings-heartbeat-dot relative size-1.5 rounded-[var(--radius-pill)] bg-[var(--color-arco-delta-up)]" />
+                <span className="savings-heartbeat-halo absolute inset-0 rounded-[var(--radius-pill)] bg-[var(--color-savings-hero-earning)]" />
+                <span className="savings-heartbeat-dot relative size-1.5 rounded-[var(--radius-pill)] bg-[var(--color-savings-hero-earning)]" />
               </span>
               Earning
             </span>
@@ -520,7 +532,7 @@ function ConnectedHero({
           <button
             type="button"
             onClick={onDeposit}
-            className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--radius-pill)] bg-[var(--color-arco-surface)] px-5 text-sm font-medium text-[var(--color-arco-ink)] hover:bg-[var(--color-arco-chip)] sm:min-w-[128px] ${FOCUS_ON_HERO}`}
+            className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[var(--radius-pill)] bg-[var(--color-savings-hero-cta)] px-5 text-sm font-medium text-[var(--color-savings-hero-cta-ink)] hover:bg-[var(--color-savings-hero-cta-hover)] sm:min-w-[128px] ${FOCUS_ON_HERO}`}
           >
             <ArrowDown aria-hidden="true" className="size-4" />
             Deposit
