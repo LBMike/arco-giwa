@@ -56,6 +56,8 @@ const accessControlAbi = parseAbi(["function hasRole(bytes32 role, address accou
 export const ADMIN_ROLE_IDS = {
   FEED_ADMIN_ROLE: keccak256(toBytes("FEED_ADMIN_ROLE")),
   PAUSER_ROLE: keccak256(toBytes("PAUSER_ROLE")),
+  DEPOSIT_VAULT_ADMIN_ROLE: keccak256(toBytes("DEPOSIT_VAULT_ADMIN_ROLE")),
+  REDEMPTION_VAULT_ADMIN_ROLE: keccak256(toBytes("REDEMPTION_VAULT_ADMIN_ROLE")),
 } as const
 export type AdminRoleName = keyof typeof ADMIN_ROLE_IDS
 

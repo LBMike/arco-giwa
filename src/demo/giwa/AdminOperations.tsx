@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, CheckCircle2, Loader2, Send } from "lucide-react"
 import { giwaApi } from "./api"
 import type { AdminAuth } from "./api"
-import { livePauseStateOf } from "./catalog"
+import { livePauseStateOf, pauseStateOf } from "./catalog"
+import { attentionLabel, limitAttention } from "./limits-helpers"
 import { afterConfirmedReceipt, sendPreparedTransaction } from "./contracts"
 import { ActivityPanel } from "./components"
 import { AdminWriteGroup, useGiwaAdmin } from "./admin-context"
@@ -50,16 +51,45 @@ export default function GiwaAdminOperationsPage() {
   const selected = products.find((product) => product.productId === selectedId) ?? products[0]
   const indexerLag = readinessQuery.data?.checks?.indexer?.detail?.lagBlocks
 
-  const currentState = useMemo(
-    () => [
-      ["Registry", registryQuery.data?.activationFlags?.deployed ? "deployed" : "dry-run"],
-      ["Indexer lag", typeof indexerLag === "number" ? `${indexerLag} blocks` : "unknown"],
-      ["Pause state", "read-only after deployment"],
-      ["Greenlist state", "prepared by unsigned tx"],
-      ["Liquidity", "provided to redemption vault"],
-    ],
-    [indexerLag, registryQuery.data?.activationFlags?.deployed],
-  )
+  // Same request the vault cards share (one fetch for the page).
+  const limitsUsageQuery = useQuery({
+    queryKey: ["giwa", "admin-limits-usage"],
+    queryFn: () => giwaApi.admin.limitsUsage(auth),
+    enabled: auth.ready,
+    refetchInterval: 60_000,
+  })
+  const pendingQuery = useQuery({
+    queryKey: ["giwa", "admin-pending-redemptions"],
+    queryFn: () => giwaApi.admin.pendingRedemptions(auth),
+    enabled: auth.ready,
+    refetchInterval: 30_000,
+  })
+
+  const currentState = useMemo(() => {
+    const usageRows = limitsUsageQuery.data?.products
+    const attention = usageRows ? limitAttention(usageRows) : null
+    const pausedCount = products.filter((product) => {
+      const pause = pauseStateOf(product)
+      return pause.depositPaused || pause.withdrawPaused || pause.depositPartial || pause.withdrawPartial
+    }).length
+    const pendingCount = pendingQuery.data?.redemptions.length
+    return [
+      ["Registry", registryQuery.data?.activationFlags?.deployed ? "deployed" : "dry-run", false],
+      ["Indexer lag", typeof indexerLag === "number" ? `${indexerLag} blocks` : "unknown", false],
+      ["Paused vaults", products.length ? (pausedCount ? `${pausedCount} of ${products.length}` : "None") : "unknown", pausedCount > 0],
+      [
+        "Deposit limits",
+        attention ? attentionLabel(attention.depositBlocked, attention.depositNear) : "unknown",
+        Boolean(attention && (attention.depositBlocked || attention.depositNear)),
+      ],
+      [
+        "Withdrawal limits",
+        attention ? attentionLabel(attention.withdrawBlocked, attention.withdrawNear) : "unknown",
+        Boolean(attention && (attention.withdrawBlocked || attention.withdrawNear)),
+      ],
+      ["Pending withdrawals", typeof pendingCount === "number" ? String(pendingCount) : "unknown", false],
+    ] as const
+  }, [indexerLag, registryQuery.data?.activationFlags?.deployed, limitsUsageQuery.data, pendingQuery.data, catalogQuery.data])
 
   async function refreshSharedReads() {
     await Promise.all([
@@ -129,11 +159,11 @@ export default function GiwaAdminOperationsPage() {
         </span>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-5">
-        {currentState.map(([label, value]) => (
+      <section className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+        {currentState.map(([label, value, attention]) => (
           <div key={label} className="rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-4 shadow-[var(--shadow-control)]">
             <p className="text-xs text-[var(--color-arco-muted)]">{label}</p>
-            <p className="mt-1 text-sm font-semibold text-[var(--color-arco-ink)]">{value}</p>
+            <p className={`mt-1 text-sm font-semibold ${attention ? "text-[var(--color-arco-down)]" : "text-[var(--color-arco-ink)]"}`}>{value}</p>
           </div>
         ))}
       </section>

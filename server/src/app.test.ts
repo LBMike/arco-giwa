@@ -279,6 +279,9 @@ function makeApp(options?: {
     vaultMintAllowance: string
     minimumRedeem: string
     vaultRedeemAllowance: string
+    mintedByVault?: string
+    redeemedByVault?: string
+    shareSupply?: string | null
   } | null
   /** Payout receipt check for settle. Defaults to an accept-all stub; `null` leaves it absent. */
   verifyPayout?: PayoutVerifier | null
@@ -929,6 +932,9 @@ test("GET limits de-scales raw on-chain values to human units per decimals; 503 
   assert.equal(body.limits.deposit.maxSupplyCap, formatUnits(BigInt(raw.maxSupplyCap), 18))
   assert.equal(body.limits.redemption.minimumRedeem, formatUnits(BigInt(raw.minimumRedeem), 18))
   assert.equal(body.limits.redemption.vaultRedeemAllowance, formatUnits(BigInt(raw.vaultRedeemAllowance), paymentDecimals))
+
+  // No lifetime counters from the reader → limits are served, usage is null.
+  assert.equal(body.usage, null)
 
   // Reader absent (makeApp with no vaultLimits option) → 503; unknown product → 404.
   const { app: appNoReader } = makeApp()
@@ -3101,4 +3107,39 @@ test("ArcoUSD Savings admin routes: operator-only view and the distribute() buil
   const bareView = (await bare.inject({ method: "GET", url: "/api/v1/admin/arcousd/savings", headers: OPERATOR })).json()
   assert.deepEqual([bareView.status, bareView.totals.deposits, bareView.days], ["not-deployed", 0, 30])
   assert.equal((await bare.inject({ method: "POST", url: "/api/v1/admin/arcousd/savings/distribute", headers: OPERATOR })).statusCode, 409)
+})
+
+test("limits report usage from the lifetime counters; limits-usage lists every deployed vault", async () => {
+  const raw = {
+    minimumDeposit: "0",
+    maxSupplyCap: "1000000000000000000000000", // 1,000,000 shares
+    vaultMintAllowance: "500000000000000000000000", // 500,000 shares
+    minimumRedeem: "0",
+    vaultRedeemAllowance: "250000000000", // 250,000 @ 6-dec payment
+    mintedByVault: "499996548245000000000000", // 499,996.548245 shares
+    redeemedByVault: "250000000000",
+    shareSupply: "400000000000000000000000",
+  }
+  const { app, registry } = makeApp({ vaultLimits: raw })
+
+  const one = await app.inject({ method: "GET", url: "/api/v1/admin/products/acapix/limits", headers: OPERATOR })
+  assert.equal(one.statusCode, 200)
+  const usage = one.json().usage
+  assert.equal(usage.deposit.remainingShares, "3.451755")
+  assert.equal(usage.deposit.binding, "mintAllowance")
+  assert.equal(usage.deposit.level, "near")
+  assert.equal(usage.redemption.level, "exhausted")
+
+  const gated = await app.inject({ method: "GET", url: "/api/v1/admin/limits-usage" })
+  assert.equal(gated.statusCode, 401)
+  const all = await app.inject({ method: "GET", url: "/api/v1/admin/limits-usage", headers: OPERATOR })
+  assert.equal(all.statusCode, 200)
+  const rows = all.json().products
+  assert.equal(rows.length, registry.products.length)
+  const acapix = rows.find((row: any) => row.productId === "acapix")
+  assert.equal(acapix.usage.redemption.level, "exhausted")
+
+  const { app: appNoReader } = makeApp()
+  const absent = await appNoReader.inject({ method: "GET", url: "/api/v1/admin/limits-usage", headers: OPERATOR })
+  assert.equal(absent.statusCode, 503)
 })

@@ -4,6 +4,7 @@ import { stocksRuntimeStatusPlugin, type StocksRuntimeStatusPluginOptions } from
 import { stocksReadinessPlugin } from './stocks-runtime-status/readiness.js'
 import { stocksTradingControlPlugin, type StocksTradingControlPluginOptions } from './stocks-trading-control/plugin.js'
 import { stocksTradingLimitsPlugin, type StocksTradingLimitsPluginOptions } from './stocks-trading-limits/plugin.js'
+import { computeVaultLimitUsage } from "./vault-limit-usage.js"
 import { createRequire } from "node:module"
 import cors from "@fastify/cors"
 import { stocksPlugin, type StocksPluginOptions } from "./stocks/plugin.js"
@@ -117,6 +118,11 @@ export type VaultLimitsRaw = {
   readonly vaultMintAllowance: string
   readonly minimumRedeem: string
   readonly vaultRedeemAllowance: string
+  // Lifetime counters the allowances are checked against, and the product token supply the cap is
+  // checked against. Optional: a reader that cannot supply them still serves the limits.
+  readonly mintedByVault?: string
+  readonly redeemedByVault?: string
+  readonly shareSupply?: string | null
 }
 
 export type ArcoAppServices = {
@@ -737,6 +743,22 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
     },
   )
 
+  // Usage needs the lifetime counters; a reader without them yields null (limits still served).
+  const usageOf = (raw: VaultLimitsRaw, paymentDecimals: number) =>
+    raw.mintedByVault === undefined || raw.redeemedByVault === undefined
+      ? null
+      : computeVaultLimitUsage(
+          {
+            vaultMintAllowance: raw.vaultMintAllowance,
+            maxSupplyCap: raw.maxSupplyCap,
+            vaultRedeemAllowance: raw.vaultRedeemAllowance,
+            mintedByVault: raw.mintedByVault,
+            redeemedByVault: raw.redeemedByVault,
+            shareSupply: raw.shareSupply,
+          },
+          paymentDecimals,
+        )
+
   // Current on-chain limits, de-scaled to HUMAN units with the SAME registry decimals the builder
   // scales up with (exact round-trip). Operator-guarded like the other admin reads.
   // Both vaults' price-feed wiring. A payment feed equal to the product feed (how deploy-giwa.ts
@@ -809,9 +831,36 @@ export function buildApp(env: AppEnv, services: ArcoAppServices) {
             vaultRedeemAllowance: formatUnits(BigInt(raw.vaultRedeemAllowance), decimals),
           },
         },
+        usage: usageOf(raw, decimals),
         paymentDecimals: decimals,
         shareDecimals: 18,
       }
+    },
+  )
+
+  // Limit usage of every deployed vault in one call: the Vault Operations list flags a vault that
+  // is close to (or at) a limit without the operator opening each card. A vault whose reads fail
+  // is listed with usage null rather than failing the whole response.
+  app.get(
+    "/api/v1/admin/limits-usage",
+    { preHandler: requireOperator },
+    async (_request, reply) => {
+      if (!services.readVaultLimits) return reply.code(503).send({ error: "Limits reader unavailable" })
+      const readVaultLimits = services.readVaultLimits
+      const registry = loadRegistry()
+      const products = await Promise.all(
+        registry.products.map(async (product) => {
+          const depositVault = product.depositVault.proxy
+          const redemptionVault = product.redemptionVault.proxy
+          if (!depositVault || !redemptionVault || !isAddress(depositVault) || !isAddress(redemptionVault)) {
+            return { productId: product.productId, usage: null }
+          }
+          const decimals = registry.assets.find((asset) => asset.symbol === product.paymentAssetSymbol)?.decimals ?? 18
+          const raw = await readVaultLimits({ depositVault, redemptionVault }).catch(() => null)
+          return { productId: product.productId, usage: raw ? usageOf(raw, decimals) : null }
+        }),
+      )
+      return { products }
     },
   )
 
