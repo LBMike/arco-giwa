@@ -538,6 +538,18 @@ export type GiwaArcoGoldReserve = {
     arcoUSDPaused: boolean
     arcoUSDMintPaused: boolean
     arcoUSDBurnPaused: boolean
+    /** Settlement and Standard-queue switches. */
+    settlementPaused?: boolean
+    queuePaused?: boolean
+    /** Share of the backing held in strategies now, and the target for it (bps). Gold has no strategies: 0. */
+    mmfBps?: number
+    mmfTargetBps?: number
+    /** Least share of the backing that must stay in the buffer as coins (bps). */
+    bufferFloorBps?: number
+    /** Seconds a Standard (queued) withdrawal waits at least. */
+    queueMinDelay?: number
+    /** Most ArcoXAU that may exist, base18. */
+    mintCap?: string
     assets: GiwaArcoUSDAssetState[]
   }
 }

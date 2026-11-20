@@ -50,6 +50,80 @@ export function goldCover(reserve: Pick<GoldReserveState, "totalBackingOunces" |
   return { surplusOunces, covered: surplusOunces >= 0 }
 }
 
+export type GoldLiquidity = {
+  /** Coins the Reserve holds now, in ounces (1 coin = 1 troy ounce). */
+  readonly bufferOunces: number
+  /** Backing held outside the buffer, in strategies. Gold has none, so this is 0 unless that changes. */
+  readonly deployedOunces: number
+  /** Buffer coins already owed to the Standard queue. */
+  readonly queuedOunces: number
+  /** What Instant withdrawals can take now: the buffer less the queue, coin by coin. */
+  readonly instantOunces: number
+  /** Buffer and strategies as shares of the backing, 0–100; null with no backing. */
+  readonly bufferPercent: number | null
+  readonly deployedPercent: number | null
+}
+
+function sumOf(values: ReadonlyArray<string | number | null | undefined>): number {
+  return values.reduce<number>((total, value) => {
+    const amount = Number(value)
+    return Number.isFinite(amount) ? total + amount : total
+  }, 0)
+}
+
+/** How the gold Reserve's backing splits between the coin buffer and strategies, and what is payable at once. */
+export function goldLiquidity(reserve: Pick<GoldReserveState, "totalBackingOunces" | "assets">): GoldLiquidity {
+  const backing = Number(reserve.totalBackingOunces)
+  const bufferOunces = sumOf(reserve.assets.map((asset) => asset.balanceHuman))
+  const queuedOunces = sumOf(reserve.assets.map((asset) => asset.queuedHuman))
+  const instantOunces = sumOf(reserve.assets.map((asset) => asset.availableHuman))
+  const hasBacking = Number.isFinite(backing) && backing > 0
+  const deployedOunces = hasBacking ? Math.max(backing - bufferOunces, 0) : 0
+  const bufferPercent = hasBacking ? Math.min((bufferOunces / backing) * 100, 100) : null
+  return {
+    bufferOunces,
+    deployedOunces,
+    queuedOunces,
+    instantOunces,
+    bufferPercent,
+    deployedPercent: bufferPercent === null ? null : 100 - bufferPercent,
+  }
+}
+
+/** A share of the backing: "100%", "62.5%"; "—" without one. */
+export function sharePercentText(percent: number | null | undefined): string {
+  if (percent === null || percent === undefined || !Number.isFinite(percent)) return "—"
+  return `${Number(percent.toFixed(2))}%`
+}
+
+/** Basis points as a percent ("10000" → "100%"); "—" when the server did not send one. */
+export function bpsPercentText(bps: number | null | undefined): string {
+  return bps === null || bps === undefined || !Number.isFinite(bps) ? "—" : sharePercentText(bps / 100)
+}
+
+/** A wait in seconds, in words: "10 minutes", "1 hour", "45 seconds"; "—" without one. */
+export function waitText(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return "—"
+  const unit = (count: number, name: string) => `${Number(count.toFixed(1))} ${name}${count === 1 ? "" : "s"}`
+  if (seconds < 60) return unit(seconds, "second")
+  if (seconds < 3600) return unit(seconds / 60, "minute")
+  if (seconds < 86400) return unit(seconds / 3600, "hour")
+  return unit(seconds / 86400, "day")
+}
+
+/** ArcoXAU that can still be issued under the mint cap, in ounces; null without a cap. */
+export function mintHeadroomOunces(reserve: Pick<GoldReserveState, "mintCap" | "totalLiabilities">): number | null {
+  if (!reserve.mintCap) return null
+  try {
+    const left = BigInt(reserve.mintCap) - BigInt(reserve.totalLiabilities)
+    // Whole ounces and the remainder separately, so a large cap keeps its fraction.
+    const base = 10n ** 18n
+    return left <= 0n ? 0 : Number(left / base) + Number(left % base) / 1e18
+  } catch {
+    return null
+  }
+}
+
 /** The ArcoGOLD vault's switches, in the order a saver meets them. */
 export function goldVaultPauseRows(vault: GoldVaultState): PauseRow[] {
   return [
@@ -67,6 +141,8 @@ export function goldReservePauseRows(reserve: GoldReserveState): PauseRow[] {
     { label: "Reserve instant redeem", paused: reserve.redeemInstantOnlyPaused, effect: "Instant redemptions only" },
     { label: "ArcoXAU mint", paused: reserve.arcoUSDMintPaused, effect: "Deposits (mint)" },
     { label: "ArcoXAU burn", paused: reserve.arcoUSDBurnPaused, effect: "Redemptions (burn)" },
+    ...(reserve.settlementPaused === undefined ? [] : [{ label: "Settlement", paused: reserve.settlementPaused, effect: "Paying the Standard queue" }]),
+    ...(reserve.queuePaused === undefined ? [] : [{ label: "Standard queue", paused: reserve.queuePaused, effect: "New queued withdrawals" }]),
     { label: "Reserve (all)", paused: reserve.reservePaused, effect: "Every Reserve function" },
     { label: "ArcoXAU (all)", paused: reserve.arcoUSDPaused, effect: "Mint and burn (transfers continue)" },
   ]

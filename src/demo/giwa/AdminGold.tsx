@@ -5,9 +5,14 @@ import { giwaApi } from "./api"
 import { amountText, bpsText, shortAddress, sharePriceText, usdText, type PauseRow } from "./arcousd-admin"
 import { readableError } from "./contracts"
 import {
+  bpsPercentText,
   goldApyText,
   goldCover,
   goldHeadline,
+  goldLiquidity,
+  mintHeadroomOunces,
+  sharePercentText,
+  waitText,
   goldReservePauseRows,
   goldVaultPauseRows,
   ounceSourceLabel,
@@ -67,6 +72,9 @@ export function GoldAdminView({
   const reserveState = reserve?.reserve ?? null
   const headline = goldHeadline(savings)
   const cover = reserveState ? goldCover(reserveState) : null
+  const liquidity = reserveState ? goldLiquidity(reserveState) : null
+  const ounceUsd = savings?.ounceUsd ?? null
+  const headroom = reserveState ? mintHeadroomOunces(reserveState) : null
   return (
     <div className="w-full space-y-6">
       <header className="space-y-2">
@@ -100,6 +108,53 @@ export function GoldAdminView({
         />
         <TotalCard label="Display rate" value={savings ? goldApyText(savings.apyPercent) : null} sub="Set in the server code, not on-chain" />
       </section>
+
+      <Card>
+        <CardTitle>Liquidity</CardTitle>
+        <p className="mt-1 text-[11px] text-[var(--color-arco-muted)]">
+          Where the Reserve's gold sits: coins in the buffer pay withdrawals; anything in strategies must be recalled first.
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <Stat
+            label="Instant liquidity"
+            value={liquidity ? ouncesLabel(liquidity.instantOunces) : "—"}
+            sub={liquidity && ounceUsd != null ? `${usdText(liquidity.instantOunces * ounceUsd)} payable at once` : "Payable at once"}
+          />
+          <Stat
+            label="In the buffer"
+            value={liquidity ? ouncesLabel(liquidity.bufferOunces) : "—"}
+            sub={liquidity ? `${sharePercentText(liquidity.bufferPercent)} of the backing` : "Coins the Reserve holds"}
+          />
+          <Stat
+            label="In strategies"
+            value={liquidity ? ouncesLabel(liquidity.deployedOunces) : "—"}
+            sub={liquidity ? `${sharePercentText(liquidity.deployedPercent)} of the backing` : "Gold put to work"}
+          />
+        </div>
+        {liquidity && liquidity.bufferPercent !== null && (
+          <div className="mt-4">
+            <div
+              role="img"
+              aria-label={`Buffer ${sharePercentText(liquidity.bufferPercent)}, strategies ${sharePercentText(liquidity.deployedPercent)}`}
+              className="h-2 w-full overflow-hidden rounded-[var(--radius-pill)] bg-[var(--color-arco-surface-muted)]"
+            >
+              <div className="h-full bg-[var(--color-arco-ink)]" style={{ width: `${liquidity.bufferPercent}%` }} />
+            </div>
+            <div className="mt-1 flex justify-between text-[11px] text-[var(--color-arco-muted)]">
+              <span>Buffer {sharePercentText(liquidity.bufferPercent)}</span>
+              <span>Strategies {sharePercentText(liquidity.deployedPercent)}</span>
+            </div>
+          </div>
+        )}
+        <dl className="mt-4 grid gap-x-8 gap-y-2 border-t border-[var(--color-arco-border)] pt-4 text-sm sm:grid-cols-2">
+          <Row label="Owed to the Standard queue" value={liquidity ? ouncesLabel(liquidity.queuedOunces) : "—"} attention={liquidity ? liquidity.queuedOunces > 0 : false} />
+          <Row label="Buffer floor" value={bpsPercentText(reserveState?.bufferFloorBps)} />
+          <Row label="Strategy share now" value={bpsPercentText(reserveState?.mmfBps)} />
+          <Row label="Strategy target" value={bpsPercentText(reserveState?.mmfTargetBps)} />
+          <Row label="Standard queue wait (least)" value={waitText(reserveState?.queueMinDelay)} />
+          <Row label="Can still be minted" value={headroom === null ? "—" : ouncesLabel(headroom)} />
+        </dl>
+      </Card>
 
       <section className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -135,10 +190,10 @@ export function GoldAdminView({
 
       <Card>
         <CardTitle>Reserve coins</CardTitle>
-        <p className="mt-1 text-[11px] text-[var(--color-arco-muted)]">Available is what an instant withdrawal can take now: the balance less what the Standard queue is owed.</p>
+        <p className="mt-1 text-[11px] text-[var(--color-arco-muted)]">Instant liquidity is what a withdrawal in that coin can take now: the balance less what the Standard queue is owed.</p>
         <Table
           caption="Gold Reserve coins"
-          head={["Coin", "Balance", "Queued", "Available", "Queue backlog", "Swap fee", "Instant fee", "Deposit", "Redeem"]}
+          head={["Coin", "Balance", "Queued", "Instant liquidity", "Queue backlog", "Swap fee", "Instant fee", "Deposit", "Redeem"]}
           numeric={[1, 2, 3, 4, 5, 6]}
           empty={reserveState ? "The gold Reserve lists no coins." : "—"}
           rows={(reserveState?.assets ?? []).map((asset) => [
@@ -212,6 +267,16 @@ function TotalCard({ label, sub, value }: { label: string; sub: string; value: s
     <div className="w-full min-w-0 rounded-[var(--radius-card)] bg-[var(--color-arco-surface)] p-4 shadow-[var(--shadow-control)]">
       <p className="text-xs text-[var(--color-arco-muted)]">{label}</p>
       <p className="mt-1 tabular-nums text-2xl font-semibold text-[var(--color-arco-ink)]">{value ?? "—"}</p>
+      <p className="mt-1 text-[11px] text-[var(--color-arco-muted)]">{sub}</p>
+    </div>
+  )
+}
+
+function Stat({ label, sub, value }: { label: string; sub: string; value: string }) {
+  return (
+    <div className="w-full min-w-0">
+      <p className="text-xs text-[var(--color-arco-muted)]">{label}</p>
+      <p className="mt-1 tabular-nums text-xl font-semibold text-[var(--color-arco-ink)]">{value}</p>
       <p className="mt-1 text-[11px] text-[var(--color-arco-muted)]">{sub}</p>
     </div>
   )
