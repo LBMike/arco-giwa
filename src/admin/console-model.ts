@@ -4,7 +4,7 @@
 
 export type ConsoleGroup = "vaults" | "stocks"
 export type StocksTabId = "limits" | "trading-control" | "overview" | "orders" | "reconciliation" | "audit" | "held"
-export type VaultsTabId = "operations" | "prices" | "config" | "featured" | "monitoring" | "arcousd"
+export type VaultsTabId = "operations" | "prices" | "config" | "featured" | "monitoring" | "arcousd" | "gold"
 export type ConsoleTab = { readonly group: ConsoleGroup; readonly id: string; readonly label: string; readonly path: string }
 
 export const VAULT_TABS: readonly ConsoleTab[] = [
@@ -14,6 +14,7 @@ export const VAULT_TABS: readonly ConsoleTab[] = [
   { group: "vaults", id: "featured", label: "Featured", path: "/vaults/featured" },
   { group: "vaults", id: "monitoring", label: "Monitoring", path: "/vaults/monitoring" },
   { group: "vaults", id: "arcousd", label: "ArcoUSD", path: "/vaults/arcousd" },
+  { group: "vaults", id: "gold", label: "Gold", path: "/vaults/gold" },
 ]
 
 // Limits is the first Stocks page: per-stock on/off and daily caps are the everyday control.
