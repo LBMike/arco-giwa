@@ -7,6 +7,7 @@ import {
   GIWA_ADMIN_ARCOUSD_ROUTE,
   GIWA_ADMIN_CONFIG_ROUTE,
   GIWA_ADMIN_FEATURED_ROUTE,
+  GIWA_ADMIN_GOLD_ROUTE,
   GIWA_ADMIN_MONITORING_ROUTE,
   GIWA_ADMIN_OPERATIONS_ROUTE,
   GIWA_ADMIN_PRICES_ROUTE,
@@ -22,6 +23,7 @@ const ADMIN_TABS = [
   { label: "Vault Operations", to: GIWA_ADMIN_OPERATIONS_ROUTE },
   { label: "Monitoring", to: GIWA_ADMIN_MONITORING_ROUTE },
   { label: "ArcoUSD", to: GIWA_ADMIN_ARCOUSD_ROUTE },
+  { label: "Gold", to: GIWA_ADMIN_GOLD_ROUTE },
 ] as const
 
 function storedOperatorToken() {

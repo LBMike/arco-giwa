@@ -125,7 +125,7 @@ test("GET /api/v1/admin/session is parsed strictly; a malformed answer grants no
 test("tabs follow the permissions: each group needs its read permission; / opens the first permitted tab", () => {
   const labels = (vault: string[] | null, stocks: string[] | null) => visibleNav(accessOf(info(vault, stocks))).map((group) => [group.label, group.tabs.map((tab) => tab.label)])
   assert.deepEqual(labels(["vault:read", "vault:write"], ["stocks:read", "stocks:control"]), [
-    ["Vaults", ["Operations", "Prices", "Vault Config", "Featured", "Monitoring", "ArcoUSD"]],
+    ["Vaults", ["Operations", "Prices", "Vault Config", "Featured", "Monitoring", "ArcoUSD", "Gold"]],
     ["Stocks", ["Limits", "Trading control", "Overview", "Orders", "Reconciliation", "Audit", "Held payments"]],
   ])
   assert.deepEqual(labels(["vault:read"], null).map(([group]) => group), ["Vaults"])
@@ -137,7 +137,7 @@ test("tabs follow the permissions: each group needs its read permission; / opens
   assert.equal(groupOfPath("/vaults/prices"), "vaults")
   assert.equal(groupOfPath("/stocks/held"), "stocks")
   assert.equal(groupOfPath("/"), null)
-  assert.equal(CONSOLE_NAV.flatMap((group) => group.tabs).length, 13)
+  assert.equal(CONSOLE_NAV.flatMap((group) => group.tabs).length, 14)
 })
 
 function shell(vault: string[] | null, stocks: string[] | null, path = "/", signerWallet = false) {
@@ -153,7 +153,7 @@ function shell(vault: string[] | null, stocks: string[] | null, path = "/", sign
 
 test("the signed-in shell shows only the permitted groups, the operator identity and the session end", () => {
   const both = shell(["vault:read", "vault:write"], ["stocks:read"], "/stocks/held")
-  for (const href of ["/vaults/operations", "/vaults/prices", "/vaults/config", "/vaults/featured", "/vaults/monitoring", "/vaults/arcousd", "/stocks/limits", "/stocks/trading-control", "/stocks/overview", "/stocks/orders", "/stocks/reconciliation", "/stocks/audit", "/stocks/held"]) {
+  for (const href of ["/vaults/operations", "/vaults/prices", "/vaults/config", "/vaults/featured", "/vaults/monitoring", "/vaults/arcousd", "/vaults/gold", "/stocks/limits", "/stocks/trading-control", "/stocks/overview", "/stocks/orders", "/stocks/reconciliation", "/stocks/audit", "/stocks/held"]) {
     assert.match(both, new RegExp(`href="${href}"`), href)
   }
   assert.match(both, /href="\/stocks\/held"[^>]*aria-current="page"|aria-current="page"[^>]*href="\/stocks\/held"/)

@@ -23,6 +23,7 @@ test("legacy admin paths map to the console's matching section", () => {
     ["/admin/featured", "/vaults/featured"],
     ["/admin/monitoring/", "/vaults/monitoring"],
     ["/admin/arcousd", "/vaults/arcousd"],
+    ["/admin/gold", "/vaults/gold"],
     ["/admin/vaults", "/vaults"],
     ["/admin/stocks", "/stocks"],
     ["/admin/stocks/orders", "/stocks"],

@@ -52,11 +52,13 @@ inherited at extraction — fix only as a dedicated approved task; never grow th
   ETH) may show up to 4 decimals, no forced trailing zeros — a few cents of gas still matter.
   **Exception:** Crypto Native coin amounts on the Savings deposit / withdraw screen (yearly earnings in tBTC,
   tXRP…) may show up to 4 decimals, no forced trailing zeros — 0.0083 BTC a year would read "0".
+  **Exception:** gold ounce amounts on the admin Gold page (ArcoGOLD totals, the gold Reserve, its coins) may show up
+  to 4 decimals, no forced trailing zeros — a troy ounce is a large unit, so 0.0083 oz would read "0.01".
 
 ## Routes
 
 Root-based (served at app.arco.financial): `/` (opens `/savings`, where a visit starts) · `/home` (home) · `/funds` (funds list) · `/savings` · `/portfolio` ·
-`/product/:id` · `/admin/{operations,prices,config,featured,monitoring,arcousd}` — constants in
+`/product/:id` · `/admin/{operations,prices,config,featured,monitoring,arcousd,gold}` — constants in
 `src/demo/giwa/routes.ts`; legacy `/app/*` + `/app/giwa-preprod/*` redirects live in `src/main.tsx`.
 
 ## Agent delegation

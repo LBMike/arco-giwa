@@ -1,0 +1,183 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+import { renderToStaticMarkup } from "react-dom/server"
+import { GoldAdminView } from "./AdminGold"
+import { goldApyText, goldCover, goldHeadline, goldReservePauseRows, goldVaultPauseRows, ounceSourceLabel, ouncesLabel, ouncesText } from "./gold-admin"
+import type { GiwaArcoGoldReserve, GiwaArcoGoldSavings } from "./types"
+import { VAULT_TABS } from "../../admin/console-model"
+
+const VAULT = {
+  blockNumber: "41760000",
+  totalAssets: "12500000000000000000",
+  totalAssetsOunces: "12.5",
+  totalSupply: "12400000000000000000",
+  sharePrice: "1008064516129032258",
+  sharePriceHuman: "1.008064516129032258",
+  seeded: true,
+  vaultPaused: false,
+  depositPaused: false,
+  withdrawPaused: false,
+  depositsOpen: true,
+  withdrawalsOpen: true,
+}
+
+function savings(over: Partial<GiwaArcoGoldSavings> = {}, vault: Partial<typeof VAULT> = {}): GiwaArcoGoldSavings {
+  return {
+    status: "live",
+    chainId: 91342,
+    contracts: { arcoGOLD: "0x1111111111111111111111111111111111111111", zap: "0x2222222222222222222222222222222222222222", unit: "0x3333333333333333333333333333333333333333", reserve: "0x4444444444444444444444444444444444444444" },
+    readAt: "2026-11-20T08:00:00.000Z",
+    savings: { ...VAULT, ...vault },
+    apyPercent: 4,
+    ounceUsd: 4000,
+    ounceUsdSource: "coingecko:pax-gold",
+    sharePriceUsd: 4032.26,
+    totalAssetsUsd: "50000",
+    ...over,
+  }
+}
+
+function reserve(over: Partial<NonNullable<GiwaArcoGoldReserve["reserve"]>> = {}): GiwaArcoGoldReserve {
+  return {
+    status: "live",
+    chainId: 91342,
+    contracts: { unit: "0x3333333333333333333333333333333333333333", reserve: "0x4444444444444444444444444444444444444444", lens: "0x5555555555555555555555555555555555555555" },
+    readAt: "2026-11-20T08:00:00.000Z",
+    reserve: {
+      blockNumber: "41760000",
+      totalBacking: "13000000000000000000",
+      totalLiabilities: "12500000000000000000",
+      totalBackingOunces: "13",
+      totalLiabilitiesOunces: "12.5",
+      reservePaused: false,
+      depositPaused: false,
+      redeemPaused: false,
+      redeemInstantOnlyPaused: false,
+      arcoUSDPaused: false,
+      arcoUSDMintPaused: false,
+      arcoUSDBurnPaused: false,
+      assets: [
+        {
+          symbol: "tXAUT",
+          address: "0x6666666666666666666666666666666666666666",
+          decimals: 6,
+          depositEnabled: true,
+          redeemEnabled: true,
+          instantFeeBps: 10,
+          swapFeeBps: 0,
+          balance: "13000000",
+          queued: "500000",
+          available: "12500000",
+          balanceHuman: "13",
+          queuedHuman: "0.5",
+          availableHuman: "12.50834",
+          queueLength: 2,
+          queueHead: 1,
+          queueBacklog: 1,
+        },
+      ],
+      ...over,
+    },
+  }
+}
+
+test("gold admin: ounces show up to 4 decimals with no forced trailing zeros", () => {
+  assert.equal(ouncesText("12.5"), "12.5")
+  assert.equal(ouncesText("0.00834999"), "0.0083")
+  assert.equal(ouncesText("1234.56789"), "1,234.5679")
+  assert.equal(ouncesText(7), "7")
+  assert.equal(ouncesText(null), "—")
+  assert.equal(ouncesText("abc"), "—")
+  assert.equal(ouncesLabel("0.5"), "0.5 oz")
+  assert.equal(ouncesLabel(undefined), "—")
+})
+
+test("gold admin: display rate and ounce source read in words", () => {
+  assert.equal(goldApyText(4), "4%")
+  assert.equal(goldApyText(4.256), "4.26%")
+  assert.equal(goldApyText(null), "Not set")
+  assert.equal(ounceSourceLabel("coingecko:pax-gold"), "PAX Gold on CoinGecko")
+  assert.equal(ounceSourceLabel("kraken:paxg"), "PAX Gold on Kraken (fallback)")
+  assert.equal(ounceSourceLabel(""), "—")
+})
+
+test("gold admin: cover is backing less what is owed", () => {
+  assert.deepEqual(goldCover({ totalBackingOunces: "13", totalLiabilitiesOunces: "12.5" }), { surplusOunces: 0.5, covered: true })
+  assert.deepEqual(goldCover({ totalBackingOunces: "12", totalLiabilitiesOunces: "12" }), { surplusOunces: 0, covered: true })
+  assert.equal(goldCover({ totalBackingOunces: "11", totalLiabilitiesOunces: "12" })?.covered, false)
+  assert.equal(goldCover({ totalBackingOunces: "x", totalLiabilitiesOunces: "12" }), null)
+})
+
+test("gold admin: headline says whether deposits and withdrawals are open", () => {
+  assert.equal(goldHeadline(null).label, "Loading")
+  assert.equal(goldHeadline(savings({ status: "not-deployed", savings: null })).label, "Not deployed")
+  assert.equal(goldHeadline(savings({ status: "unavailable", savings: null })).label, "Unavailable")
+  assert.equal(goldHeadline(savings()).label, "Open")
+  assert.equal(goldHeadline(savings({}, { seeded: false, depositsOpen: false })).label, "Not seeded")
+  assert.equal(goldHeadline(savings({}, { depositsOpen: false })).label, "Deposits paused")
+  assert.equal(goldHeadline(savings({}, { withdrawalsOpen: false })).label, "Withdrawals paused")
+  assert.equal(goldHeadline(savings({}, { depositsOpen: false, withdrawalsOpen: false })).label, "Paused")
+})
+
+test("gold admin: pause lists carry each switch", () => {
+  const vaultRows = goldVaultPauseRows({ ...VAULT, withdrawPaused: true })
+  assert.deepEqual(vaultRows.map((row) => [row.label, row.paused]), [
+    ["ArcoGOLD deposit", false],
+    ["ArcoGOLD withdraw", true],
+    ["ArcoGOLD (all)", false],
+  ])
+  const reserveRows = goldReservePauseRows({ ...reserve().reserve!, redeemInstantOnlyPaused: true, arcoUSDMintPaused: true })
+  assert.equal(reserveRows.length, 7)
+  assert.deepEqual(reserveRows.filter((row) => row.paused).map((row) => row.label), ["Reserve instant redeem", "ArcoXAU mint"])
+})
+
+test("gold admin: the page shows totals, cover, coins and contracts", () => {
+  const html = renderToStaticMarkup(<GoldAdminView savings={savings()} reserve={reserve()} />)
+  assert.match(html, /Admin · Gold/)
+  assert.match(html, /Deposits and withdrawals are open/)
+  assert.match(html, /12\.5 oz/)
+  assert.match(html, /\$50,000 at the ounce price/)
+  assert.match(html, /1\.0081 oz/)
+  assert.match(html, /\$4,000/)
+  assert.match(html, /PAX Gold on CoinGecko/)
+  assert.match(html, /Fully backed/)
+  assert.match(html, /tXAUT/)
+  assert.match(html, /12\.5083/)
+  assert.match(html, /0\.1%/)
+  assert.match(html, /0x1111…1111/)
+  assert.match(html, /0x5555…5555/)
+  assert.doesNotMatch(html, /<button/)
+})
+
+test("gold admin: an under-backed reserve and a paused vault are called out", () => {
+  const html = renderToStaticMarkup(
+    <GoldAdminView
+      savings={savings({}, { withdrawPaused: true, withdrawalsOpen: false })}
+      reserve={reserve({ totalBackingOunces: "12", totalLiabilitiesOunces: "12.5" })}
+    />,
+  )
+  assert.match(html, /Withdrawals paused/)
+  assert.match(html, /Under-backed/)
+  assert.match(html, /-0\.5 oz/)
+  assert.match(html, /Paused/)
+})
+
+test("gold admin: not deployed and failed reads say so instead of showing zeros", () => {
+  const html = renderToStaticMarkup(
+    <GoldAdminView
+      savings={savings({ status: "not-deployed", savings: null, contracts: null, ounceUsd: null, sharePriceUsd: null, totalAssetsUsd: null, apyPercent: null })}
+      reserve={null}
+      reserveError="Request failed"
+    />,
+  )
+  assert.match(html, /Not deployed/)
+  assert.match(html, /The gold Reserve could not be loaded: Request failed/)
+  assert.match(html, /No price from the rate source/)
+  assert.doesNotMatch(html, /0 oz/)
+})
+
+test("gold admin: the console menu lists Gold after ArcoUSD", () => {
+  const ids = VAULT_TABS.map((tab) => tab.id)
+  assert.equal(ids.indexOf("gold"), ids.indexOf("arcousd") + 1)
+  assert.equal(VAULT_TABS.find((tab) => tab.id === "gold")?.path, "/vaults/gold")
+})
