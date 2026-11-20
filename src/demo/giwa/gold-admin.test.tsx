@@ -2,7 +2,21 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { GoldAdminView } from "./AdminGold"
-import { goldApyText, goldCover, goldHeadline, goldReservePauseRows, goldVaultPauseRows, ounceSourceLabel, ouncesLabel, ouncesText } from "./gold-admin"
+import {
+  bpsPercentText,
+  goldApyText,
+  goldCover,
+  goldHeadline,
+  goldLiquidity,
+  goldReservePauseRows,
+  goldVaultPauseRows,
+  mintHeadroomOunces,
+  ounceSourceLabel,
+  ouncesLabel,
+  ouncesText,
+  sharePercentText,
+  waitText,
+} from "./gold-admin"
 import type { GiwaArcoGoldReserve, GiwaArcoGoldSavings } from "./types"
 import { VAULT_TABS } from "../../admin/console-model"
 
@@ -56,6 +70,13 @@ function reserve(over: Partial<NonNullable<GiwaArcoGoldReserve["reserve"]>> = {}
       arcoUSDPaused: false,
       arcoUSDMintPaused: false,
       arcoUSDBurnPaused: false,
+      settlementPaused: false,
+      queuePaused: false,
+      mmfBps: 0,
+      mmfTargetBps: 0,
+      bufferFloorBps: 10000,
+      queueMinDelay: 600,
+      mintCap: "100000000000000000000000",
       assets: [
         {
           symbol: "tXAUT",
@@ -127,7 +148,7 @@ test("gold admin: pause lists carry each switch", () => {
     ["ArcoGOLD (all)", false],
   ])
   const reserveRows = goldReservePauseRows({ ...reserve().reserve!, redeemInstantOnlyPaused: true, arcoUSDMintPaused: true })
-  assert.equal(reserveRows.length, 7)
+  assert.equal(reserveRows.length, 9)
   assert.deepEqual(reserveRows.filter((row) => row.paused).map((row) => row.label), ["Reserve instant redeem", "ArcoXAU mint"])
 })
 
@@ -180,4 +201,65 @@ test("gold admin: the console menu lists Gold after ArcoUSD", () => {
   const ids = VAULT_TABS.map((tab) => tab.id)
   assert.equal(ids.indexOf("gold"), ids.indexOf("arcousd") + 1)
   assert.equal(VAULT_TABS.find((tab) => tab.id === "gold")?.path, "/vaults/gold")
+})
+
+test("gold admin: liquidity splits the backing into buffer and strategies", () => {
+  const state = reserve().reserve!
+  const all = goldLiquidity(state)
+  assert.equal(all.bufferOunces, 13)
+  assert.equal(all.queuedOunces, 0.5)
+  assert.equal(all.instantOunces, 12.50834)
+  assert.equal(all.deployedOunces, 0)
+  assert.equal(all.bufferPercent, 100)
+  assert.equal(all.deployedPercent, 0)
+  const partly = goldLiquidity({ ...state, totalBackingOunces: "20" })
+  assert.equal(partly.deployedOunces, 7)
+  assert.equal(partly.bufferPercent, 65)
+  assert.equal(partly.deployedPercent, 35)
+  const empty = goldLiquidity({ totalBackingOunces: "0", assets: [] })
+  assert.equal(empty.bufferPercent, null)
+  assert.equal(empty.instantOunces, 0)
+})
+
+test("gold admin: shares, waits and mint headroom read plainly", () => {
+  assert.equal(sharePercentText(100), "100%")
+  assert.equal(sharePercentText(62.456), "62.46%")
+  assert.equal(sharePercentText(null), "—")
+  assert.equal(bpsPercentText(10000), "100%")
+  assert.equal(bpsPercentText(250), "2.5%")
+  assert.equal(bpsPercentText(undefined), "—")
+  assert.equal(waitText(600), "10 minutes")
+  assert.equal(waitText(60), "1 minute")
+  assert.equal(waitText(45), "45 seconds")
+  assert.equal(waitText(5400), "1.5 hours")
+  assert.equal(waitText(172800), "2 days")
+  assert.equal(waitText(undefined), "—")
+  assert.equal(mintHeadroomOunces({ mintCap: "100000000000000000000000", totalLiabilities: "12500000000000000000" }), 99987.5)
+  assert.equal(mintHeadroomOunces({ mintCap: "1000000000000000000", totalLiabilities: "2000000000000000000" }), 0)
+  assert.equal(mintHeadroomOunces({ totalLiabilities: "2000000000000000000" }), null)
+})
+
+test("gold admin: the Liquidity card shows instant liquidity, buffer, strategies and the limits", () => {
+  const html = renderToStaticMarkup(<GoldAdminView savings={savings()} reserve={reserve()} />)
+  assert.match(html, /Liquidity/)
+  assert.match(html, /12\.5083 oz/)
+  assert.match(html, /\$50,033\.36 payable at once/)
+  assert.match(html, /100% of the backing/)
+  assert.match(html, /0% of the backing/)
+  assert.match(html, /Buffer 100%, strategies 0%/)
+  assert.match(html, /Owed to the Standard queue/)
+  assert.match(html, /10 minutes/)
+  assert.match(html, /99,987\.5 oz/)
+  assert.match(html, /Instant liquidity<\/th>/)
+  assert.doesNotMatch(html, />Available</)
+  assert.doesNotMatch(html, /<button/)
+})
+
+test("gold admin: an older server without the liquidity fields shows dashes, not zeros", () => {
+  const state = reserve().reserve!
+  const { mmfBps, mmfTargetBps, bufferFloorBps, queueMinDelay, mintCap, settlementPaused, queuePaused, ...older } = state
+  void [mmfBps, mmfTargetBps, bufferFloorBps, queueMinDelay, mintCap, settlementPaused, queuePaused]
+  const html = renderToStaticMarkup(<GoldAdminView savings={savings()} reserve={{ ...reserve(), reserve: older }} />)
+  assert.match(html, /Buffer floor<\/dt><dd[^>]*>—</)
+  assert.equal(goldReservePauseRows(older).length, 7)
 })
