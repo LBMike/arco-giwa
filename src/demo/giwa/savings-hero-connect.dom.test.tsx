@@ -41,6 +41,15 @@ test("savings card before a wallet: its button connects; the slide buttons do th
     assert.equal(connect.getAttribute("aria-label"), "Connect wallet to start saving")
     await click(connect)
     assert.equal(connects, 1)
+    // The "Connect Wallet →" pill is what the eye reads; it is not a second button (the card's button connects, and it
+    // lies over the pill), so screen readers and the tab order meet one connect control.
+    const pill = element.querySelector("[data-hero-pill]")!
+    assert.equal(pill.tagName, "SPAN")
+    assert.equal(pill.getAttribute("aria-hidden"), "true")
+    assert.match(pill.textContent ?? "", /^Connect Wallet$/)
+    assert.equal(element.querySelectorAll("button").length, 4, "connect + pause, previous, next")
+    // The APY as the hero number, read with its unit.
+    assert.equal(element.querySelector("[data-hero-apy]")!.textContent, "4.6% APY")
 
     // The slides: pause, then next; neither connects, and the slide moves on.
     await click(byLabel("Pause slides"))
