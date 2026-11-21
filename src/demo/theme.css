@@ -108,6 +108,8 @@
   --color-savings-aurora-2: rgba(225, 224, 204, 0.13);
   --color-savings-aurora-3: rgba(225, 224, 204, 0.16);
   --color-savings-aurora-4: rgba(225, 224, 204, 0.2);
+  --color-savings-orbit-line: rgba(225, 224, 204, 0.3);
+  --color-savings-orbit-dot: rgba(255, 253, 235, 0.95);
 }
 
 /* The Gold card (data-savings-tone="gold", ArcoGOLD): light gold (#FFF3B3 → #FFED8A → #FFE23D) with dark brown text,
@@ -129,6 +131,8 @@
   --color-savings-hero-cta-ink: var(--color-savings-gold-3);
   --color-savings-hero-cta-hover: var(--color-savings-gold-cta-hover);
   --color-savings-hero-earning: var(--color-savings-gold-earning);
+  --color-savings-orbit-line: var(--color-savings-gold-orbit-line);
+  --color-savings-orbit-dot: var(--color-savings-gold-orbit-dot);
 }
 
 /* The Featured Funds card (FeaturedFunds.tsx, data-funds-hero): the Savings card's grid and aurora on an espresso
@@ -204,6 +208,120 @@
   50% { opacity: 0.85; }
 }
 
+/* Savings card orbits (look "E2b", SavingsHeroCard.tsx HeroOrbits): three concentric ellipses tilted -16deg in the
+   card's lower right, in the card's orbit line colour, each with one small glowing dot travelling it at its own speed
+   (6s, 9s, 13s a lap; the middle one the other way round). The box is a fixed 660 x 300 because the dots' paths are in
+   its pixels. On a phone the card is narrow and tall, so the box moves right (only its left half shows).
+   Reduced motion: the dots stand still, each at a fixed spot (at least one shows on each wide card); without
+   offset-path support they stand at about the same spots. Each dot starts its loop from its still spot (the negative
+   delay), so turning motion on or off does not make them jump. */
+.arco-demo .savings-orbits {
+  position: absolute;
+  right: -90px;
+  bottom: -40px;
+  width: 660px;
+  height: 300px;
+  transform: rotate(-16deg);
+}
+@media (max-width: 767px) {
+  .arco-demo .savings-orbits { right: -380px; bottom: 60px; }
+}
+
+/* Kept off the text: every pixel of a line or a dot's glow behind small text was measured (worst case over a lap);
+   these masks are where they would take it below AA (4.5:1 body, 3:1 large). Lines behind the frosted panels (the
+   slides, the Available strip) and the solid pill / buttons are fine; a dot's glow is not, even blurred, so the dots
+   show only where no text is. Each mask is in the card's own pixels (the layer is the card's box). */
+.arco-demo .savings-orbit-layer {
+  position: absolute;
+  inset: 0;
+}
+/* Welcome card, wide: the dots show only in the bottom of the right column, around the Connect Wallet pill (not
+   behind the slides panel, its controls or the left column's text). The lines need no mask. */
+.arco-demo [data-hero-orbits="welcome"] .savings-orbit-dots {
+  -webkit-mask-image: linear-gradient(to left, #000 320px, transparent 340px), linear-gradient(to bottom, transparent 214px, #000 234px);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(to left, #000 320px, transparent 340px), linear-gradient(to bottom, transparent 214px, #000 234px);
+  mask-composite: intersect;
+}
+/* A full-width card (912px) has room between the token row and the right column, so the dots show there too. */
+@media (min-width: 976px) {
+  .arco-demo [data-hero-orbits="welcome"] .savings-orbit-dots {
+    -webkit-mask-image: linear-gradient(to right, transparent 430px, #000 450px), linear-gradient(to bottom, transparent 214px, #000 234px);
+    mask-image: linear-gradient(to right, transparent 430px, #000 450px), linear-gradient(to bottom, transparent 214px, #000 234px);
+  }
+}
+/* Connected card, wide: the dots show only in the middle (right of the balance, left of the Earning pill and the
+   partner logos); the lines skip the Earning pill and "Powered by". */
+.arco-demo [data-hero-orbits="connected"] .savings-orbit-dots {
+  -webkit-mask-image: linear-gradient(to right, transparent 46%, #000 52%), linear-gradient(to left, transparent 200px, #000 230px);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(to right, transparent 46%, #000 52%), linear-gradient(to left, transparent 200px, #000 230px);
+  mask-composite: intersect;
+}
+.arco-demo [data-hero-orbits="connected"] .savings-orbit-lines {
+  -webkit-mask-image: radial-gradient(64px 24px at calc(100% - 59px) 34px, transparent 70%, #000 100%), radial-gradient(118px 30px at calc(100% - 103px) 162px, transparent 72%, #000 100%);
+  -webkit-mask-composite: source-in;
+  mask-image: radial-gradient(64px 24px at calc(100% - 59px) 34px, transparent 70%, #000 100%), radial-gradient(118px 30px at calc(100% - 103px) 162px, transparent 72%, #000 100%);
+  mask-composite: intersect;
+}
+/* Phones: text runs the card's full width, so the dots stay hidden. The welcome card's orbits sit lower (behind the
+   pill and the frosted slides, clear of the token row); the connected card's lines skip the Earning pill. */
+@media (max-width: 767px) {
+  .arco-demo [data-hero-orbits] .savings-orbit-dots { display: none; }
+  .arco-demo [data-hero-orbits="welcome"] .savings-orbits { bottom: -60px; }
+  .arco-demo [data-hero-orbits="connected"] .savings-orbit-lines {
+    -webkit-mask-image: radial-gradient(62px 22px at calc(100% - 55px) 30px, transparent 70%, #000 100%), radial-gradient(80px 26px at 56px 170px, transparent 70%, #000 100%);
+    mask-image: radial-gradient(62px 22px at calc(100% - 55px) 30px, transparent 70%, #000 100%), radial-gradient(80px 26px at 56px 170px, transparent 70%, #000 100%);
+  }
+}
+/* Welcome card on a narrow wide screen (card under 912px): the headline wraps to two lines and the outer orbit reaches
+   it, so the lines keep to the right column and below the headline there. */
+@media (min-width: 768px) and (max-width: 975px) {
+  .arco-demo [data-hero-orbits="welcome"] .savings-orbit-lines {
+    -webkit-mask-image: linear-gradient(to left, #000 360px, transparent 380px), linear-gradient(to bottom, transparent 228px, #000 248px);
+    -webkit-mask-composite: source-over;
+    mask-image: linear-gradient(to left, #000 360px, transparent 380px), linear-gradient(to bottom, transparent 228px, #000 248px);
+    mask-composite: add;
+  }
+}
+.arco-demo .savings-orbit {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--color-savings-orbit-line);
+  border-radius: 50%;
+}
+.arco-demo .savings-orbit-1 { inset: 0; }
+.arco-demo .savings-orbit-2 { inset: 44px 96px; }
+.arco-demo .savings-orbit-3 { inset: 88px 192px; }
+.arco-demo .savings-orbit-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--color-savings-orbit-dot);
+  box-shadow: 0 0 16px 6px var(--color-savings-orbit-dot);
+  offset-rotate: 0deg;
+  offset-anchor: 50% 50%;
+  animation: savings-orbit 9s linear infinite;
+}
+.arco-demo .savings-orbit-dot-a { offset-path: path("M 0 150 A 330 150 0 1 1 660 150 A 330 150 0 1 1 0 150"); offset-distance: 5%; animation-delay: -0.45s; }
+.arco-demo .savings-orbit-dot-b { offset-path: path("M 96 150 A 234 106 0 1 0 564 150 A 234 106 0 1 0 96 150"); offset-distance: 75%; animation-duration: 13s; animation-delay: -9.75s; }
+.arco-demo .savings-orbit-dot-c { offset-path: path("M 192 150 A 138 62 0 1 1 468 150 A 138 62 0 1 1 192 150"); offset-distance: 60%; animation-duration: 6s; animation-delay: -3.6s; }
+
+@keyframes savings-orbit {
+  from { offset-distance: 0%; }
+  to { offset-distance: 100%; }
+}
+
+@supports not (offset-path: path("M 0 0 L 1 1")) {
+  .arco-demo .savings-orbit-dot { animation: none; margin: -4.5px 0 0 -4.5px; }
+  .arco-demo .savings-orbit-dot-a { left: 40px; top: 78px; }
+  .arco-demo .savings-orbit-dot-b { left: 330px; top: 44px; }
+  .arco-demo .savings-orbit-dot-c { left: 444px; top: 185px; }
+}
+
 /* Savings figures that roll digit by digit, like an odometer (RollingDigits.tsx): a digit that changes slides in from
    below while the old one leaves through the top as the figure grows, and the other way as it shrinks. Each digit
    sits in a slot clipped to its own box, so only the moving digits show. */
@@ -257,6 +375,7 @@
   .arco-demo .savings-aurora-c,
   .arco-demo .savings-aurora-d,
   .arco-demo .savings-chevron,
+  .arco-demo .savings-orbit-dot,
   .arco-demo .savings-heartbeat-dot,
   .arco-demo .savings-heartbeat-halo,
   .arco-demo .savings-digit-in-up,
@@ -370,6 +489,8 @@
   --color-savings-aurora-2: rgba(14, 165, 233, 0.16);       /* aurora: sky curtain */
   --color-savings-aurora-3: rgba(99, 102, 241, 0.3);        /* aurora: indigo pool */
   --color-savings-aurora-4: rgba(147, 197, 253, 0.1);       /* aurora: pale ice ribbon */
+  --color-savings-orbit-line: rgba(160, 185, 255, 0.3);     /* the three orbits on the card (look "E2b"), a bit stronger than a hairline */
+  --color-savings-orbit-dot: rgba(190, 210, 255, 0.9);      /* the glowing dot travelling each orbit, and its glow */
   /* On the Savings card, named apart so a card's look can re-scope them ([data-savings-tone="gold"] above). Each is
      the app colour it stands for, resolved here, so re-scoping --color-arco-on-dark on a card leaves these as they are. */
   --color-savings-hero-cta: var(--color-arco-surface);        /* Deposit button on the card */
@@ -397,6 +518,8 @@
   --color-savings-gold-cta: #4f3900;                  /* Deposit button: brown */
   --color-savings-gold-cta-hover: #3d2c00;            /* Deposit button under the pointer */
   --color-savings-gold-earning: #146243;              /* "Earning" pill text and dot: dark green */
+  --color-savings-gold-orbit-line: rgba(46, 31, 0, 0.3);      /* orbits on the gold card (ink @ 30%) */
+  --color-savings-gold-orbit-dot: rgba(255, 255, 255, 0.95);  /* orbit dots on the gold card: white light */
   --color-savings-tile-hatch: rgba(15, 23, 42, 0.05);       /* diagonal hatch on the Backing / Exposure tiles */
   --color-savings-earn-area: rgba(23, 147, 134, 0.14);      /* simulation earnings area (arco-up @ 14%) */
 

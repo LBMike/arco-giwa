@@ -23,7 +23,7 @@ import {
   usd,
   usdCompact,
 } from "./savings-format"
-import { SavingsHeroCard, savingsHeroTone, type SavingsHeroProps } from "./SavingsHeroCard"
+import { heroApyLabel, heroApyText, SavingsHeroCard, savingsHeroTone, type SavingsHeroProps } from "./SavingsHeroCard"
 import { vaultImageFor } from "./catalog"
 import { paymentAssetIcon } from "./components"
 import { niceTicks, simulateSavings } from "./savings-simulation"
@@ -326,11 +326,24 @@ const heroProps = (over: Partial<SavingsHeroProps> = {}): SavingsHeroProps => ({
   ...over,
 })
 
-test("savings card before a wallet: the invitation, the features and who the reserves are held with", () => {
+test("savings card before a wallet: the APY as the hero, the invitation, the features and who the reserves are held with", () => {
   const html = renderToStaticMarkup(<SavingsHeroCard {...heroProps()} />)
-  assert.match(html, /Deposit Stablecoins/)
-  assert.match(html, /and start /)
-  assert.match(html, />saving</)
+  const text = (markup: string) => markup.replace(/<!-- -->/g, "")
+  // The label, then the APY in thin drawn brackets (decorative), read with its unit by screen readers.
+  assert.match(html, /<p data-hero-apy-label="" class="[^"]*uppercase[^"]*">STABLECOIN SAVINGS · APY<\/p>/)
+  const apy = html.match(/<p data-hero-apy="" class="[^"]*">(.*?)<\/p>/)![1]!
+  const brackets = [...apy.matchAll(/<span aria-hidden="true" class="([^"]*)"><\/span>/g)].map((match) => match[1]!.split(" "))
+  assert.equal(brackets.length, 2)
+  for (const [index, classes] of brackets.entries()) {
+    for (const token of ["border-2", "border-[var(--color-arco-on-dark)]", "md:h-[92px]", index === 0 ? "border-r-0" : "border-l-0"]) assert.ok(classes.includes(token), `bracket ${index}: ${token}`)
+  }
+  assert.match(apy, /<span class="[^"]*md:text-\[96px\][^"]*">4\.79%<span class="sr-only"> APY<\/span><\/span>/)
+  assert.match(apy, /font-medium/)
+  // The headline under it: today's words, one plain line of text (the outlined "saving" pill and its bars mark are gone).
+  assert.match(text(html), /<h2 class="[^"]*">Deposit Stablecoins and start saving<\/h2>/)
+  assert.doesNotMatch(html, /data-hero-pill=""[^>]*>saving/)
+  assert.doesNotMatch(html, /lucide-chart-no-axes-column/)
+  assert.ok(html.indexOf("data-hero-apy-label") < html.indexOf("data-hero-apy=") && html.indexOf("data-hero-apy=") < html.indexOf("<h2"))
   assert.match(html, /Institution-grade backing/)
   // Four slides; the onchain-settlement one is gone.
   assert.match(html, /aria-label="1 of 4"/)
@@ -379,63 +392,68 @@ test("savings card before a wallet: the invitation, the features and who the res
     for (const token of ["invisible", "opacity-0", "group-hover/logo:visible", "group-hover/logo:opacity-100"]) assert.ok(match[1]!.split(" ").includes(token), token)
   }
   for (const name of names) assert.equal(html.split(`>${name}<`).length - 1, 1, `${name} written once`)
-  // The arcoUSD mark: larger and on no disc of its own.
-  assert.match(html, /<span class="flex items-center gap-2\.5"><img src="\/logos\/arco\.png" alt="arcoUSD" title="arcoUSD" width="40" height="40"/)
-  assert.match(html, />arcoUSD</)
+  // The bottom row, on one line: chevrons pointing right at the token, the arcoUSD mark (40px, 30px on a phone; on no disc
+  // of its own) and name, a hairline, then "Powered by" and the logos. On the narrowest phones the words give way.
+  const row = html.slice(html.indexOf("data-hero-token-row"))
+  assert.match(html, /<div data-hero-token-row="" class="flex min-w-0 items-center [^"]*">/)
+  assert.match(row, /^data-hero-token-row="" class="[^"]*"><span aria-hidden="true" data-hero-chevrons=""/)
+  assert.equal((row.slice(0, row.indexOf("</span>", row.indexOf("data-hero-chevrons"))).match(/lucide-chevron-right/g) ?? []).length, 3)
+  assert.doesNotMatch(html, /lucide-chevron-down/)
+  assert.match(row, /<span class="flex shrink-0 items-center gap-1\.5 md:gap-2\.5"><img src="\/logos\/arco\.png" alt="arcoUSD" title="arcoUSD" width="40" height="40" class="[^"]*max-md:!size-\[30px\]/)
+  assert.match(row, /<span class="whitespace-nowrap text-base font-medium md:text-lg">arcoUSD<\/span>/)
+  assert.ok(row.indexOf(">arcoUSD<") < row.indexOf("Powered by"))
+  const words = row.match(/<span class="([^"]*)">Powered by<\/span>/)![1]!.split(" ")
+  for (const token of ["whitespace-nowrap", "uppercase", "max-[359px]:hidden"]) assert.ok(words.includes(token), token)
   assert.doesNotMatch(html, /Savings Balance/)
   assert.doesNotMatch(html, />Deposit</)
 })
 
-test("savings card before a wallet: the whole card connects one, the pill and a line show it, the slides and logos stay usable", () => {
+test("savings card before a wallet: the whole card connects one, the Connect Wallet pill shows it, the slides and logos stay usable", () => {
   // Pointing only where a pointer can hover (a tap would leave :hover stuck on a touch screen); focus everywhere.
   const ON_HOVER = "[@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:"
   const ON_FOCUS = "group-has-[[data-hero-connect]:focus-visible]/hero:"
-  for (const tone of ["blue", "cream"] as const) {
+  for (const tone of ["blue", "cream", "gold"] as const) {
     const html = renderToStaticMarkup(<SavingsHeroCard {...heroProps({ tone, onConnect: () => undefined })} />)
     // One button over the card, named for what it does; first in the card, so first in the tab order.
     const button = html.match(/<button type="button" data-hero-connect="" aria-label="Connect wallet to start saving" class="([^"]*)"><\/button>/)
     assert.ok(button, `${tone}: the connect button`)
-    for (const token of ["absolute", "inset-0", "z-[1]", "cursor-pointer", "focus-visible:-outline-offset-4"]) assert.ok(button[1]!.split(" ").includes(token), `${tone}: ${token}`)
+    for (const token of ["absolute", "inset-0", "z-[1]", "cursor-pointer", "focus-visible:-outline-offset-4", "focus-visible:outline-[var(--color-arco-on-dark)]"]) {
+      assert.ok(button[1]!.split(" ").includes(token), `${tone}: ${token}`)
+    }
     assert.ok(html.indexOf("data-hero-connect") < html.indexOf("<h2"), `${tone}: before the headline`)
     assert.match(html, /<div class="group\/hero">/)
-    // The headline reads as before.
-    assert.match(html, />saving</)
-    // Pointed at or focused: the pill turns white with black text and a soft glow (the line colour twice), the chart mark turns into a wallet.
-    const pill = html.match(/data-hero-pill="" class="([^"]*)"/)![1]!.split(" ")
+    // The "Connect Wallet →" pill: always shown (bottom right; under the token row on a phone), in the card's CTA
+    // colours; for the eye only (the button says it for screen readers), and under the button so a press on it connects.
+    const pill = html.match(/<span aria-hidden="true" data-hero-pill="" data-hero-connect-hint="" class="([^"]*)">Connect Wallet<svg [^>]*class="([^"]*lucide-arrow-right[^"]*)"/)
+    assert.ok(pill, `${tone}: the Connect Wallet pill`)
+    const pillClasses = pill[1]!.split(" ")
+    for (const token of ["inline-flex", "rounded-[var(--radius-pill)]", "bg-[var(--color-savings-hero-cta)]", "text-[var(--color-savings-hero-cta-ink)]", "order-first", "md:order-none", "w-full", "md:w-auto", "md:self-end", "motion-reduce:transition-none"]) {
+      assert.ok(pillClasses.includes(token), `${tone}: pill ${token}`)
+    }
+    assert.ok(!pillClasses.some((token) => token.startsWith("opacity-")), `${tone}: never hidden`)
+    // Pointed at (only where a pointer can hover) or focused: it lights up (a halo in the card's line colour) and its arrow steps on.
     for (const state of [ON_HOVER, ON_FOCUS]) {
-      for (const look of ["bg-[var(--color-arco-on-dark)]", "text-[var(--color-arco-hero)]", "shadow-[0_0_28px_var(--color-savings-on-hero-line),0_0_28px_var(--color-savings-on-hero-line)]"]) {
-        assert.ok(pill.includes(`${state}${look}`), `${tone}: pill ${state}${look}`)
+      for (const look of ["bg-[var(--color-savings-hero-cta-hover)]", "shadow-[0_0_0_4px_var(--color-savings-on-hero-line),0_0_28px_var(--color-savings-on-hero-line)]"]) {
+        assert.ok(pillClasses.includes(`${state}${look}`), `${tone}: pill ${state}${look}`)
       }
+      assert.ok(pill[2]!.split(" ").includes(`${state}translate-x-1`), `${tone}: arrow ${state}`)
     }
-    assert.ok(pill.includes("motion-reduce:transition-none"))
-    const wallet = html.match(/<svg [^>]*class="([^"]*lucide-wallet[^"]*)"[^>]*data-hero-wallet=""/)
-    assert.ok(wallet, `${tone}: the wallet mark`)
-    for (const token of ["opacity-0", `${ON_HOVER}opacity-100`, `${ON_FOCUS}opacity-100`]) assert.ok(wallet[1]!.split(" ").includes(token), `${tone}: wallet ${token}`)
-    // ...in place of the chart mark, which fades out (the two share one cell).
-    const chart = html.match(/data-hero-pill=""[^>]*>saving<span aria-hidden="true" class="grid size-6[^"]*"><svg [^>]*class="([^"]*lucide-chart-no-axes-column[^"]*)"/)
-    assert.ok(chart, `${tone}: the chart mark`)
-    for (const token of [`${ON_HOVER}opacity-0`, `${ON_FOCUS}opacity-0`]) assert.ok(chart[1]!.split(" ").includes(token), `${tone}: chart ${token}`)
     assert.ok(!html.includes(" group-has-[[data-hero-connect]:hover]/hero:"), `${tone}: no ungated hover look`)
-    // The line under the headline: hidden until then, always shown on a touch screen; hidden from screen readers.
-    const hint = html.match(/<p aria-hidden="true" data-hero-connect-hint="" class="([^"]*)">Connect Wallet<svg/)
-    assert.ok(hint, `${tone}: the Connect Wallet line`)
-    for (const token of ["opacity-0", `${ON_HOVER}opacity-100`, `${ON_FOCUS}opacity-100`, "[@media(hover:none)]:opacity-100"]) {
-      assert.ok(hint[1]!.split(" ").includes(token), `${tone}: hint ${token}`)
-    }
+    assert.doesNotMatch(html, /data-hero-wallet|lucide-wallet/)
     // The slides and the partner logos sit above the button (z-10 over z-[1]); a browser check covers the stacking itself.
     const slides = html.match(/<div class="([^"]*)"><div class="w-full"><div role="group" aria-roledescription="slide"/)
-    const logos = html.match(/<div class="([^"]*)"><div class="flex flex-wrap items-center gap-x-3 gap-y-2"><span[^>]*>Powered by</)
+    const logos = html.match(/<div class="([^"]*)"><div class="flex items-center gap-1\.5 md:gap-3"><span[^>]*>Powered by</)
     for (const [name, wrapper] of [["slides", slides], ["logos", logos]] as const) {
       assert.ok(wrapper, `${tone}: ${name} wrapper`)
       for (const token of ["relative", "z-10"]) assert.ok(wrapper[1]!.split(" ").includes(token), `${tone}: ${name} ${token}`)
     }
-    // The logos' layer is only as wide as the logos on a phone (a full-width layer would take the press from the card).
-    assert.ok(logos![1]!.split(" ").includes("self-start"))
+    // The logos' layer is only as wide as the logos (a wider layer would take the press from the card).
+    assert.ok(logos![1]!.split(" ").includes("shrink-0"))
   }
 
-  // Without onConnect the card is not a button; once connected there is no connect button either.
+  // Without onConnect the card is not a button and shows no pill; once connected there is no connect button either.
   const plain = renderToStaticMarkup(<SavingsHeroCard {...heroProps()} />)
-  for (const gone of ["data-hero-connect", "Connect Wallet", "group/hero", "data-hero-wallet"]) assert.ok(!plain.includes(gone), gone)
+  for (const gone of ["data-hero-connect", "data-hero-pill", "Connect Wallet", "group/hero"]) assert.ok(!plain.includes(gone), gone)
   const connected = renderToStaticMarkup(<SavingsHeroCard {...heroProps({ connected: true, onConnect: () => undefined })} />)
   assert.ok(!connected.includes("data-hero-connect"))
 
@@ -488,11 +506,12 @@ test("savings card look: the navy card by default, black with cream lines and li
     assert.match(cream, /data-savings-tone="cream"/)
     assert.match(cream, /style="background-color:var\(--color-arco-hero\)"/)
   }
-  // The cream look re-scopes the card's lines, panels and aurora to the brand cream (--color-arco-cream).
+  // The cream look re-scopes the card's lines, panels, aurora and orbits to the brand cream (--color-arco-cream).
   const theme = readFileSync(new URL("../theme.css", import.meta.url), "utf8")
   const scope = theme.slice(theme.indexOf('[data-savings-tone="cream"] {'))
   const block = scope.slice(0, scope.indexOf("}"))
-  for (const name of ["on-hero-line", "on-hero-fill", "aurora-1", "aurora-2", "aurora-3", "aurora-4"]) {
+  assert.match(block, /--color-savings-orbit-dot: rgba\(255, 253, 235, 0\.95\)/)
+  for (const name of ["on-hero-line", "on-hero-fill", "aurora-1", "aurora-2", "aurora-3", "aurora-4", "orbit-line"]) {
     assert.match(block, new RegExp(`--color-savings-${name}: rgba\\(225, 224, 204, `), name)
   }
 })
@@ -527,6 +546,8 @@ test("savings card look: light gold for Gold, every colour on it re-scoped to th
     ["savings-hero-cta", "savings-gold-cta"],
     ["savings-hero-cta-ink", "savings-gold-3"],
     ["savings-hero-earning", "savings-gold-earning"],
+    ["savings-orbit-line", "savings-gold-orbit-line"],
+    ["savings-orbit-dot", "savings-gold-orbit-dot"],
   ]) {
     assert.match(block, new RegExp(`--color-${name}: var\\(--color-${value}\\);`), name)
   }
@@ -541,6 +562,77 @@ test("savings card look: light gold for Gold, every colour on it re-scoped to th
   assert.match(theme, /--color-savings-hero-cta-ink: var\(--color-arco-ink\);/)
   assert.match(theme, /--color-savings-hero-earning: var\(--color-arco-delta-up\);/)
   assert.match(theme, /--color-savings-tip-text: var\(--color-arco-on-dark\);/)
+})
+
+test("savings card APY: max 2 decimals, no forced trailing zeros; a label per account; no number while unknown", () => {
+  assert.deepEqual([3.1, 4.02, 2.79, 6, 4.019, 3.10000001, 0].map(heroApyText), ["3.1%", "4.02%", "2.79%", "6%", "4.02%", "3.1%", "0%"])
+  assert.equal(heroApyText(null), null)
+  assert.equal(heroApyText(Number.NaN), null)
+  assert.equal(heroApyLabel("gold", "Gold", true), "GOLD SAVINGS · APY")
+  assert.equal(heroApyLabel("blue", "Stablecoins", true), "STABLECOIN SAVINGS · APY")
+  assert.equal(heroApyLabel("cream", "BTC", true), "CRYPTO NATIVE · BTC · APY")
+  assert.equal(heroApyLabel("cream", "ETH", false), "CRYPTO NATIVE · ETH")
+
+  // Crypto Native: the selected coin's APY as one number; no coin switcher inside the card (the tabs pick the coin).
+  const crypto = renderToStaticMarkup(<SavingsHeroCard {...heroProps({ tone: "cream", depositLabel: "BTC", tokenSymbol: "aBTC", apyPercent: 2.79, onConnect: () => undefined })} />)
+  assert.match(crypto, />CRYPTO NATIVE · BTC · APY</)
+  assert.match(crypto, />2\.79%<span class="sr-only"> APY<\/span>/)
+  assert.doesNotMatch(crypto, /aria-pressed="(true|false)"[^>]*>[^<]*<img/)
+  assert.equal((crypto.match(/data-hero-apy=""/g) ?? []).length, 1)
+  assert.match(renderToStaticMarkup(<SavingsHeroCard {...heroProps({ tone: "gold", depositLabel: "Gold", apyPercent: 3.1 })} />), />GOLD SAVINGS · APY<\/p><p data-hero-apy="" [^>]*>.*>3\.1%</)
+
+  // Unknown APY: the label without "APY", no brackets and no number; the headline is the hero, at its earlier size.
+  const unknown = renderToStaticMarkup(<SavingsHeroCard {...heroProps({ apyPercent: null, onConnect: () => undefined })} />)
+  assert.match(unknown, />STABLECOIN SAVINGS<\/p>/)
+  assert.doesNotMatch(unknown, /data-hero-apy=""|· APY|\d%</)
+  assert.match(unknown.replace(/<!-- -->/g, ""), /<h2 class="[^"]*text-\[30px\][^"]*sm:text-\[36px\][^"]*">Deposit Stablecoins and start saving<\/h2>/)
+  assert.match(unknown, /data-hero-pill=""/)
+})
+
+test("savings card background: no grid; the aurora, then three tilted orbits with a glowing dot each, kept off the text", () => {
+  for (const connected of [false, true]) {
+    for (const tone of ["blue", "cream", "gold"] as const) {
+      const html = renderToStaticMarkup(<SavingsHeroCard {...heroProps({ connected, tone, onConnect: () => undefined })} />)
+      // The grid pattern is gone (the Featured Funds card keeps its own).
+      assert.doesNotMatch(html, /background-size:28px 28px|linear-gradient\(90deg, var\(--color-savings-on-hero-fill\) 1px/)
+      // The aurora as it was, then the orbit layer: decorative, behind the content, in two layers (lines, dots).
+      assert.equal((html.match(/savings-aurora-[a-d] absolute/g) ?? []).length, 4)
+      const layer = html.match(/<div aria-hidden="true" data-hero-orbits="(welcome|connected)" class="([^"]*)">/)
+      assert.ok(layer, `${tone}: the orbits`)
+      assert.equal(layer[1], connected ? "connected" : "welcome")
+      for (const token of ["pointer-events-none", "absolute", "inset-0", "-z-10", "overflow-hidden"]) assert.ok(layer[2]!.split(" ").includes(token), token)
+      assert.ok(html.indexOf("savings-aurora-d") < html.indexOf("data-hero-orbits"))
+      for (const name of ["savings-orbit-1", "savings-orbit-2", "savings-orbit-3", "savings-orbit-dot-a", "savings-orbit-dot-b", "savings-orbit-dot-c"]) {
+        assert.equal(html.split(name).length - 1, 1, name)
+      }
+    }
+  }
+  // The slides panel and the connected card's Available strip are frosted (8px), so the orbits blur behind them.
+  assert.match(renderToStaticMarkup(<SavingsHeroCard {...heroProps()} />), /aria-roledescription="slide"[^>]*class="[^"]*backdrop-blur-\[8px\]/)
+  const connected = renderToStaticMarkup(<SavingsHeroCard {...heroProps({ connected: true, balanceUsd: 10, shares: 1 })} />)
+  assert.match(connected, /<div class="flex flex-col gap-4 border-t [^"]*backdrop-blur-\[8px\][^"]*"><div><p [^>]*>Available Stablecoins/)
+  // No brackets and no APY chip on the connected card.
+  assert.doesNotMatch(connected, /data-hero-apy|· APY/)
+
+  const theme = readFileSync(new URL("../theme.css", import.meta.url), "utf8")
+  // Lines in the card's orbit colour; each dot travels its ellipse by offset-path at its own speed (9s, 13s, 6s).
+  assert.match(theme, /\.savings-orbit \{[^}]*border: 1px solid var\(--color-savings-orbit-line\);/)
+  assert.match(theme, /\.savings-orbit-dot \{[^}]*background: var\(--color-savings-orbit-dot\);[^}]*animation: savings-orbit 9s linear infinite;/)
+  assert.match(theme, /\.savings-orbit-dot-a \{ offset-path: path\("M 0 150 A 330 150 0 1 1 660 150 A 330 150 0 1 1 0 150"\);/)
+  assert.match(theme, /\.savings-orbit-dot-b \{ offset-path: path\([^)]*\);[^}]*animation-duration: 13s;/)
+  assert.match(theme, /\.savings-orbit-dot-c \{ offset-path: path\([^)]*\);[^}]*animation-duration: 6s;/)
+  assert.match(theme, /@keyframes savings-orbit \{\s*from \{ offset-distance: 0%; \}\s*to \{ offset-distance: 100%; \}/)
+  // A static fallback without offset-path; still under reduced motion.
+  assert.match(theme, /@supports not \(offset-path: path\("M 0 0 L 1 1"\)\) \{\s*\.arco-demo \.savings-orbit-dot \{ animation: none;/)
+  const reduced = theme.slice(theme.lastIndexOf("@media (prefers-reduced-motion: reduce)"))
+  assert.match(reduced, /\.arco-demo \.savings-orbit-dot,/)
+  // The navy card's orbit colours (the mock's); the cream and gold cards re-scope them (tests above).
+  assert.match(theme, /--color-savings-orbit-line: rgba\(160, 185, 255, 0\.3\);/)
+  assert.match(theme, /--color-savings-orbit-dot: rgba\(190, 210, 255, 0\.9\);/)
+  // Kept off the text: the dots are masked to text-free parts of each card and hidden on phones.
+  assert.match(theme, /\[data-hero-orbits="welcome"\] \.savings-orbit-dots \{[^}]*mask-composite: intersect;/)
+  assert.match(theme, /\[data-hero-orbits="connected"\] \.savings-orbit-dots \{[^}]*mask-composite: intersect;/)
+  assert.match(theme, /@media \(max-width: 767px\) \{\s*\.arco-demo \[data-hero-orbits\] \.savings-orbit-dots \{ display: none; \}/)
 })
 
 const account = (symbol: string, over: Partial<SavingsAccount> = {}): SavingsAccount => ({

@@ -1,9 +1,10 @@
-// The dark Savings card at the top of the page. Before a wallet is connected it invites a deposit and shows what the
-// account offers; once connected it shows the savings balance (ticking up with the yield), the coins available to
-// deposit, and the Deposit / Withdraw buttons. Both states end with who the reserves are held with.
+// The dark Savings card at the top of the page. Before a wallet is connected it leads with the account's APY, invites a
+// deposit and shows what the account offers; once connected it shows the savings balance (ticking up with the yield),
+// the coins available to deposit, and the Deposit / Withdraw buttons. Both states end with who the reserves are held
+// with. Behind both: the aurora and three tilted orbits, each with a glowing dot travelling it (look "E2b").
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react"
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChartNoAxesColumn, ChevronDown, Eye, Landmark, Pause, Play, Sprout, Wallet, Zap } from "lucide-react"
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, Eye, Landmark, Pause, Play, Sprout, Zap } from "lucide-react"
 import { BrandMark } from "../components/BrandMark"
 import { RollingDigits, useTrend } from "./RollingDigits"
 import { SavingsInfoTip } from "./SavingsInfoTip"
@@ -20,6 +21,7 @@ export const HERO_BACKGROUND = {
   backgroundImage:
     "linear-gradient(135deg, var(--color-arco-hero-deco-1) 0%, var(--color-arco-hero-deco-2) 55%, var(--color-arco-hero) 100%)",
 }
+// The Featured Funds card's grid (FeaturedFunds.tsx). The Savings card itself has no grid since look "E2b".
 export const HERO_GRID = {
   backgroundImage:
     "linear-gradient(var(--color-savings-on-hero-fill) 1px, transparent 1px), linear-gradient(90deg, var(--color-savings-on-hero-fill) 1px, transparent 1px)",
@@ -27,7 +29,7 @@ export const HERO_GRID = {
   maskImage: "linear-gradient(to bottom, var(--color-arco-ink), transparent 85%)",
   WebkitMaskImage: "linear-gradient(to bottom, var(--color-arco-ink), transparent 85%)",
 }
-// An aurora behind the card's grid: four soft curtains of light (azure, cyan, indigo and a pale ice ribbon), tall and
+// An aurora behind the card: four soft curtains of light (azure, cyan, indigo and a pale ice ribbon), tall and
 // tilted, each drifting and stretching on its own slow loop (theme.css), so where they overlap the light keeps
 // changing. Sizes are shares of the card, so it fits any card height. Still under reduced motion.
 const AURORA: readonly Readonly<{ name: string; box: CSSProperties; color: string }>[] = [
@@ -93,9 +95,35 @@ const HERO_GOLD = {
 }
 const HERO_LOOK: Record<SavingsHeroTone, CSSProperties> = { blue: HERO_BACKGROUND, cream: HERO_BLACK, gold: HERO_GOLD }
 
+// Three concentric tilted ellipses in the card's lower right, each with one small glowing dot travelling it at its
+// own speed (about 6s, 9s and 13s a lap; CSS offset-path in theme.css). The dots stand still under reduced motion,
+// and where offset-path is not supported. Lines and dots take the card's own colours, so each look re-scopes them.
+// Lines and dots are two layers so each can be kept off the card's text on its own (theme.css masks them for each
+// card state, `layout`): a glowing dot, or a line, behind small text would take its contrast below AA.
+export function HeroOrbits({ layout }: { layout: "welcome" | "connected" }) {
+  return (
+    <div aria-hidden="true" data-hero-orbits={layout} className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+      <div className="savings-orbit-layer savings-orbit-lines">
+        <div className="savings-orbits">
+          <span className="savings-orbit savings-orbit-1" />
+          <span className="savings-orbit savings-orbit-2" />
+          <span className="savings-orbit savings-orbit-3" />
+        </div>
+      </div>
+      <div className="savings-orbit-layer savings-orbit-dots">
+        <div className="savings-orbits">
+          <span className="savings-orbit-dot savings-orbit-dot-a" />
+          <span className="savings-orbit-dot savings-orbit-dot-b" />
+          <span className="savings-orbit-dot savings-orbit-dot-c" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // The cream and gold looks re-scope the card's colours (theme.css, [data-savings-tone="cream"] / "gold"), so the
-// grid, hairlines, text and light below need no second set of styles.
-function HeroFrame({ tone, children }: { tone: SavingsHeroTone; children: ReactNode }) {
+// orbits, hairlines, text and light below need no second set of styles.
+function HeroFrame({ tone, layout, children }: { tone: SavingsHeroTone; layout: "welcome" | "connected"; children: ReactNode }) {
   return (
     <section
       aria-label="Your savings"
@@ -104,7 +132,7 @@ function HeroFrame({ tone, children }: { tone: SavingsHeroTone; children: ReactN
       style={HERO_LOOK[tone]}
     >
       <HeroAurora />
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10" style={HERO_GRID} />
+      <HeroOrbits layout={layout} />
       {children}
     </section>
   )
@@ -130,10 +158,20 @@ function PartnerLogo({ name, logo }: { name: string; logo: string }) {
 // ring, in the card's own black, cuts each badge out of the one beneath. Pointing at a logo lifts it out of the stack
 // on top of the others, moves its neighbours' badges aside and names the partner above it. Only the badges move: each
 // logo's pointer area stays where it is, so the logo under the pointer never changes as the others slide.
-function PoweredBy() {
+// `inRow`: on the welcome card, in one row beside the savings token. It never wraps; on the narrowest phones (under
+// 360px) the words give way and the logos stay (the list keeps its "Powered by" name for screen readers).
+function PoweredBy({ inRow = false }: { inRow?: boolean }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <span className={`text-[10px] font-medium uppercase tracking-[0.12em] ${ON_HERO_MUTED}`}>Powered by</span>
+    <div className={inRow ? "flex items-center gap-1.5 md:gap-3" : "flex flex-wrap items-center gap-x-3 gap-y-2"}>
+      <span
+        className={
+          inRow
+            ? `whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.06em] max-[359px]:hidden md:tracking-[0.12em] md:max-[879px]:hidden ${ON_HERO_MUTED}`
+            : `text-[10px] font-medium uppercase tracking-[0.12em] ${ON_HERO_MUTED}`
+        }
+      >
+        Powered by
+      </span>
       <ul aria-label="Powered by" className="flex items-center">
         {SAVINGS_POWERED_BY.map((mark, index) => (
           <li
@@ -162,11 +200,11 @@ function PoweredBy() {
  * A hairline in the card's line colour keeps a dark logo's edge on the dark card. A mark that is not a disc (Tether
  * Gold's gem) gets no hairline and no round crop: a circle around it would draw an empty ring.
  */
-function TokenMark({ src, label, size }: { src: string | undefined; label: string; size: number }) {
+function TokenMark({ src, label, size, className = "" }: { src: string | undefined; label: string; size: number; className?: string }) {
   return savingsMarkIsRound(label) ? (
-    <BrandMark src={src} label={label} size={size} className="ring-1 ring-[var(--color-savings-on-hero-line)]" />
+    <BrandMark src={src} label={label} size={size} className={`ring-1 ring-[var(--color-savings-on-hero-line)]${className ? ` ${className}` : ""}`} />
   ) : (
-    <BrandMark src={src} label={label} size={size} shape="rounded" />
+    <BrandMark src={src} label={label} size={size} shape="rounded" className={className} />
   )
 }
 
@@ -193,11 +231,12 @@ function CoinStack({ coins }: { coins: readonly Readonly<{ icon: string | undefi
   )
 }
 
+// The savings token in the welcome card's bottom row: 40px on wide screens, 30px on a phone so the row stays on one line.
 function TokenChip({ symbol, icon }: { symbol: string; icon: string | undefined }) {
   return (
-    <span className="flex items-center gap-2.5">
-      <TokenMark src={icon} label={symbol} size={40} />
-      <span className="text-lg font-medium">{symbol}</span>
+    <span className="flex shrink-0 items-center gap-1.5 md:gap-2.5">
+      <TokenMark src={icon} label={symbol} size={40} className="max-md:!size-[30px]" />
+      <span className="whitespace-nowrap text-base font-medium md:text-lg">{symbol}</span>
     </span>
   )
 }
@@ -254,7 +293,7 @@ function FeatureCarousel({ slides }: { slides: readonly Slide[] }) {
         role="group"
         aria-roledescription="slide"
         aria-label={`${index + 1} of ${slides.length}`}
-        className="min-h-[116px] rounded-[16px] border border-[var(--color-savings-on-hero-line)] bg-[var(--color-savings-on-hero-fill)] p-4 backdrop-blur-sm"
+        className="min-h-[116px] rounded-[16px] border border-[var(--color-savings-on-hero-line)] bg-[var(--color-savings-on-hero-fill)] p-4 backdrop-blur-[8px]"
       >
         <span aria-hidden="true" className="inline-flex size-8 items-center justify-center rounded-[10px] bg-[var(--color-savings-on-hero-fill)] ring-1 ring-[var(--color-savings-on-hero-line)]">
           {slide.icon}
@@ -305,11 +344,17 @@ function FeatureCarousel({ slides }: { slides: readonly Slide[] }) {
   )
 }
 
+// Three chevrons pointing right at the savings token, lighting up one after the other (still under reduced motion).
 function Chevrons() {
   return (
-    <span aria-hidden="true" className={`ml-1 flex flex-col items-center leading-none ${ON_HERO_MUTED}`}>
-      {[0, 1, 2].map((row) => (
-        <ChevronDown key={row} className="savings-chevron -my-1.5 size-5" style={{ animationDelay: `${row * 0.2}s` }} />
+    <span aria-hidden="true" data-hero-chevrons="" className={`-mx-1.5 flex shrink-0 items-center leading-none ${ON_HERO_MUTED}`}>
+      {[0, 1, 2].map((step) => (
+        <ChevronRight
+          key={step}
+          className={`savings-chevron size-4 md:size-5${step > 0 ? " -ml-[10px] md:-ml-[11px]" : ""}`}
+          strokeWidth={2.25}
+          style={{ animationDelay: `${step * 0.2}s` }}
+        />
       ))}
     </span>
   )
@@ -349,24 +394,47 @@ export function SavingsHeroCard(props: SavingsHeroProps) {
 }
 
 // Before a wallet is connected, the whole card connects one (`onConnect`, the same wallet modal as the header's Connect
-// Wallet): a button laid over the card, under the slides and the partner logos, which keep working as before. While it
-// is pointed at or has keyboard focus, the "saving" pill turns white with the card's black text, its chart mark turns
-// into a wallet, and "Connect Wallet →" shows under the headline. A touch screen has no pointing, so there the line
-// always shows, and the pointing look is kept to screens that can point (a tap would otherwise leave it stuck on).
+// Wallet): a button laid over the card, under the slides and the partner logos, which keep working as before. The
+// "Connect Wallet →" pill (bottom right; under the headline on a phone) is what the eye reads as the button: it is
+// always shown, and while the card is pointed at or the button has keyboard focus it lights up (a halo in the card's
+// line colour) and its arrow steps forward. The pointing look is kept to screens that can point (a tap would otherwise
+// leave it stuck on).
 const PILL_ON_CONNECT = [
-  "transition-[background-color,color,box-shadow] duration-200 motion-reduce:transition-none",
-  "[@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:bg-[var(--color-arco-on-dark)] [@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:text-[var(--color-arco-hero)] [@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:shadow-[0_0_28px_var(--color-savings-on-hero-line),0_0_28px_var(--color-savings-on-hero-line)]",
-  "group-has-[[data-hero-connect]:focus-visible]/hero:bg-[var(--color-arco-on-dark)] group-has-[[data-hero-connect]:focus-visible]/hero:text-[var(--color-arco-hero)] group-has-[[data-hero-connect]:focus-visible]/hero:shadow-[0_0_28px_var(--color-savings-on-hero-line),0_0_28px_var(--color-savings-on-hero-line)]",
+  "[@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:bg-[var(--color-savings-hero-cta-hover)]",
+  "[@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:shadow-[0_0_0_4px_var(--color-savings-on-hero-line),0_0_28px_var(--color-savings-on-hero-line)]",
+  "group-has-[[data-hero-connect]:focus-visible]/hero:bg-[var(--color-savings-hero-cta-hover)]",
+  "group-has-[[data-hero-connect]:focus-visible]/hero:shadow-[0_0_0_4px_var(--color-savings-on-hero-line),0_0_28px_var(--color-savings-on-hero-line)]",
 ].join(" ")
-const SHOW_ON_CONNECT =
-  "[@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:opacity-100 group-has-[[data-hero-connect]:focus-visible]/hero:opacity-100"
-const HIDE_ON_CONNECT =
-  "[@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:opacity-0 group-has-[[data-hero-connect]:focus-visible]/hero:opacity-0"
+const ARROW_ON_CONNECT =
+  "[@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:translate-x-1 group-has-[[data-hero-connect]:focus-visible]/hero:translate-x-1"
 
-function WelcomeHero({ depositLabel, tokenSymbol, tokenIcon, tone = "blue", onConnect }: SavingsHeroProps) {
-  const connectable = onConnect !== undefined
+/** "4.02%": the APY with at most 2 decimals and no forced trailing zeros; null while unknown. */
+export function heroApyText(apyPercent: number | null): string | null {
+  if (apyPercent === null || !Number.isFinite(apyPercent)) return null
+  return `${apyPercent.toLocaleString("en-US", { maximumFractionDigits: 2 })}%`
+}
+
+/** The small label over the APY: which account it is ("CRYPTO NATIVE · BTC"), then "APY" when there is one to show. */
+export function heroApyLabel(tone: SavingsHeroTone, depositLabel: string, withApy: boolean): string {
+  const account = tone === "gold" ? "GOLD SAVINGS" : tone === "cream" ? `CRYPTO NATIVE · ${depositLabel.toUpperCase()}` : "STABLECOIN SAVINGS"
+  return withApy ? `${account} · APY` : account
+}
+
+// A thin square bracket either side of the APY (drawn, not typed); decorative.
+function Bracket({ side }: { side: "left" | "right" }) {
   return (
-    <HeroFrame tone={tone}>
+    <span
+      aria-hidden="true"
+      className={`h-[66px] w-2.5 shrink-0 border-2 border-[var(--color-arco-on-dark)] min-[375px]:h-[76px] md:h-[92px] md:w-3 ${side === "left" ? "border-r-0" : "border-l-0"}`}
+    />
+  )
+}
+
+function WelcomeHero({ depositLabel, tokenSymbol, tokenIcon, apyPercent, tone = "blue", onConnect }: SavingsHeroProps) {
+  const connectable = onConnect !== undefined
+  const apy = heroApyText(apyPercent)
+  return (
+    <HeroFrame tone={tone} layout="welcome">
       <div className={connectable ? "group/hero" : undefined}>
         {connectable && (
           // Over the card's text (z-[1]); the slides and the partner logos sit above it (z-10).
@@ -378,53 +446,58 @@ function WelcomeHero({ depositLabel, tokenSymbol, tokenIcon, tone = "blue", onCo
             className="absolute inset-0 z-[1] cursor-pointer rounded-[22px] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-[var(--color-arco-on-dark)]"
           />
         )}
-        <div className="flex min-h-[291px] flex-col gap-6 p-5 sm:p-6">
-          <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between md:gap-8">
-            <div>
-              <h2 className="text-[30px] font-medium leading-[36px] sm:text-[36px] sm:leading-[44px]">
-                <span className={ON_HERO_MUTED}>Deposit {depositLabel}</span>
-                <br />
-                <span className={ON_HERO_MUTED}>and start </span>
-                {/* Baseline-aligned: "saving" sits on the same line as "and start" (align-middle dropped it below). */}
-                <span
-                  data-hero-pill=""
-                  className={`inline-flex items-center gap-2 rounded-[var(--radius-pill)] border-2 border-[var(--color-arco-on-dark)] px-3 align-baseline leading-[40px]${connectable ? ` ${PILL_ON_CONNECT}` : ""}`}
-                >
-                  saving
-                  {connectable ? (
-                    <span aria-hidden="true" className="grid size-6 [&>*]:col-start-1 [&>*]:row-start-1">
-                      <ChartNoAxesColumn className={`size-6 transition-opacity duration-200 motion-reduce:transition-none ${HIDE_ON_CONNECT}`} strokeWidth={2.5} />
-                      <Wallet data-hero-wallet="" className={`size-6 opacity-0 transition-opacity duration-200 motion-reduce:transition-none ${SHOW_ON_CONNECT}`} strokeWidth={2.25} />
-                    </span>
-                  ) : (
-                    <ChartNoAxesColumn aria-hidden="true" className="size-6" strokeWidth={2.5} />
-                  )}
-                </span>
-              </h2>
-              {connectable && (
-                // The button says it for screen readers; this line is for the eye.
-                <p
-                  aria-hidden="true"
-                  data-hero-connect-hint=""
-                  className={`mt-4 flex translate-y-1 items-center gap-1.5 text-sm font-medium opacity-0 transition duration-200 motion-reduce:transition-none ${SHOW_ON_CONNECT} [@media(hover:hover)]:group-has-[[data-hero-connect]:hover]/hero:translate-y-0 group-has-[[data-hero-connect]:focus-visible]/hero:translate-y-0 [@media(hover:none)]:translate-y-0 [@media(hover:none)]:opacity-100`}
-                >
-                  Connect Wallet
-                  <ArrowRight className="size-4" />
+        <div className="flex min-h-[291px] flex-col gap-5 p-5 md:grid md:min-h-[340px] md:grid-cols-[minmax(0,1fr)_300px] md:gap-8 md:p-7 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="flex min-w-0 flex-col gap-5 md:justify-between md:gap-6">
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <p data-hero-apy-label="" className={`text-[11px] font-semibold uppercase tracking-[0.12em] md:text-xs ${ON_HERO_MUTED}`}>
+                {heroApyLabel(tone, depositLabel, apy !== null)}
+              </p>
+              {apy !== null && (
+                <p data-hero-apy="" className="flex items-center gap-2 leading-none md:gap-2.5">
+                  <Bracket side="left" />
+                  <span className="whitespace-nowrap text-[72px] font-medium leading-none tracking-[-0.04em] tabular-nums min-[375px]:text-[80px] md:text-[96px]">
+                    {apy}
+                    <span className="sr-only"> APY</span>
+                  </span>
+                  <Bracket side="right" />
                 </p>
               )}
+              {/* Unknown APY: no number and no brackets; the headline is the hero, as large as it was before. */}
+              <h2
+                className={
+                  apy !== null
+                    ? `mt-1 text-lg font-medium leading-snug md:mt-1.5 md:text-[22px] ${ON_HERO_MUTED}`
+                    : "mt-1 text-[30px] font-medium leading-[36px] sm:text-[36px] sm:leading-[44px]"
+                }
+              >
+                Deposit {depositLabel} and start saving
+              </h2>
             </div>
-            <div className="relative z-10 w-full md:max-w-[300px]">
-              <FeatureCarousel slides={heroSlides(tokenSymbol)} />
-            </div>
-          </div>
-          <div className="mt-auto flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-            <div className="flex flex-col items-start gap-3">
+            <div data-hero-token-row="" className="flex min-w-0 items-center gap-1 md:gap-2.5">
               <Chevrons />
               <TokenChip symbol={tokenSymbol} icon={tokenIcon} />
+              <span aria-hidden="true" className="h-[22px] w-px shrink-0 bg-[var(--color-savings-on-hero-line)] md:mx-1.5 md:h-7" />
+              <div className="relative z-10 shrink-0">
+                <PoweredBy inRow />
+              </div>
             </div>
-            <div className="relative z-10 self-start md:self-auto">
-              <PoweredBy />
+          </div>
+          <div className="flex min-w-0 flex-col gap-5 md:justify-between">
+            <div className="relative z-10 w-full">
+              <FeatureCarousel slides={heroSlides(tokenSymbol)} />
             </div>
+            {connectable && (
+              // The button over the card says it for screen readers; this pill is for the eye.
+              <span
+                aria-hidden="true"
+                data-hero-pill=""
+                data-hero-connect-hint=""
+                className={`order-first inline-flex h-12 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-pill)] bg-[var(--color-savings-hero-cta)] px-5 text-[15px] font-semibold text-[var(--color-savings-hero-cta-ink)] transition-[background-color,box-shadow] duration-200 motion-reduce:transition-none md:order-none md:w-auto md:self-end ${PILL_ON_CONNECT}`}
+              >
+                Connect Wallet
+                <ArrowRight className={`size-4 transition-transform duration-200 motion-reduce:transition-none ${ARROW_ON_CONNECT}`} strokeWidth={2.25} />
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -459,7 +532,7 @@ function ConnectedHero({
   // What the wallet can deposit, named as the card's headline names it: "Stablecoins" for the stablecoin account.
   const availableNoun = depositLabel === "Stablecoins" ? "stablecoins" : depositLabel === "Gold" ? "gold" : depositLabel
   return (
-    <HeroFrame tone={tone}>
+    <HeroFrame tone={tone} layout="connected">
       <div className="flex min-h-[200px] flex-col justify-between gap-6 p-5 sm:p-6">
         <div className="flex items-center justify-between gap-3">
           <p className={`flex items-center gap-1 text-[13px] ${ON_HERO_MUTED}`}>
@@ -513,7 +586,8 @@ function ConnectedHero({
           <PoweredBy />
         </div>
       </div>
-      <div className="flex flex-col gap-4 border-t border-[var(--color-savings-on-hero-line)] bg-[var(--color-savings-on-hero-fill)] p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4">
+      {/* Frosted: the orbits blur behind it. */}
+      <div className="flex flex-col gap-4 border-t border-[var(--color-savings-on-hero-line)] bg-[var(--color-savings-on-hero-fill)] p-5 backdrop-blur-[8px] sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4">
         <div>
           <p className={`flex items-center gap-1 text-[13px] ${ON_HERO_MUTED}`}>
             Available {depositLabel}
